@@ -4,6 +4,8 @@ from flask import Flask, request, jsonify, abort
 from flask_sqlalchemy import SQLAlchemy
 from werkzeug.security import generate_password_hash, check_password_hash
 from flask_jwt_extended import JWTManager, create_access_token, jwt_required, get_jwt_identity
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
 
 app = Flask(__name__)
 
@@ -27,6 +29,12 @@ app.config['JWT_ACCESS_TOKEN_EXPIRES'] = timedelta(hours=1)
 
 db = SQLAlchemy(app)
 jwt = JWTManager(app)
+limiter = Limiter(
+    get_remote_address,
+    app=app,
+    default_limits=[],
+    storage_uri=os.environ.get("RATELIMIT_STORAGE_URI", "memory://"),
+)
 
 # --- Database Models ---
 class User(db.Model):
@@ -54,6 +62,7 @@ def health():
 
 # --- API Routes ---
 @app.route('/api/register', methods=['POST'])
+@limiter.limit("5 per minute")
 def register():
     data = request.get_json()
     if not data or not data.get('username') or not data.get('password'):
@@ -69,6 +78,7 @@ def register():
     return jsonify({"message": "User registered successfully"}), 201
 
 @app.route('/api/login', methods=['POST'])
+@limiter.limit("10 per minute")
 def login():
     data = request.get_json()
     if not data or not data.get('username') or not data.get('password'):
@@ -185,6 +195,10 @@ def expired_token_callback(jwt_header, jwt_payload):
     return jsonify({"error": "Token has expired"}), 401
 
 # --- Error Handlers ---
+@app.errorhandler(429)
+def ratelimit_exceeded(e):
+    return jsonify({"error": "Too many requests. Please try again later."}), 429
+
 @app.errorhandler(400)
 def bad_request(e):
     return jsonify({"error": "Bad request"}), 400
