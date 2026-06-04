@@ -544,6 +544,19 @@ class DailyCompletion(db.Model):
     )
 
 
+# --- Temporary: confirm alembic_version after schema migration (REMOVE after check) ---
+@app.route('/api/debug/version', methods=['GET'])
+def debug_version():
+    from sqlalchemy import text
+    with db.engine.connect() as conn:
+        try:
+            row = conn.execute(text("SELECT version_num FROM alembic_version")).fetchone()
+            return jsonify({"alembic_version": row[0] if row else None}), 200
+        except Exception as e:
+            return jsonify({"alembic_version": None, "error": str(e).split('\n')[0]}), 200
+# --- end temporary ---
+
+
 # --- Frontend ---
 
 @app.route('/')
