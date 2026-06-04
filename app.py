@@ -552,34 +552,38 @@ def debug_dbstate():
     from sqlalchemy import text
     result = {}
 
+    def query(sql):
+        """Run a query in its own connection so a failure doesn't poison later queries."""
+        with db.engine.connect() as conn:
+            return conn.execute(text(sql))
+
     # 1. Alembic revision
     try:
-        row = db.session.execute(
-            text("SELECT version_num FROM alembic_version")
-        ).fetchone()
+        row = query("SELECT version_num FROM alembic_version").fetchone()
         result['alembic_version'] = row[0] if row else None
     except Exception as e:
-        result['alembic_version'] = 'ERROR: ' + str(e)
+        result['alembic_version'] = None
+        result['alembic_version_error'] = str(e).split('\n')[0]
 
     # 2. Columns on the user table
     try:
-        rows = db.session.execute(text(
+        rows = query(
             "SELECT column_name FROM information_schema.columns "
             "WHERE table_name='user' ORDER BY ordinal_position"
-        )).fetchall()
+        ).fetchall()
         result['user_columns'] = [r[0] for r in rows]
     except Exception as e:
-        result['user_columns'] = 'ERROR: ' + str(e)
+        result['user_columns'] = 'ERROR: ' + str(e).split('\n')[0]
 
     # 3. Whether daily_completion table exists
     try:
-        count = db.session.execute(text(
+        count = query(
             "SELECT COUNT(*) FROM information_schema.tables "
             "WHERE table_name='daily_completion'"
-        )).scalar()
+        ).scalar()
         result['daily_completion_exists'] = bool(count)
     except Exception as e:
-        result['daily_completion_exists'] = 'ERROR: ' + str(e)
+        result['daily_completion_exists'] = 'ERROR: ' + str(e).split('\n')[0]
 
     return jsonify(result), 200
 
