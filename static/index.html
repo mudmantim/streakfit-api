@@ -43,10 +43,30 @@
     <div id="dashboard-view" hidden>
         <header class="site-header">
             <span class="logo">StreakFit</span>
-            <button class="btn-secondary" onclick="handleLogout()">Log Out</button>
+            <div class="header-right">
+                <select id="skill-level-select" class="skill-select"
+                        onchange="handleSkillLevelChange(this.value)">
+                    <option value="beginner">Beginner</option>
+                    <option value="intermediate">Intermediate</option>
+                    <option value="advanced">Advanced</option>
+                    <option value="custom" disabled>Custom</option>
+                </select>
+                <button class="btn-secondary" onclick="handleLogout()">Log Out</button>
+            </div>
         </header>
 
         <main class="container">
+
+            <!-- Today's 5 -->
+            <section class="card">
+                <h2>Today's 5</h2>
+                <div id="daily-exercises-list">
+                    <p class="muted">Loading...</p>
+                </div>
+                <p id="daily-progress" class="daily-progress"></p>
+            </section>
+
+            <!-- New Challenge -->
             <section class="card">
                 <h2>New Challenge</h2>
                 <form id="create-form" onsubmit="handleCreateChallenge(event)">
@@ -59,6 +79,7 @@
                 </form>
             </section>
 
+            <!-- Your Challenges -->
             <section>
                 <h2>Your Challenges</h2>
                 <p id="no-challenges" class="muted" hidden>
@@ -66,6 +87,7 @@
                 </p>
                 <div id="challenges-list"></div>
             </section>
+
         </main>
     </div>
 
