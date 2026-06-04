@@ -484,9 +484,13 @@ def get_daily_exercises(user_id, date_str, skill_level):
 
 
 def get_daily5_streak(user_id):
-    """Return consecutive calendar days ending today (or the last complete day)
-    where the user finished all 5 Daily exercises. No schema change required —
-    derives entirely from existing DailyCompletion rows."""
+    """Return consecutive calendar days where the user finished all 5 Daily
+    exercises, counting backward from the most recent complete day.
+
+    If today is already complete, the streak includes today.
+    If today is not yet complete, the streak counts from yesterday — the streak
+    remains alive until a day is actually missed, matching challenge-card
+    behaviour."""
     completed_dates = set(db.session.execute(
         db.select(DailyCompletion.date)
         .where(DailyCompletion.user_id == user_id)
@@ -494,8 +498,13 @@ def get_daily5_streak(user_id):
         .having(db.func.count(DailyCompletion.exercise_key) >= 5)
     ).scalars().all())
 
+    today     = date.today()
+    yesterday = today - timedelta(days=1)
+    # Start from today if already complete; otherwise give the user the rest
+    # of today before counting the streak as broken.
+    check = today if today in completed_dates else yesterday
+
     streak = 0
-    check = date.today()
     while check in completed_dates:
         streak += 1
         check -= timedelta(days=1)
