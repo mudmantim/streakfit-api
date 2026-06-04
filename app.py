@@ -544,6 +544,48 @@ class DailyCompletion(db.Model):
     )
 
 
+# --- Temporary debug endpoint — REMOVE after production diagnosis ---
+# Read-only. No auth. Exposes schema state only, no user data.
+
+@app.route('/api/debug/dbstate', methods=['GET'])
+def debug_dbstate():
+    from sqlalchemy import text
+    result = {}
+
+    # 1. Alembic revision
+    try:
+        row = db.session.execute(
+            text("SELECT version_num FROM alembic_version")
+        ).fetchone()
+        result['alembic_version'] = row[0] if row else None
+    except Exception as e:
+        result['alembic_version'] = 'ERROR: ' + str(e)
+
+    # 2. Columns on the user table
+    try:
+        rows = db.session.execute(text(
+            "SELECT column_name FROM information_schema.columns "
+            "WHERE table_name='user' ORDER BY ordinal_position"
+        )).fetchall()
+        result['user_columns'] = [r[0] for r in rows]
+    except Exception as e:
+        result['user_columns'] = 'ERROR: ' + str(e)
+
+    # 3. Whether daily_completion table exists
+    try:
+        count = db.session.execute(text(
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_name='daily_completion'"
+        )).scalar()
+        result['daily_completion_exists'] = bool(count)
+    except Exception as e:
+        result['daily_completion_exists'] = 'ERROR: ' + str(e)
+
+    return jsonify(result), 200
+
+# --- end temporary debug endpoint ---
+
+
 # --- Frontend ---
 
 @app.route('/')
