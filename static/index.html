@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>StreakFit</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+    <!-- Auth View -->
+    <div id="auth-view">
+        <div class="card auth-card">
+            <h1 class="logo">StreakFit</h1>
+            <p class="tagline">Build streaks. Stay consistent.</p>
+
+            <div class="tabs">
+                <button id="tab-login" class="tab active" onclick="showTab('login')">Log In</button>
+                <button id="tab-register" class="tab" onclick="showTab('register')">Register</button>
+            </div>
+
+            <form id="login-form" onsubmit="handleLogin(event)">
+                <input id="login-username" type="text" placeholder="Username"
+                       autocomplete="username" required>
+                <input id="login-password" type="password" placeholder="Password"
+                       autocomplete="current-password" required>
+                <button type="submit" class="btn-primary">Log In</button>
+                <p id="login-error" class="error" role="alert"></p>
+            </form>
+
+            <form id="register-form" onsubmit="handleRegister(event)" hidden>
+                <input id="reg-username" type="text" placeholder="Username"
+                       autocomplete="username" required maxlength="80">
+                <input id="reg-password" type="password" placeholder="Password"
+                       autocomplete="new-password" required>
+                <button type="submit" class="btn-primary">Create Account</button>
+                <p id="register-error" class="error" role="alert"></p>
+            </form>
+        </div>
+    </div>
+
+    <!-- Dashboard View -->
+    <div id="dashboard-view" hidden>
+        <header class="site-header">
+            <span class="logo">StreakFit</span>
+            <button class="btn-secondary" onclick="handleLogout()">Log Out</button>
+        </header>
+
+        <main class="container">
+            <section class="card">
+                <h2>New Challenge</h2>
+                <form id="create-form" onsubmit="handleCreateChallenge(event)">
+                    <div class="input-row">
+                        <input id="challenge-title" type="text"
+                               placeholder="e.g. 30-day pushups" required maxlength="100">
+                        <button type="submit" class="btn-primary">Add</button>
+                    </div>
+                    <p id="create-error" class="error" role="alert"></p>
+                </form>
+            </section>
+
+            <section>
+                <h2>Your Challenges</h2>
+                <p id="no-challenges" class="muted" hidden>
+                    No challenges yet. Add one above.
+                </p>
+                <div id="challenges-list"></div>
+            </section>
+        </main>
+    </div>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>

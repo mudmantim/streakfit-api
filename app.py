@@ -55,6 +55,11 @@ class Challenge(db.Model):
 with app.app_context():
     db.create_all()
 
+# --- Frontend ---
+@app.route('/')
+def frontend():
+    return app.send_static_file('index.html')
+
 # --- Health Check ---
 @app.route('/health', methods=['GET'])
 def health():

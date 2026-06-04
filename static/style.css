@@ -1,0 +1,223 @@
+/* ── Reset & base ─────────────────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+    font-family: system-ui, -apple-system, sans-serif;
+    background: #f3f4f6;
+    color: #111827;
+    min-height: 100vh;
+}
+
+[hidden] { display: none !important; }
+
+/* ── Auth view ────────────────────────────────────────────────────────────── */
+#auth-view {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    padding: 1rem;
+}
+
+.auth-card {
+    width: 100%;
+    max-width: 400px;
+}
+
+/* ── Card ─────────────────────────────────────────────────────────────────── */
+.card {
+    background: #fff;
+    border-radius: 12px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, .1);
+    padding: 2rem;
+}
+
+/* ── Logo & typography ────────────────────────────────────────────────────── */
+.logo {
+    font-size: 1.8rem;
+    font-weight: 700;
+    color: #4f46e5;
+    letter-spacing: -0.5px;
+}
+
+.tagline {
+    color: #6b7280;
+    margin: .25rem 0 1.5rem;
+    font-size: .9rem;
+}
+
+h2 {
+    font-size: 1.05rem;
+    font-weight: 600;
+    margin-bottom: 1rem;
+    color: #111827;
+}
+
+/* ── Tabs ─────────────────────────────────────────────────────────────────── */
+.tabs {
+    display: flex;
+    border-bottom: 2px solid #e5e7eb;
+    margin-bottom: 1.5rem;
+}
+
+.tab {
+    background: none;
+    border: none;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -2px;
+    padding: .5rem .75rem;
+    cursor: pointer;
+    font-size: .95rem;
+    color: #6b7280;
+    transition: color .15s;
+}
+
+.tab.active {
+    color: #4f46e5;
+    border-bottom-color: #4f46e5;
+    font-weight: 600;
+}
+
+/* ── Forms ────────────────────────────────────────────────────────────────── */
+form {
+    display: flex;
+    flex-direction: column;
+    gap: .75rem;
+}
+
+input[type="text"],
+input[type="password"] {
+    width: 100%;
+    padding: .6rem .8rem;
+    border: 1.5px solid #d1d5db;
+    border-radius: 8px;
+    font-size: 1rem;
+    background: #fff;
+    transition: border-color .15s;
+}
+
+input:focus {
+    outline: none;
+    border-color: #4f46e5;
+}
+
+.input-row {
+    display: flex;
+    gap: .5rem;
+}
+
+.input-row input { flex: 1; }
+
+/* ── Buttons ──────────────────────────────────────────────────────────────── */
+.btn-primary {
+    background: #4f46e5;
+    color: #fff;
+    border: none;
+    border-radius: 8px;
+    padding: .65rem 1.25rem;
+    font-size: 1rem;
+    font-weight: 600;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: background .15s;
+}
+
+.btn-primary:hover  { background: #4338ca; }
+.btn-primary:disabled { background: #a5b4fc; cursor: default; }
+
+.btn-secondary {
+    background: none;
+    color: #4f46e5;
+    border: 1.5px solid #4f46e5;
+    border-radius: 8px;
+    padding: .5rem 1rem;
+    font-size: .9rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background .15s;
+}
+
+.btn-secondary:hover { background: #eef2ff; }
+
+.btn-done {
+    background: #d1fae5;
+    color: #065f46;
+    border: none;
+    border-radius: 8px;
+    padding: .6rem 1rem;
+    font-size: .9rem;
+    font-weight: 600;
+    cursor: default;
+    white-space: nowrap;
+}
+
+/* ── Header ───────────────────────────────────────────────────────────────── */
+.site-header {
+    background: #fff;
+    border-bottom: 1px solid #e5e7eb;
+    padding: .8rem 1.5rem;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+/* ── Dashboard layout ─────────────────────────────────────────────────────── */
+.container {
+    max-width: 680px;
+    margin: 0 auto;
+    padding: 1.5rem 1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 1.5rem;
+}
+
+/* ── Challenge cards ──────────────────────────────────────────────────────── */
+.challenge-card {
+    background: #fff;
+    border-radius: 12px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, .08);
+    padding: 1.1rem 1.25rem;
+    margin-bottom: .75rem;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+}
+
+.challenge-info { flex: 1; min-width: 0; }
+
+.challenge-title {
+    font-size: 1rem;
+    font-weight: 600;
+    margin-bottom: .35rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.streak-row {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    flex-wrap: wrap;
+    font-size: .85rem;
+    color: #6b7280;
+}
+
+.streak-current {
+    font-weight: 700;
+    font-size: .95rem;
+    color: #f59e0b;
+}
+
+/* ── Misc ─────────────────────────────────────────────────────────────────── */
+.error {
+    color: #dc2626;
+    font-size: .875rem;
+    min-height: 1.2rem;
+}
+
+.muted {
+    color: #6b7280;
+    font-size: .9rem;
+}
