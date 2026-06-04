@@ -445,17 +445,42 @@ EXERCISE_LIBRARY = {
 }
 
 
+_GENERATOR_MAX_RETRIES = 20
+_CATEGORIES = ('upper_body', 'lower_body', 'core', 'mobility', 'conditioning')
+
 def get_daily_exercises(user_id, date_str, skill_level):
     if skill_level not in EXERCISE_LIBRARY:
         skill_level = 'beginner'
+
     seed = int(hashlib.sha256(
         f"{user_id}:{date_str}:{skill_level}".encode()
     ).hexdigest(), 16) % (2 ** 32)
-    rng = random.Random(seed)
-    result = []
-    for category in ('upper_body', 'lower_body', 'core', 'mobility', 'conditioning'):
-        result.append(rng.choice(EXERCISE_LIBRARY[skill_level][category]))
-    return result
+    rng  = random.Random(seed)
+    pool = EXERCISE_LIBRARY[skill_level]
+
+    # Pre-check: can this level satisfy the fun floor at all?
+    level_has_high_fun = any(
+        ex['fun_score'] == 'high' for exs in pool.values() for ex in exs
+    )
+
+    candidate = None
+    for _ in range(_GENERATOR_MAX_RETRIES):
+        candidate = [rng.choice(pool[cat]) for cat in _CATEGORIES]
+        impacts   = [ex['impact'] for ex in candidate]
+
+        # Constraint 1 — fun floor: at least one high-fun exercise when the
+        # pool makes it possible.
+        fun_ok    = any(ex['fun_score'] == 'high' for ex in candidate) or not level_has_high_fun
+        # Constraint 2 — impact balance: not every exercise can be static.
+        impact_ok = any(i in ('low', 'high') for i in impacts)
+        # Constraint 3 — high-impact cap: no more than 2 explosive exercises.
+        cap_ok    = impacts.count('high') <= 2
+
+        if fun_ok and impact_ok and cap_ok:
+            return candidate
+
+    # Graceful fallback: return last generated candidate unchanged.
+    return candidate
 
 
 # --- Database Models ---
