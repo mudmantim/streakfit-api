@@ -42,7 +42,8 @@ limiter = Limiter(
 
 # --- Exercise Library ---
 
-VALID_SKILL_LEVELS = {'beginner', 'intermediate', 'advanced', 'custom'}
+VALID_SKILL_LEVELS  = {'beginner', 'intermediate', 'advanced', 'custom'}
+VALID_DISPLAY_MODES = {'classic', 'bright', 'game'}
 
 EXERCISE_LIBRARY = {
     'beginner': {
@@ -373,7 +374,8 @@ class User(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(80), unique=True, nullable=False)
     password_hash = db.Column(db.String(256), nullable=False)
-    skill_level = db.Column(db.String(20), nullable=False, default='beginner')
+    skill_level  = db.Column(db.String(20), nullable=False, default='beginner')
+    display_mode = db.Column(db.String(20), nullable=False, default='game')
     challenges = db.relationship('Challenge', backref='owner', lazy=True)
 
 class Challenge(db.Model):
@@ -452,27 +454,43 @@ def get_me():
     user = db.session.get(User, user_id)
     if user is None:
         abort(404)
-    return jsonify({"id": user.id, "username": user.username, "skill_level": user.skill_level}), 200
+    return jsonify({
+        "id": user.id,
+        "username": user.username,
+        "skill_level": user.skill_level,
+        "display_mode": user.display_mode
+    }), 200
 
 @app.route('/api/me', methods=['PATCH'])
 @jwt_required()
 def update_me():
     data = request.get_json()
-    if not data or 'skill_level' not in data:
-        return jsonify({"error": "skill_level is required"}), 400
+    if not data or ('skill_level' not in data and 'display_mode' not in data):
+        return jsonify({"error": "Provide skill_level and/or display_mode"}), 400
 
-    skill_level = data['skill_level']
-    if skill_level not in VALID_SKILL_LEVELS:
+    if 'skill_level' in data and data['skill_level'] not in VALID_SKILL_LEVELS:
         return jsonify({"error": "Invalid skill_level. Must be one of: beginner, intermediate, advanced, custom"}), 400
+
+    if 'display_mode' in data and data['display_mode'] not in VALID_DISPLAY_MODES:
+        return jsonify({"error": "Invalid display_mode. Must be one of: classic, bright, game"}), 400
 
     user_id = int(get_jwt_identity())
     user = db.session.get(User, user_id)
     if user is None:
         abort(404)
 
-    user.skill_level = skill_level
+    if 'skill_level' in data:
+        user.skill_level = data['skill_level']
+    if 'display_mode' in data:
+        user.display_mode = data['display_mode']
+
     db.session.commit()
-    return jsonify({"id": user.id, "username": user.username, "skill_level": user.skill_level}), 200
+    return jsonify({
+        "id": user.id,
+        "username": user.username,
+        "skill_level": user.skill_level,
+        "display_mode": user.display_mode
+    }), 200
 
 @app.route('/api/challenges', methods=['POST'])
 @jwt_required()

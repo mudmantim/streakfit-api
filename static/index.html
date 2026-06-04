@@ -2,17 +2,35 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+
+    <!-- PWA & theme -->
+    <meta name="theme-color" content="#4338ca" id="meta-theme-color">
+    <meta name="description" content="The game where winning means getting healthier.">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="StreakFit">
+
     <title>StreakFit</title>
+
+    <!-- Icons & manifest -->
+    <link rel="manifest" href="/static/manifest.json">
+    <link rel="icon" href="/static/icons/icon.svg" type="image/svg+xml">
+    <link rel="apple-touch-icon" href="/static/icons/icon.svg">
+
     <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
 
-    <!-- Auth View -->
+    <!-- ── Auth View ──────────────────────────────────────────────────── -->
     <div id="auth-view">
-        <div class="card auth-card">
-            <h1 class="logo">StreakFit</h1>
-            <p class="tagline">Build streaks. Stay consistent.</p>
+        <div class="auth-card card">
+            <div class="auth-logo">
+                <span class="logo-flame">🔥</span>
+                <h1 class="logo">StreakFit</h1>
+            </div>
+            <p class="tagline">The game where winning means getting healthier.</p>
 
             <div class="tabs">
                 <button id="tab-login" class="tab active" onclick="showTab('login')">Log In</button>
@@ -24,25 +42,29 @@
                        autocomplete="username" required>
                 <input id="login-password" type="password" placeholder="Password"
                        autocomplete="current-password" required>
-                <button type="submit" class="btn-primary">Log In</button>
+                <button type="submit" class="btn-primary btn-full">Log In</button>
                 <p id="login-error" class="error" role="alert"></p>
             </form>
 
             <form id="register-form" onsubmit="handleRegister(event)" hidden>
-                <input id="reg-username" type="text" placeholder="Username"
+                <input id="reg-username" type="text" placeholder="Choose a username"
                        autocomplete="username" required maxlength="80">
-                <input id="reg-password" type="password" placeholder="Password"
+                <input id="reg-password" type="password" placeholder="Choose a password"
                        autocomplete="new-password" required>
-                <button type="submit" class="btn-primary">Create Account</button>
+                <button type="submit" class="btn-primary btn-full">Start Playing</button>
                 <p id="register-error" class="error" role="alert"></p>
             </form>
         </div>
     </div>
 
-    <!-- Dashboard View -->
+    <!-- ── Dashboard View ────────────────────────────────────────────── -->
     <div id="dashboard-view" hidden>
+
         <header class="site-header">
-            <span class="logo">StreakFit</span>
+            <div class="header-logo">
+                <span class="header-flame">🔥</span>
+                <span class="header-brand">StreakFit</span>
+            </div>
             <div class="header-right">
                 <select id="skill-level-select" class="skill-select"
                         onchange="handleSkillLevelChange(this.value)">
@@ -51,40 +73,59 @@
                     <option value="advanced">Advanced</option>
                     <option value="custom" disabled>Custom</option>
                 </select>
-                <button class="btn-secondary" onclick="handleLogout()">Log Out</button>
+                <div class="theme-toggle" role="group" aria-label="Display mode">
+                    <button class="theme-btn" data-mode="classic" onclick="handleDisplayModeChange('classic')" title="Classic">📋</button>
+                    <button class="theme-btn" data-mode="bright"  onclick="handleDisplayModeChange('bright')"  title="Bright">✨</button>
+                    <button class="theme-btn" data-mode="game"    onclick="handleDisplayModeChange('game')"    title="Game">🎮</button>
+                </div>
+                <button class="btn-logout" onclick="handleLogout()">Log Out</button>
             </div>
         </header>
 
         <main class="container">
 
-            <!-- Today's 5 -->
-            <section class="card">
-                <h2>Today's 5</h2>
-                <div id="daily-exercises-list">
-                    <p class="muted">Loading...</p>
+            <!-- Today's 5 ─────────────────────────────────────────── -->
+            <section class="card daily-card">
+                <div class="daily-header-row">
+                    <h2 class="daily-title">Today's 5</h2>
+                    <span id="daily-count-badge" class="daily-count-badge">0/5</span>
                 </div>
-                <p id="daily-progress" class="daily-progress"></p>
+
+                <div class="daily-progress-track" role="progressbar"
+                     aria-valuemin="0" aria-valuemax="5" aria-valuenow="0"
+                     aria-label="Daily exercises completed">
+                    <div id="daily-progress-bar" class="daily-progress-fill"></div>
+                </div>
+
+                <div id="daily-exercises-list">
+                    <div class="state-loading">
+                        <div class="spinner"></div>
+                        <p>Today's 5 is loading…</p>
+                    </div>
+                </div>
+
+                <div class="daily-footer">
+                    <p id="daily-progress-text" class="daily-progress-text"></p>
+                    <span class="rewards-tease">🏆 Rewards coming soon</span>
+                </div>
             </section>
 
-            <!-- New Challenge -->
+            <!-- New Challenge ──────────────────────────────────────── -->
             <section class="card">
                 <h2>New Challenge</h2>
                 <form id="create-form" onsubmit="handleCreateChallenge(event)">
                     <div class="input-row">
                         <input id="challenge-title" type="text"
-                               placeholder="e.g. 30-day pushups" required maxlength="100">
+                               placeholder="e.g. Daily meditation" required maxlength="100">
                         <button type="submit" class="btn-primary">Add</button>
                     </div>
                     <p id="create-error" class="error" role="alert"></p>
                 </form>
             </section>
 
-            <!-- Your Challenges -->
+            <!-- Your Challenges ────────────────────────────────────── -->
             <section>
                 <h2>Your Challenges</h2>
-                <p id="no-challenges" class="muted" hidden>
-                    No challenges yet. Add one above.
-                </p>
                 <div id="challenges-list"></div>
             </section>
 

@@ -1,3 +1,10 @@
+// ── Service Worker ────────────────────────────────────────────────────────────
+if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('/static/sw.js').catch(function () {
+        // Registration failed — app still works without PWA features
+    });
+}
+
 // ── API wrapper ───────────────────────────────────────────────────────────────
 
 async function api(path, method, body) {
@@ -49,7 +56,7 @@ function setError(id, msg) {
 }
 
 function clearErrors() {
-    ['login-error', 'register-error', 'create-error'].forEach(function(id) {
+    ['login-error', 'register-error', 'create-error'].forEach(function (id) {
         setError(id, '');
     });
 }
@@ -112,31 +119,123 @@ function handleLogout() {
 // ── Dashboard ─────────────────────────────────────────────────────────────────
 
 async function loadDashboard() {
+    await loadUserPreferences();
     await loadDailyExercises();
     await loadChallenges();
 }
 
+async function loadUserPreferences() {
+    var result = await api('/api/me');
+    if (!result || result.status !== 200) return;
+    applyTheme(result.data.display_mode);
+    // Sync skill-level select in case it differs from /api/daily response
+    var sel = document.getElementById('skill-level-select');
+    if (sel && result.data.skill_level) sel.value = result.data.skill_level;
+}
+
+var THEME_COLORS = { game: '#4338ca', bright: '#0891b2', classic: '#4f46e5' };
+
+function applyTheme(mode) {
+    mode = mode || 'game';
+    var body = document.body;
+    body.className = body.className.replace(/\btheme-\w+\b/g, '').trim();
+    body.classList.add('theme-' + mode);
+
+    // Keep browser chrome and PWA status bar in sync with the active theme
+    var metaTheme = document.getElementById('meta-theme-color');
+    if (metaTheme) metaTheme.content = THEME_COLORS[mode] || '#4338ca';
+
+    document.querySelectorAll('.theme-btn').forEach(function (btn) {
+        btn.classList.toggle('active', btn.dataset.mode === mode);
+    });
+}
+
+async function handleDisplayModeChange(mode) {
+    applyTheme(mode); // instant feedback — no waiting for API
+    var result = await api('/api/me', 'PATCH', { display_mode: mode });
+    if (!result || result.status !== 200) {
+        // Server rejected it — reload preferences to restore correct state
+        await loadUserPreferences();
+    }
+}
+
 async function loadDailyExercises() {
+    var list = document.getElementById('daily-exercises-list');
+    list.innerHTML = '';
+
+    // Show spinner while loading
+    var spinner = document.createElement('div');
+    spinner.className = 'state-loading';
+    spinner.innerHTML = '<div class="spinner"></div><p>Today\'s 5 is loading…</p>';
+    list.appendChild(spinner);
+
     var result = await api('/api/daily');
     if (!result) return;
 
-    var list     = document.getElementById('daily-exercises-list');
-    var progress = document.getElementById('daily-progress');
-    list.innerHTML = ''; // safe: cleared here, content added via createElement below
-
+    list.innerHTML = ''; // clear spinner
     if (result.status !== 200) return;
 
     var daily = result.data;
 
+    // Sync the skill-level select
     var select = document.getElementById('skill-level-select');
     if (select) select.value = daily.skill_level;
 
-    daily.exercises.forEach(function(ex) {
+    // Update progress bar
+    var pct = (daily.completed_count / 5) * 100;
+    var bar = document.getElementById('daily-progress-bar');
+    if (bar) {
+        bar.style.width = pct + '%';
+        if (daily.completed_count === 5) bar.classList.add('complete');
+        else bar.classList.remove('complete');
+    }
+
+    // Update count badge
+    var badge = document.getElementById('daily-count-badge');
+    if (badge) {
+        badge.textContent = daily.completed_count + '/5';
+        if (daily.completed_count === 5) badge.classList.add('badge-complete');
+        else badge.classList.remove('badge-complete');
+    }
+
+    // Update ARIA
+    var track = document.querySelector('.daily-progress-track');
+    if (track) track.setAttribute('aria-valuenow', daily.completed_count);
+
+    // All-complete banner
+    if (daily.completed_count === 5) {
+        var banner = document.createElement('div');
+        banner.className = 'daily-complete-banner';
+        banner.innerHTML =
+            '<span class="complete-emoji">🎉</span>' +
+            '<div><p class="complete-title">All 5 done — nice work!</p>' +
+            '<p class="complete-sub">Come back tomorrow for a new set.</p></div>';
+        list.appendChild(banner);
+    }
+
+    // Render exercises
+    daily.exercises.forEach(function (ex) {
         list.appendChild(renderDailyExercise(ex));
     });
 
-    progress.textContent = daily.completed_count + ' / 5 completed';
+    // Progress text
+    var progressText = document.getElementById('daily-progress-text');
+    if (progressText) {
+        if (daily.completed_count === 5) {
+            progressText.textContent = '5 \u2F 5 complete 🔥';
+        } else {
+            progressText.textContent = daily.completed_count + ' \u2F 5 completed';
+        }
+    }
 }
+
+var CATEGORY_PILL = {
+    upper_body:   'pill-upper-body',
+    lower_body:   'pill-lower-body',
+    core:         'pill-core',
+    mobility:     'pill-mobility',
+    conditioning: 'pill-conditioning',
+};
 
 function renderDailyExercise(ex) {
     var row = document.createElement('div');
@@ -157,8 +256,9 @@ function renderDailyExercise(ex) {
     info.appendChild(meta);
 
     var cat = document.createElement('span');
-    cat.className = 'daily-category-pill';
-    cat.textContent = ex.category.replace(/_/g, ' ');
+    var pillClass = CATEGORY_PILL[ex.category] || '';
+    cat.className = 'daily-category-pill ' + pillClass;
+    cat.textContent = ex.category.replace(/_/g, ' '); // non-breaking space
 
     var btn = document.createElement('button');
     if (ex.completed) {
@@ -168,7 +268,7 @@ function renderDailyExercise(ex) {
     } else {
         btn.textContent = 'Mark Done';
         btn.className   = 'btn-daily-complete';
-        btn.onclick     = function() { handleCompleteExercise(ex.key, btn); };
+        btn.onclick     = function () { handleCompleteExercise(ex.key, btn, row); };
     }
 
     row.appendChild(info);
@@ -177,16 +277,20 @@ function renderDailyExercise(ex) {
     return row;
 }
 
-async function handleCompleteExercise(key, btn) {
+async function handleCompleteExercise(key, btn, row) {
     btn.disabled    = true;
-    btn.textContent = '...';
+    btn.textContent = '✓';
+
+    if (row) row.classList.add('completing');
 
     var result = await api('/api/daily/' + key + '/complete', 'POST');
     if (!result) return;
 
     if (result.status === 200) {
-        await loadDailyExercises();
+        // Let the flash animation play, then reload
+        setTimeout(function () { loadDailyExercises(); }, 480);
     } else {
+        if (row) row.classList.remove('completing');
         btn.disabled    = false;
         btn.textContent = 'Mark Done';
     }
@@ -195,46 +299,67 @@ async function handleCompleteExercise(key, btn) {
 async function handleSkillLevelChange(value) {
     var result = await api('/api/me', 'PATCH', { skill_level: value });
     if (!result) return;
-
-    if (result.status === 200) {
-        await loadDailyExercises();
-    } else {
-        // Revert the select to the previous server value by reloading
-        await loadDailyExercises();
-    }
+    // Reload either way — on failure, reverts the select to server value
+    await loadDailyExercises();
 }
 
 async function loadChallenges() {
     var result = await api('/api/challenges');
     if (!result) return;
 
-    var list  = document.getElementById('challenges-list');
-    var empty = document.getElementById('no-challenges');
-
-    list.innerHTML = ''; // safe: only cleared here, content added via createElement below
+    var list = document.getElementById('challenges-list');
+    list.innerHTML = ''; // safe: content added via createElement below
 
     if (result.status !== 200) return;
 
     var challenges = result.data;
-    empty.hidden = challenges.length > 0;
-    challenges.forEach(function(c) {
+
+    if (challenges.length === 0) {
+        var empty = document.createElement('div');
+        empty.className = 'empty-state';
+
+        var icon = document.createElement('div');
+        icon.className = 'empty-icon';
+        icon.textContent = '🏆'; // 🏆
+
+        var title = document.createElement('p');
+        title.className = 'empty-title';
+        title.textContent = 'Create your first personal challenge';
+
+        var sub = document.createElement('p');
+        sub.className = 'empty-sub';
+        sub.textContent = 'Track any habit — workouts, reading, cold showers.';
+
+        empty.appendChild(icon);
+        empty.appendChild(title);
+        empty.appendChild(sub);
+        list.appendChild(empty);
+        return;
+    }
+
+    challenges.forEach(function (c) {
         list.appendChild(renderChallenge(c));
     });
 }
 
 function renderChallenge(c) {
-    var today      = new Date().toISOString().slice(0, 10);
+    var today     = new Date().toISOString().slice(0, 10);
+    var yesterday = new Date(Date.now() - 864e5).toISOString().slice(0, 10);
     var alreadyDone = c.last_check_in === today;
+    var atRisk      = !alreadyDone && c.last_check_in === yesterday && c.current_streak > 0;
 
     var card = document.createElement('div');
     card.className = 'challenge-card';
+    if (alreadyDone)          card.classList.add('done-today');
+    else if (atRisk)          card.classList.add('at-risk');
+    else if (c.current_streak > 0) card.classList.add('has-streak');
 
     var info = document.createElement('div');
     info.className = 'challenge-info';
 
     var title = document.createElement('p');
     title.className = 'challenge-title';
-    title.textContent = c.title; // textContent — never innerHTML
+    title.textContent = (c.current_streak > 0 ? '🔥 ' : '') + c.title; // 🔥
 
     var streakRow = document.createElement('div');
     streakRow.className = 'streak-row';
@@ -247,7 +372,12 @@ function renderChallenge(c) {
     best.textContent = 'Best: ' + c.longest_streak;
 
     var lastIn = document.createElement('span');
-    lastIn.textContent = c.last_check_in ? 'Last: ' + c.last_check_in : 'Not started';
+    if (atRisk) {
+        lastIn.textContent = '⚠️ Streak at risk';
+        lastIn.style.color = '#dc2626';
+    } else {
+        lastIn.textContent = c.last_check_in ? 'Last: ' + c.last_check_in : 'Not started';
+    }
 
     streakRow.appendChild(current);
     streakRow.appendChild(best);
@@ -263,7 +393,7 @@ function renderChallenge(c) {
     } else {
         btn.textContent = 'Check In';
         btn.className   = 'btn-primary';
-        btn.onclick     = function() { handleCheckIn(c.id, btn); };
+        btn.onclick     = function () { handleCheckIn(c.id, btn); };
     }
 
     card.appendChild(info);

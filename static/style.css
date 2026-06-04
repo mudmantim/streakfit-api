@@ -1,14 +1,90 @@
-/* ── Reset & base ─────────────────────────────────────────────────────────── */
+/* ── Variables ────────────────────────────────────────────────────────────── */
+:root {
+    /* Palette */
+    --indigo:      #4f46e5;
+    --indigo-dark: #4338ca;
+    --violet:      #7c3aed;
+    --indigo-pale: #eef2ff;
+    --green:       #059669;
+    --green-light: #d1fae5;
+    --amber:       #f59e0b;
+    --amber-light: #fef3c7;
+    --red:         #dc2626;
+    --gray-50:     #f9fafb;
+    --gray-100:    #f3f4f6;
+    --gray-200:    #e5e7eb;
+    --gray-400:    #9ca3af;
+    --gray-500:    #6b7280;
+    --gray-700:    #374151;
+    --gray-900:    #111827;
+    --radius:      12px;
+    --shadow:      0 1px 3px rgba(0,0,0,.1), 0 1px 2px rgba(0,0,0,.06);
+    --shadow-md:   0 4px 6px rgba(0,0,0,.07), 0 2px 4px rgba(0,0,0,.05);
+
+    /* Theme tokens — game (default) */
+    --t-header-bg:       linear-gradient(135deg, #4338ca 0%, #7c3aed 100%);
+    --t-header-text:     #ffffff;
+    --t-header-border:   none;
+    --t-auth-bg:         linear-gradient(150deg, #e0e7ff 0%, #f3e8ff 100%);
+    --t-body-bg:         #f3f4f6;
+    --t-logo-color:      #3730a3;
+    --t-daily-card-bg:   linear-gradient(180deg, #fafbff 0%, #fff 60%);
+    --t-primary:         #4f46e5;
+    --t-primary-dark:    #4338ca;
+    --t-select-bg:       rgba(255,255,255,.18);
+    --t-select-color:    #ffffff;
+    --t-select-border:   rgba(255,255,255,.3);
+    --t-logout-color:    rgba(255,255,255,.8);
+    --t-logout-border:   rgba(255,255,255,.35);
+    --t-logout-hover-bg: rgba(255,255,255,.15);
+}
+
+/* ── Bright theme ──────────────────────────────────────────────────────────── */
+body.theme-bright {
+    --t-header-bg:       linear-gradient(135deg, #0891b2 0%, #7c3aed 100%);
+    --t-auth-bg:         linear-gradient(150deg, #cffafe 0%, #fef9c3 100%);
+    --t-body-bg:         #fff7ed;
+    --t-logo-color:      #164e63;
+    --t-daily-card-bg:   linear-gradient(180deg, #ecfeff 0%, #fff 60%);
+    --t-primary:         #0891b2;
+    --t-primary-dark:    #0e7490;
+    --indigo:            #0891b2;
+    --indigo-dark:       #0e7490;
+    --violet:            #7c3aed;
+    --indigo-pale:       #cffafe;
+}
+
+/* ── Classic theme ─────────────────────────────────────────────────────────── */
+body.theme-classic {
+    --t-header-bg:       #ffffff;
+    --t-header-text:     #374151;
+    --t-header-border:   1px solid #e5e7eb;
+    --t-auth-bg:         #f9fafb;
+    --t-body-bg:         #f9fafb;
+    --t-logo-color:      #4f46e5;
+    --t-daily-card-bg:   #ffffff;
+    --t-primary:         #4f46e5;
+    --t-primary-dark:    #4338ca;
+    --t-select-bg:       #eef2ff;
+    --t-select-color:    #4f46e5;
+    --t-select-border:   #c7d2fe;
+    --t-logout-color:    #4f46e5;
+    --t-logout-border:   #4f46e5;
+    --t-logout-hover-bg: #eef2ff;
+}
+
+/* ── Reset ────────────────────────────────────────────────────────────────── */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+[hidden] { display: none !important; }
 
 body {
     font-family: system-ui, -apple-system, sans-serif;
-    background: #f3f4f6;
-    color: #111827;
+    background: var(--t-body-bg);
+    color: var(--gray-900);
     min-height: 100vh;
+    -webkit-font-smoothing: antialiased;
+    overscroll-behavior-y: none;   /* prevent elastic bounce on iOS/Android */
 }
-
-[hidden] { display: none !important; }
 
 /* ── Auth view ────────────────────────────────────────────────────────────── */
 #auth-view {
@@ -16,7 +92,8 @@ body {
     align-items: center;
     justify-content: center;
     min-height: 100vh;
-    padding: 1rem;
+    padding: 1.25rem 1rem;
+    background: var(--t-auth-bg);
 }
 
 .auth-card {
@@ -24,39 +101,44 @@ body {
     max-width: 400px;
 }
 
-/* ── Card ─────────────────────────────────────────────────────────────────── */
-.card {
-    background: #fff;
-    border-radius: 12px;
-    box-shadow: 0 1px 3px rgba(0, 0, 0, .1);
-    padding: 2rem;
+.auth-logo {
+    display: flex;
+    align-items: center;
+    gap: .4rem;
+    margin-bottom: .2rem;
 }
 
-/* ── Logo & typography ────────────────────────────────────────────────────── */
+.logo-flame {
+    font-size: 2rem;
+    line-height: 1;
+}
+
 .logo {
-    font-size: 1.8rem;
-    font-weight: 700;
-    color: #4f46e5;
+    font-size: 1.9rem;
+    font-weight: 800;
+    color: var(--t-logo-color);
     letter-spacing: -0.5px;
 }
 
 .tagline {
-    color: #6b7280;
-    margin: .25rem 0 1.5rem;
-    font-size: .9rem;
+    color: var(--gray-500);
+    margin: .3rem 0 1.5rem;
+    font-size: .875rem;
+    line-height: 1.5;
 }
 
-h2 {
-    font-size: 1.05rem;
-    font-weight: 600;
-    margin-bottom: 1rem;
-    color: #111827;
+/* ── Card ─────────────────────────────────────────────────────────────────── */
+.card {
+    background: #fff;
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    padding: 1.5rem;
 }
 
 /* ── Tabs ─────────────────────────────────────────────────────────────────── */
 .tabs {
     display: flex;
-    border-bottom: 2px solid #e5e7eb;
+    border-bottom: 2px solid var(--gray-200);
     margin-bottom: 1.5rem;
 }
 
@@ -65,135 +147,248 @@ h2 {
     border: none;
     border-bottom: 2px solid transparent;
     margin-bottom: -2px;
-    padding: .5rem .75rem;
+    padding: .5rem .85rem;
     cursor: pointer;
     font-size: .95rem;
-    color: #6b7280;
+    color: var(--gray-500);
     transition: color .15s;
 }
 
 .tab.active {
-    color: #4f46e5;
-    border-bottom-color: #4f46e5;
-    font-weight: 600;
+    color: var(--indigo);
+    border-bottom-color: var(--indigo);
+    font-weight: 700;
 }
 
 /* ── Forms ────────────────────────────────────────────────────────────────── */
-form {
-    display: flex;
-    flex-direction: column;
-    gap: .75rem;
-}
+form { display: flex; flex-direction: column; gap: .75rem; }
 
 input[type="text"],
 input[type="password"] {
     width: 100%;
-    padding: .6rem .8rem;
-    border: 1.5px solid #d1d5db;
+    padding: .7rem .85rem;
+    border: 1.5px solid var(--gray-200);
     border-radius: 8px;
     font-size: 1rem;
     background: #fff;
-    transition: border-color .15s;
+    transition: border-color .15s, box-shadow .15s;
+    -webkit-appearance: none;
 }
 
 input:focus {
     outline: none;
-    border-color: #4f46e5;
+    border-color: var(--indigo);
+    box-shadow: 0 0 0 3px rgba(79,70,229,.12);
 }
 
-.input-row {
-    display: flex;
-    gap: .5rem;
-}
-
-.input-row input { flex: 1; }
+.input-row { display: flex; gap: .5rem; }
+.input-row input { flex: 1; min-width: 0; }
 
 /* ── Buttons ──────────────────────────────────────────────────────────────── */
 .btn-primary {
-    background: #4f46e5;
+    background: var(--indigo);
     color: #fff;
     border: none;
     border-radius: 8px;
-    padding: .65rem 1.25rem;
-    font-size: 1rem;
-    font-weight: 600;
+    padding: .7rem 1.25rem;
+    font-size: .95rem;
+    font-weight: 700;
     cursor: pointer;
     white-space: nowrap;
-    transition: background .15s;
+    transition: background .15s, transform .1s, box-shadow .15s;
+    -webkit-tap-highlight-color: transparent;
 }
 
-.btn-primary:hover  { background: #4338ca; }
-.btn-primary:disabled { background: #a5b4fc; cursor: default; }
+.btn-primary:hover  { background: var(--indigo-dark); box-shadow: var(--shadow-md); }
+.btn-primary:active { transform: scale(.97); }
+.btn-primary:disabled { background: #a5b4fc; cursor: default; transform: none; }
 
-.btn-secondary {
+.btn-full { width: 100%; padding: .8rem; font-size: 1rem; }
+
+.btn-logout {
     background: none;
-    color: #4f46e5;
-    border: 1.5px solid #4f46e5;
+    color: var(--t-logout-color);
+    border: 1.5px solid var(--t-logout-border);
     border-radius: 8px;
-    padding: .5rem 1rem;
-    font-size: .9rem;
+    padding: .4rem .85rem;
+    font-size: .85rem;
     font-weight: 600;
     cursor: pointer;
-    transition: background .15s;
+    transition: background .15s, color .15s;
+    -webkit-tap-highlight-color: transparent;
 }
 
-.btn-secondary:hover { background: #eef2ff; }
+.btn-logout:hover {
+    background: var(--t-logout-hover-bg);
+}
 
 .btn-done {
-    background: #d1fae5;
+    background: var(--green-light);
     color: #065f46;
     border: none;
     border-radius: 8px;
-    padding: .6rem 1rem;
+    padding: .55rem 1rem;
     font-size: .9rem;
-    font-weight: 600;
+    font-weight: 700;
     cursor: default;
     white-space: nowrap;
+    flex-shrink: 0;
 }
 
-/* ── Header ───────────────────────────────────────────────────────────────── */
+/* ── Site header ──────────────────────────────────────────────────────────── */
 .site-header {
-    background: #fff;
-    border-bottom: 1px solid #e5e7eb;
-    padding: .8rem 1.5rem;
+    background: var(--t-header-bg);
+    color: var(--t-header-text);
+    border-bottom: var(--t-header-border);
+    padding: .85rem 1.25rem;
     display: flex;
     align-items: center;
     justify-content: space-between;
+    gap: .75rem;
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    padding-top: calc(.85rem + env(safe-area-inset-top, 0px));
+}
+
+.header-logo {
+    display: flex;
+    align-items: center;
+    gap: .35rem;
+}
+
+.header-flame { font-size: 1.3rem; line-height: 1; }
+
+.header-brand {
+    font-size: 1.2rem;
+    font-weight: 800;
+    color: var(--t-header-text);
+    letter-spacing: -0.3px;
 }
 
 .header-right {
     display: flex;
     align-items: center;
-    gap: .75rem;
+    gap: .6rem;
+    flex-shrink: 0;
 }
 
 /* ── Skill level select ───────────────────────────────────────────────────── */
 .skill-select {
+    -webkit-appearance: none;
     appearance: none;
-    background: #eef2ff;
-    color: #4f46e5;
-    border: 1.5px solid #c7d2fe;
+    background: var(--t-select-bg);
+    color: var(--t-select-color);
+    border: 1.5px solid var(--t-select-border);
     border-radius: 20px;
     padding: .35rem .85rem;
-    font-size: .85rem;
-    font-weight: 600;
+    font-size: .82rem;
+    font-weight: 700;
     cursor: pointer;
-    transition: border-color .15s;
+    transition: background .15s;
 }
 
 .skill-select:focus {
     outline: none;
-    border-color: #4f46e5;
+    background: var(--t-select-bg);
+    opacity: .9;
 }
 
-/* ── Dashboard layout ─────────────────────────────────────────────────────── */
+.skill-select option { background: #3730a3; color: #fff; }
+
+/* ── Dashboard container ──────────────────────────────────────────────────── */
 .container {
     max-width: 680px;
     margin: 0 auto;
-    padding: 1.5rem 1rem;
+    padding: 1.25rem 1rem;
+    padding-bottom: calc(2rem + env(safe-area-inset-bottom, 0px));
     display: flex;
     flex-direction: column;
-    gap: 1.5rem;
+    gap: 1.25rem;
+}
+
+/* ── Daily 5 card ─────────────────────────────────────────────────────────── */
+.daily-card {
+    background: var(--t-daily-card-bg);
+    border: 1.5px solid var(--gray-200);
+    padding: 1.25rem 1.25rem 1rem;
+}
+
+.daily-header-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: .75rem;
+}
+
+.daily-title {
+    font-size: 1.05rem;
+    font-weight: 700;
+    color: var(--gray-900);
+    margin: 0;
+}
+
+.daily-count-badge {
+    background: var(--indigo);
+    color: #fff;
+    border-radius: 20px;
+    padding: .25rem .7rem;
+    font-size: .82rem;
+    font-weight: 700;
+    min-width: 2.8rem;
+    text-align: center;
+    transition: background .3s;
+}
+
+.daily-count-badge.badge-complete {
+    background: var(--green);
+}
+
+/* ── Progress bar ─────────────────────────────────────────────────────────── */
+.daily-progress-track {
+    height: 8px;
+    background: var(--gray-200);
+    border-radius: 4px;
+    margin-bottom: 1rem;
+    overflow: hidden;
+}
+
+.daily-progress-fill {
+    height: 100%;
+    width: 0%;
+    background: linear-gradient(90deg, var(--indigo) 0%, var(--violet) 100%);
+    border-radius: 4px;
+    transition: width .45s cubic-bezier(.4,0,.2,1);
+}
+
+.daily-progress-fill.complete {
+    background: linear-gradient(90deg, var(--green) 0%, #10b981 100%);
+}
+
+/* ── Complete banner ──────────────────────────────────────────────────────── */
+.daily-complete-banner {
+    display: flex;
+    align-items: center;
+    gap: .85rem;
+    background: linear-gradient(135deg, #ecfdf5 0%, #d1fae5 100%);
+    border: 1.5px solid #6ee7b7;
+    border-radius: 10px;
+    padding: .9rem 1rem;
+    margin-bottom: .85rem;
+}
+
+.complete-emoji { font-size: 1.8rem; line-height: 1; flex-shrink: 0; }
+
+.complete-title {
+    font-weight: 700;
+    font-size: .95rem;
+    color: #065f46;
+}
+
+.complete-sub {
+    font-size: .8rem;
+    color: #047857;
+    margin-top: .1rem;
 }
 
 /* ── Daily exercise rows ──────────────────────────────────────────────────── */
@@ -202,35 +397,36 @@ input:focus {
     align-items: center;
     gap: .75rem;
     padding: .7rem 0;
-    border-bottom: 1px solid #f3f4f6;
+    border-bottom: 1px solid var(--gray-100);
+    min-height: 52px;
 }
 
 .daily-exercise-row:last-child { border-bottom: none; }
 
-.daily-exercise-done { opacity: .5; }
+.daily-exercise-done { opacity: .45; }
 
-.daily-exercise-info {
-    flex: 1;
-    min-width: 0;
-}
+.daily-exercise-info { flex: 1; min-width: 0; }
 
 .daily-exercise-name {
     font-size: .95rem;
     font-weight: 600;
-    color: #111827;
-    margin-bottom: .15rem;
+    color: var(--gray-900);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .daily-exercise-meta {
-    font-size: .8rem;
-    color: #6b7280;
+    font-size: .78rem;
+    color: var(--gray-500);
     display: block;
+    margin-top: .1rem;
 }
 
+/* Category pills — each category gets its own colour */
 .daily-category-pill {
-    font-size: .72rem;
-    background: #f3f4f6;
-    color: #6b7280;
+    font-size: .7rem;
+    font-weight: 600;
     border-radius: 4px;
     padding: .2rem .45rem;
     white-space: nowrap;
@@ -238,62 +434,96 @@ input:focus {
     flex-shrink: 0;
 }
 
+.pill-upper-body    { background: #dbeafe; color: #1d4ed8; }
+.pill-lower-body    { background: #dcfce7; color: #166534; }
+.pill-core          { background: #ffedd5; color: #c2410c; }
+.pill-mobility      { background: #f3e8ff; color: #6d28d9; }
+.pill-conditioning  { background: #fee2e2; color: #b91c1c; }
+
+/* Mark Done button */
 .btn-daily-complete {
-    background: #4f46e5;
+    background: var(--indigo);
     color: #fff;
     border: none;
     border-radius: 8px;
-    padding: .4rem .8rem;
-    font-size: .85rem;
-    font-weight: 600;
+    padding: .45rem .85rem;
+    font-size: .82rem;
+    font-weight: 700;
     cursor: pointer;
     white-space: nowrap;
     flex-shrink: 0;
-    transition: background .15s;
+    transition: background .15s, transform .1s;
+    -webkit-tap-highlight-color: transparent;
 }
 
-.btn-daily-complete:hover    { background: #4338ca; }
-.btn-daily-complete:disabled { background: #a5b4fc; cursor: default; }
+.btn-daily-complete:hover    { background: var(--indigo-dark); }
+.btn-daily-complete:active   { transform: scale(.95); }
+.btn-daily-complete:disabled { background: #a5b4fc; cursor: default; transform: none; }
 
 .btn-daily-done {
-    background: #d1fae5;
+    background: var(--green-light);
     color: #065f46;
     border: none;
     border-radius: 8px;
-    padding: .4rem .8rem;
+    padding: .45rem .85rem;
     font-size: .85rem;
-    font-weight: 700;
+    font-weight: 800;
     cursor: default;
     white-space: nowrap;
     flex-shrink: 0;
 }
 
-.daily-progress {
-    font-size: .85rem;
-    color: #6b7280;
+/* ── Daily footer ─────────────────────────────────────────────────────────── */
+.daily-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
     margin-top: .75rem;
-    text-align: right;
+    flex-wrap: wrap;
+    gap: .4rem;
+}
+
+.daily-progress-text {
+    font-size: .82rem;
+    color: var(--gray-500);
+}
+
+.rewards-tease {
+    font-size: .78rem;
+    font-weight: 600;
+    color: var(--amber);
+    background: var(--amber-light);
+    border-radius: 20px;
+    padding: .2rem .6rem;
+    white-space: nowrap;
 }
 
 /* ── Challenge cards ──────────────────────────────────────────────────────── */
 .challenge-card {
     background: #fff;
-    border-radius: 12px;
-    box-shadow: 0 1px 3px rgba(0, 0, 0, .08);
-    padding: 1.1rem 1.25rem;
-    margin-bottom: .75rem;
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    padding: 1rem 1.1rem;
+    margin-bottom: .7rem;
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 1rem;
+    gap: .85rem;
+    border-left: 4px solid transparent;
+    transition: border-color .2s, box-shadow .2s;
 }
+
+.challenge-card:hover        { box-shadow: var(--shadow-md); }
+.challenge-card.has-streak   { border-left-color: var(--amber); }
+.challenge-card.at-risk      { border-left-color: var(--red); }
+.challenge-card.done-today   { border-left-color: var(--green); }
 
 .challenge-info { flex: 1; min-width: 0; }
 
 .challenge-title {
     font-size: 1rem;
-    font-weight: 600;
-    margin-bottom: .35rem;
+    font-weight: 700;
+    margin-bottom: .3rem;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -302,26 +532,133 @@ input:focus {
 .streak-row {
     display: flex;
     align-items: center;
-    gap: 1rem;
+    gap: .85rem;
     flex-wrap: wrap;
-    font-size: .85rem;
-    color: #6b7280;
+    font-size: .82rem;
+    color: var(--gray-500);
 }
 
 .streak-current {
-    font-weight: 700;
+    font-weight: 800;
     font-size: .95rem;
-    color: #f59e0b;
+    color: var(--amber);
+}
+
+/* ── Animations ───────────────────────────────────────────────────────────── */
+@keyframes completePulse {
+    0%   { background-color: transparent; }
+    30%  { background-color: #dcfce7; }
+    100% { background-color: transparent; }
+}
+
+.completing {
+    animation: completePulse .55s ease forwards;
+    border-radius: 6px;
+}
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+
+/* ── Loading state ────────────────────────────────────────────────────────── */
+.state-loading {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 1.25rem 0;
+    color: var(--gray-400);
+    font-size: .875rem;
+    gap: .5rem;
+}
+
+.spinner {
+    width: 22px;
+    height: 22px;
+    border: 3px solid var(--gray-200);
+    border-top-color: var(--indigo);
+    border-radius: 50%;
+    animation: spin .7s linear infinite;
+}
+
+/* ── Empty states ─────────────────────────────────────────────────────────── */
+.empty-state {
+    text-align: center;
+    padding: 2.25rem 1rem;
+}
+
+.empty-icon { font-size: 2.5rem; margin-bottom: .6rem; }
+
+.empty-title {
+    font-size: .95rem;
+    font-weight: 700;
+    color: var(--gray-700);
+    margin-bottom: .25rem;
+}
+
+.empty-sub {
+    font-size: .825rem;
+    color: var(--gray-400);
+    line-height: 1.5;
 }
 
 /* ── Misc ─────────────────────────────────────────────────────────────────── */
+h2 {
+    font-size: 1.05rem;
+    font-weight: 700;
+    color: var(--gray-900);
+    margin-bottom: 1rem;
+}
+
 .error {
-    color: #dc2626;
-    font-size: .875rem;
+    color: var(--red);
+    font-size: .85rem;
     min-height: 1.2rem;
 }
 
-.muted {
-    color: #6b7280;
+.muted { color: var(--gray-500); font-size: .875rem; }
+
+/* ── Theme toggle buttons ─────────────────────────────────────────────────── */
+.theme-toggle {
+    display: flex;
+    gap: .2rem;
+    background: rgba(0,0,0,.12);
+    border-radius: 20px;
+    padding: .15rem .25rem;
+}
+
+.theme-btn {
+    background: none;
+    border: none;
+    cursor: pointer;
     font-size: .9rem;
+    padding: .15rem .3rem;
+    border-radius: 16px;
+    line-height: 1.4;
+    transition: background .15s, transform .1s;
+    -webkit-tap-highlight-color: transparent;
+    opacity: .65;
+}
+
+.theme-btn:hover  { opacity: 1; background: rgba(255,255,255,.2); }
+.theme-btn:active { transform: scale(.9); }
+.theme-btn.active { opacity: 1; background: rgba(255,255,255,.3); }
+
+body.theme-classic .theme-toggle { background: rgba(79,70,229,.1); }
+body.theme-classic .theme-btn:hover  { background: rgba(79,70,229,.15); }
+body.theme-classic .theme-btn.active { background: rgba(79,70,229,.2); }
+
+/* ── PWA standalone adjustments ──────────────────────────────────────────── */
+@media (display-mode: standalone) {
+    body { background: var(--t-body-bg); }
+}
+
+/* ── Mobile responsive ────────────────────────────────────────────────────── */
+@media (max-width: 400px) {
+    .card { padding: 1.1rem; }
+    .daily-card { padding: 1rem 1rem .85rem; }
+    .container { padding: 1rem .85rem 2rem; gap: 1rem; }
+    .site-header { padding: .7rem 1rem; }
+    .header-brand { font-size: 1.1rem; }
+    .daily-exercise-row { min-height: 48px; }
+    .challenge-card { padding: .9rem 1rem; }
 }
