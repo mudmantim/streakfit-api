@@ -321,12 +321,24 @@ input:focus {
     margin-bottom: .75rem;
 }
 
+.daily-mission-meta {
+    display: flex;
+    align-items: center;
+    gap: .45rem;
+    margin-top: .1rem;
+    flex-wrap: wrap;
+}
+
 .daily-mission-date {
     font-size: .75rem;
     color: var(--gray-500);
-    display: block;
-    margin-top: .1rem;
     font-weight: 500;
+}
+
+.daily-streak-badge {
+    font-size: .75rem;
+    font-weight: 700;
+    color: var(--amber);
 }
 
 .daily-title {

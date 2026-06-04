@@ -188,6 +188,18 @@ async function loadDailyExercises() {
         dateEl.textContent = d.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' });
     }
 
+    // Populate streak badge (hidden when streak is 0)
+    var streakBadge = document.getElementById('daily-streak-badge');
+    if (streakBadge) {
+        var streak = daily.daily5_streak || 0;
+        if (streak > 0) {
+            streakBadge.textContent = '🔥 ' + streak + (streak === 1 ? ' day' : ' days');
+            streakBadge.hidden = false;
+        } else {
+            streakBadge.hidden = true;
+        }
+    }
+
     // Update progress bar
     var pct = (daily.completed_count / 5) * 100;
     var bar = document.getElementById('daily-progress-bar');
@@ -209,14 +221,31 @@ async function loadDailyExercises() {
     var track = document.querySelector('.daily-progress-track');
     if (track) track.setAttribute('aria-valuenow', daily.completed_count);
 
-    // All-complete banner
+    // All-complete banner — copy is driven by milestone or current streak count
     if (daily.completed_count === 5) {
-        var banner = document.createElement('div');
+        var bannerStreak = daily.daily5_streak || 0;
+
+        var banner    = document.createElement('div');
         banner.className = 'daily-complete-banner';
-        banner.innerHTML =
-            '<span class="complete-emoji">🔥</span>' +
-            '<div><p class="complete-title">Mission complete.</p>' +
-            '<p class="complete-sub">Come back tomorrow to keep your streak alive.</p></div>';
+
+        var bannerEmoji = document.createElement('span');
+        bannerEmoji.className = 'complete-emoji';
+        bannerEmoji.textContent = '🔥';
+
+        var bannerText  = document.createElement('div');
+
+        var bannerTitle = document.createElement('p');
+        bannerTitle.className = 'complete-title';
+        bannerTitle.textContent = getStreakBannerCopy(bannerStreak);
+
+        var bannerSub   = document.createElement('p');
+        bannerSub.className = 'complete-sub';
+        bannerSub.textContent = 'Come back tomorrow to keep it alive.';
+
+        bannerText.appendChild(bannerTitle);
+        bannerText.appendChild(bannerSub);
+        banner.appendChild(bannerEmoji);
+        banner.appendChild(bannerText);
         list.appendChild(banner);
     }
 
@@ -234,6 +263,23 @@ async function loadDailyExercises() {
             progressText.textContent = daily.completed_count + ' \u2F 5 completed';
         }
     }
+}
+
+// ── Streak milestone copy ─────────────────────────────────────────────────────
+
+var STREAK_MILESTONES = {
+    1:   'Day 1. The streak starts here.',
+    3:   '3 days in a row. You\'re building something.',
+    7:   'One week straight. This is becoming real.',
+    14:  '14 days. You haven\'t broken it.',
+    30:  '30 days. A month of showing up.',
+    100: '100 days. That changes a person.'
+};
+
+function getStreakBannerCopy(streak) {
+    if (STREAK_MILESTONES[streak]) return STREAK_MILESTONES[streak];
+    if (streak > 1) return streak + '-day streak. Keep it going.';
+    return 'Mission complete.';
 }
 
 var CATEGORY_PILL = {
