@@ -103,6 +103,8 @@
                     <div id="daily-progress-bar" class="daily-progress-fill"></div>
                 </div>
 
+                <p id="daily-streak-helper" class="daily-streak-helper" hidden></p>
+
                 <div id="daily-exercises-list">
                     <div class="state-loading">
                         <div class="spinner"></div>
@@ -115,23 +117,21 @@
                 </div>
             </section>
 
-            <!-- New Challenge ──────────────────────────────────────── -->
-            <section class="card">
-                <h2>New Challenge</h2>
-                <form id="create-form" onsubmit="handleCreateChallenge(event)">
+            <!-- Side Quests ─────────────────────────────────────────── -->
+            <section class="side-quests-section">
+                <div class="side-quests-header">
+                    <h2 class="side-quests-title">Side Quests</h2>
+                    <p class="side-quests-subtitle">Track your own daily habits</p>
+                </div>
+                <div id="challenges-list"></div>
+                <form id="create-form" onsubmit="handleCreateChallenge(event)" class="side-quests-form">
                     <div class="input-row">
                         <input id="challenge-title" type="text"
-                               placeholder="e.g. Daily meditation" required maxlength="100">
+                               placeholder="e.g. Read for 10 minutes" required maxlength="100">
                         <button type="submit" class="btn-primary">Add</button>
                     </div>
                     <p id="create-error" class="error" role="alert"></p>
                 </form>
-            </section>
-
-            <!-- Your Challenges ────────────────────────────────────── -->
-            <section>
-                <h2>Your Challenges</h2>
-                <div id="challenges-list"></div>
             </section>
 
         </main>

@@ -547,6 +547,42 @@ input:focus {
     color: var(--gray-500);
 }
 
+/* Streak helper text — below progress bar, visible while mission is incomplete */
+.daily-streak-helper {
+    font-size: .78rem;
+    color: var(--gray-500);
+    margin-bottom: .75rem;
+    font-style: italic;
+}
+
+/* ── Side Quests section ──────────────────────────────────────────────────── */
+.side-quests-section {
+    padding: 1rem 0 .25rem;
+}
+
+.side-quests-header {
+    margin-bottom: .85rem;
+}
+
+.side-quests-title {
+    font-size: 1rem;
+    font-weight: 700;
+    color: var(--gray-700);
+    margin: 0 0 .15rem;
+}
+
+.side-quests-subtitle {
+    font-size: .78rem;
+    color: var(--gray-500);
+    margin: 0;
+}
+
+.side-quests-form {
+    margin-top: .85rem;
+    padding-top: .85rem;
+    border-top: 1px solid var(--gray-100);
+}
+
 /* ── Challenge cards ──────────────────────────────────────────────────────── */
 .challenge-card {
     background: #fff;

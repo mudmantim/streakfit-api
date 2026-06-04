@@ -181,11 +181,27 @@ async function loadDailyExercises() {
     var select = document.getElementById('skill-level-select');
     if (select) select.value = daily.skill_level;
 
-    // Populate mission date
+    // Populate mission subtitle: date · skill level · Refreshes tomorrow
     var dateEl = document.getElementById('daily-mission-date');
     if (dateEl) {
         var d = new Date();
-        dateEl.textContent = d.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' });
+        var dateStr = d.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' });
+        var level = daily.skill_level.charAt(0).toUpperCase() + daily.skill_level.slice(1);
+        dateEl.textContent = dateStr + ' · ' + level + ' · Refreshes tomorrow';
+    }
+
+    // Populate streak helper text (below progress bar, hidden when mission complete)
+    var helperEl = document.getElementById('daily-streak-helper');
+    if (helperEl) {
+        if (daily.completed_count < 5) {
+            var helperStreak = daily.daily5_streak || 0;
+            helperEl.textContent = helperStreak > 0
+                ? 'Complete all 5 to keep your streak'
+                : 'Complete all 5 to start your streak';
+            helperEl.hidden = false;
+        } else {
+            helperEl.hidden = true;
+        }
     }
 
     // Populate streak badge (hidden when streak is 0)
@@ -403,11 +419,11 @@ async function loadChallenges() {
 
         var title = document.createElement('p');
         title.className = 'empty-title';
-        title.textContent = 'Create your first personal challenge';
+        title.textContent = 'No side quests yet';
 
         var sub = document.createElement('p');
         sub.className = 'empty-sub';
-        sub.textContent = 'Track any habit — workouts, reading, cold showers.';
+        sub.textContent = 'Add a daily habit you want to track — reading, meditation, cold showers.';
 
         empty.appendChild(icon);
         empty.appendChild(title);
