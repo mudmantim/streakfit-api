@@ -166,7 +166,7 @@ async function loadDailyExercises() {
     // Show spinner while loading
     var spinner = document.createElement('div');
     spinner.className = 'state-loading';
-    spinner.innerHTML = '<div class="spinner"></div><p>Today\'s 5 is loading…</p>';
+    spinner.innerHTML = '<div class="spinner"></div><p>Today\'s Mission is loading…</p>';
     list.appendChild(spinner);
 
     var result = await api('/api/daily');
@@ -256,7 +256,9 @@ async function loadDailyExercises() {
 
         var bannerSub   = document.createElement('p');
         bannerSub.className = 'complete-sub';
-        bannerSub.textContent = 'Come back tomorrow to keep it alive.';
+        bannerSub.textContent = bannerStreak === 1
+            ? 'Come back tomorrow for Day 2.'
+            : 'Come back tomorrow to keep it alive.';
 
         bannerText.appendChild(bannerTitle);
         bannerText.appendChild(bannerSub);
