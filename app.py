@@ -94,6 +94,43 @@ def create_challenge():
     db.session.commit()
     return jsonify({"message": "Challenge created", "challenge_id": new_challenge.id}), 201
 
+@app.route('/api/challenges', methods=['GET'])
+@jwt_required()
+def get_challenges():
+    user_id = int(get_jwt_identity())
+    challenges = db.session.execute(
+        db.select(Challenge).where(Challenge.user_id == user_id)
+    ).scalars().all()
+    return jsonify([{
+        "id": c.id,
+        "title": c.title,
+        "current_streak": c.current_streak,
+        "longest_streak": c.longest_streak,
+        "last_check_in": c.last_check_in.isoformat() if c.last_check_in else None,
+        "created_at": c.created_at.isoformat()
+    } for c in challenges]), 200
+
+@app.route('/api/challenges/<int:challenge_id>', methods=['GET'])
+@jwt_required()
+def get_challenge(challenge_id):
+    user_id = int(get_jwt_identity())
+    challenge = db.session.execute(
+        db.select(Challenge).where(
+            Challenge.id == challenge_id,
+            Challenge.user_id == user_id
+        )
+    ).scalar_one_or_none()
+    if challenge is None:
+        abort(404)
+    return jsonify({
+        "id": challenge.id,
+        "title": challenge.title,
+        "current_streak": challenge.current_streak,
+        "longest_streak": challenge.longest_streak,
+        "last_check_in": challenge.last_check_in.isoformat() if challenge.last_check_in else None,
+        "created_at": challenge.created_at.isoformat()
+    }), 200
+
 @app.route('/api/challenges/<int:challenge_id>/checkin', methods=['POST'])
 @jwt_required()
 def check_in(challenge_id):
