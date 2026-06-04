@@ -258,9 +258,9 @@ async function loadDailyExercises() {
     var progressText = document.getElementById('daily-progress-text');
     if (progressText) {
         if (daily.completed_count === 5) {
-            progressText.textContent = '5 \u2F 5 complete 🔥';
+            progressText.textContent = '5 / 5 complete 🔥';
         } else {
-            progressText.textContent = daily.completed_count + ' \u2F 5 completed';
+            progressText.textContent = daily.completed_count + ' / 5 completed';
         }
     }
 }
