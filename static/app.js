@@ -181,6 +181,13 @@ async function loadDailyExercises() {
     var select = document.getElementById('skill-level-select');
     if (select) select.value = daily.skill_level;
 
+    // Populate mission date
+    var dateEl = document.getElementById('daily-mission-date');
+    if (dateEl) {
+        var d = new Date();
+        dateEl.textContent = d.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' });
+    }
+
     // Update progress bar
     var pct = (daily.completed_count / 5) * 100;
     var bar = document.getElementById('daily-progress-bar');
@@ -207,9 +214,9 @@ async function loadDailyExercises() {
         var banner = document.createElement('div');
         banner.className = 'daily-complete-banner';
         banner.innerHTML =
-            '<span class="complete-emoji">🎉</span>' +
-            '<div><p class="complete-title">All 5 done — nice work!</p>' +
-            '<p class="complete-sub">Come back tomorrow for a new set.</p></div>';
+            '<span class="complete-emoji">🔥</span>' +
+            '<div><p class="complete-title">Mission complete.</p>' +
+            '<p class="complete-sub">Come back tomorrow to keep your streak alive.</p></div>';
         list.appendChild(banner);
     }
 
@@ -241,6 +248,7 @@ function renderDailyExercise(ex) {
     var row = document.createElement('div');
     row.className = 'daily-exercise-row' + (ex.completed ? ' daily-exercise-done' : '');
 
+    // ── Exercise info (name + reps + how-to toggle) ──────────────────────────────
     var info = document.createElement('div');
     info.className = 'daily-exercise-info';
 
@@ -252,14 +260,22 @@ function renderDailyExercise(ex) {
     meta.className = 'daily-exercise-meta';
     meta.textContent = ex.reps_or_duration;
 
+    var howBtn = document.createElement('button');
+    howBtn.className = 'btn-how-to';
+    howBtn.textContent = 'How to do this';
+    howBtn.setAttribute('aria-expanded', 'false');
+
     info.appendChild(name);
     info.appendChild(meta);
+    info.appendChild(howBtn);
 
+    // ── Category pill ──────────────────────────────────────────────────────────────────────
     var cat = document.createElement('span');
     var pillClass = CATEGORY_PILL[ex.category] || '';
     cat.className = 'daily-category-pill ' + pillClass;
-    cat.textContent = ex.category.replace(/_/g, ' '); // non-breaking space
+    cat.textContent = ex.category.replace(/_/g, ' ');
 
+    // ── Mark Done / Done button ──────────────────────────────────────────────────────────────────
     var btn = document.createElement('button');
     if (ex.completed) {
         btn.textContent = '✓';
@@ -271,9 +287,26 @@ function renderDailyExercise(ex) {
         btn.onclick     = function () { handleCompleteExercise(ex.key, btn, row); };
     }
 
+    // ── Expandable instructions ──────────────────────────────────────────────────────────────────
+    var instrPanel = document.createElement('div');
+    instrPanel.className = 'exercise-instructions';
+    instrPanel.hidden = true;
+
+    var instrText = document.createElement('p');
+    instrText.textContent = ex.instructions; // textContent — never innerHTML
+    instrPanel.appendChild(instrText);
+
+    howBtn.onclick = function () {
+        var opening = instrPanel.hidden;
+        instrPanel.hidden = !opening;
+        howBtn.textContent = opening ? 'Hide' : 'How to do this';
+        howBtn.setAttribute('aria-expanded', String(opening));
+    };
+
     row.appendChild(info);
     row.appendChild(cat);
     row.appendChild(btn);
+    row.appendChild(instrPanel); // wraps to full width via flex-wrap
     return row;
 }
 

@@ -321,6 +321,14 @@ input:focus {
     margin-bottom: .75rem;
 }
 
+.daily-mission-date {
+    font-size: .75rem;
+    color: var(--gray-500);
+    display: block;
+    margin-top: .1rem;
+    font-weight: 500;
+}
+
 .daily-title {
     font-size: 1.05rem;
     font-weight: 700;
@@ -395,7 +403,8 @@ input:focus {
 .daily-exercise-row {
     display: flex;
     align-items: center;
-    gap: .75rem;
+    flex-wrap: wrap;
+    gap: 0 .75rem;
     padding: .7rem 0;
     border-bottom: 1px solid var(--gray-100);
     min-height: 52px;
@@ -403,7 +412,16 @@ input:focus {
 
 .daily-exercise-row:last-child { border-bottom: none; }
 
-.daily-exercise-done { opacity: .45; }
+/* Completed rows: stay readable — accomplished, not erased */
+.daily-exercise-done {
+    background: #f0fdf4;
+    border-radius: 6px;
+    padding-left: .5rem;
+    padding-right: .5rem;
+    margin-left: -.5rem;
+    margin-right: -.5rem;
+}
+.daily-exercise-done .daily-exercise-name { color: var(--gray-500); }
 
 .daily-exercise-info { flex: 1; min-width: 0; }
 
@@ -421,6 +439,35 @@ input:focus {
     color: var(--gray-500);
     display: block;
     margin-top: .1rem;
+}
+
+/* How-to toggle button */
+.btn-how-to {
+    background: none;
+    border: none;
+    padding: 0;
+    margin-top: .25rem;
+    font-size: .72rem;
+    font-weight: 600;
+    color: var(--indigo);
+    cursor: pointer;
+    font-family: inherit;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+    display: inline-block;
+    -webkit-tap-highlight-color: transparent;
+}
+.btn-how-to:hover { opacity: .75; }
+
+/* Expandable instructions panel — wraps to full width via flex-wrap on parent */
+.exercise-instructions {
+    width: 100%;
+    padding: .5rem 0 .25rem;
+    font-size: .82rem;
+    line-height: 1.55;
+    color: var(--gray-600);
+    border-top: 1px solid var(--gray-100);
+    margin-top: .35rem;
 }
 
 /* Category pills — each category gets its own colour */
@@ -486,16 +533,6 @@ input:focus {
 .daily-progress-text {
     font-size: .82rem;
     color: var(--gray-500);
-}
-
-.rewards-tease {
-    font-size: .78rem;
-    font-weight: 600;
-    color: var(--amber);
-    background: var(--amber-light);
-    border-radius: 20px;
-    padding: .2rem .6rem;
-    white-space: nowrap;
 }
 
 /* ── Challenge cards ──────────────────────────────────────────────────────── */
