@@ -209,7 +209,11 @@ async function loadDailyExercises() {
     if (streakBadge) {
         var streak = daily.daily5_streak || 0;
         if (streak > 0) {
-            streakBadge.textContent = '🔥 ' + streak + (streak === 1 ? ' day' : ' days');
+            // Days 1–6: journey framing ("Day N") — you are at a point on a path
+            // Day 7+:   record framing ("N days") — you have built something
+            streakBadge.textContent = streak <= 6
+                ? '🔥 Day ' + streak
+                : '🔥 ' + streak + ' days';
             streakBadge.hidden = false;
         } else {
             streakBadge.hidden = true;
@@ -287,7 +291,11 @@ async function loadDailyExercises() {
 
 var STREAK_MILESTONES = {
     1:   'Day 1. The streak starts here.',
+    2:   'Day 2. You came back.',
     3:   '3 days in a row. You\'re building something.',
+    4:   'The beginning of something real.',
+    5:   'Almost there.',
+    6:   'One more day.',
     7:   'One week straight. This is becoming real.',
     14:  '14 days. You haven\'t broken it.',
     30:  '30 days. A month of showing up.',
