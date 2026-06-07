@@ -48,27 +48,6 @@ self.addEventListener('fetch', function (e) {
 
 // ── Push Notifications ─────────────────────────────────────────────────────────
 
-self.addEventListener('push', function (e) {
-  var data = {};
-  if (e.data) {
-    try { data = e.data.json(); } catch (_) { data = { body: e.data.text() }; }
-  }
-  var title   = data.title || 'StreakFit';
-  var body    = data.body  || '';
-  var destUrl = data.url   || '/';
-
-  e.waitUntil(
-    self.registration.showNotification(title, {
-      body:    body,
-      icon:    '/static/icons/icon.svg',
-      badge:   '/static/icons/icon.svg',
-      tag:     'streakfit-daily',
-      data:    { url: destUrl },
-      vibrate: [200, 100, 200],
-    })
-  );
-});
-
 self.addEventListener('notificationclick', function (e) {
   e.notification.close();
   var destUrl = (e.notification.data && e.notification.data.url) || '/';

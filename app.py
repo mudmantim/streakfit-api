@@ -1,5 +1,4 @@
 import os
-import json
 import hashlib
 import random
 from datetime import datetime, date, timedelta
@@ -11,12 +10,6 @@ from flask_jwt_extended import JWTManager, create_access_token, jwt_required, ge
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 import anthropic as _anthropic_lib
-
-try:
-    from pywebpush import webpush as _webpush, WebPushException as _WebPushException
-    _push_available = True
-except ImportError:
-    _push_available = False
 
 app = Flask(__name__)
 
@@ -39,13 +32,6 @@ app.config['JWT_SECRET_KEY'] = _jwt_secret_key
 app.config['JWT_ACCESS_TOKEN_EXPIRES'] = timedelta(hours=1)
 
 _anthropic_api_key = os.environ.get('ANTHROPIC_API_KEY')
-
-# VAPID keys for Web Push — generate once and store in Render env vars.
-# VAPID_PRIVATE_KEY: base64url-encoded DER private key
-# VAPID_PUBLIC_KEY:  base64url-encoded uncompressed EC public key point
-_VAPID_PRIVATE_KEY   = os.environ.get('VAPID_PRIVATE_KEY', '')
-_VAPID_PUBLIC_KEY    = os.environ.get('VAPID_PUBLIC_KEY', '')
-_VAPID_CLAIMS_EMAIL  = os.environ.get('VAPID_CLAIMS_EMAIL', 'mudmantim@gmail.com')
 
 db = SQLAlchemy(app)
 migrate = Migrate(app, db)
@@ -675,16 +661,6 @@ class DailyCompletion(db.Model):
         db.Index('ix_daily_completion_user_date', 'user_id', 'date'),
     )
 
-class PushSubscription(db.Model):
-    __tablename__ = 'push_subscription'
-    id         = db.Column(db.Integer, primary_key=True)
-    user_id    = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
-    endpoint   = db.Column(db.Text, nullable=False, unique=True)
-    auth       = db.Column(db.String(256), nullable=False)
-    p256dh     = db.Column(db.String(512), nullable=False)
-    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
-
-
 # --- Frontend ---
 
 @app.route('/')
@@ -765,90 +741,6 @@ def record_event():
     db.session.add(AnalyticsEvent(event_name=name))
     db.session.commit()
     return '', 204
-
-
-# --- Push Notification Routes ---
-
-@app.route('/api/push/vapid-key')
-def push_vapid_key():
-    return jsonify({'publicKey': _VAPID_PUBLIC_KEY})
-
-
-@app.route('/api/push/subscribe', methods=['POST'])
-@jwt_required()
-@limiter.limit("20 per minute")
-def push_subscribe():
-    if not _push_available or not _VAPID_PRIVATE_KEY:
-        return jsonify({'error': 'push_unavailable'}), 503
-    user_id = get_jwt_identity()
-    data    = request.get_json(silent=True) or {}
-    endpoint = data.get('endpoint', '').strip()
-    auth     = data.get('auth', '').strip()
-    p256dh   = data.get('p256dh', '').strip()
-    if not all([endpoint, auth, p256dh]):
-        return jsonify({'error': 'missing_fields'}), 400
-
-    existing = PushSubscription.query.filter_by(endpoint=endpoint).first()
-    if existing:
-        existing.user_id = user_id
-        existing.auth    = auth
-        existing.p256dh  = p256dh
-    else:
-        db.session.add(PushSubscription(
-            user_id=user_id, endpoint=endpoint, auth=auth, p256dh=p256dh
-        ))
-    db.session.commit()
-    return '', 204
-
-
-@app.route('/api/push/unsubscribe', methods=['POST'])
-@jwt_required()
-def push_unsubscribe():
-    user_id  = get_jwt_identity()
-    data     = request.get_json(silent=True) or {}
-    endpoint = data.get('endpoint', '').strip()
-    if endpoint:
-        PushSubscription.query.filter_by(user_id=user_id, endpoint=endpoint).delete()
-    else:
-        PushSubscription.query.filter_by(user_id=user_id).delete()
-    db.session.commit()
-    return '', 204
-
-
-@app.route('/api/admin/notify-daily', methods=['POST'])
-@limiter.limit("10 per hour")
-def notify_daily():
-    secret     = request.headers.get('X-Admin-Secret', '')
-    env_secret = os.environ.get('ADMIN_SECRET', '')
-    if not env_secret or secret != env_secret:
-        abort(403)
-    if not _push_available or not _VAPID_PRIVATE_KEY:
-        return jsonify({'error': 'push_unavailable'}), 503
-
-    subscriptions = PushSubscription.query.all()
-    sent = 0
-    failed = 0
-    for sub in subscriptions:
-        try:
-            _webpush(
-                subscription_info={
-                    'endpoint': sub.endpoint,
-                    'keys': {'auth': sub.auth, 'p256dh': sub.p256dh},
-                },
-                data=json.dumps({
-                    'title': '🔥 StreakFit',
-                    'body':  "Today's mission is waiting. Complete all 5 to keep building your streak.",
-                    'url':   '/',
-                }),
-                vapid_private_key=_VAPID_PRIVATE_KEY,
-                vapid_claims={'sub': f'mailto:{_VAPID_CLAIMS_EMAIL}'},
-            )
-            sent += 1
-            db.session.add(AnalyticsEvent(event_name='notification_sent_daily'))
-        except Exception:
-            failed += 1
-    db.session.commit()
-    return jsonify({'sent': sent, 'failed': failed}), 200
 
 
 # --- API Routes ---

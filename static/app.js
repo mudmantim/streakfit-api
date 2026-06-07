@@ -26,15 +26,6 @@ function _isIOSSafari() {
            !/chrome|crios|fxios|edgios/i.test(ua);
 }
 
-function _urlBase64ToUint8Array(base64String) {
-    var padding = '='.repeat((4 - base64String.length % 4) % 4);
-    var base64  = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
-    var raw     = atob(base64);
-    var output  = new Uint8Array(raw.length);
-    for (var i = 0; i < raw.length; i++) { output[i] = raw.charCodeAt(i); }
-    return output;
-}
-
 // ── Retention prompts ─────────────────────────────────────────────────────────
 // Called once per dashboard session. Shows install banner and/or notification
 // ask. Never shown to guests. Each prompt stores a localStorage flag after
@@ -139,7 +130,6 @@ function _maybeShowNotificationBanner() {
     if (Notification.permission !== 'default') {
         // Already granted or denied — mark as asked so we skip the banner
         localStorage.setItem('sf_notif_asked', '1');
-        if (Notification.permission === 'granted') _subscribePush();
         return;
     }
 
@@ -164,7 +154,6 @@ function _maybeShowNotificationBanner() {
         Notification.requestPermission().then(function (perm) {
             if (perm === 'granted') {
                 fireEvent('notification_permission_granted');
-                _subscribePush();
             } else {
                 fireEvent('notification_permission_denied');
             }
@@ -184,42 +173,6 @@ function _maybeShowNotificationBanner() {
     banner.appendChild(text);
     banner.appendChild(btnRow);
     container.appendChild(banner);
-}
-
-// ── Push subscription ─────────────────────────────────────────────────────────
-
-async function _subscribePush() {
-    if (!('serviceWorker' in navigator) || !('PushManager' in window)) return;
-    try {
-        var keyResp = await fetch('/api/push/vapid-key');
-        if (!keyResp.ok) return;
-        var keyData = await keyResp.json();
-        if (!keyData.publicKey) return;
-
-        var reg = await navigator.serviceWorker.ready;
-        var sub = await reg.pushManager.subscribe({
-            userVisibleOnly: true,
-            applicationServerKey: _urlBase64ToUint8Array(keyData.publicKey),
-        });
-
-        var token = localStorage.getItem('streakfit_token');
-        if (!token) return;
-        var keys = sub.toJSON().keys || {};
-        await fetch('/api/push/subscribe', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': 'Bearer ' + token,
-            },
-            body: JSON.stringify({
-                endpoint: sub.endpoint,
-                auth:     keys.auth   || '',
-                p256dh:   keys.p256dh || '',
-            }),
-        });
-    } catch (_) {
-        // Subscribe failed — not a user-visible error
-    }
 }
 
 // ── Mission complete notification ─────────────────────────────────────────────
