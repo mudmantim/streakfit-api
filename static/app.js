@@ -5,6 +5,242 @@ if ('serviceWorker' in navigator) {
     });
 }
 
+// ── PWA Install Prompt ────────────────────────────────────────────────────────
+var _deferredInstallPrompt = null;
+
+window.addEventListener('beforeinstallprompt', function (e) {
+    e.preventDefault();
+    _deferredInstallPrompt = e;
+    // Show banner after the user reaches the dashboard (not on the auth screen)
+});
+
+function _isStandalone() {
+    return window.matchMedia('(display-mode: standalone)').matches ||
+           window.navigator.standalone === true;
+}
+
+function _isIOSSafari() {
+    var ua = navigator.userAgent;
+    return /iphone|ipad|ipod/i.test(ua) &&
+           /safari/i.test(ua) &&
+           !/chrome|crios|fxios|edgios/i.test(ua);
+}
+
+function _urlBase64ToUint8Array(base64String) {
+    var padding = '='.repeat((4 - base64String.length % 4) % 4);
+    var base64  = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+    var raw     = atob(base64);
+    var output  = new Uint8Array(raw.length);
+    for (var i = 0; i < raw.length; i++) { output[i] = raw.charCodeAt(i); }
+    return output;
+}
+
+// ── Retention prompts ─────────────────────────────────────────────────────────
+// Called once per dashboard session. Shows install banner and/or notification
+// ask. Never shown to guests. Each prompt stores a localStorage flag after
+// being acted on so it never appears again.
+
+function _getOrCreatePromptsContainer() {
+    var el = document.getElementById('retention-prompts');
+    if (!el) {
+        el = document.createElement('div');
+        el.id = 'retention-prompts';
+        var main = document.querySelector('#dashboard-view main');
+        if (main) main.insertBefore(el, main.firstChild);
+    }
+    return el;
+}
+
+function checkRetentionPrompts() {
+    if (isGuest) return;
+    if (_isStandalone()) {
+        // Already installed — skip install, go straight to notification ask
+        _maybeShowNotificationBanner();
+        return;
+    }
+    _maybeShowInstallBanner();
+    _maybeShowNotificationBanner();
+}
+
+// ── Install banner ────────────────────────────────────────────────────────────
+
+function _maybeShowInstallBanner() {
+    if (localStorage.getItem('sf_install_dismissed')) return;
+
+    if (_deferredInstallPrompt) {
+        _showAndroidInstallBanner();
+    } else if (_isIOSSafari()) {
+        _showIOSInstallBanner();
+    }
+    // On other browsers with no prompt: do nothing
+}
+
+function _buildInstallBannerShell(container) {
+    var banner = document.createElement('div');
+    banner.className = 'retention-banner';
+    banner.id = 'install-banner';
+
+    var dismiss = document.createElement('button');
+    dismiss.className = 'retention-dismiss';
+    dismiss.setAttribute('aria-label', 'Dismiss');
+    dismiss.textContent = '×';
+    dismiss.onclick = function () {
+        localStorage.setItem('sf_install_dismissed', '1');
+        fireEvent('install_prompt_dismissed');
+        banner.remove();
+    };
+    banner.appendChild(dismiss);
+    container.insertBefore(banner, container.firstChild);
+    return banner;
+}
+
+function _showAndroidInstallBanner() {
+    var container = _getOrCreatePromptsContainer();
+    var banner = _buildInstallBannerShell(container);
+
+    var text = document.createElement('p');
+    text.className = 'retention-text';
+    text.textContent = 'Add StreakFit to your home screen for quick access to your daily mission.';
+
+    var installBtn = document.createElement('button');
+    installBtn.className = 'retention-btn';
+    installBtn.textContent = 'Add to Home Screen';
+    installBtn.onclick = function () {
+        fireEvent('install_prompt_accepted');
+        _deferredInstallPrompt.prompt();
+        _deferredInstallPrompt.userChoice.then(function (choice) {
+            localStorage.setItem('sf_install_dismissed', '1');
+            banner.remove();
+        });
+    };
+
+    banner.appendChild(text);
+    banner.appendChild(installBtn);
+    fireEvent('install_prompt_shown');
+}
+
+function _showIOSInstallBanner() {
+    var container = _getOrCreatePromptsContainer();
+    var banner = _buildInstallBannerShell(container);
+
+    var text = document.createElement('p');
+    text.className = 'retention-text';
+    text.innerHTML = 'Add StreakFit to your home screen: tap <strong>Share ↑</strong>, then <strong>Add to Home Screen</strong>.';
+
+    banner.appendChild(text);
+    fireEvent('install_prompt_shown');
+}
+
+// ── Notification ask banner ───────────────────────────────────────────────────
+
+function _maybeShowNotificationBanner() {
+    if (!('Notification' in window) || !('serviceWorker' in navigator)) return;
+    if (localStorage.getItem('sf_notif_asked')) return;
+    if (Notification.permission !== 'default') {
+        // Already granted or denied — mark as asked so we skip the banner
+        localStorage.setItem('sf_notif_asked', '1');
+        if (Notification.permission === 'granted') _subscribePush();
+        return;
+    }
+
+    var container = _getOrCreatePromptsContainer();
+    var banner = document.createElement('div');
+    banner.className = 'retention-banner';
+    banner.id = 'notif-banner';
+
+    var text = document.createElement('p');
+    text.className = 'retention-text';
+    text.textContent = 'Would you like a daily reminder for your mission?';
+
+    var btnRow = document.createElement('div');
+    btnRow.className = 'retention-btn-row';
+
+    var yesBtn = document.createElement('button');
+    yesBtn.className = 'retention-btn';
+    yesBtn.textContent = 'Yes';
+    yesBtn.onclick = function () {
+        localStorage.setItem('sf_notif_asked', '1');
+        banner.remove();
+        Notification.requestPermission().then(function (perm) {
+            if (perm === 'granted') {
+                fireEvent('notification_permission_granted');
+                _subscribePush();
+            } else {
+                fireEvent('notification_permission_denied');
+            }
+        });
+    };
+
+    var notNowBtn = document.createElement('button');
+    notNowBtn.className = 'retention-btn retention-btn-ghost';
+    notNowBtn.textContent = 'Not now';
+    notNowBtn.onclick = function () {
+        localStorage.setItem('sf_notif_asked', '1');
+        banner.remove();
+    };
+
+    btnRow.appendChild(yesBtn);
+    btnRow.appendChild(notNowBtn);
+    banner.appendChild(text);
+    banner.appendChild(btnRow);
+    container.appendChild(banner);
+}
+
+// ── Push subscription ─────────────────────────────────────────────────────────
+
+async function _subscribePush() {
+    if (!('serviceWorker' in navigator) || !('PushManager' in window)) return;
+    try {
+        var keyResp = await fetch('/api/push/vapid-key');
+        if (!keyResp.ok) return;
+        var keyData = await keyResp.json();
+        if (!keyData.publicKey) return;
+
+        var reg = await navigator.serviceWorker.ready;
+        var sub = await reg.pushManager.subscribe({
+            userVisibleOnly: true,
+            applicationServerKey: _urlBase64ToUint8Array(keyData.publicKey),
+        });
+
+        var token = localStorage.getItem('streakfit_token');
+        if (!token) return;
+        var keys = sub.toJSON().keys || {};
+        await fetch('/api/push/subscribe', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': 'Bearer ' + token,
+            },
+            body: JSON.stringify({
+                endpoint: sub.endpoint,
+                auth:     keys.auth   || '',
+                p256dh:   keys.p256dh || '',
+            }),
+        });
+    } catch (_) {
+        // Subscribe failed — not a user-visible error
+    }
+}
+
+// ── Mission complete notification ─────────────────────────────────────────────
+
+function _showMissionCompleteNotification() {
+    if (!('Notification' in window) || Notification.permission !== 'granted') return;
+    var today = new Date().toDateString();
+    if (localStorage.getItem('sf_complete_notif_date') === today) return;
+    localStorage.setItem('sf_complete_notif_date', today);
+    fireEvent('notification_sent_completion');
+
+    navigator.serviceWorker.ready.then(function (reg) {
+        reg.showNotification('🔥 Nice work!', {
+            body:  "Today's mission is complete.",
+            icon:  '/static/icons/icon.svg',
+            tag:   'streakfit-complete',
+            renotify: false,
+        });
+    }).catch(function () {});
+}
+
 // ── User state ────────────────────────────────────────────────────────────────
 // Set by loadUserPreferences() on every dashboard load. Streak data lives here
 // rather than in the /api/daily response.
@@ -185,6 +421,7 @@ async function loadDashboard() {
     await loadUserPreferences();
     await loadDailyExercises();
     await loadChallenges();
+    checkRetentionPrompts();
 }
 
 async function loadUserPreferences() {
@@ -388,6 +625,8 @@ async function loadDailyExercises() {
             }
             list.appendChild(renderGuestCompleteBanner());
         } else {
+            _showMissionCompleteNotification();
+
             var bannerStreak = (currentUser && currentUser.current_streak) || 0;
 
             var banner    = document.createElement('div');

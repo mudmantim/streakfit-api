@@ -1042,3 +1042,68 @@ body.theme-classic .theme-btn.active { background: rgba(79,70,229,.2); }
     .daily-exercise-row { min-height: 48px; }
     .challenge-card { padding: .9rem 1rem; }
 }
+
+/* ── Retention prompts (install + notification ask) ───────────────────────── */
+#retention-prompts {
+    display: flex;
+    flex-direction: column;
+    gap: .75rem;
+    margin-bottom: .25rem;
+}
+
+.retention-banner {
+    position: relative;
+    background: var(--t-card-bg, #fff);
+    border: 1px solid var(--gray-200);
+    border-radius: var(--radius);
+    padding: .9rem 2.5rem .9rem 1rem;
+    box-shadow: var(--shadow);
+}
+
+.retention-dismiss {
+    position: absolute;
+    top: .5rem;
+    right: .6rem;
+    background: none;
+    border: none;
+    font-size: 1.2rem;
+    line-height: 1;
+    color: var(--gray-400);
+    cursor: pointer;
+    padding: .15rem .3rem;
+}
+.retention-dismiss:hover { color: var(--gray-700); }
+
+.retention-text {
+    font-size: .88rem;
+    color: var(--gray-700);
+    margin: 0 0 .6rem;
+    line-height: 1.4;
+}
+
+.retention-btn-row {
+    display: flex;
+    gap: .5rem;
+    flex-wrap: wrap;
+}
+
+.retention-btn {
+    padding: .45rem 1rem;
+    border-radius: 8px;
+    border: none;
+    background: var(--indigo-dark, #4338ca);
+    color: #fff;
+    font-size: .83rem;
+    font-weight: 600;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+    transition: opacity .15s;
+}
+.retention-btn:hover { opacity: .85; }
+
+.retention-btn-ghost {
+    background: transparent;
+    color: var(--gray-500);
+    border: 1px solid var(--gray-200);
+}
+.retention-btn-ghost:hover { background: var(--gray-100); opacity: 1; }

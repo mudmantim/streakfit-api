@@ -1,4 +1,4 @@
-const CACHE = 'streakfit-v0620';
+const CACHE = 'streakfit-v0700';
 const STATIC = [
   '/static/style.css',
   '/static/app.js',
@@ -42,6 +42,45 @@ self.addEventListener('fetch', function (e) {
         }
         return response;
       });
+    })
+  );
+});
+
+// ── Push Notifications ─────────────────────────────────────────────────────────
+
+self.addEventListener('push', function (e) {
+  var data = {};
+  if (e.data) {
+    try { data = e.data.json(); } catch (_) { data = { body: e.data.text() }; }
+  }
+  var title   = data.title || 'StreakFit';
+  var body    = data.body  || '';
+  var destUrl = data.url   || '/';
+
+  e.waitUntil(
+    self.registration.showNotification(title, {
+      body:    body,
+      icon:    '/static/icons/icon.svg',
+      badge:   '/static/icons/icon.svg',
+      tag:     'streakfit-daily',
+      data:    { url: destUrl },
+      vibrate: [200, 100, 200],
+    })
+  );
+});
+
+self.addEventListener('notificationclick', function (e) {
+  e.notification.close();
+  var destUrl = (e.notification.data && e.notification.data.url) || '/';
+  e.waitUntil(
+    clients.matchAll({ type: 'window', includeUncontrolled: true }).then(function (list) {
+      for (var i = 0; i < list.length; i++) {
+        var c = list[i];
+        if (c.url.indexOf(self.location.origin) === 0 && 'focus' in c) {
+          return c.focus();
+        }
+      }
+      if (clients.openWindow) return clients.openWindow(destUrl);
     })
   );
 });
