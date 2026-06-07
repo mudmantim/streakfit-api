@@ -901,7 +901,8 @@ def get_daily():
                 "difficulty": ex['difficulty'],
                 "reps_or_duration": ex['reps_or_duration'],
                 "instructions": ex['instructions'],
-                "completed": ex['key'] in completed_keys
+                "completed": ex['key'] in completed_keys,
+                "image_url": f"/static/exercises/{ex['key']}.svg"
             }
             for ex in exercises
         ]
@@ -928,7 +929,8 @@ def get_demo_daily():
                 "difficulty": ex['difficulty'],
                 "reps_or_duration": ex['reps_or_duration'],
                 "instructions": ex['instructions'],
-                "completed": False
+                "completed": False,
+                "image_url": f"/static/exercises/{ex['key']}.svg"
             }
             for ex in exercises
         ]

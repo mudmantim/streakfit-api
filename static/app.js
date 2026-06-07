@@ -586,6 +586,15 @@ function renderDailyExercise(ex) {
     instrPanel.className = 'exercise-instructions';
     instrPanel.hidden = true;
 
+    if (ex.image_url) {
+        var img = document.createElement('img');
+        img.src = ex.image_url;
+        img.alt = ex.name;
+        img.className = 'exercise-illustration';
+        img.onerror = function () { this.style.display = 'none'; };
+        instrPanel.appendChild(img);
+    }
+
     var instrText = document.createElement('p');
     instrText.textContent = ex.instructions; // textContent — never innerHTML
     instrPanel.appendChild(instrText);
