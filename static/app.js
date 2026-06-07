@@ -97,11 +97,33 @@ function _showAndroidInstallBanner() {
     installBtn.className = 'retention-btn';
     installBtn.textContent = 'Add to Home Screen';
     installBtn.onclick = function () {
+        if (!_deferredInstallPrompt) {
+            // Prompt already used once — browser consumed it; explain state
+            installBtn.textContent = 'Open browser menu to install';
+            installBtn.disabled = true;
+            return;
+        }
+        installBtn.disabled = true;
         fireEvent('install_prompt_accepted');
-        _deferredInstallPrompt.prompt();
-        _deferredInstallPrompt.userChoice.then(function (choice) {
-            localStorage.setItem('sf_install_dismissed', '1');
-            banner.remove();
+        var captured = _deferredInstallPrompt;
+        _deferredInstallPrompt = null; // browsers only allow one call
+        captured.prompt();
+        captured.userChoice.then(function (choice) {
+            if (choice.outcome === 'accepted') {
+                // User accepted — dismiss permanently
+                localStorage.setItem('sf_install_dismissed', '1');
+                banner.remove();
+            } else {
+                // User dismissed the OS dialog — keep banner, re-enable button
+                installBtn.textContent = 'Add to Home Screen';
+                installBtn.disabled = false;
+                // Browsers don't re-fire beforeinstallprompt after a dismiss;
+                // guide user to browser menu instead
+                text.textContent = 'To install, use your browser menu (⋮ → Add to Home Screen).';
+            }
+        }).catch(function () {
+            installBtn.textContent = 'Add to Home Screen';
+            installBtn.disabled = false;
         });
     };
 
@@ -780,14 +802,14 @@ function renderDailyExercise(ex) {
     cat.className = 'daily-category-pill ' + pillClass;
     cat.textContent = ex.category.replace(/_/g, ' ');
 
-    // ── Mark Done / Done button ──────────────────────────────────────────────────────────────────
+    // ── "I did this" / Done button ───────────────────────────────────────────────────────────────
     var btn = document.createElement('button');
     if (ex.completed) {
         btn.textContent = '✓';
         btn.className   = 'btn-daily-done';
         btn.disabled    = true;
     } else {
-        btn.textContent = 'Mark Done';
+        btn.textContent = 'I did this';
         btn.className   = 'btn-daily-complete';
         btn.onclick     = function () { handleCompleteExercise(ex.key, btn, row); };
     }
@@ -845,7 +867,7 @@ async function handleCompleteExercise(key, btn, row) {
     } else {
         if (row) row.classList.remove('completing');
         btn.disabled    = false;
-        btn.textContent = 'Mark Done';
+        btn.textContent = 'I did this';
     }
 }
 
