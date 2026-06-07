@@ -676,6 +676,53 @@ def health():
     return jsonify({"status": "ok"}), 200
 
 
+# --- Admin ---
+
+@app.route('/admin')
+def admin_dashboard():
+    return app.send_static_file('admin.html')
+
+
+@app.route('/api/admin/stats')
+@limiter.limit("120 per minute")
+def admin_stats():
+    secret = request.headers.get('X-Admin-Secret', '')
+    env_secret = os.environ.get('ADMIN_SECRET', '')
+    if not env_secret or secret != env_secret:
+        abort(403)
+
+    now = datetime.utcnow()
+    today_start  = datetime(now.year, now.month, now.day)
+    seven_ago    = now - timedelta(days=7)
+    thirty_ago   = now - timedelta(days=30)
+
+    def counts(event_name):
+        def n(since):
+            return db.session.query(
+                db.func.count(AnalyticsEvent.id)
+            ).filter(
+                AnalyticsEvent.event_name == event_name,
+                AnalyticsEvent.created_at >= since
+            ).scalar() or 0
+        return {
+            'today':    n(today_start),
+            'week':     n(seven_ago),
+            'month':    n(thirty_ago),
+            'all_time': db.session.query(
+                db.func.count(AnalyticsEvent.id)
+            ).filter(AnalyticsEvent.event_name == event_name).scalar() or 0,
+        }
+
+    return jsonify({
+        'generated_at': now.isoformat() + 'Z',
+        'events': {
+            'guest_start':               counts('guest_start'),
+            'guest_complete':            counts('guest_complete'),
+            'guest_create_account_click': counts('guest_create_account_click'),
+        }
+    })
+
+
 # --- Analytics ---
 
 _ALLOWED_EVENTS = {'guest_start', 'guest_complete', 'guest_create_account_click'}

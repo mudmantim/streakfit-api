@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>StreakFit Analytics</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg:       #0f1117;
+    --surface:  #1a1d27;
+    --border:   #2a2d3a;
+    --text:     #e2e4ed;
+    --muted:    #6b7280;
+    --accent:   #6366f1;
+    --green:    #34d399;
+    --amber:    #fbbf24;
+    --red:      #f87171;
+    --flame:    #f97316;
+  }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: ui-monospace, 'SF Mono', 'Cascadia Code', monospace;
+    font-size: 13px;
+    line-height: 1.6;
+    min-height: 100vh;
+    padding: 32px 24px 64px;
+  }
+
+  .page { max-width: 780px; margin: 0 auto; }
+
+  /* ── Header ── */
+  .header { display: flex; align-items: baseline; gap: 12px; margin-bottom: 32px; }
+  .logo { font-size: 18px; font-weight: 700; color: var(--flame); letter-spacing: -.5px; }
+  .header-title { font-size: 14px; font-weight: 600; color: var(--text); }
+  .header-sep { color: var(--border); }
+  .timestamp { font-size: 11px; color: var(--muted); margin-left: auto; }
+
+  /* ── Auth bar ── */
+  .auth-bar {
+    display: flex; gap: 8px; margin-bottom: 36px; align-items: center;
+  }
+  .auth-bar input {
+    flex: 1; background: var(--surface); border: 1px solid var(--border);
+    border-radius: 6px; padding: 8px 12px; color: var(--text);
+    font-family: inherit; font-size: 13px; outline: none;
+    transition: border-color .15s;
+  }
+  .auth-bar input:focus { border-color: var(--accent); }
+  .auth-bar button {
+    background: var(--accent); color: #fff; border: none;
+    border-radius: 6px; padding: 8px 18px; font-family: inherit;
+    font-size: 13px; font-weight: 600; cursor: pointer;
+    transition: opacity .15s;
+  }
+  .auth-bar button:hover { opacity: .85; }
+
+  /* ── Section labels ── */
+  .section-label {
+    font-size: 10px; font-weight: 700; letter-spacing: .12em;
+    text-transform: uppercase; color: var(--muted);
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 8px; margin-bottom: 20px;
+  }
+
+  /* ── Funnel table ── */
+  .funnel { width: 100%; border-collapse: collapse; margin-bottom: 8px; }
+
+  .funnel th {
+    text-align: right; font-size: 10px; font-weight: 700;
+    letter-spacing: .08em; text-transform: uppercase;
+    color: var(--muted); padding: 0 16px 10px 0;
+  }
+  .funnel th:first-child { text-align: left; padding-left: 0; }
+
+  .funnel td {
+    padding: 10px 16px 10px 0; text-align: right;
+    border-top: 1px solid var(--border);
+    vertical-align: middle;
+  }
+  .funnel td:first-child { text-align: left; padding-left: 0; }
+
+  .event-name { font-weight: 600; color: var(--text); }
+  .event-sub  { font-size: 11px; color: var(--muted); margin-top: 2px; }
+
+  .count { font-size: 20px; font-weight: 700; color: var(--text); }
+  .count-all { font-size: 13px; color: var(--muted); }
+
+  /* ── Arrow rows ── */
+  .arrow-row td {
+    border-top: none;
+    padding-top: 4px; padding-bottom: 4px;
+    font-size: 11px;
+  }
+  .arrow-cell { color: var(--muted); }
+  .pct { font-weight: 700; }
+  .pct.high  { color: var(--green); }
+  .pct.mid   { color: var(--amber); }
+  .pct.low   { color: var(--red); }
+  .pct.none  { color: var(--muted); }
+
+  /* ── Overall row ── */
+  .overall-row td { border-top: 2px solid var(--border); padding-top: 14px; }
+  .overall-label { font-size: 11px; color: var(--muted); }
+
+  /* ── States ── */
+  .state {
+    text-align: center; padding: 48px 0; color: var(--muted); font-size: 13px;
+  }
+  .state.error { color: var(--red); }
+
+  /* ── Footer ── */
+  .footer {
+    margin-top: 40px; font-size: 11px; color: var(--muted);
+    border-top: 1px solid var(--border); padding-top: 16px;
+  }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <div class="header">
+    <span class="logo">🔥 StreakFit</span>
+    <span class="header-sep">/</span>
+    <span class="header-title">Analytics</span>
+    <span class="timestamp" id="ts"></span>
+  </div>
+
+  <div class="auth-bar">
+    <input id="secret-input" type="password" placeholder="Admin secret"
+           autocomplete="current-password" spellcheck="false">
+    <button onclick="load()">Load</button>
+  </div>
+
+  <div id="output">
+    <div class="state">Enter admin secret to load data.</div>
+  </div>
+
+  <div class="footer">Read-only · No PII stored · UTC timestamps</div>
+</div>
+
+<script>
+(function () {
+
+  var SECRET_KEY = 'sf_admin_secret';
+
+  // Restore secret from sessionStorage
+  var stored = sessionStorage.getItem(SECRET_KEY);
+  if (stored) {
+    document.getElementById('secret-input').value = stored;
+    load();
+  }
+
+  document.getElementById('secret-input').addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') load();
+  });
+
+  function pct(num, denom) {
+    if (!denom || denom === 0) return null;
+    return Math.round((num / denom) * 100);
+  }
+
+  function pctClass(p) {
+    if (p === null) return 'none';
+    if (p >= 60) return 'high';
+    if (p >= 30) return 'mid';
+    return 'low';
+  }
+
+  function pctStr(p) {
+    return p === null ? '—' : p + '%';
+  }
+
+  function fmt(n) {
+    return n.toLocaleString();
+  }
+
+  function renderPctCell(num, denom) {
+    var p = pct(num, denom);
+    return '<td class="arrow-cell"><span class="pct ' + pctClass(p) + '">'
+           + pctStr(p) + '</span></td>';
+  }
+
+  window.load = function load() {
+    var secret = document.getElementById('secret-input').value.trim();
+    if (!secret) return;
+    sessionStorage.setItem(SECRET_KEY, secret);
+
+    document.getElementById('output').innerHTML =
+      '<div class="state">Loading…</div>';
+
+    fetch('/api/admin/stats', {
+      headers: { 'X-Admin-Secret': secret }
+    })
+    .then(function (r) {
+      if (r.status === 403) throw new Error('403');
+      if (!r.ok) throw new Error(r.status);
+      return r.json();
+    })
+    .then(function (data) { render(data); })
+    .catch(function (err) {
+      var msg = err.message === '403'
+        ? 'Access denied. Check your admin secret.'
+        : 'Failed to load data (' + err.message + ').';
+      document.getElementById('output').innerHTML =
+        '<div class="state error">' + msg + '</div>';
+    });
+  };
+
+  function render(data) {
+    var e = data.events;
+    var gs  = e.guest_start;
+    var gc  = e.guest_complete;
+    var gca = e.guest_create_account_click;
+
+    // Update timestamp
+    var d = new Date(data.generated_at);
+    document.getElementById('ts').textContent =
+      'Generated ' + d.toUTCString();
+
+    // Conversion rates — Today, Week, Month
+    var cols = ['today', 'week', 'month'];
+
+    function arrowRow(label, numeratorKey, denominatorKey) {
+      var cells = cols.map(function (c) {
+        return renderPctCell(
+          e[numeratorKey][c],
+          e[denominatorKey][c]
+        );
+      }).join('');
+      // all-time cell
+      var allP = pct(e[numeratorKey].all_time, e[denominatorKey].all_time);
+      return '<tr class="arrow-row">'
+           + '<td class="arrow-cell">↓ <span class="pct ' + pctClass(allP) + '">'
+           + pctStr(allP) + '</span> ' + label + '</td>'
+           + cells
+           + '<td class="count-all"></td>'
+           + '</tr>';
+    }
+
+    function eventRow(key, label, sub) {
+      var ev = e[key];
+      var cells = cols.map(function (c) {
+        return '<td><span class="count">' + fmt(ev[c]) + '</span></td>';
+      }).join('');
+      return '<tr>'
+           + '<td><div class="event-name">' + label + '</div>'
+           + (sub ? '<div class="event-sub">' + sub + '</div>' : '')
+           + '</td>'
+           + cells
+           + '<td><span class="count-all">' + fmt(ev.all_time) + ' all&#8209;time</span></td>'
+           + '</tr>';
+    }
+
+    // Overall conversion Start → Click
+    function overallRow() {
+      var cells = cols.map(function (c) {
+        var p = pct(gca[c], gs[c]);
+        return '<td><span class="pct ' + pctClass(p) + '">' + pctStr(p) + '</span></td>';
+      }).join('');
+      var allP = pct(gca.all_time, gs.all_time);
+      return '<tr class="overall-row">'
+           + '<td><div class="overall-label">↓ Overall: Start → Create Account Click</div></td>'
+           + cells
+           + '<td><span class="pct ' + pctClass(allP) + '">' + pctStr(allP) + '</span></td>'
+           + '</tr>';
+    }
+
+    var html = '<div class="section-label">Guest Funnel</div>'
+             + '<table class="funnel">'
+             + '<thead><tr>'
+             + '<th></th>'
+             + '<th>Today</th>'
+             + '<th>7 Days</th>'
+             + '<th>30 Days</th>'
+             + '<th>All Time</th>'
+             + '</tr></thead>'
+             + '<tbody>'
+             + eventRow('guest_start',               'Guest Start',               'visitor chose guest mode')
+             + arrowRow('completed mission',          'guest_complete',            'guest_start')
+             + eventRow('guest_complete',             'Guest Complete',            'finished all 5 exercises')
+             + arrowRow('clicked Create Account',    'guest_create_account_click','guest_complete')
+             + eventRow('guest_create_account_click','Create Account Click',      'tapped Create Account on banner')
+             + overallRow()
+             + '</tbody>'
+             + '</table>';
+
+    document.getElementById('output').innerHTML = html;
+  }
+
+})();
+</script>
+</body>
+</html>
