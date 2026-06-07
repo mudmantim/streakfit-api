@@ -722,7 +722,6 @@ input:focus {
     background: none;
     border: none;
     padding: 0;
-    margin-top: .25rem;
     font-size: .72rem;
     font-weight: 600;
     color: var(--indigo);
@@ -730,10 +729,34 @@ input:focus {
     font-family: inherit;
     text-decoration: underline;
     text-underline-offset: 2px;
-    display: inline-block;
+    white-space: nowrap;
     -webkit-tap-highlight-color: transparent;
 }
 .btn-how-to:hover { opacity: .75; }
+
+.exercise-link-row {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: .15rem .6rem;
+    margin-top: .25rem;
+}
+
+.btn-coach-link {
+    background: none;
+    border: none;
+    padding: 0;
+    font-size: .72rem;
+    font-weight: 600;
+    color: var(--gray-500);
+    cursor: pointer;
+    font-family: inherit;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+    -webkit-tap-highlight-color: transparent;
+    white-space: nowrap;
+}
+.btn-coach-link:hover { color: var(--gray-700); }
 
 /* Expandable instructions panel — wraps to full width via flex-wrap on parent */
 .exercise-instructions {
@@ -1107,3 +1130,111 @@ body.theme-classic .theme-btn.active { background: rgba(79,70,229,.2); }
     border: 1px solid var(--gray-200);
 }
 .retention-btn-ghost:hover { background: var(--gray-100); opacity: 1; }
+
+/* ── Exercise Coach Modal ─────────────────────────────────────────────────── */
+.ex-modal-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,.52);
+    z-index: 200;
+    align-items: flex-end;
+    justify-content: center;
+    overscroll-behavior: contain;
+}
+.ex-modal-overlay.open { display: flex; }
+
+@media (min-width: 540px) {
+    .ex-modal-overlay { align-items: center; padding: 1.5rem; }
+    .ex-modal { border-radius: var(--radius); }
+}
+
+.ex-modal {
+    background: var(--t-card-bg, #fff);
+    border-radius: var(--radius) var(--radius) 0 0;
+    width: 100%;
+    max-width: 480px;
+    max-height: 88dvh;
+    overflow-y: auto;
+    padding: 1.4rem 1.25rem 2.5rem;
+    position: relative;
+    box-shadow: 0 -4px 24px rgba(0,0,0,.18);
+    overscroll-behavior: contain;
+}
+
+.ex-modal-close {
+    position: absolute;
+    top: .85rem;
+    right: .85rem;
+    background: none;
+    border: none;
+    font-size: 1rem;
+    color: var(--gray-400);
+    cursor: pointer;
+    padding: .25rem .4rem;
+    border-radius: 4px;
+    line-height: 1;
+    -webkit-tap-highlight-color: transparent;
+}
+.ex-modal-close:hover { color: var(--gray-700); background: var(--gray-100); }
+
+.ex-modal-img {
+    display: block;
+    width: 220px;
+    height: 220px;
+    object-fit: contain;
+    margin: 0 auto .85rem;
+    border-radius: 12px;
+    background: var(--gray-50, #f9fafb);
+}
+
+.ex-modal-name {
+    font-size: 1.15rem;
+    font-weight: 700;
+    color: var(--gray-900);
+    text-align: center;
+    margin: 0 0 .5rem;
+    padding-right: 1.5rem;
+}
+
+.ex-modal-instructions {
+    font-size: .875rem;
+    line-height: 1.6;
+    color: var(--gray-700);
+    margin: 0 0 1.1rem;
+}
+
+.ex-modal-section { margin-bottom: 1rem; }
+
+.ex-modal-section-title {
+    font-size: .72rem;
+    font-weight: 700;
+    letter-spacing: .06em;
+    text-transform: uppercase;
+    color: var(--gray-500);
+    margin: 0 0 .5rem;
+}
+
+.ex-modal-list {
+    margin: 0;
+    padding-left: 1.15rem;
+    display: flex;
+    flex-direction: column;
+    gap: .4rem;
+}
+
+.ex-modal-list li {
+    font-size: .875rem;
+    line-height: 1.5;
+    color: var(--gray-700);
+}
+
+.ex-modal-tip {
+    font-size: .875rem;
+    line-height: 1.6;
+    color: var(--gray-700);
+    background: var(--indigo-pale, #eef2ff);
+    border-radius: 8px;
+    padding: .7rem .9rem;
+    margin: 0;
+}

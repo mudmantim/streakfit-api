@@ -771,6 +771,748 @@ var CATEGORY_PILL = {
     conditioning: 'pill-conditioning',
 };
 
+// ── Coach modal data ───────────────────────────────────────────────────────────
+// Static content for every exercise in the library.
+// mistakes: common form errors to correct. tip: one actionable beginner cue.
+
+var COACH_DATA = {
+    // Beginner / Upper Body
+    wall_push_up: {
+        mistakes: [
+            'Letting the hips sag or push back instead of staying in a straight line.',
+            'Placing the hands too high — they should be at shoulder height, not head height.',
+            'Bouncing off the wall with momentum instead of pressing with control.',
+        ],
+        tip: 'Walk your feet further from the wall to increase the angle and difficulty over time.',
+    },
+    knee_push_up: {
+        mistakes: [
+            'Hips sagging so the back curves into a banana shape.',
+            'Flaring the elbows out to 90 degrees — keep them closer to 45 degrees.',
+            'Stopping at a partial range rather than lowering the chest to the floor.',
+        ],
+        tip: 'Place a folded towel under your knees if the floor is uncomfortable.',
+    },
+    arm_circles: {
+        mistakes: [
+            'Allowing the shoulders to shrug up toward the ears.',
+            'Making circles too large and fast, which reduces shoulder activation.',
+            'Letting the arms drop below shoulder height mid-set.',
+        ],
+        tip: 'Keeping your thumbs pointing upward throughout the circle helps engage the rotator cuff.',
+    },
+    shoulder_tap: {
+        mistakes: [
+            'Letting the hips twist and sway with each tap.',
+            'Looking up or forward instead of down at the floor, which misaligns the spine.',
+            'Widening the hand position to compensate for instability.',
+        ],
+        tip: 'Place a water bottle on your lower back — if it falls, your hips are rotating too much.',
+    },
+    chest_opener: {
+        mistakes: [
+            'Arching the lower back to force the arms higher rather than opening the chest.',
+            'Holding tension in the neck or jaw instead of relaxing into the stretch.',
+            'Releasing after only a few seconds — 30 seconds is needed for a lasting effect.',
+        ],
+        tip: 'Your shoulders should pull directly back, not lift up. Watch in a mirror if you can.',
+    },
+    floor_tricep_dip: {
+        mistakes: [
+            'Allowing the shoulders to roll forward rather than staying open and back.',
+            'Bending the elbows outward instead of pointing them straight back.',
+            'Placing the hands too far from the hips, which shifts strain to the wrists.',
+        ],
+        tip: 'Keep your feet flat and close to your body to shorten the range and make the start easier.',
+    },
+    // Beginner / Lower Body
+    bodyweight_squat: {
+        mistakes: [
+            'Letting the knees cave inward as you lower — push them out over your toes.',
+            'Rising onto the toes because the ankles lack mobility.',
+            'Leaning so far forward that the weight shifts off the heels.',
+        ],
+        tip: 'Squat toward a chair to build confidence before doing unsupported reps.',
+    },
+    reverse_lunge: {
+        mistakes: [
+            'Leaning too far forward with the torso instead of keeping it upright.',
+            'Letting the front knee track past the toes instead of over the ankle.',
+            'Pushing off the back foot rather than the front heel to return.',
+        ],
+        tip: 'Fix your gaze on a spot straight ahead — it keeps your torso tall.',
+    },
+    glute_bridge: {
+        mistakes: [
+            'Placing the feet too far from the body, shifting work to the hamstrings.',
+            'Only lifting partway — hips should form a straight line from shoulder to knee.',
+            'Letting the knees fall apart at the top instead of staying hip-width.',
+        ],
+        tip: 'Squeeze your glutes at the top for a full second before lowering — it activates more fibers.',
+    },
+    calf_raise: {
+        mistakes: [
+            'Bouncing at the bottom rather than pausing and fully stretching the calf.',
+            'Rolling the ankles outward to cheat extra range.',
+            'Using momentum to rise rather than controlled muscular effort.',
+        ],
+        tip: 'Performing these single-leg from a stair edge adds a full stretch and dramatically increases difficulty.',
+    },
+    wall_sit: {
+        mistakes: [
+            'Thighs not parallel to the floor — sit at exactly 90 degrees.',
+            'Pushing through the hands on the knees, which takes load off the legs.',
+            'Sliding the feet toward the wall, reducing the joint angle.',
+        ],
+        tip: 'Keep arms relaxed at your sides or folded across your chest — no hands on thighs.',
+    },
+    step_up: {
+        mistakes: [
+            'Pushing off the back foot instead of driving entirely through the stepping leg.',
+            'Using a step so high the thigh exceeds parallel.',
+            'Leaning forward from the hip instead of staying tall.',
+        ],
+        tip: 'Pause for one second at the top with your leg straight to confirm full hip extension.',
+    },
+    // Beginner / Core
+    dead_bug: {
+        mistakes: [
+            'Allowing the lower back to arch away from the floor as the limbs extend.',
+            'Moving too quickly — the movement should be slow and deliberate.',
+            'Holding the breath instead of exhaling as you extend each limb.',
+        ],
+        tip: 'Press your lower back firmly into the floor before each rep and maintain that contact throughout.',
+    },
+    bird_dog: {
+        mistakes: [
+            'Hiking the hip of the extending leg instead of keeping the pelvis level.',
+            'Lifting the arm and leg too high, forcing the lower back to arch.',
+            'Rushing the transition — pause briefly at full extension to build stability.',
+        ],
+        tip: 'Imagine balancing a cup of water on your lower back — keep it perfectly still.',
+    },
+    knee_plank: {
+        mistakes: [
+            'Hips rising too high into a downward-dog shape, reducing core demand.',
+            'Looking up rather than down at the floor, which hyperextends the neck.',
+            'Holding the breath — breathe normally throughout the hold.',
+        ],
+        tip: 'Draw your belly button toward your spine to actively engage the deep core muscles.',
+    },
+    crunch: {
+        mistakes: [
+            'Pulling on the neck with interlaced fingers instead of lightly supporting the head.',
+            'Using momentum to swing up rather than contracting the abs.',
+            'Not fully lowering between reps — shoulders should approach but not fully settle on the floor.',
+        ],
+        tip: 'Place your tongue on the roof of your mouth to help reduce neck tension during the movement.',
+    },
+    bent_knee_leg_raise: {
+        mistakes: [
+            'Allowing the lower back to arch off the floor as the feet lower.',
+            'Dropping the feet too fast, removing the eccentric challenge.',
+            'Using hip flexors alone rather than keeping the core braced throughout.',
+        ],
+        tip: 'Stop the descent the moment you feel your lower back begin to lift from the floor.',
+    },
+    superman: {
+        mistakes: [
+            'Jerking the limbs up with momentum rather than lifting slowly with control.',
+            'Straining the neck by looking up — keep your gaze toward the floor.',
+            'Only lifting the arms while forgetting to raise the legs, or vice versa.',
+        ],
+        tip: 'Squeeze your glutes and upper back simultaneously as you lift for maximum activation.',
+    },
+    // Beginner / Mobility
+    cat_cow: {
+        mistakes: [
+            'Moving only the lower back instead of mobilizing the entire spine.',
+            'Forcing the range with muscular tension instead of letting breath drive it.',
+            'Rushing through cycles — each transition should take at least 2–3 seconds.',
+        ],
+        tip: 'Sync each movement with your breath: exhale into Cat, inhale into Cow.',
+    },
+    hip_flexor_kneeling: {
+        mistakes: [
+            'Allowing the lower back to hyperextend — keep a neutral spine throughout.',
+            'Shifting the front knee forward past the toes.',
+            'Not shifting the hips forward enough to actually feel the hip flexor stretch.',
+        ],
+        tip: 'Tuck your tailbone slightly under as you shift forward to deepen the stretch.',
+    },
+    standing_hamstring_stretch: {
+        mistakes: [
+            'Rounding the spine forward to reach the surface instead of hinging from the hip.',
+            'Locking the knee — keep a very slight bend to protect the joint.',
+            'Forcing the range aggressively — the stretch should be firm, never painful.',
+        ],
+        tip: 'If your hamstrings are very tight, start with the foot on a low surface like a step.',
+    },
+    childs_pose: {
+        mistakes: [
+            'Sitting so far forward that the hips lift off the heels, reducing the stretch.',
+            'Holding tension in the shoulders instead of lengthening the arms forward.',
+            'Breathing shallowly — deep belly breaths allow the hips to sink further.',
+        ],
+        tip: 'Widen your knees slightly if your belly prevents a comfortable forward fold.',
+    },
+    thoracic_rotation: {
+        mistakes: [
+            'Rotating from the lower back and hips rather than isolating the upper spine.',
+            'Bringing the elbow forward instead of backward — the rotation must go behind you.',
+            'Holding the breath during the rotation instead of exhaling into the twist.',
+        ],
+        tip: 'Keep your lower body completely still — only the ribs and above should move.',
+    },
+    ankle_circles: {
+        mistakes: [
+            'Moving the entire leg in a circle rather than isolating the ankle joint.',
+            'Making circles too small to work through the full range of motion.',
+            'Going too fast — slow circles improve joint awareness and control.',
+        ],
+        tip: 'Keep the working leg parallel to the ground and draw the largest circles you can control.',
+    },
+    // Beginner / Conditioning
+    marching_in_place: {
+        mistakes: [
+            'Not lifting the knees high enough — aim for hip height on each step.',
+            'Letting the arms hang still instead of pumping them in opposition.',
+            'Leaning backward rather than keeping a tall, upright posture.',
+        ],
+        tip: 'Drive the knee up rather than just lifting the foot — it recruits the hip flexors more effectively.',
+    },
+    jumping_jack: {
+        mistakes: [
+            'Landing with straight knees — always land with a slight bend to absorb impact.',
+            'Not fully extending the arms overhead on each rep.',
+            'Letting the feet drift inward on the landing, which stresses the ankles.',
+        ],
+        tip: 'For lower impact, step side to side instead of jumping — same arms, same benefit.',
+    },
+    step_touch: {
+        mistakes: [
+            'Taking too small a step, which reduces cardiovascular demand.',
+            'Looking down at the feet instead of keeping the gaze forward.',
+            'Letting the trailing foot drag rather than actively bringing it to meet the lead foot.',
+        ],
+        tip: 'Add a small side arm raise as you step out to increase upper body engagement.',
+    },
+    standing_bicycle: {
+        mistakes: [
+            'Crunching the elbow down toward the knee rather than rotating the ribcage.',
+            'Moving only the arms without lifting the knee high enough.',
+            'Rushing the movement — rotation matters more than speed.',
+        ],
+        tip: 'Think "ribcage rotates" not "elbow touches knee" — the torso does the work.',
+    },
+    low_skip: {
+        mistakes: [
+            'Landing on the heels instead of the balls of the feet, which increases impact.',
+            'Skipping so high that the impact becomes significant — keep it low and rhythmic.',
+            'Neglecting arm swing, which helps maintain rhythm and balance.',
+        ],
+        tip: 'Count "left, right, left, right" out loud to stay light and consistent.',
+    },
+    boxer_shuffle: {
+        mistakes: [
+            'Bouncing on the heels rather than staying on the balls of the feet.',
+            'Stiffening the upper body — keep arms relaxed and slightly raised.',
+            'Making the hops too large, which increases impact and reduces speed.',
+        ],
+        tip: 'Keep your weight centered and imagine the floor is hot — stay light on your feet.',
+    },
+    // Intermediate / Upper Body
+    push_up: {
+        mistakes: [
+            'Allowing the hips to sag — the body must form a rigid plank from head to heels.',
+            'Flaring the elbows to 90 degrees — keep them at roughly 45 degrees.',
+            'Cutting the range short — the chest should come within an inch of the floor.',
+        ],
+        tip: 'Squeeze your glutes during every rep — it creates full-body tension and prevents hip sag.',
+    },
+    diamond_push_up: {
+        mistakes: [
+            'Spreading the diamond too wide, shifting emphasis to the chest instead of the triceps.',
+            'Flaring the elbows out — they must stay close and track backward.',
+            'Allowing the wrists to roll outward under load.',
+        ],
+        tip: 'If wrist pain occurs, make fists and press on your knuckles to keep the wrist neutral.',
+    },
+    pike_push_up: {
+        mistakes: [
+            'Not getting the hips high enough — the goal is an inverted V shape.',
+            'Looking forward instead of down between the hands.',
+            'Collapsing at the top instead of maintaining shoulder elevation.',
+        ],
+        tip: 'Walk your feet closer to your hands to increase the angle and difficulty.',
+    },
+    decline_push_up: {
+        mistakes: [
+            'Using a surface so high that balance becomes the limiting factor, not strength.',
+            'Allowing the hips to pike upward during the movement.',
+            'Looking forward — keep the neck neutral and gaze slightly ahead of the hands.',
+        ],
+        tip: 'Start with a low surface like a step and graduate to higher objects as you get stronger.',
+    },
+    wide_push_up: {
+        mistakes: [
+            'Going so wide that the elbows splay beyond 90 degrees at the bottom.',
+            'Allowing the hips to sag or the lower back to arch.',
+            'Not reaching full arm extension at the top of every rep.',
+        ],
+        tip: 'Think "bend the floor apart" with your hands to engage the chest from the top.',
+    },
+    sphinx_push_up: {
+        mistakes: [
+            'Allowing the hips to shift laterally during the forearm-to-straight-arm transition.',
+            'Looking up during the transition, which compresses the cervical spine.',
+            'Going too quickly — this is a control drill, not a speed exercise.',
+        ],
+        tip: 'Press one arm up at a time and hold the plank tight between each transition.',
+    },
+    // Intermediate / Lower Body
+    jump_squat: {
+        mistakes: [
+            'Landing with stiff, straight knees — absorb the impact through bent knees into a squat.',
+            'Not reaching full depth before each jump.',
+            'Leaning forward excessively on the landing, losing balance.',
+        ],
+        tip: 'Land as quietly as possible — silent landings equal safe landings.',
+    },
+    walking_lunge: {
+        mistakes: [
+            'Pushing off the back toes rather than driving through the front heel.',
+            'Letting the torso lean forward, which overloads the lower back.',
+            'Front knee caving inward on each step.',
+        ],
+        tip: 'Keep your chin up and focus on a spot ahead to maintain an upright posture.',
+    },
+    single_leg_glute_bridge: {
+        mistakes: [
+            'Allowing the pelvis to tilt toward the free side at the top.',
+            'Keeping the non-working leg bent instead of extending it.',
+            'Pushing through the toes rather than the heel of the grounded foot.',
+        ],
+        tip: 'Pause at the top and check that both hip points are at the same height.',
+    },
+    lateral_lunge: {
+        mistakes: [
+            'Allowing the working knee to track inward rather than over the second toe.',
+            'Rounding the lower back — hinge from the hip with a flat back.',
+            'Putting weight through the extended leg instead of keeping it straight.',
+        ],
+        tip: 'Push your hip back first before bending the knee to initiate the correct pattern.',
+    },
+    sumo_squat: {
+        mistakes: [
+            'Toes pointing straight forward — they must turn out to match the wide stance.',
+            'Letting the knees buckle inward at the bottom.',
+            'Not reaching sufficient depth — aim for thighs parallel to the floor.',
+        ],
+        tip: 'Drive your knees out throughout the entire movement to keep tension on the inner thighs.',
+    },
+    bodyweight_good_morning: {
+        mistakes: [
+            'Rounding the lower back as you fold forward instead of hinging from the hip.',
+            'Locking out the knees completely — keep a soft bend throughout.',
+            'Going past parallel, which removes tension from the hamstrings.',
+        ],
+        tip: 'If you feel it in your lower back instead of your hamstrings, stand up and reset your hinge.',
+    },
+    // Intermediate / Core
+    plank: {
+        mistakes: [
+            'Hips piking up toward the ceiling, which reduces core demand.',
+            'Letting the hips sag, compressing the lower back.',
+            'Holding the breath instead of breathing steadily throughout.',
+        ],
+        tip: 'Squeeze your quads and glutes alongside your abs for a full-body brace.',
+    },
+    hollow_body_hold: {
+        mistakes: [
+            'Raising the legs too high, which allows the lower back to arch off the floor.',
+            'Only holding briefly instead of maintaining the full time.',
+            'Losing the rounded lower-back — the key is a curved, engaged spine against the floor.',
+        ],
+        tip: 'Start with knees bent if you cannot maintain the position with legs extended.',
+    },
+    russian_twist: {
+        mistakes: [
+            'Rotating only the arms while the torso stays stationary — the whole upper body must rotate.',
+            'Letting the feet drift wide for balance instead of keeping them together.',
+            'Leaning back so far that the hip flexors dominate instead of the obliques.',
+        ],
+        tip: 'Lift your feet off the floor to increase the difficulty without changing the movement.',
+    },
+    bicycle_crunch: {
+        mistakes: [
+            'Pulling the head forward with the hands instead of using the abs to rotate.',
+            'Not fully extending the opposite leg on each rep.',
+            'Moving so fast that rotation disappears and it becomes a simple crunch.',
+        ],
+        tip: 'Think "elbow to the ceiling" rather than "elbow to the knee" to get full rotation.',
+    },
+    straight_leg_raise: {
+        mistakes: [
+            'Allowing the lower back to arch and lift off the floor as the legs descend.',
+            'Using momentum to swing the legs up rather than controlled lifting.',
+            'Going below the point where lower back control is lost.',
+        ],
+        tip: 'Press your hands lightly under your lower back if you struggle to keep it flat.',
+    },
+    side_plank: {
+        mistakes: [
+            'Allowing the hip to sag toward the floor.',
+            'Stacking the feet incorrectly — top foot rests on the bottom, not in front of it.',
+            'Looking down at the floor instead of keeping the head neutral.',
+        ],
+        tip: 'Drop to your bottom knee to regress if needed — it is the same movement pattern.',
+    },
+    // Intermediate / Mobility
+    worlds_greatest_stretch: {
+        mistakes: [
+            'Rushing through each position rather than breathing into it.',
+            'Not fully straightening the back leg during the hamstring shift.',
+            'Letting the front knee collapse inward during the lunge phase.',
+        ],
+        tip: 'Move slowly and use each exhale to deepen the position — this works best as a warm-up.',
+    },
+    deep_squat_hold: {
+        mistakes: [
+            'Heels rising off the floor — place a thin book under them if mobility is limited.',
+            'Rounding the upper back instead of maintaining a tall spine.',
+            'Gripping the floor with the toes instead of keeping the feet flat.',
+        ],
+        tip: 'Hold onto a door frame or pole to counterbalance your weight and sit deeper.',
+    },
+    pigeon_pose: {
+        mistakes: [
+            'Allowing the back hip to rotate upward — both hips stay square to the floor.',
+            'Forcing the shin to 90 degrees before having the flexibility for it.',
+            'Collapsing all weight into the grounded hip rather than distributing it evenly.',
+        ],
+        tip: 'Place a folded blanket or cushion under the hip of the bent leg for support.',
+    },
+    spinal_twist: {
+        mistakes: [
+            'Using force to press the knee further across instead of letting gravity do the work.',
+            'Allowing the opposite shoulder to lift off the floor.',
+            'Tensing the neck during the twist instead of keeping it long and relaxed.',
+        ],
+        tip: 'Exhale deeply with each breath and allow the knee to sink a little further naturally.',
+    },
+    doorway_pec_stretch: {
+        mistakes: [
+            'Placing the forearms above shoulder height, which overstresses the front of the shoulder.',
+            'Leaning forward with the lower back arched instead of a neutral spine.',
+            'Pushing aggressively through the doorway rather than allowing a passive stretch.',
+        ],
+        tip: 'Experiment with raising or lowering your elbows to find which angle stretches your chest most.',
+    },
+    downdog_calf_stretch: {
+        mistakes: [
+            'Not fully pressing the heel of the active leg toward the floor.',
+            'Bending the knee of the pressing leg, which removes the calf stretch.',
+            'Moving too quickly between legs — hold each for 2 full seconds.',
+        ],
+        tip: 'Keep the hips high and press the chest toward your thighs to combine a hamstring stretch.',
+    },
+    // Intermediate / Conditioning
+    no_jump_burpee: {
+        mistakes: [
+            'Stepping the feet out one at a time instead of both together.',
+            'Skipping the push-up portion entirely.',
+            'Not fully extending the hips when standing back up.',
+        ],
+        tip: 'Control the pace — a slow, correct no-jump burpee is harder than a fast, sloppy one.',
+    },
+    mountain_climber: {
+        mistakes: [
+            'Letting the hips rise as each knee drives forward.',
+            'Placing the foot flat instead of landing on the ball of the foot.',
+            'Losing shoulder position — shoulders should stay directly over the wrists.',
+        ],
+        tip: 'Brace your core as if you are about to be punched — this keeps your hips level.',
+    },
+    high_knees: {
+        mistakes: [
+            'Barely lifting the knees — they must reach hip height on every rep.',
+            'Landing flat-footed, which increases ground contact time and slows you down.',
+            'Leaning backward instead of maintaining a slight forward lean.',
+        ],
+        tip: 'Hold your palms face-down at hip height and aim to slap them with your knees.',
+    },
+    skater_jump: {
+        mistakes: [
+            'Jumping straight up rather than laterally, removing the balance challenge.',
+            'Landing with the knee locked straight instead of bent and soft.',
+            'Taking tiny hops rather than reaching maximum lateral distance.',
+        ],
+        tip: 'Reach your opposite hand toward the landing foot to add a balance challenge.',
+    },
+    plank_to_downdog: {
+        mistakes: [
+            'Bending the knees during the transition, reducing the hamstring stretch.',
+            'Looking up in downward dog, compressing the neck.',
+            'Moving the hips to the side rather than directly up and back.',
+        ],
+        tip: 'Coordinate with your breath: exhale to downdog, inhale to plank.',
+    },
+    speed_squat: {
+        mistakes: [
+            'Sacrificing depth for speed — you must reach parallel on every rep.',
+            'Allowing the knees to collapse inward under fatigue.',
+            'Holding the breath throughout instead of rhythmically exhaling each rep.',
+        ],
+        tip: 'If form deteriorates, slow down immediately — speed only builds what you already have.',
+    },
+    // Advanced / Upper Body
+    archer_push_up: {
+        mistakes: [
+            'Not keeping the extended arm fully straight — it acts as a lever, not a support.',
+            'Allowing the hips to rotate as you shift laterally.',
+            'Gripping the floor with the extended hand — it rests lightly.',
+        ],
+        tip: 'Start by shifting only 20% of the way to each side and gradually increase range over weeks.',
+    },
+    pseudo_planche_push_up: {
+        mistakes: [
+            'Not leaning far enough forward — the shoulders must pass the wrists.',
+            'Allowing the elbows to flare out instead of staying close to the body.',
+            'Placing the fingers pointing forward instead of backward.',
+        ],
+        tip: 'Even 30 degrees of lean is meaningful progress at first — build it gradually.',
+    },
+    typewriter_push_up: {
+        mistakes: [
+            'Not lowering all the way before beginning the horizontal shift.',
+            'Twisting at the hips during the shift instead of keeping the body square.',
+            'Moving through the shift too quickly to build real strength.',
+        ],
+        tip: 'This is a strength skill — treat it as slow, deliberate work, not a rep grinder.',
+    },
+    plyometric_push_up: {
+        mistakes: [
+            'Allowing the elbows to collapse on landing rather than absorbing with bent arms.',
+            'Not generating enough force to actually clear the hands off the floor.',
+            'Attempting these with fatigued form at the end of a long set.',
+        ],
+        tip: 'Start with hands on an elevated surface to reduce the load while building explosive power.',
+    },
+    wall_handstand_hold: {
+        mistakes: [
+            'Kicking up with too much force and smashing the feet into the wall.',
+            'Arching the lower back excessively rather than holding a tight hollow position.',
+            'Looking at the wall instead of at the floor between your hands.',
+        ],
+        tip: 'Practice the kick-up separately first — a controlled entry is safer and builds better technique.',
+    },
+    assisted_one_arm_push_up: {
+        mistakes: [
+            'Placing the assisting hand on a surface too low, turning it into a regular push-up.',
+            'Allowing the body to rotate toward the working arm.',
+            'Cutting range — lower until the chest nearly touches the floor.',
+        ],
+        tip: 'A fist resting on a basketball is a classic tool — it assists but still demands significant balance.',
+    },
+    // Advanced / Lower Body
+    assisted_pistol_squat: {
+        mistakes: [
+            'Using the support to pull yourself up rather than just for balance.',
+            'Extending the free leg to the side rather than straight forward.',
+            'Not squatting deep enough — full depth means hip below the knee.',
+        ],
+        tip: 'Use a door frame and grip it with progressively less force over time to reduce the assist.',
+    },
+    plyometric_lunge: {
+        mistakes: [
+            'Landing in a lunge that is too shallow or too narrow.',
+            'Letting the front knee cave inward on each landing.',
+            'Pausing between reps instead of landing and immediately loading the next jump.',
+        ],
+        tip: 'Pump your arms aggressively — the arm drive significantly increases jump height and power.',
+    },
+    single_leg_good_morning: {
+        mistakes: [
+            'Allowing the hips to rotate outward on the free leg — keep them square.',
+            'Locking the knee of the standing leg — keep a soft bend throughout.',
+            'Using momentum to swing back up instead of driving through the standing glute.',
+        ],
+        tip: 'Fix your gaze on a point directly ahead and keep it there throughout the movement.',
+    },
+    shrimp_squat: {
+        mistakes: [
+            'Letting the rear knee drop and touch the floor rather than lowering with control.',
+            'Leaning excessively forward with the torso instead of staying tall.',
+            'Using the held foot for balance rather than pure single-leg work.',
+        ],
+        tip: 'Place a folded mat where the knee will land so you have a target and a buffer.',
+    },
+    broad_jump: {
+        mistakes: [
+            'Not fully loading the hips before the jump — use a deep countermovement.',
+            'Landing with the knees straight, sending impact directly to the joints.',
+            'Not using arm swing, which contributes significantly to jump distance.',
+        ],
+        tip: 'Swing your arms back forcefully on the load, then throw them forward explosively on the jump.',
+    },
+    sprint_intervals: {
+        mistakes: [
+            'Starting at less than maximum effort — Tabata requires true all-out sprinting.',
+            'Drifting from the prescribed work-to-rest ratio, which defeats the protocol.',
+            'Sprinting on a surface that allows slipping — use flat, dry ground only.',
+        ],
+        tip: 'Your pace in round 8 will naturally be slower than round 1 — that is expected and normal.',
+    },
+    // Advanced / Core
+    straddle_v_up: {
+        mistakes: [
+            'Using momentum by swinging rather than performing a controlled simultaneous lift.',
+            'Barely lifting the torso — it should rise until the spine is nearly vertical.',
+            'Neglecting the slow descent — 3 seconds down is where the strength is built.',
+        ],
+        tip: 'If full straddle is too difficult, start with feet together in a regular V-up first.',
+    },
+    l_sit_hold: {
+        mistakes: [
+            'Bending the elbows instead of pressing down on straight arms.',
+            'Allowing the shoulders to elevate — press them down away from the ears.',
+            'Giving up on the leg position before time is up — hold a tuck if you have to.',
+        ],
+        tip: 'Parallel bars or gymnastics blocks allow deeper depression and make this significantly easier.',
+    },
+    pike_walk_out: {
+        mistakes: [
+            'Bending the knees as you walk out, reducing the hamstring and core demand.',
+            'Allowing the hips to sag once in the plank position.',
+            'Walking the hands so far forward that all tension leaves the posterior chain.',
+        ],
+        tip: 'Add a push-up in the plank position before walking back to significantly increase difficulty.',
+    },
+    tuck_to_straight_leg_raise: {
+        mistakes: [
+            'Losing lower back contact with the floor during the extension phase.',
+            'Dropping the legs too fast on the descent — it should be slow and controlled.',
+            'Not fully extending the legs at the top before beginning the lower.',
+        ],
+        tip: 'If the lower back lifts, reduce the range and only go as low as you can truly control.',
+    },
+    hollow_body_rock: {
+        mistakes: [
+            'Arching the lower back during the rock — any arch means the hollow is lost.',
+            'Rocking at a random pace instead of a controlled rhythm.',
+            'Extending the arms and legs too wide, which demands more flexibility than strength.',
+        ],
+        tip: 'Shorten your position (tuck the arms in, bend the knees slightly) to maintain hollow under fatigue.',
+    },
+    planche_lean: {
+        mistakes: [
+            'Bending the elbows instead of keeping the arms completely straight.',
+            'Allowing the hips to sag rather than maintaining a rigid body line.',
+            'Leaning too aggressively too soon — shoulder damage from excessive lean accumulates.',
+        ],
+        tip: 'Build your lean angle gradually, adding only a degree or two each week.',
+    },
+    // Advanced / Mobility
+    pancake_stretch: {
+        mistakes: [
+            'Rounding the back to get the chest lower instead of hinging from the hips.',
+            'Forcing the position aggressively — this stretch requires months of consistent work.',
+            'Not breathing — slow, deep exhales allow the muscles to release further.',
+        ],
+        tip: 'Use a foam roller lengthwise along your spine to encourage a flat back as you fold.',
+    },
+    bodyweight_jefferson_curl: {
+        mistakes: [
+            'Moving too quickly — each vertebra should peel away from the previous one slowly.',
+            'Locking the knees, which creates excessive strain on the hamstrings.',
+            'Only going halfway and calling it done.',
+        ],
+        tip: 'Treat this as a spinal warm-up. Move with full respect and never force it.',
+    },
+    front_split_prep: {
+        mistakes: [
+            'Forcing the hips all the way down before they are ready.',
+            'Allowing the pelvis to rotate open on the rear hip.',
+            'Only stretching one side, which creates an imbalance.',
+        ],
+        tip: 'Progress is measured in weeks and months, not sessions — do this daily for consistent gains.',
+    },
+    cossack_squat: {
+        mistakes: [
+            'Not keeping the extended leg completely straight.',
+            'Allowing the heel of the squatting leg to lift — keep both heels on the floor.',
+            'Only squatting to a comfortable partial range rather than going as deep as possible.',
+        ],
+        tip: 'Holding a light weight in front of your chest helps counterbalance the movement.',
+    },
+    shoulder_cars: {
+        mistakes: [
+            'Allowing the opposite shoulder to participate — pin it firmly and isolate one side.',
+            'Losing tension at the end ranges of the rotation.',
+            'Moving through the range too quickly — CARs require maximum active control.',
+        ],
+        tip: 'Do these in front of a mirror to catch any compensatory shoulder elevation or trunk sway.',
+    },
+    wrist_prep: {
+        mistakes: [
+            'Skipping this before handstand or planche work — wrist injuries from this omission are common.',
+            'Loading the wrists before they are fully warmed up.',
+            'Performing the movements too quickly without feeling each position.',
+        ],
+        tip: 'Your wrist strength often limits handstand progress more than your shoulder strength does.',
+    },
+    // Advanced / Conditioning
+    full_burpee: {
+        mistakes: [
+            'Skipping the push-up or barely bending the elbows.',
+            'Landing the jump with stiff, straight legs instead of soft bent knees.',
+            'Not fully extending the body overhead at the top of the jump.',
+        ],
+        tip: 'Breathe out on the push-up, breathe in on the jump — find that rhythm and it becomes sustainable.',
+    },
+    tabata_mountain_climber: {
+        mistakes: [
+            'Pacing the first few rounds to save energy — Tabata demands maximum effort each round.',
+            'Allowing the hips to rise progressively higher with each rep.',
+            'Resting beyond the prescribed 10 seconds.',
+        ],
+        tip: 'Count reps in round 1. If your count drops by more than 30% in round 8, you started too hard.',
+    },
+    tuck_jump: {
+        mistakes: [
+            'Achieving only a partial tuck — the knees must drive up toward the chest.',
+            'Landing with the knees forward and straight instead of absorbing with a bend.',
+            'Leaning backward during the jump instead of staying tall.',
+        ],
+        tip: 'Mark hip height on a wall with tape and try to tap it with your knees at the peak.',
+    },
+    tuck_jump_burpee: {
+        mistakes: [
+            'Rushing the push-up portion to get to the jump faster.',
+            'Landing from the tuck jump and falling immediately into the next burpee without resetting.',
+            'Not achieving full tuck height on the jump due to accumulated fatigue.',
+        ],
+        tip: 'This is a high-skill drill — rest fully between sets so technique does not break down.',
+    },
+    broad_jump_consecutive: {
+        mistakes: [
+            'Not absorbing each landing through a full squat position before the next jump.',
+            'Reducing jump distance on later reps — maintain consistent maximum effort throughout.',
+            'Landing on the toes only, which fails to transfer force into the next jump.',
+        ],
+        tip: 'Land in a quarter squat, pause for a single breath, then drive into the next jump.',
+    },
+    shuttle_run: {
+        mistakes: [
+            'Slowing to a jog at the end of each length instead of sprinting through the turn.',
+            'Touching the line without properly lowering and changing direction sharply.',
+            'Not taking the full 45-second rest, which compromises all subsequent rounds.',
+        ],
+        tip: 'Lead with your outside foot when changing direction to minimize the deceleration distance.',
+    },
+};
+
 function renderDailyExercise(ex) {
     var row = document.createElement('div');
     row.className = 'daily-exercise-row' + (ex.completed ? ' daily-exercise-done' : '');
@@ -792,9 +1534,19 @@ function renderDailyExercise(ex) {
     howBtn.textContent = 'How to do this';
     howBtn.setAttribute('aria-expanded', 'false');
 
+    var coachLink = document.createElement('button');
+    coachLink.className = 'btn-coach-link';
+    coachLink.textContent = 'Open Coach';
+    coachLink.addEventListener('click', function () { openExerciseModal(ex); });
+
+    var linkRow = document.createElement('div');
+    linkRow.className = 'exercise-link-row';
+    linkRow.appendChild(howBtn);
+    linkRow.appendChild(coachLink);
+
     info.appendChild(name);
     info.appendChild(meta);
-    info.appendChild(howBtn);
+    info.appendChild(linkRow);
 
     // ── Category pill ──────────────────────────────────────────────────────────────────────
     var cat = document.createElement('span');
@@ -1024,6 +1776,112 @@ async function init() {
 }
 
 document.addEventListener('DOMContentLoaded', init);
+
+// ── Exercise Coach Modal ──────────────────────────────────────────────────────
+
+var _exModalOverlay = null;
+
+function openExerciseModal(ex) {
+    if (!_exModalOverlay) {
+        _exModalOverlay = document.createElement('div');
+        _exModalOverlay.className = 'ex-modal-overlay';
+        _exModalOverlay.setAttribute('role', 'dialog');
+        _exModalOverlay.setAttribute('aria-modal', 'true');
+        _exModalOverlay.addEventListener('click', function (e) {
+            if (e.target === _exModalOverlay) closeExerciseModal();
+        });
+        document.addEventListener('keydown', function (e) {
+            if (e.key === 'Escape' && _exModalOverlay.classList.contains('open')) {
+                closeExerciseModal();
+            }
+        });
+        document.body.appendChild(_exModalOverlay);
+    }
+
+    // Rebuild content each open
+    _exModalOverlay.innerHTML = '';
+    _exModalOverlay.setAttribute('aria-labelledby', 'ex-modal-name');
+
+    var modal = document.createElement('div');
+    modal.className = 'ex-modal';
+
+    var closeBtn = document.createElement('button');
+    closeBtn.className = 'ex-modal-close';
+    closeBtn.setAttribute('aria-label', 'Close');
+    closeBtn.textContent = '✕';
+    closeBtn.addEventListener('click', closeExerciseModal);
+
+    if (ex.image_url) {
+        var imgEl = document.createElement('img');
+        imgEl.className = 'ex-modal-img';
+        imgEl.src = ex.image_url;
+        imgEl.alt = ex.name;
+        imgEl.onerror = function () { this.style.display = 'none'; };
+        modal.appendChild(imgEl);
+    }
+
+    var nameEl = document.createElement('h2');
+    nameEl.className = 'ex-modal-name';
+    nameEl.id = 'ex-modal-name';
+    nameEl.textContent = ex.name;
+
+    var instrEl = document.createElement('p');
+    instrEl.className = 'ex-modal-instructions';
+    instrEl.textContent = ex.instructions;
+
+    modal.appendChild(closeBtn);
+    modal.appendChild(nameEl);
+    modal.appendChild(instrEl);
+
+    var data = COACH_DATA[ex.key];
+    if (data) {
+        var mistakesSection = document.createElement('div');
+        mistakesSection.className = 'ex-modal-section';
+
+        var mistakesTitle = document.createElement('h3');
+        mistakesTitle.className = 'ex-modal-section-title';
+        mistakesTitle.textContent = 'Common mistakes';
+
+        var mistakesList = document.createElement('ul');
+        mistakesList.className = 'ex-modal-list';
+        data.mistakes.forEach(function (m) {
+            var li = document.createElement('li');
+            li.textContent = m;
+            mistakesList.appendChild(li);
+        });
+
+        mistakesSection.appendChild(mistakesTitle);
+        mistakesSection.appendChild(mistakesList);
+        modal.appendChild(mistakesSection);
+
+        var tipSection = document.createElement('div');
+        tipSection.className = 'ex-modal-section';
+
+        var tipTitle = document.createElement('h3');
+        tipTitle.className = 'ex-modal-section-title';
+        tipTitle.textContent = 'Beginner tip';
+
+        var tipText = document.createElement('p');
+        tipText.className = 'ex-modal-tip';
+        tipText.textContent = data.tip;
+
+        tipSection.appendChild(tipTitle);
+        tipSection.appendChild(tipText);
+        modal.appendChild(tipSection);
+    }
+
+    _exModalOverlay.appendChild(modal);
+    _exModalOverlay.classList.add('open');
+    document.body.style.overflow = 'hidden';
+    closeBtn.focus();
+}
+
+function closeExerciseModal() {
+    if (_exModalOverlay) {
+        _exModalOverlay.classList.remove('open');
+        document.body.style.overflow = '';
+    }
+}
 
 // ── Coach panel ───────────────────────────────────────────────────────────────
 
