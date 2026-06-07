@@ -54,6 +54,9 @@
                 <button type="submit" class="btn-primary btn-full">Start Playing</button>
                 <p id="register-error" class="error" role="alert"></p>
             </form>
+
+            <div class="auth-guest-divider"><span>or</span></div>
+            <button class="btn-guest" onclick="handleGuestMode()">Continue as Guest</button>
         </div>
     </div>
 
@@ -78,7 +81,7 @@
                     <button class="theme-btn" data-mode="bright"  onclick="handleDisplayModeChange('bright')"  title="Bright">✨</button>
                     <button class="theme-btn" data-mode="game"    onclick="handleDisplayModeChange('game')"    title="Game">🎮</button>
                 </div>
-                <button class="btn-logout" onclick="handleLogout()">Log Out</button>
+                <button id="btn-logout" class="btn-logout" onclick="handleLogout()">Log Out</button>
             </div>
         </header>
 
@@ -122,12 +125,12 @@
 
                 <div class="daily-footer">
                     <p id="daily-progress-text" class="daily-progress-text"></p>
-                    <button class="coach-ask-btn" onclick="openCoach({type:'general'})">Ask about StreakFit</button>
+                    <button id="coach-ask-btn" class="coach-ask-btn" onclick="openCoach({type:'general'})">Ask about StreakFit</button>
                 </div>
             </section>
 
             <!-- Side Quests ─────────────────────────────────────────── -->
-            <section class="side-quests-section">
+            <section id="side-quests-section" class="side-quests-section">
                 <div class="side-quests-header">
                     <h2 class="side-quests-title">Side Quests</h2>
                     <p class="side-quests-subtitle">Track your own daily habits</p>

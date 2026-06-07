@@ -127,6 +127,44 @@ body {
     line-height: 1.5;
 }
 
+/* ── Auth guest divider & button ──────────────────────────────────────────── */
+.auth-guest-divider {
+    display: flex;
+    align-items: center;
+    gap: .75rem;
+    margin: 1.25rem 0 .75rem;
+    color: var(--gray-400);
+    font-size: .8rem;
+}
+
+.auth-guest-divider::before,
+.auth-guest-divider::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: var(--gray-200);
+}
+
+.btn-guest {
+    width: 100%;
+    padding: .7rem;
+    background: none;
+    color: var(--gray-500);
+    border: 1.5px solid var(--gray-200);
+    border-radius: 8px;
+    font-size: .9rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background .15s, color .15s, border-color .15s;
+    -webkit-tap-highlight-color: transparent;
+}
+
+.btn-guest:hover {
+    background: var(--gray-50);
+    color: var(--gray-700);
+    border-color: var(--gray-400);
+}
+
 /* ── Card ─────────────────────────────────────────────────────────────────── */
 .card {
     background: #fff;
@@ -440,6 +478,58 @@ input:focus {
     font-size: .8rem;
     color: #047857;
     margin-top: .1rem;
+}
+
+/* ── Guest complete banner ────────────────────────────────────────────────── */
+.guest-complete-banner {
+    flex-direction: column;
+    align-items: stretch;
+}
+
+.guest-banner-top {
+    display: flex;
+    align-items: center;
+    gap: .85rem;
+}
+
+.guest-banner-desc {
+    font-size: .82rem;
+    color: #047857;
+    margin-top: .5rem;
+    line-height: 1.5;
+}
+
+.guest-banner-actions {
+    display: flex;
+    gap: .5rem;
+    margin-top: .75rem;
+    flex-wrap: wrap;
+}
+
+.guest-banner-actions .btn-primary {
+    flex: 1;
+    min-width: 110px;
+    padding: .6rem .85rem;
+    font-size: .9rem;
+}
+
+.btn-guest-login {
+    flex: 1;
+    min-width: 110px;
+    padding: .6rem .85rem;
+    font-size: .9rem;
+    font-weight: 700;
+    cursor: pointer;
+    background: none;
+    border: 1.5px solid #6ee7b7;
+    border-radius: 8px;
+    color: #065f46;
+    transition: background .15s;
+    -webkit-tap-highlight-color: transparent;
+}
+
+.btn-guest-login:hover {
+    background: rgba(16,185,129,.1);
 }
 
 /* ── Today's Insight card ─────────────────────────────────────────────────── */

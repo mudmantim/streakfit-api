@@ -10,6 +10,11 @@ if ('serviceWorker' in navigator) {
 // rather than in the /api/daily response.
 var currentUser = null;
 
+// ── Guest state ───────────────────────────────────────────────────────────────
+// In-memory only — intentionally resets on page refresh.
+var isGuest = false;
+var guestCompleted = new Set();
+
 // ── API wrapper ───────────────────────────────────────────────────────────────
 
 async function api(path, method, body) {
@@ -66,6 +71,43 @@ function clearErrors() {
     });
 }
 
+// ── Guest Mode ────────────────────────────────────────────────────────────────
+
+function handleGuestMode() {
+    isGuest = true;
+    guestCompleted = new Set();
+    applyTheme('game');
+    setGuestUI(true);
+    loadDailyExercises();
+    showView('dashboard');
+}
+
+function handleExitGuest() {
+    isGuest = false;
+    guestCompleted = new Set();
+    setGuestUI(false);
+    clearErrors();
+    showTab('login');
+    showView('auth');
+}
+
+function setGuestUI(guest) {
+    var skillSel = document.getElementById('skill-level-select');
+    if (skillSel) skillSel.hidden = guest;
+
+    var sideQuests = document.getElementById('side-quests-section');
+    if (sideQuests) sideQuests.hidden = guest;
+
+    var coachBtn = document.getElementById('coach-ask-btn');
+    if (coachBtn) coachBtn.hidden = guest;
+
+    var logoutBtn = document.getElementById('btn-logout');
+    if (logoutBtn) {
+        logoutBtn.textContent = guest ? 'Exit' : 'Log Out';
+        logoutBtn.onclick = guest ? handleExitGuest : handleLogout;
+    }
+}
+
 // ── Auth ──────────────────────────────────────────────────────────────────────
 
 async function handleLogin(event) {
@@ -115,6 +157,8 @@ async function handleRegister(event) {
 }
 
 function handleLogout() {
+    isGuest = false;
+    guestCompleted = new Set();
     localStorage.removeItem('streakfit_token');
     clearErrors();
     showTab('login');
@@ -174,15 +218,31 @@ async function loadDailyExercises() {
     spinner.innerHTML = '<div class="spinner"></div><p>Today\'s Mission is loading…</p>';
     list.appendChild(spinner);
 
-    var [result, meResult] = await Promise.all([api('/api/daily'), api('/api/me')]);
-    if (meResult && meResult.status === 200) currentUser = meResult.data;
+    var daily;
 
-    if (!result) return;
-
-    list.innerHTML = ''; // clear spinner
-    if (result.status !== 200) return;
-
-    var daily = result.data;
+    if (isGuest) {
+        var guestRes;
+        try {
+            guestRes = await fetch('/api/demo/daily');
+        } catch (e) {
+            list.innerHTML = '';
+            return;
+        }
+        if (!guestRes.ok) { list.innerHTML = ''; return; }
+        daily = await guestRes.json();
+        daily.exercises = daily.exercises.map(function (ex) {
+            return Object.assign({}, ex, { completed: guestCompleted.has(ex.key) });
+        });
+        daily.completed_count = guestCompleted.size;
+        list.innerHTML = '';
+    } else {
+        var [result, meResult] = await Promise.all([api('/api/daily'), api('/api/me')]);
+        if (meResult && meResult.status === 200) currentUser = meResult.data;
+        if (!result) return;
+        list.innerHTML = '';
+        if (result.status !== 200) return;
+        daily = result.data;
+    }
 
     // Sync the skill-level select
     var select = document.getElementById('skill-level-select');
@@ -307,32 +367,36 @@ async function loadDailyExercises() {
     }
 
     if (daily.completed_count === 5) {
-        var bannerStreak = (currentUser && currentUser.current_streak) || 0;
+        if (isGuest) {
+            list.appendChild(renderGuestCompleteBanner());
+        } else {
+            var bannerStreak = (currentUser && currentUser.current_streak) || 0;
 
-        var banner    = document.createElement('div');
-        banner.className = 'daily-complete-banner';
+            var banner    = document.createElement('div');
+            banner.className = 'daily-complete-banner';
 
-        var bannerEmoji = document.createElement('span');
-        bannerEmoji.className = 'complete-emoji';
-        bannerEmoji.textContent = '🔥';
+            var bannerEmoji = document.createElement('span');
+            bannerEmoji.className = 'complete-emoji';
+            bannerEmoji.textContent = '🔥';
 
-        var bannerText  = document.createElement('div');
+            var bannerText  = document.createElement('div');
 
-        var bannerTitle = document.createElement('p');
-        bannerTitle.className = 'complete-title';
-        bannerTitle.textContent = getStreakBannerCopy(bannerStreak);
+            var bannerTitle = document.createElement('p');
+            bannerTitle.className = 'complete-title';
+            bannerTitle.textContent = getStreakBannerCopy(bannerStreak);
 
-        var bannerSub   = document.createElement('p');
-        bannerSub.className = 'complete-sub';
-        bannerSub.textContent = bannerStreak === 1
-            ? 'Come back tomorrow for Day 2.'
-            : 'Come back tomorrow to keep it alive.';
+            var bannerSub   = document.createElement('p');
+            bannerSub.className = 'complete-sub';
+            bannerSub.textContent = bannerStreak === 1
+                ? 'Come back tomorrow for Day 2.'
+                : 'Come back tomorrow to keep it alive.';
 
-        bannerText.appendChild(bannerTitle);
-        bannerText.appendChild(bannerSub);
-        banner.appendChild(bannerEmoji);
-        banner.appendChild(bannerText);
-        list.appendChild(banner);
+            bannerText.appendChild(bannerTitle);
+            bannerText.appendChild(bannerSub);
+            banner.appendChild(bannerEmoji);
+            banner.appendChild(bannerText);
+            list.appendChild(banner);
+        }
 
         if (daily.insight) {
             list.appendChild(renderInsightCard(daily.insight));
@@ -376,6 +440,66 @@ function getStreakBannerCopy(streak) {
     return 'Mission complete.';
 }
 
+// ── Guest completion banner ───────────────────────────────────────────────────
+
+function renderGuestCompleteBanner() {
+    var banner = document.createElement('div');
+    banner.className = 'daily-complete-banner guest-complete-banner';
+
+    var topRow = document.createElement('div');
+    topRow.className = 'guest-banner-top';
+
+    var emoji = document.createElement('span');
+    emoji.className = 'complete-emoji';
+    emoji.textContent = '🔥';
+
+    var textDiv = document.createElement('div');
+
+    var title = document.createElement('p');
+    title.className = 'complete-title';
+    title.textContent = 'Day 1 Complete';
+
+    var sub = document.createElement('p');
+    sub.className = 'complete-sub';
+    sub.textContent = 'Your streak starts here.';
+
+    textDiv.appendChild(title);
+    textDiv.appendChild(sub);
+    topRow.appendChild(emoji);
+    topRow.appendChild(textDiv);
+
+    var desc = document.createElement('p');
+    desc.className = 'guest-banner-desc';
+    desc.textContent = 'Create a free account to save your streak and come back tomorrow for Day 2.';
+
+    var actions = document.createElement('div');
+    actions.className = 'guest-banner-actions';
+
+    var createBtn = document.createElement('button');
+    createBtn.className = 'btn-primary';
+    createBtn.textContent = 'Create Account';
+    createBtn.addEventListener('click', function () {
+        handleExitGuest();
+        showTab('register');
+    });
+
+    var loginBtn = document.createElement('button');
+    loginBtn.className = 'btn-guest-login';
+    loginBtn.textContent = 'Log In';
+    loginBtn.addEventListener('click', function () {
+        handleExitGuest();
+    });
+
+    actions.appendChild(createBtn);
+    actions.appendChild(loginBtn);
+
+    banner.appendChild(topRow);
+    banner.appendChild(desc);
+    banner.appendChild(actions);
+
+    return banner;
+}
+
 // ── Today's Insight card ──────────────────────────────────────────────────────
 
 function renderInsightCard(insight) {
@@ -390,16 +514,19 @@ function renderInsightCard(insight) {
     text.className = 'insight-text';
     text.textContent = insight.text;
 
-    var tellMore = document.createElement('button');
-    tellMore.className = 'insight-tell-more';
-    tellMore.textContent = 'Tell me more →';
-    tellMore.addEventListener('click', function () {
-        openCoach({ type: 'insight', insight_text: insight.text, insight_category: insight.category });
-    });
-
     card.appendChild(category);
     card.appendChild(text);
-    card.appendChild(tellMore);
+
+    if (!isGuest) {
+        var tellMore = document.createElement('button');
+        tellMore.className = 'insight-tell-more';
+        tellMore.textContent = 'Tell me more →';
+        tellMore.addEventListener('click', function () {
+            openCoach({ type: 'insight', insight_text: insight.text, insight_category: insight.category });
+        });
+        card.appendChild(tellMore);
+    }
+
     return card;
 }
 
@@ -482,6 +609,12 @@ async function handleCompleteExercise(key, btn, row) {
     btn.textContent = '✓';
 
     if (row) row.classList.add('completing');
+
+    if (isGuest) {
+        guestCompleted.add(key);
+        setTimeout(function () { loadDailyExercises(); }, 480);
+        return;
+    }
 
     var result = await api('/api/daily/' + key + '/complete', 'POST');
     if (!result) return;

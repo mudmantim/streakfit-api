@@ -907,6 +907,34 @@ def get_daily():
         ]
     }), 200
 
+
+@app.route('/api/demo/daily', methods=['GET'])
+def get_demo_daily():
+    today = date.today()
+    today_str = today.isoformat()
+    exercises = get_daily_exercises('demo', today_str, 'beginner')
+    insight   = get_daily_insight(today_str)
+    return jsonify({
+        "date": today_str,
+        "skill_level": "beginner",
+        "completed_count": 0,
+        "rise_again": False,
+        "insight": insight,
+        "exercises": [
+            {
+                "key": ex['key'],
+                "name": ex['name'],
+                "category": ex['category'],
+                "difficulty": ex['difficulty'],
+                "reps_or_duration": ex['reps_or_duration'],
+                "instructions": ex['instructions'],
+                "completed": False
+            }
+            for ex in exercises
+        ]
+    }), 200
+
+
 @app.route('/api/daily/<string:exercise_key>/complete', methods=['POST'])
 @jwt_required()
 def complete_daily_exercise(exercise_key):
