@@ -633,6 +633,12 @@ class User(db.Model):
     display_mode = db.Column(db.String(20), nullable=False, default='game')
     challenges = db.relationship('Challenge', backref='owner', lazy=True)
 
+class AnalyticsEvent(db.Model):
+    __tablename__ = 'analytics_event'
+    id         = db.Column(db.Integer, primary_key=True)
+    event_name = db.Column(db.String(64), nullable=False)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+
 class Challenge(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     title = db.Column(db.String(100), nullable=False)
@@ -668,6 +674,22 @@ def frontend():
 @app.route('/health', methods=['GET'])
 def health():
     return jsonify({"status": "ok"}), 200
+
+
+# --- Analytics ---
+
+_ALLOWED_EVENTS = {'guest_start', 'guest_complete', 'guest_create_account_click'}
+
+@app.route('/api/events', methods=['POST'])
+@limiter.limit("30 per minute")
+def record_event():
+    data = request.get_json(silent=True) or {}
+    name = data.get('event', '')
+    if name not in _ALLOWED_EVENTS:
+        return jsonify({"error": "unknown event"}), 400
+    db.session.add(AnalyticsEvent(event_name=name))
+    db.session.commit()
+    return '', 204
 
 
 # --- API Routes ---

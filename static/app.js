@@ -14,6 +14,17 @@ var currentUser = null;
 // In-memory only — intentionally resets on page refresh.
 var isGuest = false;
 var guestCompleted = new Set();
+var guestCompleteFired = false;
+
+// ── Analytics ─────────────────────────────────────────────────────────────────
+// Fire-and-forget. Swallows all errors — never affects user experience.
+function fireEvent(name) {
+    fetch('/api/events', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ event: name })
+    }).catch(function () {});
+}
 
 // ── API wrapper ───────────────────────────────────────────────────────────────
 
@@ -76,8 +87,10 @@ function clearErrors() {
 function handleGuestMode() {
     isGuest = true;
     guestCompleted = new Set();
+    guestCompleteFired = false;
     applyTheme('game');
     setGuestUI(true);
+    fireEvent('guest_start');
     loadDailyExercises();
     showView('dashboard');
 }
@@ -85,6 +98,7 @@ function handleGuestMode() {
 function handleExitGuest() {
     isGuest = false;
     guestCompleted = new Set();
+    guestCompleteFired = false;
     setGuestUI(false);
     clearErrors();
     showTab('login');
@@ -368,6 +382,10 @@ async function loadDailyExercises() {
 
     if (daily.completed_count === 5) {
         if (isGuest) {
+            if (!guestCompleteFired) {
+                guestCompleteFired = true;
+                fireEvent('guest_complete');
+            }
             list.appendChild(renderGuestCompleteBanner());
         } else {
             var bannerStreak = (currentUser && currentUser.current_streak) || 0;
@@ -479,6 +497,7 @@ function renderGuestCompleteBanner() {
     createBtn.className = 'btn-primary';
     createBtn.textContent = 'Create Account';
     createBtn.addEventListener('click', function () {
+        fireEvent('guest_create_account_click');
         handleExitGuest();
         showTab('register');
     });
