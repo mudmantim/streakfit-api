@@ -133,6 +133,7 @@
     <input id="secret-input" type="password" placeholder="Admin secret"
            autocomplete="current-password" spellcheck="false">
     <button onclick="load()">Load</button>
+    <button id="refresh-btn" onclick="load()" hidden>↻ Refresh</button>
   </div>
 
   <div id="output">
@@ -289,6 +290,7 @@
              + '</table>';
 
     document.getElementById('output').innerHTML = html;
+    document.getElementById('refresh-btn').hidden = false;
   }
 
 })();
