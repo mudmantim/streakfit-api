@@ -9,6 +9,7 @@ from werkzeug.security import generate_password_hash, check_password_hash
 from flask_jwt_extended import JWTManager, create_access_token, jwt_required, get_jwt_identity
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
+import anthropic as _anthropic_lib
 
 app = Flask(__name__)
 
@@ -29,6 +30,8 @@ if not _jwt_secret_key:
     raise RuntimeError("JWT_SECRET_KEY environment variable is required but not set")
 app.config['JWT_SECRET_KEY'] = _jwt_secret_key
 app.config['JWT_ACCESS_TOKEN_EXPIRES'] = timedelta(hours=1)
+
+_anthropic_api_key = os.environ.get('ANTHROPIC_API_KEY')
 
 db = SQLAlchemy(app)
 migrate = Migrate(app, db)
@@ -448,6 +451,115 @@ EXERCISE_LIBRARY = {
 _GENERATOR_MAX_RETRIES = 20
 _CATEGORIES = ('upper_body', 'lower_body', 'core', 'mobility', 'conditioning')
 
+# --- Insight Library ---
+# One insight per calendar day, same for all users. Indexed by day-of-year mod length.
+# 30 insights covering 8 categories: Exercise, Recovery, Sleep, Nutrition,
+# Habit Formation, Human Body, Longevity, Performance.
+
+INSIGHT_LIBRARY = [
+    {'category': 'EXERCISE',
+     'text': "Your muscles don't grow during exercise — they grow during rest. The workout creates the physiological signal; the adaptation happens during sleep and recovery."},
+    {'category': 'SLEEP',
+     'text': "Men who sleep five hours a night for one week show testosterone levels 10–15% lower than when fully rested. The hormonal impact is roughly equivalent to a decade of normal aging."},
+    {'category': 'HABIT FORMATION',
+     'text': "The idea that habits form in 21 days traces to a 1960 plastic surgeon's observation about post-surgery adjustment times — not a habit study. Research finds the actual average is closer to 66 days, with individual results ranging from 18 to 254."},
+    {'category': 'NUTRITION',
+     'text': "The recommendation to drink eight glasses of water per day has no established scientific basis. It traces to a 1945 US nutrition report that immediately noted most daily water comes from food — the eight-glasses figure was never a clinical recommendation."},
+    {'category': 'RECOVERY',
+     'text': "Delayed onset muscle soreness peaks 24–48 hours after exercise, not immediately after. The delay reflects the body's inflammatory repair process — not a sign the workout is still actively happening."},
+    {'category': 'HUMAN BODY',
+     'text': "Muscle memory is stored in the brain's motor cortex — not in the muscles themselves. Learned movement patterns can persist for years with minimal practice because the neural pathways remain largely intact."},
+    {'category': 'LONGEVITY',
+     'text': "Walking is the exercise behavior most consistently linked to reduced all-cause mortality in large population studies. The benefit curve flattens quickly — 30 minutes of brisk walking per day captures most of the measurable long-term effect."},
+    {'category': 'PERFORMANCE',
+     'text': "Slowing a resistance exercise down — taking several seconds through each phase rather than letting momentum help — keeps muscles under load longer. The same weight, moved with control, creates meaningfully different physiological demands."},
+    {'category': 'SLEEP',
+     'text': "During sleep, the brain clears metabolic waste through the glymphatic system — a drainage network that is almost entirely inactive while you're awake. The process is most active during deep sleep."},
+    {'category': 'NUTRITION',
+     'text': "'Breakfast is the most important meal of the day' was widely promoted by food companies in the early 20th century — before nutritional evidence for it existed. Whether breakfast is uniquely beneficial remains actively debated among nutrition scientists."},
+    {'category': 'EXERCISE',
+     'text': "The elevated calorie burn after vigorous exercise — called afterburn — is real, but modest. A hard 30-minute session might add 50–150 extra calories burned in the following hours, not the hundreds that popular accounts often claim."},
+    {'category': 'HABIT FORMATION',
+     'text': "Deciding in advance exactly when and where you'll do something — 'Monday at 7am, before coffee' instead of 'sometime this week' — substantially increases follow-through. Researchers call these implementation intentions, and the effect holds across hundreds of studies."},
+    {'category': 'RECOVERY',
+     'text': "Light movement on rest days — a short walk, easy cycling, gentle stretching — promotes blood flow and helps clear metabolic byproducts of exercise. For most people, active recovery outperforms doing nothing for how they feel the following day."},
+    {'category': 'HUMAN BODY',
+     'text': "The urge to breathe is driven primarily by rising carbon dioxide levels — not falling oxygen. This is why breathing too fast during anxiety or stress makes breathlessness feel worse, not better — exhaling CO2 too quickly triggers the sensation."},
+    {'category': 'PERFORMANCE',
+     'text': "Breathing through the nose during moderate exercise produces nitric oxide in the nasal passages, which helps dilate blood vessels and improve oxygen uptake. Most people default to mouth breathing under any exertion and never develop this adaptation."},
+    {'category': 'LONGEVITY',
+     'text': "Grip strength is one of the strongest predictors of all-cause mortality in adults over 50 — more reliable than many traditional cardiovascular risk markers. It is a useful proxy for overall muscular and metabolic health, not a cause in itself."},
+    {'category': 'NUTRITION',
+     'text': "Total daily protein intake predicts muscle growth more reliably than the timing of when you eat it. The post-workout 'anabolic window' is real — but it's several hours wide, not the 30-minute deadline that's commonly cited."},
+    {'category': 'EXERCISE',
+     'text': "Strength training and endurance training stimulate adaptation through different molecular pathways — one promotes muscle growth signals, the other cardiovascular adaptation. Both can improve simultaneously, but they respond to fundamentally different types of physiological stress."},
+    {'category': 'SLEEP',
+     'text': "Sleeping longer on weekends to compensate for a short week partially offsets the deficit — but not completely. Metabolic markers and cognitive performance don't fully restore after two nights of extra sleep following five short ones."},
+    {'category': 'HABIT FORMATION',
+     'text': "Missing one day does not meaningfully disrupt habit formation, according to research on how habits develop. Missing two consecutive days begins to weaken the pattern — the goal is minimizing back-to-back misses, not achieving a perfect record."},
+    {'category': 'RECOVERY',
+     'text': "Cold water immersion after exercise reliably reduces acute muscle soreness and inflammation. Whether it also reduces long-term muscle adaptation is debated — the same biological process that speeds recovery may partially blunt the growth signal."},
+    {'category': 'HUMAN BODY',
+     'text': "Your heart beats approximately 100,000 times per day without stopping or scheduling maintenance. Regular aerobic exercise gradually lowers resting heart rate — a well-trained heart does the same work with fewer beats."},
+    {'category': 'NUTRITION',
+     'text': "The idea that dietary fat directly causes heart disease was based on mid-20th century research that has since been significantly revised. Current evidence makes finer distinctions — fat type matters considerably more than fat as a category."},
+    {'category': 'PERFORMANCE',
+     'text': "Mentally rehearsing a physical skill activates many of the same motor pathways as physically performing it. Athletes and musicians use mental imagery as a form of practice — not as motivation, but as genuine neural training."},
+    {'category': 'EXERCISE',
+     'text': "Training to complete muscle failure is not reliably more effective for growth than stopping 1–3 repetitions short of it. The additional fatigue from going to failure often outweighs its marginal benefit for most training goals."},
+    {'category': 'LONGEVITY',
+     'text': "Prolonged sitting is associated with elevated health risks even in people who exercise regularly. Breaking up long periods of sitting with brief movement throughout the day appears to matter independently of a dedicated workout."},
+    {'category': 'SLEEP',
+     'text': "Growth hormone — critical for muscle repair and tissue recovery — is released primarily during deep sleep, not during REM. The first few hours of sleep, when deep sleep is most concentrated, are the most important window for physical restoration."},
+    {'category': 'HABIT FORMATION',
+     'text': "Habits form faster when tied to consistent cues — the same time, the same location, the same sequence. The context does part of the triggering work, which is why travel or schedule changes make existing habits harder to maintain."},
+    {'category': 'NUTRITION',
+     'text': "Most adults eat roughly half the daily fiber that large health studies associate with meaningful benefit. Fiber feeds gut bacteria, moderates blood sugar, and is one of the most consistently supported dietary predictors of long-term health."},
+    {'category': 'RECOVERY',
+     'text': "After exercise, the body doesn't just repair to its previous baseline — it adapts slightly above it during recovery, a process called supercompensation. This is why rest days aren't time off from training; they're when training's actual result is produced."},
+]
+
+
+def get_daily_insight(date_str):
+    d = date.fromisoformat(date_str)
+    idx = (d.timetuple().tm_yday - 1) % len(INSIGHT_LIBRARY)
+    return INSIGHT_LIBRARY[idx]
+
+
+def get_user_stats(user_id):
+    """Return current_streak, best_streak, and total_missions from one query."""
+    completed_dates = sorted(set(db.session.execute(
+        db.select(DailyCompletion.date)
+        .where(DailyCompletion.user_id == user_id)
+        .group_by(DailyCompletion.date)
+        .having(db.func.count(DailyCompletion.exercise_key) >= 5)
+    ).scalars().all()))
+
+    total_missions = len(completed_dates)
+
+    if not completed_dates:
+        return {'current_streak': 0, 'best_streak': 0, 'total_missions': 0}
+
+    date_set = set(completed_dates)
+    today     = date.today()
+    yesterday = today - timedelta(days=1)
+
+    check   = today if today in date_set else yesterday
+    current = 0
+    while check in date_set:
+        current += 1
+        check -= timedelta(days=1)
+
+    best = run = 0
+    prev = None
+    for d in completed_dates:
+        run  = run + 1 if (prev and (d - prev).days == 1) else 1
+        best = max(best, run)
+        prev = d
+
+    return {'current_streak': current, 'best_streak': best, 'total_missions': total_missions}
+
+
 def get_daily_exercises(user_id, date_str, skill_level):
     if skill_level not in EXERCISE_LIBRARY:
         skill_level = 'beginner'
@@ -597,11 +709,15 @@ def get_me():
     user = db.session.get(User, user_id)
     if user is None:
         abort(404)
+    stats = get_user_stats(user_id)
     return jsonify({
         "id": user.id,
         "username": user.username,
         "skill_level": user.skill_level,
-        "display_mode": user.display_mode
+        "display_mode": user.display_mode,
+        "current_streak": stats['current_streak'],
+        "best_streak": stats['best_streak'],
+        "total_missions": stats['total_missions']
     }), 200
 
 @app.route('/api/me', methods=['PATCH'])
@@ -628,11 +744,15 @@ def update_me():
         user.display_mode = data['display_mode']
 
     db.session.commit()
+    stats = get_user_stats(user_id)
     return jsonify({
         "id": user.id,
         "username": user.username,
         "skill_level": user.skill_level,
-        "display_mode": user.display_mode
+        "display_mode": user.display_mode,
+        "current_streak": stats['current_streak'],
+        "best_streak": stats['best_streak'],
+        "total_missions": stats['total_missions']
     }), 200
 
 @app.route('/api/challenges', methods=['POST'])
@@ -735,6 +855,7 @@ def get_daily():
     today = date.today()
     today_str = today.isoformat()
     exercises = get_daily_exercises(user_id, today_str, user.skill_level)
+    insight   = get_daily_insight(today_str)
 
     completed_keys = set(db.session.execute(
         db.select(DailyCompletion.exercise_key).where(
@@ -743,11 +864,35 @@ def get_daily():
         )
     ).scalars().all())
 
+    yesterday = today - timedelta(days=1)
+    all_completed_dates = sorted(db.session.execute(
+        db.select(DailyCompletion.date)
+        .where(DailyCompletion.user_id == user_id)
+        .group_by(DailyCompletion.date)
+        .having(db.func.count(DailyCompletion.exercise_key) >= 5)
+    ).scalars().all())
+
+    all_date_set = set(all_completed_dates)
+    best = run = 0
+    prev = None
+    for d in all_completed_dates:
+        run  = run + 1 if (prev and (d - prev).days == 1) else 1
+        best = max(best, run)
+        prev = d
+
+    rise_again = (
+        bool(all_date_set)
+        and len(completed_keys) < 5
+        and yesterday not in all_date_set
+        and best >= 7
+    )
+
     return jsonify({
         "date": today_str,
         "skill_level": user.skill_level,
         "completed_count": len(completed_keys),
-        "daily5_streak": get_daily5_streak(user_id),
+        "rise_again": rise_again,
+        "insight": insight,
         "exercises": [
             {
                 "key": ex['key'],
@@ -805,6 +950,85 @@ def complete_daily_exercise(exercise_key):
         "exercise_key": exercise_key,
         "completed_count": completed_count
     }), 200
+
+
+# --- Coach v1 ---
+
+_COACH_SYSTEM_PROMPT = """\
+You are the StreakFit Coach. You help users understand how StreakFit works \
+and expand on Today's Insight. Be direct and brief. Answer first. No filler.
+
+StreakFit features:
+
+Daily Mission — 5 exercises chosen each day based on skill level. \
+Completing all 5 counts as a completed mission. Refreshes at midnight.
+
+Streak — the number of consecutive days a user has completed all 5 exercises. \
+A streak stays alive if yesterday or today is complete. \
+Missing both yesterday and today breaks the streak.
+
+Best Streak — the highest streak the user has ever reached.
+
+Total Missions — total count of days where all 5 exercises were completed.
+
+Milestone Banners — shown when a user completes a mission at a streak milestone: \
+Day 1, 7, 14, 30, 100. Celebratory, not evaluative.
+
+Rise Again — a one-time screen shown when a user with a best streak of 7 or more \
+returns after their streak has broken. It acknowledges the return. \
+No statistics, no guilt, no comparison. Copy: "You came back. That's what matters."
+
+Only answer questions about StreakFit features described above and Today's Insight.
+Do not answer questions about fitness training, exercise substitutions, \
+nutrition, diet, medical topics, Teams, or Campfire.
+If a question is out of scope, respond with exactly: \
+"I'm focused on StreakFit and Today's Insight — I can't help with that one." \
+"""
+
+
+@app.route('/api/coach', methods=['POST'])
+@jwt_required()
+@limiter.limit("10 per day")
+@limiter.limit("3 per minute")
+def coach():
+    data = request.get_json(silent=True) or {}
+    message = (data.get('message') or '').strip()
+    if not message:
+        return jsonify({"error": "message_required"}), 400
+    if len(message) > 500:
+        return jsonify({"error": "message_too_long"}), 400
+
+    context  = data.get('context') or {}
+    ctx_type = context.get('type', 'general')
+    if ctx_type not in ('general', 'insight'):
+        return jsonify({"error": "invalid_context_type"}), 400
+
+    if not _anthropic_api_key:
+        return jsonify({"error": "coach_unavailable"}), 503
+
+    system = _COACH_SYSTEM_PROMPT
+    if ctx_type == 'insight':
+        insight_text     = (context.get('insight_text') or '').strip()
+        insight_category = (context.get('insight_category') or '').strip()
+        if insight_text:
+            system += (
+                f"\n\nToday's Insight (category: {insight_category}): \"{insight_text}\"\n"
+                "The user wants to know more about this insight. "
+                "Add depth without restating it verbatim."
+            )
+
+    try:
+        client   = _anthropic_lib.Anthropic(api_key=_anthropic_api_key)
+        response = client.messages.create(
+            model='claude-haiku-4-5-20251001',
+            max_tokens=512,
+            system=system,
+            messages=[{'role': 'user', 'content': message}]
+        )
+        reply = response.content[0].text
+        return jsonify({"reply": reply}), 200
+    except Exception:
+        return jsonify({"error": "coach_unavailable"}), 503
 
 
 # --- JWT Error Handlers ---

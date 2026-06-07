@@ -5,6 +5,11 @@ if ('serviceWorker' in navigator) {
     });
 }
 
+// ── User state ────────────────────────────────────────────────────────────────
+// Set by loadUserPreferences() on every dashboard load. Streak data lives here
+// rather than in the /api/daily response.
+var currentUser = null;
+
 // ── API wrapper ───────────────────────────────────────────────────────────────
 
 async function api(path, method, body) {
@@ -127,8 +132,8 @@ async function loadDashboard() {
 async function loadUserPreferences() {
     var result = await api('/api/me');
     if (!result || result.status !== 200) return;
+    currentUser = result.data;
     applyTheme(result.data.display_mode);
-    // Sync skill-level select in case it differs from /api/daily response
     var sel = document.getElementById('skill-level-select');
     if (sel && result.data.skill_level) sel.value = result.data.skill_level;
 }
@@ -169,7 +174,9 @@ async function loadDailyExercises() {
     spinner.innerHTML = '<div class="spinner"></div><p>Today\'s Mission is loading…</p>';
     list.appendChild(spinner);
 
-    var result = await api('/api/daily');
+    var [result, meResult] = await Promise.all([api('/api/daily'), api('/api/me')]);
+    if (meResult && meResult.status === 200) currentUser = meResult.data;
+
     if (!result) return;
 
     list.innerHTML = ''; // clear spinner
@@ -194,7 +201,7 @@ async function loadDailyExercises() {
     var helperEl = document.getElementById('daily-streak-helper');
     if (helperEl) {
         if (daily.completed_count < 5) {
-            var helperStreak = daily.daily5_streak || 0;
+            var helperStreak = (currentUser && currentUser.current_streak) || 0;
             helperEl.textContent = helperStreak > 0
                 ? 'Complete all 5 to keep your streak'
                 : 'Complete all 5 to start your streak';
@@ -207,7 +214,7 @@ async function loadDailyExercises() {
     // Populate streak badge (hidden when streak is 0)
     var streakBadge = document.getElementById('daily-streak-badge');
     if (streakBadge) {
-        var streak = daily.daily5_streak || 0;
+        var streak = (currentUser && currentUser.current_streak) || 0;
         if (streak > 0) {
             // Days 1–6: journey framing ("Day N") — you are at a point on a path
             // Day 7+:   record framing ("N days") — you have built something
@@ -218,6 +225,21 @@ async function loadDailyExercises() {
         } else {
             streakBadge.hidden = true;
         }
+    }
+
+    // Populate stats row (current streak · best streak · total missions)
+    var statsRow = document.getElementById('daily-stats-row');
+    if (statsRow && currentUser) {
+        var cs = currentUser.current_streak || 0;
+        var bs = currentUser.best_streak    || 0;
+        var tm = currentUser.total_missions || 0;
+        document.getElementById('stat-current-streak').textContent  =
+            '🔥 ' + cs + (cs === 1 ? ' day' : ' days');
+        document.getElementById('stat-best-streak').textContent =
+            '🏅 Best: ' + bs + (bs === 1 ? ' day' : ' days');
+        document.getElementById('stat-total-missions').textContent =
+            '✓ ' + tm + (tm === 1 ? ' mission' : ' missions');
+        statsRow.hidden = false;
     }
 
     // Update progress bar
@@ -241,9 +263,51 @@ async function loadDailyExercises() {
     var track = document.querySelector('.daily-progress-track');
     if (track) track.setAttribute('aria-valuenow', daily.completed_count);
 
-    // All-complete banner — copy is driven by milestone or current streak count
+    // All-complete banner + Today's Insight
+    if (daily.rise_again && localStorage.getItem('rise_again_dismissed') !== daily.date) {
+        var ceremony = document.createElement('div');
+        ceremony.className = 'rise-again-ceremony';
+
+        var rEmoji = document.createElement('p');
+        rEmoji.className = 'rise-again-emoji';
+        rEmoji.textContent = '🌅';
+
+        var rTitle = document.createElement('p');
+        rTitle.className = 'rise-again-title';
+        rTitle.textContent = 'Rise Again';
+
+        var rLine1 = document.createElement('p');
+        rLine1.className = 'rise-again-body';
+        rLine1.textContent = 'You came back.';
+
+        var rLine2 = document.createElement('p');
+        rLine2.className = 'rise-again-body';
+        rLine2.textContent = 'That’s what matters.';
+
+        var rBtn = document.createElement('button');
+        rBtn.className = 'btn-primary rise-again-btn';
+        rBtn.textContent = 'Continue';
+        rBtn.addEventListener('click', function () {
+            localStorage.setItem('rise_again_dismissed', daily.date);
+            list.removeChild(ceremony);
+            daily.exercises.forEach(function (ex) {
+                list.appendChild(renderDailyExercise(ex));
+            });
+            var pt = document.getElementById('daily-progress-text');
+            if (pt) pt.textContent = daily.completed_count + ' / 5 completed';
+        });
+
+        ceremony.appendChild(rEmoji);
+        ceremony.appendChild(rTitle);
+        ceremony.appendChild(rLine1);
+        ceremony.appendChild(rLine2);
+        ceremony.appendChild(rBtn);
+        list.appendChild(ceremony);
+        return;
+    }
+
     if (daily.completed_count === 5) {
-        var bannerStreak = daily.daily5_streak || 0;
+        var bannerStreak = (currentUser && currentUser.current_streak) || 0;
 
         var banner    = document.createElement('div');
         banner.className = 'daily-complete-banner';
@@ -269,6 +333,10 @@ async function loadDailyExercises() {
         banner.appendChild(bannerEmoji);
         banner.appendChild(bannerText);
         list.appendChild(banner);
+
+        if (daily.insight) {
+            list.appendChild(renderInsightCard(daily.insight));
+        }
     }
 
     // Render exercises
@@ -306,6 +374,33 @@ function getStreakBannerCopy(streak) {
     if (STREAK_MILESTONES[streak]) return STREAK_MILESTONES[streak];
     if (streak > 1) return streak + '-day streak. Keep it going.';
     return 'Mission complete.';
+}
+
+// ── Today's Insight card ──────────────────────────────────────────────────────
+
+function renderInsightCard(insight) {
+    var card = document.createElement('div');
+    card.className = 'insight-card';
+
+    var category = document.createElement('p');
+    category.className = 'insight-category';
+    category.textContent = insight.category;
+
+    var text = document.createElement('p');
+    text.className = 'insight-text';
+    text.textContent = insight.text;
+
+    var tellMore = document.createElement('button');
+    tellMore.className = 'insight-tell-more';
+    tellMore.textContent = 'Tell me more →';
+    tellMore.addEventListener('click', function () {
+        openCoach({ type: 'insight', insight_text: insight.text, insight_category: insight.category });
+    });
+
+    card.appendChild(category);
+    card.appendChild(text);
+    card.appendChild(tellMore);
+    return card;
 }
 
 var CATEGORY_PILL = {
@@ -554,3 +649,119 @@ async function init() {
 }
 
 document.addEventListener('DOMContentLoaded', init);
+
+// ── Coach panel ───────────────────────────────────────────────────────────────
+
+var _coachPanel   = null;
+var _coachThread  = null;
+var _coachInput   = null;
+var _coachSendBtn = null;
+
+function openCoach(context) {
+    if (!_coachPanel) {
+        _coachPanel = document.createElement('section');
+        _coachPanel.className = 'card coach-panel';
+
+        var header = document.createElement('div');
+        header.className = 'coach-header';
+
+        var title = document.createElement('p');
+        title.className = 'coach-title';
+        title.textContent = 'Coach';
+
+        var closeBtn = document.createElement('button');
+        closeBtn.className = 'coach-close';
+        closeBtn.textContent = 'Close';
+        closeBtn.addEventListener('click', function () {
+            _coachPanel.hidden = true;
+        });
+
+        header.appendChild(title);
+        header.appendChild(closeBtn);
+
+        _coachThread = document.createElement('div');
+        _coachThread.className = 'coach-thread';
+
+        var inputRow = document.createElement('div');
+        inputRow.className = 'coach-input-row';
+
+        _coachInput = document.createElement('input');
+        _coachInput.type = 'text';
+        _coachInput.className = 'coach-input';
+        _coachInput.placeholder = 'Ask about StreakFit…';
+        _coachInput.maxLength = 500;
+        _coachInput.setAttribute('autocomplete', 'off');
+        _coachInput.addEventListener('keydown', function (e) {
+            if (e.key === 'Enter') _submitCoachMessage();
+        });
+
+        _coachSendBtn = document.createElement('button');
+        _coachSendBtn.className = 'btn-primary coach-send';
+        _coachSendBtn.textContent = 'Ask';
+        _coachSendBtn.addEventListener('click', _submitCoachMessage);
+
+        inputRow.appendChild(_coachInput);
+        inputRow.appendChild(_coachSendBtn);
+
+        _coachPanel.appendChild(header);
+        _coachPanel.appendChild(_coachThread);
+        _coachPanel.appendChild(inputRow);
+
+        var sideQuests = document.querySelector('.side-quests-section');
+        sideQuests.parentNode.insertBefore(_coachPanel, sideQuests);
+    }
+
+    _coachPanel.hidden = false;
+
+    if (context && context.type === 'insight') {
+        _sendCoachMessage('Tell me more about today’s insight', context);
+    } else {
+        _coachInput.focus();
+    }
+}
+
+function _submitCoachMessage() {
+    var msg = _coachInput.value.trim();
+    if (!msg) return;
+    _coachInput.value = '';
+    _sendCoachMessage(msg, { type: 'general' });
+}
+
+async function _sendCoachMessage(message, context) {
+    _coachInput.disabled   = true;
+    _coachSendBtn.disabled = true;
+
+    var isAutoTrigger = (context && context.type === 'insight');
+    if (!isAutoTrigger) {
+        _appendCoachMsg('user', message);
+    }
+
+    var loadingEl = _appendCoachMsg('coach', '…');
+
+    var result = await api('/api/coach', 'POST', { message: message, context: context });
+
+    _coachThread.removeChild(loadingEl);
+    _coachInput.disabled   = false;
+    _coachSendBtn.disabled = false;
+
+    if (!result || result.status === 0) {
+        _appendCoachMsg('coach', 'Coach isn’t available right now — try again later.');
+    } else if (result.status === 429) {
+        _appendCoachMsg('coach', 'You’ve reached today’s question limit — come back tomorrow.');
+    } else if (result.status !== 200) {
+        _appendCoachMsg('coach', 'Coach isn’t available right now — try again later.');
+    } else {
+        _appendCoachMsg('coach', result.data.reply);
+    }
+
+    _coachInput.focus();
+}
+
+function _appendCoachMsg(role, text) {
+    var el = document.createElement('p');
+    el.className = 'coach-msg coach-msg-' + role;
+    el.textContent = text;
+    _coachThread.appendChild(el);
+    _coachThread.scrollTop = _coachThread.scrollHeight;
+    return el;
+}

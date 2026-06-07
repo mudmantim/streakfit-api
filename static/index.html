@@ -105,6 +105,14 @@
 
                 <p id="daily-streak-helper" class="daily-streak-helper" hidden></p>
 
+                <div id="daily-stats-row" class="daily-stats-row" hidden>
+                    <span class="daily-stat" id="stat-current-streak"></span>
+                    <span class="daily-stat-sep">·</span>
+                    <span class="daily-stat" id="stat-best-streak"></span>
+                    <span class="daily-stat-sep">·</span>
+                    <span class="daily-stat" id="stat-total-missions"></span>
+                </div>
+
                 <div id="daily-exercises-list">
                     <div class="state-loading">
                         <div class="spinner"></div>
@@ -114,6 +122,7 @@
 
                 <div class="daily-footer">
                     <p id="daily-progress-text" class="daily-progress-text"></p>
+                    <button class="coach-ask-btn" onclick="openCoach({type:'general'})">Ask about StreakFit</button>
                 </div>
             </section>
 

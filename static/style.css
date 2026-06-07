@@ -385,6 +385,37 @@ input:focus {
     background: linear-gradient(90deg, var(--green) 0%, #10b981 100%);
 }
 
+/* ── Rise Again ceremony ──────────────────────────────────────────────────── */
+.rise-again-ceremony {
+    text-align: center;
+    padding: 2.5rem 1rem 2rem;
+}
+
+.rise-again-emoji {
+    font-size: 2.2rem;
+    margin: 0 0 .6rem;
+    line-height: 1;
+}
+
+.rise-again-title {
+    font-weight: 700;
+    font-size: 1.15rem;
+    color: var(--t-primary);
+    margin: 0 0 .75rem;
+}
+
+.rise-again-body {
+    font-size: .9rem;
+    color: var(--t-secondary);
+    line-height: 1.6;
+    margin: 0 0 .15rem;
+}
+
+.rise-again-btn {
+    margin-top: 1.5rem;
+    min-width: 9rem;
+}
+
 /* ── Complete banner ──────────────────────────────────────────────────────── */
 .daily-complete-banner {
     display: flex;
@@ -410,6 +441,149 @@ input:focus {
     color: #047857;
     margin-top: .1rem;
 }
+
+/* ── Today's Insight card ─────────────────────────────────────────────────── */
+.insight-card {
+    background: var(--indigo-pale);
+    border-radius: 10px;
+    border-left: 3px solid var(--t-primary);
+    padding: .85rem 1rem;
+    margin-bottom: .85rem;
+}
+
+.insight-category {
+    font-size: .65rem;
+    font-weight: 700;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    color: var(--t-primary);
+    margin-bottom: .4rem;
+}
+
+.insight-text {
+    font-size: .9rem;
+    line-height: 1.55;
+    color: var(--gray-700);
+}
+
+/* ── Insight tell-more link ───────────────────────────────────────────────── */
+.insight-tell-more {
+    background: none;
+    border: none;
+    font-size: .8rem;
+    color: var(--t-primary);
+    cursor: pointer;
+    padding: .4rem 0 0;
+    display: block;
+    text-align: right;
+    width: 100%;
+    -webkit-tap-highlight-color: transparent;
+}
+
+.insight-tell-more:hover { opacity: .75; }
+
+/* ── Coach panel ──────────────────────────────────────────────────────────── */
+.coach-panel {
+    margin-bottom: .85rem;
+}
+
+.coach-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: .6rem;
+}
+
+.coach-title {
+    font-weight: 700;
+    font-size: .95rem;
+    color: var(--t-primary);
+}
+
+.coach-close {
+    background: none;
+    border: none;
+    font-size: .82rem;
+    color: var(--gray-500);
+    cursor: pointer;
+    padding: 0;
+    -webkit-tap-highlight-color: transparent;
+}
+
+.coach-close:hover { color: var(--gray-700); }
+
+.coach-thread {
+    max-height: 260px;
+    overflow-y: auto;
+    margin-bottom: .65rem;
+    display: flex;
+    flex-direction: column;
+    gap: .45rem;
+}
+
+.coach-msg {
+    font-size: .88rem;
+    line-height: 1.5;
+    padding: .5rem .7rem;
+    border-radius: 8px;
+    max-width: 88%;
+    word-break: break-word;
+}
+
+.coach-msg-coach {
+    background: var(--indigo-pale);
+    color: var(--gray-700);
+    align-self: flex-start;
+}
+
+.coach-msg-user {
+    background: var(--gray-100);
+    color: var(--gray-700);
+    align-self: flex-end;
+}
+
+.coach-input-row {
+    display: flex;
+    gap: .5rem;
+}
+
+.coach-input {
+    flex: 1;
+    min-width: 0;
+    border: 1.5px solid var(--gray-200);
+    border-radius: 8px;
+    padding: .55rem .75rem;
+    font-size: .9rem;
+    background: var(--bg-card);
+    color: var(--t-main);
+    transition: border-color .15s, box-shadow .15s;
+}
+
+.coach-input:focus {
+    outline: none;
+    border-color: var(--indigo);
+    box-shadow: 0 0 0 3px rgba(79,70,229,.12);
+}
+
+.coach-send {
+    padding: .55rem .9rem;
+    font-size: .88rem;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
+/* ── Ask about StreakFit footer link ──────────────────────────────────────── */
+.coach-ask-btn {
+    background: none;
+    border: none;
+    font-size: .78rem;
+    color: var(--gray-500);
+    cursor: pointer;
+    padding: 0;
+    -webkit-tap-highlight-color: transparent;
+}
+
+.coach-ask-btn:hover { color: var(--t-primary); }
 
 /* ── Daily exercise rows ──────────────────────────────────────────────────── */
 .daily-exercise-row {
@@ -553,6 +727,26 @@ input:focus {
     color: var(--gray-500);
     margin-bottom: .75rem;
     font-style: italic;
+}
+
+/* ── Stats row — current streak · best streak · total missions ───────────── */
+.daily-stats-row {
+    display: flex;
+    align-items: center;
+    gap: .35rem;
+    margin-bottom: .85rem;
+    flex-wrap: wrap;
+}
+
+.daily-stat {
+    font-size: .78rem;
+    font-weight: 600;
+    color: var(--gray-600);
+}
+
+.daily-stat-sep {
+    font-size: .78rem;
+    color: var(--gray-400);
 }
 
 /* ── Side Quests section ──────────────────────────────────────────────────── */
