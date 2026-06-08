@@ -695,31 +695,36 @@ def admin_stats():
     seven_ago    = now - timedelta(days=7)
     thirty_ago   = now - timedelta(days=30)
 
-    def counts(event_name):
-        def n(since):
-            return db.session.query(
-                db.func.count(AnalyticsEvent.id)
-            ).filter(
-                AnalyticsEvent.event_name == event_name,
-                AnalyticsEvent.created_at >= since
-            ).scalar() or 0
-        return {
-            'today':    n(today_start),
-            'week':     n(seven_ago),
-            'month':    n(thirty_ago),
-            'all_time': db.session.query(
-                db.func.count(AnalyticsEvent.id)
-            ).filter(AnalyticsEvent.event_name == event_name).scalar() or 0,
-        }
+    try:
+        def counts(event_name):
+            def n(since):
+                return db.session.query(
+                    db.func.count(AnalyticsEvent.id)
+                ).filter(
+                    AnalyticsEvent.event_name == event_name,
+                    AnalyticsEvent.created_at >= since
+                ).scalar() or 0
+            return {
+                'today':    n(today_start),
+                'week':     n(seven_ago),
+                'month':    n(thirty_ago),
+                'all_time': db.session.query(
+                    db.func.count(AnalyticsEvent.id)
+                ).filter(AnalyticsEvent.event_name == event_name).scalar() or 0,
+            }
 
-    return jsonify({
-        'generated_at': now.isoformat() + 'Z',
-        'events': {
-            'guest_start':               counts('guest_start'),
-            'guest_complete':            counts('guest_complete'),
-            'guest_create_account_click': counts('guest_create_account_click'),
-        }
-    })
+        return jsonify({
+            'generated_at': now.isoformat() + 'Z',
+            'events': {
+                'guest_start':                counts('guest_start'),
+                'guest_complete':             counts('guest_complete'),
+                'guest_create_account_click': counts('guest_create_account_click'),
+            }
+        })
+    except Exception:
+        db.session.rollback()
+        app.logger.warning('admin_stats query failed')
+        return jsonify({'error': 'stats_unavailable'}), 503
 
 
 # --- Analytics ---
@@ -738,8 +743,12 @@ def record_event():
     name = data.get('event', '')
     if name not in _ALLOWED_EVENTS:
         return jsonify({"error": "unknown event"}), 400
-    db.session.add(AnalyticsEvent(event_name=name))
-    db.session.commit()
+    try:
+        db.session.add(AnalyticsEvent(event_name=name))
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+        app.logger.warning('analytics write failed for event: %s', name)
     return '', 204
 
 

@@ -198,14 +198,21 @@
     })
     .then(function (r) {
       if (r.status === 403) throw new Error('403');
+      if (r.status === 503) throw new Error('503');
       if (!r.ok) throw new Error(r.status);
       return r.json();
     })
     .then(function (data) { render(data); })
     .catch(function (err) {
-      var msg = err.message === '403'
-        ? 'Access denied. Check your admin secret.'
-        : 'Failed to load data (' + err.message + ').';
+      var msg;
+      if (err.message === '403') {
+        msg = 'Access denied. Check your admin secret.';
+      } else if (err.message === '503') {
+        msg = 'Stats temporarily unavailable. Try Refresh.';
+        document.getElementById('refresh-btn').hidden = false;
+      } else {
+        msg = 'Failed to load data (' + err.message + ').';
+      }
       document.getElementById('output').innerHTML =
         '<div class="state error">' + msg + '</div>';
     });
