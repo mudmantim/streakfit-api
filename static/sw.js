@@ -1,8 +1,11 @@
-const CACHE = 'streakfit-v0700';
+const CACHE = 'streakfit-v0701';
 const STATIC = [
   '/static/style.css',
   '/static/app.js',
   '/static/icons/icon.svg',
+  '/static/icons/icon-180.png',
+  '/static/icons/icon-192.png',
+  '/static/icons/icon-512.png',
 ];
 
 self.addEventListener('install', function (e) {
