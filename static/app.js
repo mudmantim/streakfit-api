@@ -776,741 +776,1448 @@ var CATEGORY_PILL = {
 // mistakes: common form errors to correct. tip: one actionable beginner cue.
 
 var COACH_DATA = {
-    // Beginner / Upper Body
-    wall_push_up: {
-        mistakes: [
-            'Letting the hips sag or push back instead of staying in a straight line.',
-            'Placing the hands too high — they should be at shoulder height, not head height.',
-            'Bouncing off the wall with momentum instead of pressing with control.',
-        ],
-        tip: 'Walk your feet further from the wall to increase the angle and difficulty over time.',
-    },
-    knee_push_up: {
-        mistakes: [
-            'Hips sagging so the back curves into a banana shape.',
-            'Flaring the elbows out to 90 degrees — keep them closer to 45 degrees.',
-            'Stopping at a partial range rather than lowering the chest to the floor.',
-        ],
-        tip: 'Place a folded towel under your knees if the floor is uncomfortable.',
-    },
-    arm_circles: {
-        mistakes: [
-            'Allowing the shoulders to shrug up toward the ears.',
-            'Making circles too large and fast, which reduces shoulder activation.',
-            'Letting the arms drop below shoulder height mid-set.',
-        ],
-        tip: 'Keeping your thumbs pointing upward throughout the circle helps engage the rotator cuff.',
-    },
-    shoulder_tap: {
-        mistakes: [
-            'Letting the hips twist and sway with each tap.',
-            'Looking up or forward instead of down at the floor, which misaligns the spine.',
-            'Widening the hand position to compensate for instability.',
-        ],
-        tip: 'Place a water bottle on your lower back — if it falls, your hips are rotating too much.',
-    },
-    chest_opener: {
-        mistakes: [
-            'Arching the lower back to force the arms higher rather than opening the chest.',
-            'Holding tension in the neck or jaw instead of relaxing into the stretch.',
-            'Releasing after only a few seconds — 30 seconds is needed for a lasting effect.',
-        ],
-        tip: 'Your shoulders should pull directly back, not lift up. Watch in a mirror if you can.',
-    },
-    floor_tricep_dip: {
-        mistakes: [
-            'Allowing the shoulders to roll forward rather than staying open and back.',
-            'Bending the elbows outward instead of pointing them straight back.',
-            'Placing the hands too far from the hips, which shifts strain to the wrists.',
-        ],
-        tip: 'Keep your feet flat and close to your body to shorten the range and make the start easier.',
-    },
-    // Beginner / Lower Body
-    bodyweight_squat: {
-        mistakes: [
-            'Letting the knees cave inward as you lower — push them out over your toes.',
-            'Rising onto the toes because the ankles lack mobility.',
-            'Leaning so far forward that the weight shifts off the heels.',
-        ],
-        tip: 'Squat toward a chair to build confidence before doing unsupported reps.',
-    },
-    reverse_lunge: {
-        mistakes: [
-            'Leaning too far forward with the torso instead of keeping it upright.',
-            'Letting the front knee track past the toes instead of over the ankle.',
-            'Pushing off the back foot rather than the front heel to return.',
-        ],
-        tip: 'Fix your gaze on a spot straight ahead — it keeps your torso tall.',
-    },
-    glute_bridge: {
-        mistakes: [
-            'Placing the feet too far from the body, shifting work to the hamstrings.',
-            'Only lifting partway — hips should form a straight line from shoulder to knee.',
-            'Letting the knees fall apart at the top instead of staying hip-width.',
-        ],
-        tip: 'Squeeze your glutes at the top for a full second before lowering — it activates more fibers.',
-    },
-    calf_raise: {
-        mistakes: [
-            'Bouncing at the bottom rather than pausing and fully stretching the calf.',
-            'Rolling the ankles outward to cheat extra range.',
-            'Using momentum to rise rather than controlled muscular effort.',
-        ],
-        tip: 'Performing these single-leg from a stair edge adds a full stretch and dramatically increases difficulty.',
-    },
-    wall_sit: {
-        mistakes: [
-            'Thighs not parallel to the floor — sit at exactly 90 degrees.',
-            'Pushing through the hands on the knees, which takes load off the legs.',
-            'Sliding the feet toward the wall, reducing the joint angle.',
-        ],
-        tip: 'Keep arms relaxed at your sides or folded across your chest — no hands on thighs.',
-    },
-    step_up: {
-        mistakes: [
-            'Pushing off the back foot instead of driving entirely through the stepping leg.',
-            'Using a step so high the thigh exceeds parallel.',
-            'Leaning forward from the hip instead of staying tall.',
-        ],
-        tip: 'Pause for one second at the top with your leg straight to confirm full hip extension.',
-    },
-    // Beginner / Core
-    dead_bug: {
-        mistakes: [
-            'Allowing the lower back to arch away from the floor as the limbs extend.',
-            'Moving too quickly — the movement should be slow and deliberate.',
-            'Holding the breath instead of exhaling as you extend each limb.',
-        ],
-        tip: 'Press your lower back firmly into the floor before each rep and maintain that contact throughout.',
-    },
-    bird_dog: {
-        mistakes: [
-            'Hiking the hip of the extending leg instead of keeping the pelvis level.',
-            'Lifting the arm and leg too high, forcing the lower back to arch.',
-            'Rushing the transition — pause briefly at full extension to build stability.',
-        ],
-        tip: 'Imagine balancing a cup of water on your lower back — keep it perfectly still.',
-    },
-    knee_plank: {
-        mistakes: [
-            'Hips rising too high into a downward-dog shape, reducing core demand.',
-            'Looking up rather than down at the floor, which hyperextends the neck.',
-            'Holding the breath — breathe normally throughout the hold.',
-        ],
-        tip: 'Draw your belly button toward your spine to actively engage the deep core muscles.',
-    },
-    crunch: {
-        mistakes: [
-            'Pulling on the neck with interlaced fingers instead of lightly supporting the head.',
-            'Using momentum to swing up rather than contracting the abs.',
-            'Not fully lowering between reps — shoulders should approach but not fully settle on the floor.',
-        ],
-        tip: 'Place your tongue on the roof of your mouth to help reduce neck tension during the movement.',
-    },
-    bent_knee_leg_raise: {
-        mistakes: [
-            'Allowing the lower back to arch off the floor as the feet lower.',
-            'Dropping the feet too fast, removing the eccentric challenge.',
-            'Using hip flexors alone rather than keeping the core braced throughout.',
-        ],
-        tip: 'Stop the descent the moment you feel your lower back begin to lift from the floor.',
-    },
-    superman: {
-        mistakes: [
-            'Jerking the limbs up with momentum rather than lifting slowly with control.',
-            'Straining the neck by looking up — keep your gaze toward the floor.',
-            'Only lifting the arms while forgetting to raise the legs, or vice versa.',
-        ],
-        tip: 'Squeeze your glutes and upper back simultaneously as you lift for maximum activation.',
-    },
-    // Beginner / Mobility
-    cat_cow: {
-        mistakes: [
-            'Moving only the lower back instead of mobilizing the entire spine.',
-            'Forcing the range with muscular tension instead of letting breath drive it.',
-            'Rushing through cycles — each transition should take at least 2–3 seconds.',
-        ],
-        tip: 'Sync each movement with your breath: exhale into Cat, inhale into Cow.',
-    },
-    hip_flexor_kneeling: {
-        mistakes: [
-            'Allowing the lower back to hyperextend — keep a neutral spine throughout.',
-            'Shifting the front knee forward past the toes.',
-            'Not shifting the hips forward enough to actually feel the hip flexor stretch.',
-        ],
-        tip: 'Tuck your tailbone slightly under as you shift forward to deepen the stretch.',
-    },
-    standing_hamstring_stretch: {
-        mistakes: [
-            'Rounding the spine forward to reach the surface instead of hinging from the hip.',
-            'Locking the knee — keep a very slight bend to protect the joint.',
-            'Forcing the range aggressively — the stretch should be firm, never painful.',
-        ],
-        tip: 'If your hamstrings are very tight, start with the foot on a low surface like a step.',
-    },
-    childs_pose: {
-        mistakes: [
-            'Sitting so far forward that the hips lift off the heels, reducing the stretch.',
-            'Holding tension in the shoulders instead of lengthening the arms forward.',
-            'Breathing shallowly — deep belly breaths allow the hips to sink further.',
-        ],
-        tip: 'Widen your knees slightly if your belly prevents a comfortable forward fold.',
-    },
-    thoracic_rotation: {
-        mistakes: [
-            'Rotating from the lower back and hips rather than isolating the upper spine.',
-            'Bringing the elbow forward instead of backward — the rotation must go behind you.',
-            'Holding the breath during the rotation instead of exhaling into the twist.',
-        ],
-        tip: 'Keep your lower body completely still — only the ribs and above should move.',
-    },
-    ankle_circles: {
-        mistakes: [
-            'Moving the entire leg in a circle rather than isolating the ankle joint.',
-            'Making circles too small to work through the full range of motion.',
-            'Going too fast — slow circles improve joint awareness and control.',
-        ],
-        tip: 'Keep the working leg parallel to the ground and draw the largest circles you can control.',
-    },
-    // Beginner / Conditioning
-    marching_in_place: {
-        mistakes: [
-            'Not lifting the knees high enough — aim for hip height on each step.',
-            'Letting the arms hang still instead of pumping them in opposition.',
-            'Leaning backward rather than keeping a tall, upright posture.',
-        ],
-        tip: 'Drive the knee up rather than just lifting the foot — it recruits the hip flexors more effectively.',
-    },
-    jumping_jack: {
-        mistakes: [
-            'Landing with straight knees — always land with a slight bend to absorb impact.',
-            'Not fully extending the arms overhead on each rep.',
-            'Letting the feet drift inward on the landing, which stresses the ankles.',
-        ],
-        tip: 'For lower impact, step side to side instead of jumping — same arms, same benefit.',
-    },
-    step_touch: {
-        mistakes: [
-            'Taking too small a step, which reduces cardiovascular demand.',
-            'Looking down at the feet instead of keeping the gaze forward.',
-            'Letting the trailing foot drag rather than actively bringing it to meet the lead foot.',
-        ],
-        tip: 'Add a small side arm raise as you step out to increase upper body engagement.',
-    },
-    standing_bicycle: {
-        mistakes: [
-            'Crunching the elbow down toward the knee rather than rotating the ribcage.',
-            'Moving only the arms without lifting the knee high enough.',
-            'Rushing the movement — rotation matters more than speed.',
-        ],
-        tip: 'Think "ribcage rotates" not "elbow touches knee" — the torso does the work.',
-    },
-    low_skip: {
-        mistakes: [
-            'Landing on the heels instead of the balls of the feet, which increases impact.',
-            'Skipping so high that the impact becomes significant — keep it low and rhythmic.',
-            'Neglecting arm swing, which helps maintain rhythm and balance.',
-        ],
-        tip: 'Count "left, right, left, right" out loud to stay light and consistent.',
-    },
-    boxer_shuffle: {
-        mistakes: [
-            'Bouncing on the heels rather than staying on the balls of the feet.',
-            'Stiffening the upper body — keep arms relaxed and slightly raised.',
-            'Making the hops too large, which increases impact and reduces speed.',
-        ],
-        tip: 'Keep your weight centered and imagine the floor is hot — stay light on your feet.',
-    },
-    // Intermediate / Upper Body
-    push_up: {
-        mistakes: [
-            'Allowing the hips to sag — the body must form a rigid plank from head to heels.',
-            'Flaring the elbows to 90 degrees — keep them at roughly 45 degrees.',
-            'Cutting the range short — the chest should come within an inch of the floor.',
-        ],
-        tip: 'Squeeze your glutes during every rep — it creates full-body tension and prevents hip sag.',
-    },
-    diamond_push_up: {
-        mistakes: [
-            'Spreading the diamond too wide, shifting emphasis to the chest instead of the triceps.',
-            'Flaring the elbows out — they must stay close and track backward.',
-            'Allowing the wrists to roll outward under load.',
-        ],
-        tip: 'If wrist pain occurs, make fists and press on your knuckles to keep the wrist neutral.',
-    },
-    pike_push_up: {
-        mistakes: [
-            'Not getting the hips high enough — the goal is an inverted V shape.',
-            'Looking forward instead of down between the hands.',
-            'Collapsing at the top instead of maintaining shoulder elevation.',
-        ],
-        tip: 'Walk your feet closer to your hands to increase the angle and difficulty.',
-    },
-    decline_push_up: {
-        mistakes: [
-            'Using a surface so high that balance becomes the limiting factor, not strength.',
-            'Allowing the hips to pike upward during the movement.',
-            'Looking forward — keep the neck neutral and gaze slightly ahead of the hands.',
-        ],
-        tip: 'Start with a low surface like a step and graduate to higher objects as you get stronger.',
-    },
-    wide_push_up: {
-        mistakes: [
-            'Going so wide that the elbows splay beyond 90 degrees at the bottom.',
-            'Allowing the hips to sag or the lower back to arch.',
-            'Not reaching full arm extension at the top of every rep.',
-        ],
-        tip: 'Think "bend the floor apart" with your hands to engage the chest from the top.',
-    },
-    sphinx_push_up: {
-        mistakes: [
-            'Allowing the hips to shift laterally during the forearm-to-straight-arm transition.',
-            'Looking up during the transition, which compresses the cervical spine.',
-            'Going too quickly — this is a control drill, not a speed exercise.',
-        ],
-        tip: 'Press one arm up at a time and hold the plank tight between each transition.',
-    },
-    // Intermediate / Lower Body
-    jump_squat: {
-        mistakes: [
-            'Landing with stiff, straight knees — absorb the impact through bent knees into a squat.',
-            'Not reaching full depth before each jump.',
-            'Leaning forward excessively on the landing, losing balance.',
-        ],
-        tip: 'Land as quietly as possible — silent landings equal safe landings.',
-    },
-    walking_lunge: {
-        mistakes: [
-            'Pushing off the back toes rather than driving through the front heel.',
-            'Letting the torso lean forward, which overloads the lower back.',
-            'Front knee caving inward on each step.',
-        ],
-        tip: 'Keep your chin up and focus on a spot ahead to maintain an upright posture.',
-    },
-    single_leg_glute_bridge: {
-        mistakes: [
-            'Allowing the pelvis to tilt toward the free side at the top.',
-            'Keeping the non-working leg bent instead of extending it.',
-            'Pushing through the toes rather than the heel of the grounded foot.',
-        ],
-        tip: 'Pause at the top and check that both hip points are at the same height.',
-    },
-    lateral_lunge: {
-        mistakes: [
-            'Allowing the working knee to track inward rather than over the second toe.',
-            'Rounding the lower back — hinge from the hip with a flat back.',
-            'Putting weight through the extended leg instead of keeping it straight.',
-        ],
-        tip: 'Push your hip back first before bending the knee to initiate the correct pattern.',
-    },
-    sumo_squat: {
-        mistakes: [
-            'Toes pointing straight forward — they must turn out to match the wide stance.',
-            'Letting the knees buckle inward at the bottom.',
-            'Not reaching sufficient depth — aim for thighs parallel to the floor.',
-        ],
-        tip: 'Drive your knees out throughout the entire movement to keep tension on the inner thighs.',
-    },
-    bodyweight_good_morning: {
-        mistakes: [
-            'Rounding the lower back as you fold forward instead of hinging from the hip.',
-            'Locking out the knees completely — keep a soft bend throughout.',
-            'Going past parallel, which removes tension from the hamstrings.',
-        ],
-        tip: 'If you feel it in your lower back instead of your hamstrings, stand up and reset your hinge.',
-    },
-    // Intermediate / Core
-    plank: {
-        mistakes: [
-            'Hips piking up toward the ceiling, which reduces core demand.',
-            'Letting the hips sag, compressing the lower back.',
-            'Holding the breath instead of breathing steadily throughout.',
-        ],
-        tip: 'Squeeze your quads and glutes alongside your abs for a full-body brace.',
-    },
-    hollow_body_hold: {
-        mistakes: [
-            'Raising the legs too high, which allows the lower back to arch off the floor.',
-            'Only holding briefly instead of maintaining the full time.',
-            'Losing the rounded lower-back — the key is a curved, engaged spine against the floor.',
-        ],
-        tip: 'Start with knees bent if you cannot maintain the position with legs extended.',
-    },
-    russian_twist: {
-        mistakes: [
-            'Rotating only the arms while the torso stays stationary — the whole upper body must rotate.',
-            'Letting the feet drift wide for balance instead of keeping them together.',
-            'Leaning back so far that the hip flexors dominate instead of the obliques.',
-        ],
-        tip: 'Lift your feet off the floor to increase the difficulty without changing the movement.',
-    },
-    bicycle_crunch: {
-        mistakes: [
-            'Pulling the head forward with the hands instead of using the abs to rotate.',
-            'Not fully extending the opposite leg on each rep.',
-            'Moving so fast that rotation disappears and it becomes a simple crunch.',
-        ],
-        tip: 'Think "elbow to the ceiling" rather than "elbow to the knee" to get full rotation.',
-    },
-    straight_leg_raise: {
-        mistakes: [
-            'Allowing the lower back to arch and lift off the floor as the legs descend.',
-            'Using momentum to swing the legs up rather than controlled lifting.',
-            'Going below the point where lower back control is lost.',
-        ],
-        tip: 'Press your hands lightly under your lower back if you struggle to keep it flat.',
-    },
-    side_plank: {
-        mistakes: [
-            'Allowing the hip to sag toward the floor.',
-            'Stacking the feet incorrectly — top foot rests on the bottom, not in front of it.',
-            'Looking down at the floor instead of keeping the head neutral.',
-        ],
-        tip: 'Drop to your bottom knee to regress if needed — it is the same movement pattern.',
-    },
-    // Intermediate / Mobility
-    worlds_greatest_stretch: {
-        mistakes: [
-            'Rushing through each position rather than breathing into it.',
-            'Not fully straightening the back leg during the hamstring shift.',
-            'Letting the front knee collapse inward during the lunge phase.',
-        ],
-        tip: 'Move slowly and use each exhale to deepen the position — this works best as a warm-up.',
-    },
-    deep_squat_hold: {
-        mistakes: [
-            'Heels rising off the floor — place a thin book under them if mobility is limited.',
-            'Rounding the upper back instead of maintaining a tall spine.',
-            'Gripping the floor with the toes instead of keeping the feet flat.',
-        ],
-        tip: 'Hold onto a door frame or pole to counterbalance your weight and sit deeper.',
-    },
-    pigeon_pose: {
-        mistakes: [
-            'Allowing the back hip to rotate upward — both hips stay square to the floor.',
-            'Forcing the shin to 90 degrees before having the flexibility for it.',
-            'Collapsing all weight into the grounded hip rather than distributing it evenly.',
-        ],
-        tip: 'Place a folded blanket or cushion under the hip of the bent leg for support.',
-    },
-    spinal_twist: {
-        mistakes: [
-            'Using force to press the knee further across instead of letting gravity do the work.',
-            'Allowing the opposite shoulder to lift off the floor.',
-            'Tensing the neck during the twist instead of keeping it long and relaxed.',
-        ],
-        tip: 'Exhale deeply with each breath and allow the knee to sink a little further naturally.',
-    },
-    doorway_pec_stretch: {
-        mistakes: [
-            'Placing the forearms above shoulder height, which overstresses the front of the shoulder.',
-            'Leaning forward with the lower back arched instead of a neutral spine.',
-            'Pushing aggressively through the doorway rather than allowing a passive stretch.',
-        ],
-        tip: 'Experiment with raising or lowering your elbows to find which angle stretches your chest most.',
-    },
-    downdog_calf_stretch: {
-        mistakes: [
-            'Not fully pressing the heel of the active leg toward the floor.',
-            'Bending the knee of the pressing leg, which removes the calf stretch.',
-            'Moving too quickly between legs — hold each for 2 full seconds.',
-        ],
-        tip: 'Keep the hips high and press the chest toward your thighs to combine a hamstring stretch.',
-    },
-    // Intermediate / Conditioning
-    no_jump_burpee: {
-        mistakes: [
-            'Stepping the feet out one at a time instead of both together.',
-            'Skipping the push-up portion entirely.',
-            'Not fully extending the hips when standing back up.',
-        ],
-        tip: 'Control the pace — a slow, correct no-jump burpee is harder than a fast, sloppy one.',
-    },
-    mountain_climber: {
-        mistakes: [
-            'Letting the hips rise as each knee drives forward.',
-            'Placing the foot flat instead of landing on the ball of the foot.',
-            'Losing shoulder position — shoulders should stay directly over the wrists.',
-        ],
-        tip: 'Brace your core as if you are about to be punched — this keeps your hips level.',
-    },
-    high_knees: {
-        mistakes: [
-            'Barely lifting the knees — they must reach hip height on every rep.',
-            'Landing flat-footed, which increases ground contact time and slows you down.',
-            'Leaning backward instead of maintaining a slight forward lean.',
-        ],
-        tip: 'Hold your palms face-down at hip height and aim to slap them with your knees.',
-    },
-    skater_jump: {
-        mistakes: [
-            'Jumping straight up rather than laterally, removing the balance challenge.',
-            'Landing with the knee locked straight instead of bent and soft.',
-            'Taking tiny hops rather than reaching maximum lateral distance.',
-        ],
-        tip: 'Reach your opposite hand toward the landing foot to add a balance challenge.',
-    },
-    plank_to_downdog: {
-        mistakes: [
-            'Bending the knees during the transition, reducing the hamstring stretch.',
-            'Looking up in downward dog, compressing the neck.',
-            'Moving the hips to the side rather than directly up and back.',
-        ],
-        tip: 'Coordinate with your breath: exhale to downdog, inhale to plank.',
-    },
-    speed_squat: {
-        mistakes: [
-            'Sacrificing depth for speed — you must reach parallel on every rep.',
-            'Allowing the knees to collapse inward under fatigue.',
-            'Holding the breath throughout instead of rhythmically exhaling each rep.',
-        ],
-        tip: 'If form deteriorates, slow down immediately — speed only builds what you already have.',
-    },
-    // Advanced / Upper Body
-    archer_push_up: {
-        mistakes: [
-            'Not keeping the extended arm fully straight — it acts as a lever, not a support.',
-            'Allowing the hips to rotate as you shift laterally.',
-            'Gripping the floor with the extended hand — it rests lightly.',
-        ],
-        tip: 'Start by shifting only 20% of the way to each side and gradually increase range over weeks.',
-    },
-    pseudo_planche_push_up: {
-        mistakes: [
-            'Not leaning far enough forward — the shoulders must pass the wrists.',
-            'Allowing the elbows to flare out instead of staying close to the body.',
-            'Placing the fingers pointing forward instead of backward.',
-        ],
-        tip: 'Even 30 degrees of lean is meaningful progress at first — build it gradually.',
-    },
-    typewriter_push_up: {
-        mistakes: [
-            'Not lowering all the way before beginning the horizontal shift.',
-            'Twisting at the hips during the shift instead of keeping the body square.',
-            'Moving through the shift too quickly to build real strength.',
-        ],
-        tip: 'This is a strength skill — treat it as slow, deliberate work, not a rep grinder.',
-    },
-    plyometric_push_up: {
-        mistakes: [
-            'Allowing the elbows to collapse on landing rather than absorbing with bent arms.',
-            'Not generating enough force to actually clear the hands off the floor.',
-            'Attempting these with fatigued form at the end of a long set.',
-        ],
-        tip: 'Start with hands on an elevated surface to reduce the load while building explosive power.',
-    },
-    wall_handstand_hold: {
-        mistakes: [
-            'Kicking up with too much force and smashing the feet into the wall.',
-            'Arching the lower back excessively rather than holding a tight hollow position.',
-            'Looking at the wall instead of at the floor between your hands.',
-        ],
-        tip: 'Practice the kick-up separately first — a controlled entry is safer and builds better technique.',
-    },
-    assisted_one_arm_push_up: {
-        mistakes: [
-            'Placing the assisting hand on a surface too low, turning it into a regular push-up.',
-            'Allowing the body to rotate toward the working arm.',
-            'Cutting range — lower until the chest nearly touches the floor.',
-        ],
-        tip: 'A fist resting on a basketball is a classic tool — it assists but still demands significant balance.',
-    },
-    // Advanced / Lower Body
-    assisted_pistol_squat: {
-        mistakes: [
-            'Using the support to pull yourself up rather than just for balance.',
-            'Extending the free leg to the side rather than straight forward.',
-            'Not squatting deep enough — full depth means hip below the knee.',
-        ],
-        tip: 'Use a door frame and grip it with progressively less force over time to reduce the assist.',
-    },
-    plyometric_lunge: {
-        mistakes: [
-            'Landing in a lunge that is too shallow or too narrow.',
-            'Letting the front knee cave inward on each landing.',
-            'Pausing between reps instead of landing and immediately loading the next jump.',
-        ],
-        tip: 'Pump your arms aggressively — the arm drive significantly increases jump height and power.',
-    },
-    single_leg_good_morning: {
-        mistakes: [
-            'Allowing the hips to rotate outward on the free leg — keep them square.',
-            'Locking the knee of the standing leg — keep a soft bend throughout.',
-            'Using momentum to swing back up instead of driving through the standing glute.',
-        ],
-        tip: 'Fix your gaze on a point directly ahead and keep it there throughout the movement.',
-    },
-    shrimp_squat: {
-        mistakes: [
-            'Letting the rear knee drop and touch the floor rather than lowering with control.',
-            'Leaning excessively forward with the torso instead of staying tall.',
-            'Using the held foot for balance rather than pure single-leg work.',
-        ],
-        tip: 'Place a folded mat where the knee will land so you have a target and a buffer.',
-    },
-    broad_jump: {
-        mistakes: [
-            'Not fully loading the hips before the jump — use a deep countermovement.',
-            'Landing with the knees straight, sending impact directly to the joints.',
-            'Not using arm swing, which contributes significantly to jump distance.',
-        ],
-        tip: 'Swing your arms back forcefully on the load, then throw them forward explosively on the jump.',
-    },
-    sprint_intervals: {
-        mistakes: [
-            'Starting at less than maximum effort — Tabata requires true all-out sprinting.',
-            'Drifting from the prescribed work-to-rest ratio, which defeats the protocol.',
-            'Sprinting on a surface that allows slipping — use flat, dry ground only.',
-        ],
-        tip: 'Your pace in round 8 will naturally be slower than round 1 — that is expected and normal.',
-    },
-    // Advanced / Core
-    straddle_v_up: {
-        mistakes: [
-            'Using momentum by swinging rather than performing a controlled simultaneous lift.',
-            'Barely lifting the torso — it should rise until the spine is nearly vertical.',
-            'Neglecting the slow descent — 3 seconds down is where the strength is built.',
-        ],
-        tip: 'If full straddle is too difficult, start with feet together in a regular V-up first.',
-    },
-    l_sit_hold: {
-        mistakes: [
-            'Bending the elbows instead of pressing down on straight arms.',
-            'Allowing the shoulders to elevate — press them down away from the ears.',
-            'Giving up on the leg position before time is up — hold a tuck if you have to.',
-        ],
-        tip: 'Parallel bars or gymnastics blocks allow deeper depression and make this significantly easier.',
-    },
-    pike_walk_out: {
-        mistakes: [
-            'Bending the knees as you walk out, reducing the hamstring and core demand.',
-            'Allowing the hips to sag once in the plank position.',
-            'Walking the hands so far forward that all tension leaves the posterior chain.',
-        ],
-        tip: 'Add a push-up in the plank position before walking back to significantly increase difficulty.',
-    },
-    tuck_to_straight_leg_raise: {
-        mistakes: [
-            'Losing lower back contact with the floor during the extension phase.',
-            'Dropping the legs too fast on the descent — it should be slow and controlled.',
-            'Not fully extending the legs at the top before beginning the lower.',
-        ],
-        tip: 'If the lower back lifts, reduce the range and only go as low as you can truly control.',
-    },
-    hollow_body_rock: {
-        mistakes: [
-            'Arching the lower back during the rock — any arch means the hollow is lost.',
-            'Rocking at a random pace instead of a controlled rhythm.',
-            'Extending the arms and legs too wide, which demands more flexibility than strength.',
-        ],
-        tip: 'Shorten your position (tuck the arms in, bend the knees slightly) to maintain hollow under fatigue.',
-    },
-    planche_lean: {
-        mistakes: [
-            'Bending the elbows instead of keeping the arms completely straight.',
-            'Allowing the hips to sag rather than maintaining a rigid body line.',
-            'Leaning too aggressively too soon — shoulder damage from excessive lean accumulates.',
-        ],
-        tip: 'Build your lean angle gradually, adding only a degree or two each week.',
-    },
-    // Advanced / Mobility
-    pancake_stretch: {
-        mistakes: [
-            'Rounding the back to get the chest lower instead of hinging from the hips.',
-            'Forcing the position aggressively — this stretch requires months of consistent work.',
-            'Not breathing — slow, deep exhales allow the muscles to release further.',
-        ],
-        tip: 'Use a foam roller lengthwise along your spine to encourage a flat back as you fold.',
-    },
-    bodyweight_jefferson_curl: {
-        mistakes: [
-            'Moving too quickly — each vertebra should peel away from the previous one slowly.',
-            'Locking the knees, which creates excessive strain on the hamstrings.',
-            'Only going halfway and calling it done.',
-        ],
-        tip: 'Treat this as a spinal warm-up. Move with full respect and never force it.',
-    },
-    front_split_prep: {
-        mistakes: [
-            'Forcing the hips all the way down before they are ready.',
-            'Allowing the pelvis to rotate open on the rear hip.',
-            'Only stretching one side, which creates an imbalance.',
-        ],
-        tip: 'Progress is measured in weeks and months, not sessions — do this daily for consistent gains.',
-    },
-    cossack_squat: {
-        mistakes: [
-            'Not keeping the extended leg completely straight.',
-            'Allowing the heel of the squatting leg to lift — keep both heels on the floor.',
-            'Only squatting to a comfortable partial range rather than going as deep as possible.',
-        ],
-        tip: 'Holding a light weight in front of your chest helps counterbalance the movement.',
-    },
-    shoulder_cars: {
-        mistakes: [
-            'Allowing the opposite shoulder to participate — pin it firmly and isolate one side.',
-            'Losing tension at the end ranges of the rotation.',
-            'Moving through the range too quickly — CARs require maximum active control.',
-        ],
-        tip: 'Do these in front of a mirror to catch any compensatory shoulder elevation or trunk sway.',
-    },
-    wrist_prep: {
-        mistakes: [
-            'Skipping this before handstand or planche work — wrist injuries from this omission are common.',
-            'Loading the wrists before they are fully warmed up.',
-            'Performing the movements too quickly without feeling each position.',
-        ],
-        tip: 'Your wrist strength often limits handstand progress more than your shoulder strength does.',
-    },
-    // Advanced / Conditioning
-    full_burpee: {
-        mistakes: [
-            'Skipping the push-up or barely bending the elbows.',
-            'Landing the jump with stiff, straight legs instead of soft bent knees.',
-            'Not fully extending the body overhead at the top of the jump.',
-        ],
-        tip: 'Breathe out on the push-up, breathe in on the jump — find that rhythm and it becomes sustainable.',
-    },
-    tabata_mountain_climber: {
-        mistakes: [
-            'Pacing the first few rounds to save energy — Tabata demands maximum effort each round.',
-            'Allowing the hips to rise progressively higher with each rep.',
-            'Resting beyond the prescribed 10 seconds.',
-        ],
-        tip: 'Count reps in round 1. If your count drops by more than 30% in round 8, you started too hard.',
-    },
-    tuck_jump: {
-        mistakes: [
-            'Achieving only a partial tuck — the knees must drive up toward the chest.',
-            'Landing with the knees forward and straight instead of absorbing with a bend.',
-            'Leaning backward during the jump instead of staying tall.',
-        ],
-        tip: 'Mark hip height on a wall with tape and try to tap it with your knees at the peak.',
-    },
-    tuck_jump_burpee: {
-        mistakes: [
-            'Rushing the push-up portion to get to the jump faster.',
-            'Landing from the tuck jump and falling immediately into the next burpee without resetting.',
-            'Not achieving full tuck height on the jump due to accumulated fatigue.',
-        ],
-        tip: 'This is a high-skill drill — rest fully between sets so technique does not break down.',
-    },
-    broad_jump_consecutive: {
-        mistakes: [
-            'Not absorbing each landing through a full squat position before the next jump.',
-            'Reducing jump distance on later reps — maintain consistent maximum effort throughout.',
-            'Landing on the toes only, which fails to transfer force into the next jump.',
-        ],
-        tip: 'Land in a quarter squat, pause for a single breath, then drive into the next jump.',
-    },
-    shuttle_run: {
-        mistakes: [
-            'Slowing to a jog at the end of each length instead of sprinting through the turn.',
-            'Touching the line without properly lowering and changing direction sharply.',
-            'Not taking the full 45-second rest, which compromises all subsequent rounds.',
-        ],
-        tip: 'Lead with your outside foot when changing direction to minimize the deceleration distance.',
-    },
+    "wall_push_up": {
+        "what": "Push against a wall like you're trying to push it away.",
+        "how": [
+            "Stand facing a wall, an arm's length away.",
+            "Put your hands on the wall at shoulder height.",
+            "Bend your elbows and lean your chest toward the wall.",
+            "Push back until your arms are straight again."
+        ],
+        "why": "Makes your arms and chest stronger without needing to get on the floor.",
+        "mistakes": [
+            "Standing too close to the wall, which makes it too easy.",
+            "Letting your back curve instead of staying straight.",
+            "Moving too fast instead of slow and controlled."
+        ],
+        "tip": "Stand a little farther from the wall as it gets easier."
+    },
+    "knee_push_up": {
+        "what": "A push-up you do with your knees on the floor to make it easier.",
+        "how": [
+            "Get on your hands and knees on the floor.",
+            "Keep your back flat, like a tabletop.",
+            "Bend your elbows and lower your chest toward the floor.",
+            "Push back up until your arms are straight."
+        ],
+        "why": "Builds arm and chest strength while your knees help take some of the weight.",
+        "mistakes": [
+            "Letting your hips droop down or stick up in the air.",
+            "Only bending halfway instead of going all the way down.",
+            "Holding your breath instead of breathing normally."
+        ],
+        "tip": "Put a towel or pillow under your knees if the floor feels hard."
+    },
+    "arm_circles": {
+        "what": "Make big circles in the air with your arms, like you're swimming.",
+        "how": [
+            "Stand with your arms stretched out to the sides.",
+            "Make small circles forward in the air.",
+            "After a while, switch and circle backward.",
+            "Keep your arms at shoulder height the whole time."
+        ],
+        "why": "Warms up your shoulders and helps them move more easily.",
+        "mistakes": [
+            "Letting your shoulders creep up toward your ears.",
+            "Making the circles so big and fast that you lose control.",
+            "Dropping your arms below shoulder height."
+        ],
+        "tip": "Point your thumbs up to the ceiling — it makes the circles easier to control."
+    },
+    "shoulder_tap": {
+        "what": "Hold yourself up like a tabletop and tap your shoulder with one hand.",
+        "how": [
+            "Get into a push-up position with arms straight.",
+            "Keep your hips still and your body steady.",
+            "Lift one hand and tap the opposite shoulder.",
+            "Put it back down and switch hands."
+        ],
+        "why": "Helps you stay steady and strong through your whole body.",
+        "mistakes": [
+            "Letting your hips wiggle side to side with each tap.",
+            "Looking up instead of down at the floor.",
+            "Putting your feet too wide apart to make it easier."
+        ],
+        "tip": "Try placing a small object on your lower back — if it falls off, slow down and steady yourself."
+    },
+    "chest_opener": {
+        "what": "Stretch your arms behind you like you're about to give a big hug from behind.",
+        "how": [
+            "Stand up tall.",
+            "Clasp your hands together behind your back.",
+            "Gently squeeze your shoulder blades together and lift your chest.",
+            "Hold still and breathe for 30 seconds."
+        ],
+        "why": "Helps loosen up shoulders that get tight from sitting or looking at screens.",
+        "mistakes": [
+            "Arching your lower back to lift your arms higher.",
+            "Holding tension in your neck instead of relaxing.",
+            "Letting go after just a couple seconds instead of holding it."
+        ],
+        "tip": "Pull your shoulders back and down, not up — think 'proud chest,' not 'shrug.'"
+    },
+    "floor_tricep_dip": {
+        "what": "Lower your body up and down using just your arms while sitting on the floor.",
+        "how": [
+            "Sit on the floor with your knees bent and feet flat.",
+            "Put your hands on the floor beside your hips, fingers pointing forward.",
+            "Lift your hips up and bend your elbows to lower yourself down.",
+            "Push back up until your arms are straight."
+        ],
+        "why": "Builds strength in the back of your arms.",
+        "mistakes": [
+            "Letting your shoulders roll forward instead of staying open.",
+            "Letting your elbows point out to the sides instead of straight back.",
+            "Putting your hands too far away from your hips, which strains your wrists."
+        ],
+        "tip": "Keep your feet close to your body to make this easier when you're starting out."
+    },
+    "bodyweight_squat": {
+        "what": "Pretend you're sitting down into an invisible chair, then stand back up.",
+        "how": [
+            "Stand with your feet about shoulder-width apart.",
+            "Push your hips back and bend your knees like you're sitting down.",
+            "Go down until your thighs are about flat, like a chair seat.",
+            "Push through your feet to stand back up."
+        ],
+        "why": "Makes your legs strong for everyday things like standing up and climbing stairs.",
+        "mistakes": [
+            "Letting your knees cave in toward each other.",
+            "Rising up onto your toes instead of staying flat-footed.",
+            "Leaning so far forward that you tip onto your toes."
+        ],
+        "tip": "Squat down toward a chair without sitting all the way — it helps you find the right depth."
+    },
+    "reverse_lunge": {
+        "what": "Step one foot backward and dip down like you're bowing.",
+        "how": [
+            "Stand tall with your feet together.",
+            "Step one foot backward.",
+            "Bend both knees until the back knee almost touches the floor.",
+            "Push off your front foot to stand back up and return your feet together."
+        ],
+        "why": "Builds leg strength and helps you balance better.",
+        "mistakes": [
+            "Leaning your whole body too far forward.",
+            "Letting your front knee go too far past your toes.",
+            "Pushing off your back foot instead of your front foot to stand up."
+        ],
+        "tip": "Pick a spot on the wall to stare at — it helps you stay tall and balanced."
+    },
+    "glute_bridge": {
+        "what": "Lie on your back and lift your hips up like a bridge.",
+        "how": [
+            "Lie on your back with your knees bent and feet flat on the floor.",
+            "Press your feet down and lift your hips toward the ceiling.",
+            "Make a straight line from your shoulders to your knees.",
+            "Lower back down slowly and repeat."
+        ],
+        "why": "Strengthens your bottom and lower back muscles, which helps your posture.",
+        "mistakes": [
+            "Placing your feet too far away from your body.",
+            "Only lifting your hips partway up.",
+            "Letting your knees fall apart at the top."
+        ],
+        "tip": "Squeeze your bottom muscles tight for one second at the very top of each lift."
+    },
+    "calf_raise": {
+        "what": "Rise up onto your toes like you're trying to reach something on a high shelf.",
+        "how": [
+            "Stand with your feet about hip-width apart.",
+            "Rise up onto your tiptoes as high as you can.",
+            "Pause for a second at the top.",
+            "Slowly lower back down."
+        ],
+        "why": "Strengthens the muscles in the back of your lower legs.",
+        "mistakes": [
+            "Bouncing quickly instead of pausing at the bottom.",
+            "Letting your ankles roll outward.",
+            "Using a quick jerky motion instead of slow control."
+        ],
+        "tip": "Try this standing on the edge of a step for an extra stretch once it feels easy."
+    },
+    "wall_sit": {
+        "what": "Slide down a wall and hold still like you're sitting in an invisible chair.",
+        "how": [
+            "Stand with your back against a wall.",
+            "Slide down until your thighs are flat, like sitting in a chair.",
+            "Keep your knees right above your ankles.",
+            "Hold still for the time given, then slide back up."
+        ],
+        "why": "Builds leg strength and teaches your muscles to hold steady.",
+        "mistakes": [
+            "Not sliding down far enough — aim for a flat seat, not a half-squat.",
+            "Pushing down on your knees with your hands.",
+            "Letting your feet slide too close to the wall."
+        ],
+        "tip": "Keep your arms relaxed at your sides or crossed over your chest — no hands on your legs."
+    },
+    "step_up": {
+        "what": "Step up onto a stair like you're climbing, one foot at a time.",
+        "how": [
+            "Stand facing a sturdy step or stair.",
+            "Step up with one foot, placing it fully on the step.",
+            "Bring your other foot up to meet it.",
+            "Step back down and repeat, then switch which foot leads."
+        ],
+        "why": "Builds leg strength using a movement you already do every day.",
+        "mistakes": [
+            "Pushing off your back foot instead of the leg on the step.",
+            "Using a step so high it's hard to keep your balance.",
+            "Leaning your body far forward instead of staying upright."
+        ],
+        "tip": "Pause for a second at the top with your leg straight before stepping back down."
+    },
+    "dead_bug": {
+        "what": "Lie on your back and move your arms and legs like a bug stuck on its back.",
+        "how": [
+            "Lie on your back with your arms pointing at the ceiling and knees bent.",
+            "Slowly lower one arm and the opposite leg toward the floor.",
+            "Stop just before they touch.",
+            "Bring them back up and switch sides."
+        ],
+        "why": "Helps your middle and your arms and legs learn to work together.",
+        "mistakes": [
+            "Letting your lower back lift off the floor.",
+            "Moving too fast instead of slow and smooth.",
+            "Holding your breath instead of breathing normally."
+        ],
+        "tip": "Press your lower back into the floor and try to keep it there the whole time."
+    },
+    "bird_dog": {
+        "what": "Pretend you're a dog pointing at something.",
+        "how": [
+            "Get on your hands and knees.",
+            "Reach your right arm forward.",
+            "Stretch your left leg behind you.",
+            "Hold for a second.",
+            "Switch sides."
+        ],
+        "why": "Improves balance and helps strengthen your middle.",
+        "mistakes": [
+            "Letting one hip twist up higher than the other.",
+            "Reaching so high that your back arches.",
+            "Rushing instead of holding still for a moment at the top."
+        ],
+        "tip": "Imagine balancing a cup of water on your back — try not to spill it."
+    },
+    "knee_plank": {
+        "what": "Hold your body still like a stiff board, resting on your knees.",
+        "how": [
+            "Get on the floor on your forearms and knees.",
+            "Make a straight line from your head to your knees.",
+            "Keep your tummy muscles tight and breathe steadily.",
+            "Hold still for the time given."
+        ],
+        "why": "Builds strength in your middle, which helps with balance and posture.",
+        "mistakes": [
+            "Letting your hips poke up high in the air.",
+            "Looking up instead of down at the floor.",
+            "Letting your back sag toward the floor."
+        ],
+        "tip": "Picture a broomstick balanced along your back — keep it from rolling off."
+    },
+    "crunch": {
+        "what": "Curl your shoulders up off the floor like a turtle peeking out of its shell.",
+        "how": [
+            "Lie on your back with your knees bent and feet flat.",
+            "Put your hands lightly behind your head or crossed on your chest.",
+            "Curl your shoulders up off the floor.",
+            "Lower back down slowly and repeat."
+        ],
+        "why": "Strengthens your belly muscles.",
+        "mistakes": [
+            "Pulling on your neck with your hands.",
+            "Using a fast jerky motion instead of a slow curl.",
+            "Lifting your whole back off the floor instead of just your shoulders."
+        ],
+        "tip": "Picture lifting your shoulder blades just an inch off the floor — you don't need to sit all the way up."
+    },
+    "bent_knee_leg_raise": {
+        "what": "Lie on your back and lower your bent legs toward the floor without touching.",
+        "how": [
+            "Lie on your back with your knees bent and lifted toward your chest.",
+            "Slowly lower your feet toward the floor.",
+            "Stop just before your feet touch.",
+            "Lift your knees back up and repeat."
+        ],
+        "why": "Strengthens your lower belly muscles.",
+        "mistakes": [
+            "Letting your lower back lift off the floor as your legs lower.",
+            "Letting your feet touch the floor between reps.",
+            "Moving too quickly instead of slow and controlled."
+        ],
+        "tip": "Keep your lower back pressed flat against the floor the entire time."
+    },
+    "superman": {
+        "what": "Pretend you're Superman flying through the air.",
+        "how": [
+            "Lie on your stomach.",
+            "Lift your arms slightly.",
+            "Lift your legs slightly.",
+            "Hold for the required time.",
+            "Lower and relax."
+        ],
+        "why": "Helps strengthen your back.",
+        "mistakes": [
+            "Lifting so high that your neck cranks back uncomfortably.",
+            "Holding your breath instead of breathing normally.",
+            "Jerking up quickly instead of lifting smoothly."
+        ],
+        "tip": "Look down at the floor the whole time to keep your neck comfortable."
+    },
+    "cat_cow": {
+        "what": "Move like a cat stretching, then like a cow with its belly sagging.",
+        "how": [
+            "Get on your hands and knees.",
+            "Breathe in and let your belly dip down while you lift your head (the cow).",
+            "Breathe out and round your back up toward the ceiling, tucking your chin (the cat).",
+            "Keep moving slowly back and forth with your breathing."
+        ],
+        "why": "Loosens up your back and feels relaxing.",
+        "mistakes": [
+            "Moving too fast instead of slow and gentle.",
+            "Forgetting to breathe along with the movement.",
+            "Only moving your head instead of your whole back."
+        ],
+        "tip": "Imagine a string pulling your belly button up and down with each breath."
+    },
+    "hip_flexor_kneeling": {
+        "what": "Kneel down with one leg forward, like you're about to propose, and lean forward gently.",
+        "how": [
+            "Kneel on one knee with the other foot flat on the floor in front of you.",
+            "Keep your body tall and upright.",
+            "Gently shift your weight forward until you feel a stretch in the front of your back hip.",
+            "Hold still and breathe, then switch legs."
+        ],
+        "why": "Loosens up tight hips, which often get stiff from sitting a lot.",
+        "mistakes": [
+            "Leaning your whole upper body forward instead of just shifting your hips.",
+            "Bouncing instead of holding the stretch still.",
+            "Forgetting to switch and stretch the other side."
+        ],
+        "tip": "If your knee on the floor is sore, put a folded towel or pillow under it."
+    },
+    "standing_hamstring_stretch": {
+        "what": "Stretch the back of your leg like you're trying to touch your toes with one foot up high.",
+        "how": [
+            "Place one foot on a low step or stool.",
+            "Keep that leg mostly straight.",
+            "Lean forward from your hips with a flat back until you feel a stretch behind your thigh.",
+            "Hold still, then switch legs."
+        ],
+        "why": "Loosens up the back of your legs, which helps you move more freely.",
+        "mistakes": [
+            "Rounding your back forward instead of keeping it flat.",
+            "Bouncing instead of holding the stretch still.",
+            "Choosing a surface so high it hurts instead of stretches."
+        ],
+        "tip": "Only lean forward until you feel a gentle pull — it should never hurt."
+    },
+    "childs_pose": {
+        "what": "Sit back on your heels and stretch forward like you're bowing.",
+        "how": [
+            "Kneel down and sit back onto your heels.",
+            "Stretch your arms forward on the floor.",
+            "Rest your forehead down.",
+            "Breathe slowly and let your body relax."
+        ],
+        "why": "Helps you relax and gently stretches your back.",
+        "mistakes": [
+            "Holding tension in your shoulders instead of letting them relax.",
+            "Breathing fast and shallow instead of slow and deep.",
+            "Forcing your hips down instead of letting them sink naturally."
+        ],
+        "tip": "Let your whole body feel heavy, like you're melting into the floor."
+    },
+    "thoracic_rotation": {
+        "what": "Sit cross-legged and twist your upper body like you're looking behind you.",
+        "how": [
+            "Sit cross-legged with one hand resting behind your head.",
+            "Keep your hips facing forward.",
+            "Twist your upper body to bring that elbow backward.",
+            "Return to the front and switch sides."
+        ],
+        "why": "Helps your upper back twist and move more easily.",
+        "mistakes": [
+            "Twisting from your hips instead of your upper back.",
+            "Forcing the twist too far instead of going gently.",
+            "Forgetting to do both sides evenly."
+        ],
+        "tip": "Move slowly and only twist as far as feels comfortable."
+    },
+    "ankle_circles": {
+        "what": "Draw circles in the air with your foot, like stirring a pot with your toes.",
+        "how": [
+            "Lift one foot slightly off the floor.",
+            "Slowly draw circles with your foot, like stirring a big pot.",
+            "Do all your circles one way, then switch direction.",
+            "Put that foot down and switch to the other foot."
+        ],
+        "why": "Keeps your ankles loose and moving well.",
+        "mistakes": [
+            "Moving too fast instead of slow and controlled.",
+            "Making circles too small to really feel the stretch.",
+            "Forgetting to do both directions and both feet."
+        ],
+        "tip": "Pretend your big toe is a pencil drawing the biggest circle it can."
+    },
+    "marching_in_place": {
+        "what": "March like you're in a parade, lifting your knees high.",
+        "how": [
+            "Stand up tall.",
+            "Lift one knee up to about hip height.",
+            "Lower it and lift the other knee.",
+            "Swing your arms naturally as you march."
+        ],
+        "why": "Gets your heart pumping without any jumping or hard moves.",
+        "mistakes": [
+            "Slouching forward instead of standing tall.",
+            "Barely lifting your knees instead of bringing them up high.",
+            "Forgetting to swing your arms, which helps you keep rhythm."
+        ],
+        "tip": "Pretend you're marching to your favorite song to keep a steady beat."
+    },
+    "jumping_jack": {
+        "what": "Jump while spreading your arms and legs out like a starfish, then jump back together.",
+        "how": [
+            "Stand with your feet together and arms at your sides.",
+            "Jump your feet out wide while raising your arms overhead.",
+            "Jump your feet back together while lowering your arms.",
+            "Keep repeating at a steady pace."
+        ],
+        "why": "Gets your whole body moving and your heart beating faster.",
+        "mistakes": [
+            "Landing hard and stiff instead of soft and bent.",
+            "Letting your arms and legs move out of sync.",
+            "Going so fast that your form falls apart."
+        ],
+        "tip": "Land softly on the balls of your feet, like a cat."
+    },
+    "step_touch": {
+        "what": "Step side to side like a simple dance move.",
+        "how": [
+            "Step one foot out to the side.",
+            "Bring your other foot in to meet it.",
+            "Step back the other direction.",
+            "Keep going side to side at a steady pace."
+        ],
+        "why": "Gets your heart rate up gently, with no jumping needed.",
+        "mistakes": [
+            "Taking steps so small that it barely counts as exercise.",
+            "Looking down at your feet instead of ahead.",
+            "Forgetting to swing your arms along with your steps."
+        ],
+        "tip": "Try clapping your hands together each time your feet meet — it adds rhythm."
+    },
+    "standing_bicycle": {
+        "what": "Stand and twist while lifting your knees, like pedaling a bike standing up.",
+        "how": [
+            "Stand with your hands gently behind your head.",
+            "Lift one knee up while twisting the opposite elbow toward it.",
+            "Lower and switch to the other side.",
+            "Keep alternating in a smooth rhythm."
+        ],
+        "why": "Works your middle and gets your heart pumping at the same time.",
+        "mistakes": [
+            "Pulling hard on your neck with your hands.",
+            "Rushing so fast that the twisting motion disappears.",
+            "Leaning too far backward instead of staying upright."
+        ],
+        "tip": "Move slowly at first to get the twist-and-lift feeling right, then speed up."
+    },
+    "low_skip": {
+        "what": "Skip in place gently, like skipping rope without the rope.",
+        "how": [
+            "Stand with your feet hip-width apart.",
+            "Hop lightly from one foot to the other.",
+            "Keep the hops small and close to the floor.",
+            "Swing your arms naturally as you go."
+        ],
+        "why": "Gets your heart pumping with gentle, joint-friendly hops.",
+        "mistakes": [
+            "Jumping too high instead of keeping hops low and light.",
+            "Landing flat-footed and heavy instead of soft.",
+            "Forgetting to breathe steadily as you go."
+        ],
+        "tip": "Imagine you're skipping over a low rope just inches off the ground."
+    },
+    "boxer_shuffle": {
+        "what": "Bounce lightly from foot to foot like a boxer warming up.",
+        "how": [
+            "Stand with your knees slightly bent.",
+            "Bounce gently from one foot to the other.",
+            "Keep the movement small and quick.",
+            "Let your arms move naturally at your sides."
+        ],
+        "why": "Warms up your whole body and gets your heart beating faster.",
+        "mistakes": [
+            "Bouncing too high instead of keeping it light and quick.",
+            "Locking your knees straight instead of staying slightly bent.",
+            "Tensing your shoulders up instead of staying loose."
+        ],
+        "tip": "Stay light on your feet, like you're standing on hot sand."
+    },
+    "push_up": {
+        "what": "Lower your whole body down and push it back up using just your arms.",
+        "how": [
+            "Get into a high push-up position with your hands under your shoulders.",
+            "Keep your body in a straight line from head to feet.",
+            "Bend your elbows to lower your chest almost to the floor.",
+            "Push back up until your arms are fully straight."
+        ],
+        "why": "Builds strength in your arms, chest, and middle all at once.",
+        "mistakes": [
+            "Letting your hips sag down or poke up.",
+            "Only lowering halfway instead of all the way down.",
+            "Flaring your elbows straight out to the sides."
+        ],
+        "tip": "If this is too hard right now, try the knee version first and work up to this."
+    },
+    "diamond_push_up": {
+        "what": "Do a push-up with your hands close together making a diamond shape.",
+        "how": [
+            "Get into a push-up position with your hands close together under your chest.",
+            "Touch your thumbs and index fingers together to form a diamond shape.",
+            "Lower your chest down while keeping your elbows close to your sides.",
+            "Push back up until your arms are straight."
+        ],
+        "why": "Builds extra strength in the back of your arms.",
+        "mistakes": [
+            "Letting your elbows flare out wide instead of staying close.",
+            "Letting your hips sag instead of staying in a straight line.",
+            "Placing your hands too far forward instead of under your chest."
+        ],
+        "tip": "Start with the knee version of this if the regular push-up is still tricky."
+    },
+    "pike_push_up": {
+        "what": "Make an upside-down V shape with your body and lower your head toward the floor.",
+        "how": [
+            "Start with your hips lifted high and hands and feet on the floor, making an upside-down V.",
+            "Bend your elbows to lower the top of your head toward the floor.",
+            "Pause briefly near the bottom.",
+            "Push back up until your arms are straight."
+        ],
+        "why": "Builds strength in your shoulders.",
+        "mistakes": [
+            "Letting your hips drop instead of staying lifted high.",
+            "Lowering your head too fast instead of with control.",
+            "Placing your hands too close to your feet, which can feel cramped."
+        ],
+        "tip": "Walk your feet a bit closer to your hands to make the V shape steeper and the move easier."
+    },
+    "decline_push_up": {
+        "what": "Do a push-up with your feet up on something higher than your hands.",
+        "how": [
+            "Place your feet on a sturdy elevated surface like a step or low chair.",
+            "Put your hands on the floor, slightly wider than your shoulders.",
+            "Lower your chest toward the floor, keeping your body in a straight line.",
+            "Push back up until your arms are straight."
+        ],
+        "why": "Makes a regular push-up harder by shifting more weight to your arms.",
+        "mistakes": [
+            "Letting your hips sag or rise instead of staying in line.",
+            "Choosing a surface so high or unstable that you feel wobbly.",
+            "Rushing through reps instead of moving with control."
+        ],
+        "tip": "Start with a lower surface and work your way up to something taller."
+    },
+    "wide_push_up": {
+        "what": "Do a push-up with your hands spread out wider than usual.",
+        "how": [
+            "Get into a push-up position with your hands wider than your shoulders.",
+            "Keep your body in a straight line from head to feet.",
+            "Bend your elbows out to the sides as you lower your chest.",
+            "Push back up until your arms are straight."
+        ],
+        "why": "Works your chest muscles a little differently than a regular push-up.",
+        "mistakes": [
+            "Spreading your hands so wide it strains your shoulders.",
+            "Letting your hips sag toward the floor.",
+            "Only lowering partway instead of going all the way down."
+        ],
+        "tip": "If your shoulders feel uncomfortable, bring your hands in a little closer."
+    },
+    "sphinx_push_up": {
+        "what": "Push up from your forearms to your hands one arm at a time, then lower back down.",
+        "how": [
+            "Start lying on your forearms like a sphinx statue.",
+            "Press into one palm and straighten that arm.",
+            "Press into the other palm and straighten that arm too, so you're in a high push-up position.",
+            "Lower back down to your forearms one arm at a time, keeping your hips steady."
+        ],
+        "why": "Builds strength and control through your arms and shoulders.",
+        "mistakes": [
+            "Letting your hips twist or dip as you push up.",
+            "Rushing through instead of moving one arm at a time with control.",
+            "Letting your hips sag toward the floor."
+        ],
+        "tip": "Move slowly and imagine a flat tray balanced on your back that you can't spill."
+    },
+    "jump_squat": {
+        "what": "Squat down low, then jump up high into the air.",
+        "how": [
+            "Stand with your feet shoulder-width apart.",
+            "Bend your knees and lower into a squat.",
+            "Push off the floor and jump straight up.",
+            "Land softly with bent knees and go straight into the next squat."
+        ],
+        "why": "Builds powerful legs and gets your heart pumping fast.",
+        "mistakes": [
+            "Landing stiff-legged instead of bending your knees to land softly.",
+            "Not squatting low enough before jumping.",
+            "Landing off-balance instead of in a controlled squat."
+        ],
+        "tip": "Focus on landing as quietly and softly as possible — that means you're doing it right."
+    },
+    "walking_lunge": {
+        "what": "Step forward into a lunge, then bring your back foot through to take the next step.",
+        "how": [
+            "Step forward with one foot into a lunge.",
+            "Lower your back knee toward the floor.",
+            "Push through your front foot to stand, then step your back foot forward.",
+            "Continue stepping forward, alternating legs."
+        ],
+        "why": "Builds leg strength while you move across the room instead of staying still.",
+        "mistakes": [
+            "Letting your front knee travel too far past your toes.",
+            "Taking steps too short, which makes the move less effective.",
+            "Leaning your upper body too far forward."
+        ],
+        "tip": "Make sure you have a few steps of open space before you start."
+    },
+    "single_leg_glute_bridge": {
+        "what": "Lift your hips up using just one leg while the other leg stays straight in the air.",
+        "how": [
+            "Lie on your back with one knee bent and foot flat on the floor.",
+            "Stretch your other leg straight out, lifted in the air.",
+            "Push through your planted heel to lift your hips up.",
+            "Lower back down slowly, then switch legs."
+        ],
+        "why": "Builds extra strength and balance in your hips and bottom muscles, one side at a time.",
+        "mistakes": [
+            "Letting your hips tilt sideways instead of staying level.",
+            "Pushing through your toes instead of your heel.",
+            "Rushing the movement instead of lifting with control."
+        ],
+        "tip": "Keep your raised leg in line with your body instead of letting it drift."
+    },
+    "lateral_lunge": {
+        "what": "Step out to the side and bend that knee, like you're dodging something.",
+        "how": [
+            "Stand with your feet together.",
+            "Take a big step out to one side.",
+            "Bend that knee and push your hips back, keeping the other leg straight.",
+            "Push off that foot to return to standing, then switch sides."
+        ],
+        "why": "Builds strength in your legs in a side-to-side direction, which everyday squats don't cover.",
+        "mistakes": [
+            "Letting the bent knee cave inward instead of staying over your foot.",
+            "Rounding your back instead of staying upright.",
+            "Taking a step too small to really feel the stretch and effort."
+        ],
+        "tip": "Keep your toes pointed forward the whole time, even as you step sideways."
+    },
+    "sumo_squat": {
+        "what": "Squat down with your feet spread wide and toes pointed out, like a sumo wrestler.",
+        "how": [
+            "Stand with your feet wider than shoulder-width and toes turned out.",
+            "Bend your knees and lower into a deep squat.",
+            "Keep your chest up and back straight.",
+            "Push through your feet to stand back up."
+        ],
+        "why": "Works your legs and inner thighs in a slightly different way than a regular squat.",
+        "mistakes": [
+            "Letting your knees cave inward instead of tracking over your toes.",
+            "Leaning your chest too far forward.",
+            "Not squatting low enough to feel it working."
+        ],
+        "tip": "Imagine you're trying to keep a beach ball squeezed between your knees the whole time."
+    },
+    "bodyweight_good_morning": {
+        "what": "Bend forward from your hips with a flat back, like you're taking a bow.",
+        "how": [
+            "Stand with your feet hip-width apart and hands lightly behind your head.",
+            "Keep a soft bend in your knees.",
+            "Bend forward from your hips, keeping your back flat, until your body is close to parallel with the floor.",
+            "Push your hips forward to stand back up."
+        ],
+        "why": "Strengthens your lower back and the back of your legs.",
+        "mistakes": [
+            "Rounding your back instead of keeping it flat.",
+            "Bending from your waist instead of from your hips.",
+            "Standing up too fast instead of with control."
+        ],
+        "tip": "Pretend you're trying to keep a broomstick flat along your back the whole time."
+    },
+    "plank": {
+        "what": "Hold your body stiff and straight, like a board, propped up on your forearms and toes.",
+        "how": [
+            "Get into a push-up position but rest on your forearms instead of your hands.",
+            "Make a straight line from your head to your heels.",
+            "Tighten your tummy muscles and keep breathing.",
+            "Hold still for the time given."
+        ],
+        "why": "Builds strength all through your middle, which helps with posture and balance.",
+        "mistakes": [
+            "Letting your hips sag down toward the floor.",
+            "Letting your hips poke up too high in the air.",
+            "Holding your breath instead of breathing steadily."
+        ],
+        "tip": "Picture a broomstick balanced along your back from head to heels — don't let it roll off."
+    },
+    "hollow_body_hold": {
+        "what": "Lie on your back and lift your arms and legs slightly, making a curved banana shape.",
+        "how": [
+            "Lie on your back with your arms stretched overhead.",
+            "Press your lower back firmly into the floor.",
+            "Lift your arms and legs a few inches off the floor.",
+            "Hold this curved shape still for the time given."
+        ],
+        "why": "Builds strength in your belly muscles and teaches your body to stay steady.",
+        "mistakes": [
+            "Letting your lower back lift off the floor.",
+            "Lifting your legs so high that you lose the curve.",
+            "Holding your breath instead of breathing steadily."
+        ],
+        "tip": "If this is too hard, bend your knees and keep your feet closer to the floor."
+    },
+    "russian_twist": {
+        "what": "Sit back slightly and twist side to side, like turning a steering wheel.",
+        "how": [
+            "Sit on the floor with your knees bent and lean back slightly.",
+            "Lift your feet a little off the floor if you can.",
+            "Clasp your hands together and twist to touch the floor on one side.",
+            "Twist to the other side and keep alternating."
+        ],
+        "why": "Strengthens the muscles along the sides of your middle.",
+        "mistakes": [
+            "Rounding your back instead of staying tall while leaning back.",
+            "Moving so fast that you lose control of the twist.",
+            "Twisting only your arms instead of your whole upper body."
+        ],
+        "tip": "Keep your feet down on the floor at first if lifting them feels too hard."
+    },
+    "bicycle_crunch": {
+        "what": "Lie on your back and pedal your legs while twisting side to side, like riding an upside-down bike.",
+        "how": [
+            "Lie on your back with your hands lightly behind your head.",
+            "Lift your knees and bring one knee toward your chest.",
+            "Twist to bring the opposite elbow toward that knee.",
+            "Switch sides in a smooth pedaling motion."
+        ],
+        "why": "Works your belly muscles from multiple directions at once.",
+        "mistakes": [
+            "Pulling hard on your neck with your hands.",
+            "Moving so fast that the twisting motion disappears.",
+            "Letting your lower back arch up off the floor."
+        ],
+        "tip": "Slow down and focus on really twisting your shoulder toward your knee."
+    },
+    "straight_leg_raise": {
+        "what": "Lie on your back and lift both straight legs up toward the ceiling, then lower them slowly.",
+        "how": [
+            "Lie on your back with your legs straight.",
+            "Lift both legs up until they point toward the ceiling.",
+            "Lower them slowly back down.",
+            "Stop just before your feet touch the floor, then lift again."
+        ],
+        "why": "Strengthens your lower belly muscles.",
+        "mistakes": [
+            "Letting your lower back arch up off the floor.",
+            "Lowering your legs too fast instead of slow and controlled.",
+            "Letting your feet touch the floor between reps."
+        ],
+        "tip": "Keep your lower back pressed flat against the floor the whole time."
+    },
+    "side_plank": {
+        "what": "Hold your body stiff and straight on your side, propped up on one forearm.",
+        "how": [
+            "Lie on your side and prop yourself up on one forearm.",
+            "Stack your feet on top of each other.",
+            "Lift your hips up so your body forms a straight line.",
+            "Hold still, then switch sides."
+        ],
+        "why": "Strengthens the muscles along the sides of your middle, which helps with balance.",
+        "mistakes": [
+            "Letting your hips sink down toward the floor.",
+            "Letting your top shoulder roll forward.",
+            "Forgetting to do both sides evenly."
+        ],
+        "tip": "Stack your shoulder directly over your elbow before you lift your hips."
+    },
+    "worlds_greatest_stretch": {
+        "what": "Step into a deep lunge and twist your body open, like you're unwrapping a present.",
+        "how": [
+            "Step forward into a deep lunge.",
+            "Place your front hand on the floor next to your front foot.",
+            "Twist your other arm up toward the ceiling, opening your chest.",
+            "Straighten your front leg for a stretch, then switch sides."
+        ],
+        "why": "Loosens up your hips, legs, and back all in one smooth move.",
+        "mistakes": [
+            "Rushing through the steps instead of holding each part for a moment.",
+            "Letting your front knee cave inward instead of staying steady.",
+            "Forgetting to switch and stretch the other side."
+        ],
+        "tip": "Move slowly through each part — there's no need to rush a stretch."
+    },
+    "deep_squat_hold": {
+        "what": "Squat down low and just sit there, holding the position.",
+        "how": [
+            "Stand with your feet shoulder-width apart.",
+            "Squat down low, keeping your heels flat on the floor.",
+            "Rest your elbows gently against the inside of your knees.",
+            "Hold the position, keeping your chest lifted."
+        ],
+        "why": "Loosens up your hips and ankles, and is a great way to rest between activities.",
+        "mistakes": [
+            "Letting your heels lift up off the floor.",
+            "Rounding your back instead of keeping your chest lifted.",
+            "Forcing yourself down too fast instead of easing in gently."
+        ],
+        "tip": "If your heels keep lifting, try placing a small rolled towel under them."
+    },
+    "pigeon_pose": {
+        "what": "Sit with one leg bent in front of you and the other stretched behind, like a resting pigeon.",
+        "how": [
+            "Start on your hands and knees.",
+            "Bring one knee forward and let that shin rest at an angle in front of you.",
+            "Stretch your other leg straight out behind you.",
+            "Lower your hips down and hold still, then switch sides."
+        ],
+        "why": "Loosens up tight hips, which often get stiff from sitting.",
+        "mistakes": [
+            "Forcing your hips down too fast instead of easing in slowly.",
+            "Letting your back leg twist instead of pointing straight back.",
+            "Forgetting to switch and stretch the other side."
+        ],
+        "tip": "Stay higher up on your hands at first — you can sink lower as your hips loosen over time."
+    },
+    "spinal_twist": {
+        "what": "Lie on your back and let your knee fall across your body for a gentle twist.",
+        "how": [
+            "Lie on your back with your legs straight.",
+            "Bring one knee up toward your chest.",
+            "Gently guide that knee across your body toward the floor.",
+            "Stretch your opposite arm out to the side and hold, then switch sides."
+        ],
+        "why": "Gently loosens up your back and feels relaxing.",
+        "mistakes": [
+            "Forcing the knee down too far instead of letting it settle naturally.",
+            "Holding your breath instead of breathing slowly.",
+            "Forgetting to switch and stretch the other side."
+        ],
+        "tip": "Let gravity do the work — relax and let your knee sink down on its own."
+    },
+    "doorway_pec_stretch": {
+        "what": "Rest your arms on a doorframe and lean forward gently to stretch your chest.",
+        "how": [
+            "Stand in a doorway.",
+            "Place your forearms on the door frame at shoulder height.",
+            "Gently lean your body forward through the doorway.",
+            "Hold still until you feel a comfortable stretch."
+        ],
+        "why": "Loosens up a chest and shoulders that get tight from sitting at a desk all day.",
+        "mistakes": [
+            "Leaning so far forward that it hurts instead of just stretches.",
+            "Holding your breath instead of breathing normally.",
+            "Letting your shoulders shrug up toward your ears."
+        ],
+        "tip": "Ease in slowly — you should feel a gentle pull, never sharp pain."
+    },
+    "downdog_calf_stretch": {
+        "what": "Make an upside-down V shape with your body and pedal your feet to stretch your calves.",
+        "how": [
+            "Get into an upside-down V shape with your hands and feet on the floor.",
+            "Press one heel down toward the floor.",
+            "Hold for a couple seconds, then switch to the other foot.",
+            "Keep alternating in a gentle pedaling motion."
+        ],
+        "why": "Loosens up the back of your lower legs.",
+        "mistakes": [
+            "Bending your knees too much instead of keeping legs mostly straight.",
+            "Rushing through instead of holding each side for a moment.",
+            "Letting your hips drop down low instead of staying lifted."
+        ],
+        "tip": "Bend the knee of the leg you're not stretching to make the move more comfortable."
+    },
+    "no_jump_burpee": {
+        "what": "Squat down, kick your feet back, do a push-up, then stand back up — no jumping needed.",
+        "how": [
+            "Start standing, then place your hands on the floor.",
+            "Step your feet back so you're in a push-up position.",
+            "Do one push-up, then step your feet forward again.",
+            "Stand back up to finish the move."
+        ],
+        "why": "Works your whole body and gets your heart pumping, without any jumping.",
+        "mistakes": [
+            "Letting your hips sag during the push-up part.",
+            "Rushing so much that your form falls apart.",
+            "Skipping the push-up instead of doing a full one."
+        ],
+        "tip": "Move at your own pace — this works just as well done slowly as done fast."
+    },
+    "mountain_climber": {
+        "what": "Hold a push-up position and drive your knees toward your chest quickly, one at a time.",
+        "how": [
+            "Get into a push-up position with your arms straight.",
+            "Drive one knee toward your chest.",
+            "Quickly switch and drive the other knee forward.",
+            "Keep alternating at a steady pace."
+        ],
+        "why": "Gets your heart pumping while also working your arms and middle.",
+        "mistakes": [
+            "Letting your hips bounce up and down instead of staying level.",
+            "Letting your hands drift too far forward.",
+            "Going so fast that your form falls apart."
+        ],
+        "tip": "Slow down if you feel wobbly — a controlled pace still works great."
+    },
+    "high_knees": {
+        "what": "Run in place, lifting your knees up high with each step.",
+        "how": [
+            "Stand tall with your feet hip-width apart.",
+            "Run in place, driving one knee up to hip height.",
+            "Quickly switch to the other knee.",
+            "Pump your arms and keep a fast, steady rhythm."
+        ],
+        "why": "Gets your heart pumping fast and works your legs at the same time.",
+        "mistakes": [
+            "Leaning back too far instead of staying upright.",
+            "Barely lifting your knees instead of bringing them up high.",
+            "Landing flat-footed and heavy instead of light on your toes."
+        ],
+        "tip": "Pretend you're running through tall grass and need to lift your knees to clear it."
+    },
+    "skater_jump": {
+        "what": "Hop side to side on one foot at a time, like a speed skater.",
+        "how": [
+            "Stand on one leg with a slight bend in your knee.",
+            "Push off and leap sideways onto your other foot.",
+            "Land softly with a slight knee bend.",
+            "Push off again and leap back the other way."
+        ],
+        "why": "Builds balance and leg strength while getting your heart pumping.",
+        "mistakes": [
+            "Landing stiff-legged instead of bending your knee to absorb the landing.",
+            "Looking down at your feet instead of ahead.",
+            "Jumping a distance that's too far for your comfort level."
+        ],
+        "tip": "Start with small hops and make them bigger only once you feel steady."
+    },
+    "plank_to_downdog": {
+        "what": "Move between a flat board position and an upside-down V shape.",
+        "how": [
+            "Start in a push-up position with your arms straight.",
+            "Push your hips up and back into an upside-down V shape.",
+            "Hold for a moment.",
+            "Flow back forward into the straight board position."
+        ],
+        "why": "Gets your heart rate up gently while also stretching your body.",
+        "mistakes": [
+            "Rushing through the movement instead of flowing smoothly.",
+            "Letting your hips sag in the board position.",
+            "Forgetting to breathe along with the movement."
+        ],
+        "tip": "Match each movement to a breath — push up and back as you breathe out."
+    },
+    "speed_squat": {
+        "what": "Do squats as quickly as you can while still doing them correctly.",
+        "how": [
+            "Stand with your feet shoulder-width apart.",
+            "Squat down quickly until your thighs are about flat.",
+            "Stand back up quickly to full height.",
+            "Repeat right away at a fast pace."
+        ],
+        "why": "Builds leg strength and gets your heart pumping at the same time.",
+        "mistakes": [
+            "Going so fast that you stop squatting low enough.",
+            "Letting your knees cave inward to keep up the pace.",
+            "Forgetting to fully stand up straight between reps."
+        ],
+        "tip": "If your form starts slipping, slow down — good squats beat fast sloppy ones."
+    },
+    "archer_push_up": {
+        "what": "Do a push-up while leaning your weight to one side, like pulling back a bow and arrow.",
+        "how": [
+            "Get into a push-up position with your hands wider than usual.",
+            "Lower your chest toward one hand while keeping your other arm straight out to the side.",
+            "Push back up to the starting position.",
+            "Repeat, leaning toward the other hand next time."
+        ],
+        "why": "Builds a lot of strength in one arm at a time, preparing you for harder moves.",
+        "mistakes": [
+            "Letting your hips sag instead of staying in a straight line.",
+            "Not lowering far enough toward the working hand.",
+            "Rushing through instead of controlling the lower and push."
+        ],
+        "tip": "Make sure you can already do regular push-ups comfortably before trying this one."
+    },
+    "pseudo_planche_push_up": {
+        "what": "Do a push-up with your hands turned backward and your shoulders leaning way forward.",
+        "how": [
+            "Place your hands facing backward at about hip level.",
+            "Lean your shoulders forward, past your wrists.",
+            "Bend your elbows to lower your chest while keeping that forward lean.",
+            "Push back up, keeping the lean the whole time."
+        ],
+        "why": "Builds serious strength in your shoulders and arms.",
+        "mistakes": [
+            "Losing the forward lean partway through the move.",
+            "Going too fast instead of staying slow and controlled.",
+            "Trying this before you're ready for it — it needs strong wrists."
+        ],
+        "tip": "Practice the lean by itself, without lowering down, until it feels stable."
+    },
+    "typewriter_push_up": {
+        "what": "Lower into a wide push-up, then shift your weight side to side like an old typewriter.",
+        "how": [
+            "Lower into the bottom of a wide push-up.",
+            "Shift your weight across to one hand.",
+            "Push up on that arm while keeping the other arm straight.",
+            "Shift back to the other side and repeat."
+        ],
+        "why": "Builds strength and control in each arm individually.",
+        "mistakes": [
+            "Letting your hips sag during the shift.",
+            "Rushing the side-to-side shift instead of moving with control.",
+            "Not lowering deep enough at the start."
+        ],
+        "tip": "Move slowly — the sideways shift is the hardest part, so don't rush it."
+    },
+    "plyometric_push_up": {
+        "what": "Push up so hard and fast that your hands leave the floor.",
+        "how": [
+            "Get into a push-up position.",
+            "Lower your chest toward the floor.",
+            "Push up explosively so your hands lift off the ground.",
+            "Land softly with bent elbows and lower right into the next rep."
+        ],
+        "why": "Builds power and speed in your arms and chest.",
+        "mistakes": [
+            "Landing stiff-armed instead of with soft, bent elbows.",
+            "Not pushing hard enough for your hands to actually leave the floor.",
+            "Rushing into the next rep without controlling the landing first."
+        ],
+        "tip": "Make sure regular push-ups feel easy before adding this explosive version."
+    },
+    "wall_handstand_hold": {
+        "what": "Kick up into a handstand against a wall and hold still, upside down.",
+        "how": [
+            "Start facing away from a wall in a kneeling position.",
+            "Kick one leg up and walk your hands back until your feet rest against the wall.",
+            "Stack your wrists, elbows, and shoulders in a straight line.",
+            "Hold the position, pressing the floor away with your hands."
+        ],
+        "why": "Builds serious shoulder and arm strength, plus a fun new skill.",
+        "mistakes": [
+            "Letting your back arch instead of staying straight.",
+            "Holding your breath instead of breathing steadily.",
+            "Trying this without a spotter or safe space the first few times."
+        ],
+        "tip": "Practice near a wall with someone nearby until you feel confident and steady."
+    },
+    "assisted_one_arm_push_up": {
+        "what": "Do a push-up on one hand while your other hand rests lightly on something low for support.",
+        "how": [
+            "Get into a push-up position with one hand on the floor and the other resting on a low support, like a book.",
+            "Keep your body square and facing the floor.",
+            "Lower with control on your main arm.",
+            "Push back up, then switch arms."
+        ],
+        "why": "Builds toward doing a full push-up on just one arm.",
+        "mistakes": [
+            "Letting your body twist to one side instead of staying square.",
+            "Relying too much on the support hand instead of your working arm.",
+            "Rushing through instead of lowering with control."
+        ],
+        "tip": "Use a taller support at first, and a lower one as you get stronger."
+    },
+    "assisted_pistol_squat": {
+        "what": "Squat all the way down on one leg while holding something for balance.",
+        "how": [
+            "Hold onto something sturdy for balance, like a doorframe.",
+            "Stand on one leg with the other leg stretched out in front of you.",
+            "Slowly squat down as low as you can on the standing leg.",
+            "Push back up to standing, then switch legs."
+        ],
+        "why": "Builds serious strength and balance in one leg at a time.",
+        "mistakes": [
+            "Letting your standing knee cave inward.",
+            "Rushing down instead of lowering with control.",
+            "Relying too heavily on your hands instead of your leg."
+        ],
+        "tip": "Hold something sturdy at first, and use less and less support as you get stronger."
+    },
+    "plyometric_lunge": {
+        "what": "Lunge down, then jump and switch your legs in the air.",
+        "how": [
+            "Step into a lunge with one foot forward.",
+            "Jump up, switching your legs in mid-air.",
+            "Land softly in a lunge with the opposite leg forward.",
+            "Immediately continue into the next jump."
+        ],
+        "why": "Builds powerful legs and gets your heart pumping fast.",
+        "mistakes": [
+            "Landing stiff-legged instead of bending your knees to absorb impact.",
+            "Losing your balance because the jump is too big.",
+            "Forgetting to land softly with control before the next jump."
+        ],
+        "tip": "Start with small, slow jumps and build up speed once you feel steady."
+    },
+    "single_leg_good_morning": {
+        "what": "Stand on one leg and bend forward, lifting your other leg straight out behind you.",
+        "how": [
+            "Stand on one leg with a slight bend in the knee.",
+            "Put your hands lightly behind your head.",
+            "Bend forward from your hips while your other leg lifts straight out behind you.",
+            "Push back up to standing, then switch legs."
+        ],
+        "why": "Builds balance along with strength in your legs and lower back.",
+        "mistakes": [
+            "Rounding your back instead of keeping it flat.",
+            "Wobbling out of control instead of moving slowly.",
+            "Letting your standing knee lock out stiffly."
+        ],
+        "tip": "Practice next to a wall or chair you can lightly touch if you lose your balance."
+    },
+    "shrimp_squat": {
+        "what": "Squat all the way down on one leg while holding your other foot behind you.",
+        "how": [
+            "Stand on one leg and hold your other foot up behind you with your hand.",
+            "Slowly lower your back knee toward the floor.",
+            "Keep your balance on the standing leg the whole way down.",
+            "Push back up to standing, then switch legs."
+        ],
+        "why": "Builds a huge amount of strength and balance in one leg at a time.",
+        "mistakes": [
+            "Rushing down instead of lowering with full control.",
+            "Letting your standing knee cave inward.",
+            "Losing your grip on your back foot, which throws off your balance."
+        ],
+        "tip": "Try this near a wall at first in case you need a hand to steady yourself."
+    },
+    "broad_jump": {
+        "what": "Jump forward as far as you can, then land softly.",
+        "how": [
+            "Stand with your feet shoulder-width apart.",
+            "Swing your arms back and bend your knees.",
+            "Explode forward, jumping as far as you can.",
+            "Land softly with bent knees, sinking into a squat."
+        ],
+        "why": "Builds explosive leg power.",
+        "mistakes": [
+            "Landing stiff-legged instead of bending your knees to absorb the landing.",
+            "Looking down instead of ahead while jumping.",
+            "Not leaving enough open space to land safely."
+        ],
+        "tip": "Make sure you have a long, clear, soft space in front of you before jumping."
+    },
+    "sprint_intervals": {
+        "what": "Run as fast as you possibly can for a short burst, then rest, and repeat.",
+        "how": [
+            "Pick a safe, open space to run.",
+            "Sprint at your fastest possible speed for 20 seconds.",
+            "Slow down and rest for 10 seconds.",
+            "Repeat the sprint-and-rest pattern for all the rounds."
+        ],
+        "why": "Builds speed and gets your heart and lungs working hard.",
+        "mistakes": [
+            "Not actually resting during the rest periods.",
+            "Starting too fast and running out of energy partway through.",
+            "Sprinting on an uneven or unsafe surface."
+        ],
+        "tip": "Pick a flat, clear path ahead of time so you can focus on running, not watching your feet."
+    },
+    "straddle_v_up": {
+        "what": "Lie on your back with legs spread wide, then sit up and reach for your toes.",
+        "how": [
+            "Lie on your back with your arms stretched overhead and legs spread wide.",
+            "Lift your upper body and legs up at the same time.",
+            "Reach your hands toward your feet at the top.",
+            "Lower back down slowly and with control."
+        ],
+        "why": "Builds a lot of strength in your belly muscles.",
+        "mistakes": [
+            "Using a fast jerky motion to sit up instead of a controlled lift.",
+            "Rushing the lowering part instead of taking your time.",
+            "Letting your legs come together instead of staying spread."
+        ],
+        "tip": "Lower down slowly, taking about three seconds — that's where most of the work happens."
+    },
+    "l_sit_hold": {
+        "what": "Sit on the floor and push your whole body up off the ground with just your hands.",
+        "how": [
+            "Sit on the floor with your legs stretched out in front of you.",
+            "Place your hands flat on the floor beside your hips.",
+            "Press down hard to lift your whole body off the floor.",
+            "Hold the position with your legs out straight."
+        ],
+        "why": "Builds incredible strength in your arms and belly muscles.",
+        "mistakes": [
+            "Letting your shoulders shrug up toward your ears.",
+            "Bending your knees when you don't need to yet.",
+            "Holding your breath instead of breathing steadily."
+        ],
+        "tip": "If holding your legs straight is too hard right now, tuck your knees in instead."
+    },
+    "pike_walk_out": {
+        "what": "Walk your hands down to the floor until you're in a stiff board shape, then walk back up.",
+        "how": [
+            "Stand with your feet hip-width apart.",
+            "Walk your hands down your legs and onto the floor.",
+            "Walk your hands forward until your body forms a straight line, like a board.",
+            "Walk your hands back toward your feet and stand back up."
+        ],
+        "why": "Builds strength in your belly muscles and shoulders together.",
+        "mistakes": [
+            "Letting your hips sag once you reach the straight position.",
+            "Rushing through instead of walking your hands slowly.",
+            "Bending your knees a lot to make it easier instead of keeping them straighter."
+        ],
+        "tip": "Take small steps with your hands — there's no rush to get all the way out."
+    },
+    "tuck_to_straight_leg_raise": {
+        "what": "Lie on your back, pull your knees in, then straighten your legs up high.",
+        "how": [
+            "Lie on your back with your arms stretched overhead, pressing into the floor.",
+            "Pull your knees in toward your chest.",
+            "Straighten your legs up toward the ceiling.",
+            "Lower your straight legs slowly, stopping just above the floor."
+        ],
+        "why": "Builds strength in your lower belly muscles.",
+        "mistakes": [
+            "Letting your lower back lift off the floor.",
+            "Lowering your legs too fast instead of slow and controlled.",
+            "Letting your legs touch the floor between reps."
+        ],
+        "tip": "Keep your lower back pressed flat against the floor the entire time."
+    },
+    "hollow_body_rock": {
+        "what": "Hold the curved banana shape and gently rock forward and backward.",
+        "how": [
+            "Lie on your back and lift into the curved hollow shape, arms and legs raised.",
+            "Gently rock your body forward.",
+            "Gently rock back the other way.",
+            "Keep rocking smoothly without losing the curved shape."
+        ],
+        "why": "Builds strength and control in your belly muscles.",
+        "mistakes": [
+            "Letting your back arch instead of staying curved.",
+            "Rocking so hard that you lose the shape completely.",
+            "Holding your breath instead of breathing steadily."
+        ],
+        "tip": "If you feel your back arching, that's the signal to stop and reset the curve."
+    },
+    "planche_lean": {
+        "what": "Hold a stiff board position on straight arms and lean your body forward over your hands.",
+        "how": [
+            "Start in a straight-arm board position.",
+            "Slowly shift your weight forward over your wrists.",
+            "Keep your whole body rigid and straight.",
+            "Hold the forward lean, then ease back to start."
+        ],
+        "why": "Builds a huge amount of strength in your shoulders and wrists.",
+        "mistakes": [
+            "Letting your hips sag instead of staying in a straight line.",
+            "Leaning so far forward that your wrists feel strained.",
+            "Rushing into a big lean before you're ready for it."
+        ],
+        "tip": "Start with a small lean and only go further forward as it feels comfortable."
+    },
+    "pancake_stretch": {
+        "what": "Sit with your legs spread wide and fold forward, flat like a pancake.",
+        "how": [
+            "Sit on the floor with your legs spread wide apart.",
+            "Keep your back flat.",
+            "Lean forward from your hips, walking your hands along the floor.",
+            "Relax and breathe deeply into the stretch."
+        ],
+        "why": "Loosens up your inner legs and hips.",
+        "mistakes": [
+            "Forcing yourself down too far instead of easing in gently.",
+            "Holding your breath instead of breathing slowly.",
+            "Rounding your back instead of keeping it flat."
+        ],
+        "tip": "Never force this stretch — let your breathing relax you deeper over time."
+    },
+    "bodyweight_jefferson_curl": {
+        "what": "Stand tall and slowly curl down one piece of your back at a time, like a wave.",
+        "how": [
+            "Stand with your feet together.",
+            "Starting from your head, curl your chin to your chest.",
+            "Keep curling down through your upper back, then your lower back, until you're hanging forward with your arms relaxed.",
+            "Slowly uncurl back up, starting from your lower back."
+        ],
+        "why": "Loosens up your whole back, one section at a time.",
+        "mistakes": [
+            "Rushing through instead of moving slowly, piece by piece.",
+            "Bending your knees a lot instead of keeping them mostly straight.",
+            "Bouncing at the bottom instead of hanging relaxed."
+        ],
+        "tip": "Take about five slow seconds to curl down and five more to come back up."
+    },
+    "front_split_prep": {
+        "what": "Kneel in a low lunge and slide your front foot forward to stretch toward a split.",
+        "how": [
+            "Kneel down in a low lunge with one foot forward.",
+            "Use your hands on the floor for support.",
+            "Slowly slide your front foot further forward.",
+            "Sink down as far as feels comfortable and hold."
+        ],
+        "why": "Loosens up your hips and legs over time.",
+        "mistakes": [
+            "Sliding forward too fast instead of slow and gradual.",
+            "Forcing yourself into pain instead of stopping at a gentle stretch.",
+            "Forgetting to switch and stretch the other side."
+        ],
+        "tip": "This takes weeks or months to improve — a tiny bit of progress each time is enough."
+    },
+    "cossack_squat": {
+        "what": "Stand wide and squat down on one leg while the other leg stays straight out to the side.",
+        "how": [
+            "Stand in a wide stance with your toes pointed slightly out.",
+            "Shift your weight onto one leg.",
+            "Squat down deep on that leg while your other leg stays straight out to the side.",
+            "Push back up to the middle, then switch sides."
+        ],
+        "why": "Loosens up your hips and builds leg strength at the same time.",
+        "mistakes": [
+            "Letting your heel lift off the floor on the squatting leg.",
+            "Rushing the shift from side to side.",
+            "Leaning your upper body too far forward."
+        ],
+        "tip": "Hold something sturdy nearby at first if your balance feels shaky."
+    },
+    "shoulder_cars": {
+        "what": "Move your arm through every direction it can go, like drawing a giant circle with your whole shoulder.",
+        "how": [
+            "Stand tall and hold one arm firmly against your side.",
+            "With your other arm, slowly lift it forward and up overhead.",
+            "Continue the circle by sweeping the arm behind your body.",
+            "Complete the circle back to the start, then switch arms."
+        ],
+        "why": "Keeps your shoulders moving well through their full range.",
+        "mistakes": [
+            "Moving too fast instead of slow and controlled.",
+            "Letting your back arch to help the arm move further.",
+            "Skipping parts of the circle instead of completing the whole range."
+        ],
+        "tip": "Move as slowly as you can — the slower you go, the more it helps your shoulder."
+    },
+    "wrist_prep": {
+        "what": "Move your wrists and fingers through different stretches to wake them up.",
+        "how": [
+            "Get on your hands and knees.",
+            "Make slow circles with your wrists in both directions.",
+            "Spread and curl your fingers slowly several times.",
+            "Gently lean your weight forward and back over your hands to stretch them."
+        ],
+        "why": "Gets your wrists ready for moves that put extra weight on your hands.",
+        "mistakes": [
+            "Skipping this before hand-balancing moves like handstands.",
+            "Moving too fast instead of slow and gentle.",
+            "Pushing through pain instead of stopping at a comfortable stretch."
+        ],
+        "tip": "Spend a couple of minutes here before any move that leans hard on your hands."
+    },
+    "full_burpee": {
+        "what": "Squat down, kick back to a board shape, do a push-up, jump your feet in, then jump up high.",
+        "how": [
+            "Start standing, then squat down and place your hands on the floor.",
+            "Kick your feet back into a push-up position and do one push-up.",
+            "Jump your feet back up to your hands.",
+            "Explode upward into a jump with your arms overhead."
+        ],
+        "why": "Works your entire body and gets your heart pumping hard.",
+        "mistakes": [
+            "Letting your hips sag during the push-up part.",
+            "Skipping the push-up to go faster.",
+            "Landing the jump stiff-legged instead of bending your knees."
+        ],
+        "tip": "Slow down and do each part fully — a slower complete burpee beats a fast sloppy one."
+    },
+    "tabata_mountain_climber": {
+        "what": "Do mountain climbers as fast as you can for short bursts, with quick rests in between.",
+        "how": [
+            "Get into a push-up position with your arms straight.",
+            "Drive your knees toward your chest as fast as you can, alternating legs.",
+            "Go at top speed for 20 seconds.",
+            "Rest for exactly 10 seconds, then repeat for all the rounds."
+        ],
+        "why": "Pushes your heart and lungs hard in short, intense bursts.",
+        "mistakes": [
+            "Letting your hips bounce up and down instead of staying level.",
+            "Skipping the rest periods instead of using them to recover.",
+            "Letting your form fall apart for the sake of speed."
+        ],
+        "tip": "It's okay to slow down slightly if your form starts slipping — staying steady matters more than raw speed."
+    },
+    "tuck_jump": {
+        "what": "Jump up high and pull both knees up to your chest in the air.",
+        "how": [
+            "Stand with your feet hip-width apart.",
+            "Dip down into a small squat.",
+            "Explode upward, pulling both knees toward your chest at the top.",
+            "Land softly with bent knees and reset for the next jump."
+        ],
+        "why": "Builds explosive power in your legs.",
+        "mistakes": [
+            "Landing stiff-legged instead of bending your knees to absorb impact.",
+            "Not pulling your knees high enough to really feel the move.",
+            "Rushing into the next jump before fully landing and resetting."
+        ],
+        "tip": "Focus on landing soft and quiet — that's the sign you're controlling the move well."
+    },
+    "tuck_jump_burpee": {
+        "what": "Do a burpee, but instead of just jumping up, pull your knees to your chest at the top.",
+        "how": [
+            "Start standing, then place your hands on the floor and kick back to a board shape.",
+            "Do one push-up, then jump your feet forward.",
+            "Explode upward, pulling both knees to your chest at the peak of the jump.",
+            "Land softly with bent knees and flow right into the next rep."
+        ],
+        "why": "Combines a full-body move with an explosive jump for extra heart-pumping effort.",
+        "mistakes": [
+            "Letting your hips sag during the push-up part.",
+            "Landing the jump stiff-legged instead of with bent knees.",
+            "Rushing so much that the push-up gets skipped or sloppy."
+        ],
+        "tip": "Make sure you're comfortable with a full burpee and a tuck jump separately before combining them."
+    },
+    "broad_jump_consecutive": {
+        "what": "Do several big jumps forward in a row without stopping in between.",
+        "how": [
+            "Stand with your feet shoulder-width apart.",
+            "Swing your arms back, bend your knees, and jump forward as far as you can.",
+            "Land with bent knees and immediately load into the next jump.",
+            "Repeat for the number of jumps in a row."
+        ],
+        "why": "Builds explosive leg power and teaches your body to recover quickly between efforts.",
+        "mistakes": [
+            "Pausing too long between jumps instead of flowing into the next one.",
+            "Landing stiff-legged instead of bending your knees.",
+            "Not leaving enough open space to land safely for every jump."
+        ],
+        "tip": "Pick a long, clear stretch of space before you start so you're not cut short mid-jump."
+    },
+    "shuttle_run": {
+        "what": "Sprint to a marker, touch it, then sprint back, over and over.",
+        "how": [
+            "Set up two markers a set distance apart.",
+            "Sprint from one marker to the other and touch it.",
+            "Sprint back to the starting marker and touch it.",
+            "Keep repeating for the number of lengths in a round, then rest before the next round."
+        ],
+        "why": "Builds speed along with the ability to change direction quickly.",
+        "mistakes": [
+            "Slowing down too early instead of sprinting through each marker.",
+            "Turning too sharply without slowing down a little first, which risks a slip.",
+            "Skipping the rest between rounds instead of using it to recover."
+        ],
+        "tip": "Practice on a surface with good grip so quick turns feel safe."
+    }
 };
 
 function renderDailyExercise(ex) {
@@ -1825,16 +2532,60 @@ function openExerciseModal(ex) {
     nameEl.id = 'ex-modal-name';
     nameEl.textContent = ex.name;
 
-    var instrEl = document.createElement('p');
-    instrEl.className = 'ex-modal-instructions';
-    instrEl.textContent = ex.instructions;
-
     modal.appendChild(closeBtn);
     modal.appendChild(nameEl);
-    modal.appendChild(instrEl);
 
     var data = COACH_DATA[ex.key];
     if (data) {
+        var whatSection = document.createElement('div');
+        whatSection.className = 'ex-modal-section';
+
+        var whatTitle = document.createElement('h3');
+        whatTitle.className = 'ex-modal-section-title';
+        whatTitle.textContent = 'What this is';
+
+        var whatText = document.createElement('p');
+        whatText.className = 'ex-modal-text';
+        whatText.textContent = data.what;
+
+        whatSection.appendChild(whatTitle);
+        whatSection.appendChild(whatText);
+        modal.appendChild(whatSection);
+
+        var howSection = document.createElement('div');
+        howSection.className = 'ex-modal-section';
+
+        var howTitle = document.createElement('h3');
+        howTitle.className = 'ex-modal-section-title';
+        howTitle.textContent = 'How to do it';
+
+        var howList = document.createElement('ol');
+        howList.className = 'ex-modal-list';
+        data.how.forEach(function (step) {
+            var li = document.createElement('li');
+            li.textContent = step;
+            howList.appendChild(li);
+        });
+
+        howSection.appendChild(howTitle);
+        howSection.appendChild(howList);
+        modal.appendChild(howSection);
+
+        var whySection = document.createElement('div');
+        whySection.className = 'ex-modal-section';
+
+        var whyTitle = document.createElement('h3');
+        whyTitle.className = 'ex-modal-section-title';
+        whyTitle.textContent = 'Why it matters';
+
+        var whyText = document.createElement('p');
+        whyText.className = 'ex-modal-text';
+        whyText.textContent = data.why;
+
+        whySection.appendChild(whyTitle);
+        whySection.appendChild(whyText);
+        modal.appendChild(whySection);
+
         var mistakesSection = document.createElement('div');
         mistakesSection.className = 'ex-modal-section';
 

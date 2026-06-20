@@ -1197,11 +1197,11 @@ body.theme-classic .theme-btn.active { background: rgba(79,70,229,.2); }
     padding-right: 1.5rem;
 }
 
-.ex-modal-instructions {
+.ex-modal-text {
     font-size: .875rem;
     line-height: 1.6;
     color: var(--gray-700);
-    margin: 0 0 1.1rem;
+    margin: 0;
 }
 
 .ex-modal-section { margin-bottom: 1rem; }
