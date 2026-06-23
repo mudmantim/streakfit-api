@@ -2917,6 +2917,7 @@ function openCoach(context) {
 
     _coachPanel.hidden = false;
     _updateRickyMoodBadge();
+    _coachPanel.scrollIntoView({ behavior: 'smooth', block: 'start' });
 
     if (context && context.type === 'insight') {
         _sendCoachMessage('Tell me more about today’s insight', context);
