@@ -2918,11 +2918,11 @@ async function _sendCoachMessage(message, context) {
     _coachSendBtn.disabled = false;
 
     if (!result || result.status === 0) {
-        _appendCoachMsg('coach', 'Coach isn’t available right now — try again later.');
+        _appendCoachMsg('coach', '🦝 Rickie stepped away from his burrow for a bit — try again in a little while.');
     } else if (result.status === 429) {
         _appendCoachMsg('coach', 'You’ve reached today’s question limit — come back tomorrow.');
     } else if (result.status !== 200) {
-        _appendCoachMsg('coach', 'Coach isn’t available right now — try again later.');
+        _appendCoachMsg('coach', '🦝 Rickie stepped away from his burrow for a bit — try again in a little while.');
     } else {
         _appendCoachMsg('coach', result.data.reply);
     }
