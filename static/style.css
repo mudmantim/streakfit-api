@@ -724,6 +724,11 @@ input:focus {
     color: var(--t-primary);
 }
 
+.coach-mood-badge {
+    font-size: .85rem;
+    line-height: 1;
+}
+
 .coach-close {
     background: none;
     border: none;
@@ -737,21 +742,30 @@ input:focus {
 .coach-close:hover { color: var(--gray-700); }
 
 .coach-thread {
-    max-height: 260px;
+    max-height: 320px;
     overflow-y: auto;
     margin-bottom: .65rem;
     display: flex;
     flex-direction: column;
-    gap: .45rem;
+    gap: .55rem;
+    scroll-behavior: smooth;
 }
 
 .coach-msg {
     font-size: .88rem;
-    line-height: 1.5;
-    padding: .5rem .7rem;
-    border-radius: 8px;
-    max-width: 88%;
+    line-height: 1.55;
+    padding: .6rem .8rem;
+    border-radius: 10px;
+    max-width: 90%;
     word-break: break-word;
+}
+
+.coach-msg-line {
+    margin: 0 0 .45rem;
+}
+
+.coach-msg-line:last-child {
+    margin-bottom: 0;
 }
 
 .coach-msg-coach {

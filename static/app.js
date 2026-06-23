@@ -2819,6 +2819,32 @@ var _coachThread  = null;
 var _coachInput   = null;
 var _coachSendBtn = null;
 
+// ── Ricky mood (UI-only — derived from existing currentUser data, never sent to the backend) ──
+
+var RICKY_MOODS = {
+    neutral:     { emoji: '🦝', title: 'Ready when you are' },
+    'warming-up': { emoji: '🔥', title: 'Streak warming up' },
+    'fired-up':   { emoji: '⚡', title: 'Streak is on fire' },
+    celebrating: { emoji: '🎉', title: 'Milestone day!' }
+};
+
+function getRickyMood() {
+    var streak = (currentUser && currentUser.current_streak) || 0;
+    if ([7, 14, 30, 100].indexOf(streak) !== -1) return 'celebrating';
+    if (streak >= 7) return 'fired-up';
+    if (streak >= 1) return 'warming-up';
+    return 'neutral';
+}
+
+function _updateRickyMoodBadge() {
+    var badge = document.getElementById('coach-mood-badge');
+    if (!badge) return;
+    var mood = RICKY_MOODS[getRickyMood()];
+    badge.textContent = mood.emoji;
+    badge.title = mood.title;
+    badge.className = 'coach-mood-badge coach-mood-' + getRickyMood();
+}
+
 function openCoach(context) {
     if (!_coachPanel) {
         _coachPanel = document.createElement('section');
@@ -2839,8 +2865,13 @@ function openCoach(context) {
         title.className = 'coach-title';
         title.textContent = 'Ricky';
 
+        var moodBadge = document.createElement('span');
+        moodBadge.id = 'coach-mood-badge';
+        moodBadge.className = 'coach-mood-badge';
+
         headerLeft.appendChild(avatar);
         headerLeft.appendChild(title);
+        headerLeft.appendChild(moodBadge);
 
         var closeBtn = document.createElement('button');
         closeBtn.className = 'coach-close';
@@ -2885,6 +2916,7 @@ function openCoach(context) {
     }
 
     _coachPanel.hidden = false;
+    _updateRickyMoodBadge();
 
     if (context && context.type === 'insight') {
         _sendCoachMessage('Tell me more about today’s insight', context);
@@ -2931,10 +2963,20 @@ async function _sendCoachMessage(message, context) {
 }
 
 function _appendCoachMsg(role, text) {
-    var el = document.createElement('p');
-    el.className = 'coach-msg coach-msg-' + role;
-    el.textContent = text;
-    _coachThread.appendChild(el);
+    var wrap = document.createElement('div');
+    wrap.className = 'coach-msg coach-msg-' + role;
+
+    var lines = text.split('\n').filter(function (line) { return line.trim() !== ''; });
+    if (lines.length === 0) lines = [text];
+
+    lines.forEach(function (line) {
+        var p = document.createElement('p');
+        p.className = 'coach-msg-line';
+        p.textContent = line; // textContent — never innerHTML
+        wrap.appendChild(p);
+    });
+
+    _coachThread.appendChild(wrap);
     _coachThread.scrollTop = _coachThread.scrollHeight;
-    return el;
+    return wrap;
 }
