@@ -865,6 +865,78 @@ def get_daily_brain_boost(date_str):
     return BRAIN_BOOST_LIBRARY[idx]
 
 
+# --- Ricky's joke library ---
+# Family-friendly, kid-friendly, fitness/health/wellness themed. No sarcasm,
+# no political or adult humor, no medical advice. Used by the Coach route to
+# give Ricky real, pre-written jokes to draw from instead of inventing one
+# on the fly when a user asks for a joke or something silly.
+
+RICKY_JOKES = [
+    "Why did the bicycle fall over? It was two-tired.",
+    "Why don't kettlebells ever tell secrets? They always spill the iron.",
+    "Why did the jump rope quit its job? It was tired of being skipped.",
+    "Why do stretches make terrible liars? They're always caught reaching.",
+    "What's a runner's favorite school subject? Jog-raphy.",
+    "What do you call a vegetable that lifts weights? A buff-et.",
+    "Why did the smoothie blush? It saw the blender's smooth moves.",
+    "What do you call a chicken at the gym? A hen-thusiast.",
+    "What's a tree's favorite exercise? Branch presses.",
+    "Why did the apple join the gym? It wanted to turn over a new leaf.",
+    "Why did the broccoli win the race? It was ahead by a sprout.",
+    "Why don't oranges ever skip leg day? They're always well-rounded.",
+    "What's a fish's favorite workout? The backstroke.",
+    "Why did the stairs get a promotion? They always stepped up.",
+    "What do you call a calm cucumber? Cool, collected, and well-hydrated.",
+    "Why did the egg go for a jog? It wanted to get a little more egg-cited.",
+    "Why did the pillow join the wellness club? It needed better support.",
+    "What do you call a dog that does yoga? A dog-a practitioner.",
+    "Why did the watermelon win an award? It was outstanding in its field.",
+    "Why did the salad get the lead role? It really dressed the part.",
+    "What do plants say after a workout? \"That was un-be-leaf-able!\"",
+    "What's a frog's favorite exercise? Jumping jacks.",
+    "Why did the grape stop exercising? It was raisin the bar too high.",
+    "What do you call a well-rested mountain? Boulder than ever.",
+    "Why did the tomato turn red? It saw the salad getting all the attention.",
+    "Why did the lemon stay positive? It always looked for the zest in life.",
+    "What do you call a strong bowl of soup? Souper fit.",
+    "What do you call a chill mushroom? A fungi who knows how to relax.",
+    "Why did the bread feel proud after baking? It really rose to the occasion.",
+    "What do you call a strong cup of tea? A steeped-up workout buddy.",
+    "What do you call a happy, hydrated flower? Well-watered and blooming.",
+    "What's a turtle's favorite exercise? Slow and steady stretching.",
+    "What do you call a strong loaf of bread? Well-kneaded.",
+    "Why did the squirrel do push-ups? To get ready for nut-cracking season.",
+    "What do you call a relaxed cactus? Low maintenance and well-grounded.",
+    "What's a snail's favorite kind of workout? Anything nice and slow.",
+    "What do you call a happy glass of water? Refreshed and ready for more.",
+    "Why did the banana feel great after the walk? It was finally peeling good.",
+    "Why did the celery look so fit? It always stayed crunchy and upright.",
+    "What do you call a strong, steady walk? A step in the right direction.",
+    "Why did the balloon skip the gym? It already felt light and full of air.",
+    "What do you call a calm wave at the beach? Totally board with stress.",
+    "Why did the clock stretch every morning? To keep good time with its joints.",
+    "What do you call a carrot that works out? Well-grounded and crunchy strong.",
+    "Why did the marathon runner bring a map? To find the long way to feeling great.",
+    "What do you call a happy pair of running shoes? Sole mates.",
+    "Why did the avocado feel zen after yoga? It found its inner pit of calm.",
+    "What do you call a strong, calm ocean? Well-balanced and full of good vibes.",
+    "Why did the spinach feel unstoppable? It always had a leafy green attitude.",
+    "What do you call a peaceful nap after a long walk? A well-earned recharge.",
+    "Why did the cyclist bring an umbrella? To stay ahead of any rainy excuses.",
+    "What do you call a flexible willow tree? Bendy, balanced, and proud of it.",
+    "Why did the granola bar feel confident? It was packed with good energy.",
+    "What do you call a calm, steady heartbeat after a walk? A job well done.",
+    "Why did the orange peel stay positive? It always saw the bright side.",
+    "What do you call a strong handshake after a workout? A grip well earned.",
+    "Why did the cloud feel lighter after the rain? It let go of what it didn't need.",
+    "What do you call a well-stretched rubber band? Flexible and ready for anything.",
+    "Why did the river keep moving? It liked the steady flow of a good routine.",
+    "What do you call a happy, well-rested raccoon? Ricky, probably.",
+]
+
+_JOKE_TRIGGER_WORDS = ('joke', 'funny', 'silly', 'laugh', 'pun', 'hilarious')
+
+
 def get_user_stats(user_id):
     """Return current_streak, best_streak, total_missions, and brain_boost_answers."""
     completed_dates = sorted(set(db.session.execute(
@@ -1511,7 +1583,7 @@ def answer_brain_boost():
 # --- Coach v1 ---
 
 _COACH_SYSTEM_PROMPT = """\
-You are Rickie, a friendly raccoon who is StreakFit's mascot and coach. You help users \
+You are Ricky, a friendly raccoon who is StreakFit's mascot and coach. You help users \
 understand how StreakFit works and expand on Today's Insight. Be direct and brief. \
 Answer first. No filler.
 
@@ -1523,6 +1595,11 @@ tone approachable for kids, adults, and seniors alike. Never shame a user for mi
 day or falling behind. Never diagnose a condition, assess an injury, or imply medical \
 expertise — if something sounds like it needs that, say so plainly and suggest they check \
 with a professional.
+
+If the user asks for a joke, a funny fact, or something silly, share one of \
+the jokes provided to you in this prompt (verbatim or lightly adapted) \
+instead of redirecting back to StreakFit features. After the joke, gently \
+bring the conversation back to today's mission in one short, warm line.
 
 StreakFit features:
 
@@ -1544,7 +1621,8 @@ Rise Again — a one-time screen shown when a user with a best streak of 7 or mo
 returns after their streak has broken. It acknowledges the return. \
 No statistics, no guilt, no comparison. Copy: "You came back. That's what matters."
 
-Only answer questions about StreakFit features described above and Today's Insight.
+Only answer questions about StreakFit features described above, Today's Insight, \
+and — when asked — a family-friendly joke from the list provided to you.
 Do not answer questions about fitness training, exercise substitutions, \
 nutrition, diet, medical topics, Teams, or Campfire.
 If a question is out of scope, respond with exactly: \
@@ -1582,6 +1660,14 @@ def coach():
                 "The user wants to know more about this insight. "
                 "Add depth without restating it verbatim."
             )
+
+    if any(word in message.lower() for word in _JOKE_TRIGGER_WORDS):
+        sample = random.sample(RICKY_JOKES, min(5, len(RICKY_JOKES)))
+        system += (
+            "\n\nThe user seems to want a joke or something silly. Here are some "
+            "options you can use (pick one, verbatim or lightly adapted):\n- "
+            + "\n- ".join(sample)
+        )
 
     try:
         client   = _anthropic_lib.Anthropic(api_key=_anthropic_api_key)

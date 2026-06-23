@@ -760,11 +760,11 @@ function renderInsightCard(insight) {
     var teaserAvatar = document.createElement('img');
     teaserAvatar.className = 'rickie-avatar-sm';
     teaserAvatar.src = '/static/rickie.svg';
-    teaserAvatar.alt = 'Rickie';
+    teaserAvatar.alt = 'Ricky';
 
     var teaserText = document.createElement('p');
     teaserText.className = 'insight-teaser-text';
-    teaserText.textContent = '🦝 Rickie found today\'s Insight...';
+    teaserText.textContent = '🦝 Ricky found today\'s Insight...';
 
     teaserTop.appendChild(teaserAvatar);
     teaserTop.appendChild(teaserText);
@@ -827,11 +827,11 @@ function renderBrainBoostCard(brainBoost) {
     var teaserAvatar = document.createElement('img');
     teaserAvatar.className = 'rickie-avatar-sm';
     teaserAvatar.src = '/static/rickie.svg';
-    teaserAvatar.alt = 'Rickie';
+    teaserAvatar.alt = 'Ricky';
 
     var teaserText = document.createElement('p');
     teaserText.className = 'insight-teaser-text';
-    teaserText.textContent = '🦝 Rickie found today\'s Brain Boost...';
+    teaserText.textContent = '🦝 Ricky found today\'s Brain Boost...';
 
     teaserTop.appendChild(teaserAvatar);
     teaserTop.appendChild(teaserText);
@@ -890,8 +890,8 @@ function renderBrainBoostQuestion(brainBoost) {
             if (i === correctIndex) btn.classList.add('bb-option-correct');
         });
         feedback.textContent = correct
-            ? '🦝 Rickie\'s impressed — you got it!'
-            : '🦝 Even Rickie had to think about that one.';
+            ? '🦝 Ricky\'s impressed — you got it!'
+            : '🦝 Even Ricky had to think about that one.';
         feedback.className = 'bb-feedback ' + (correct ? 'bb-feedback-correct' : 'bb-feedback-incorrect');
         feedback.hidden = false;
 
@@ -2833,11 +2833,11 @@ function openCoach(context) {
         var avatar = document.createElement('img');
         avatar.className = 'coach-avatar';
         avatar.src = '/static/rickie.svg';
-        avatar.alt = 'Rickie';
+        avatar.alt = 'Ricky';
 
         var title = document.createElement('p');
         title.className = 'coach-title';
-        title.textContent = 'Rickie';
+        title.textContent = 'Ricky';
 
         headerLeft.appendChild(avatar);
         headerLeft.appendChild(title);
@@ -2861,7 +2861,7 @@ function openCoach(context) {
         _coachInput = document.createElement('input');
         _coachInput.type = 'text';
         _coachInput.className = 'coach-input';
-        _coachInput.placeholder = 'Ask Rickie…';
+        _coachInput.placeholder = 'Ask Ricky…';
         _coachInput.maxLength = 500;
         _coachInput.setAttribute('autocomplete', 'off');
         _coachInput.addEventListener('keydown', function (e) {
@@ -2918,11 +2918,11 @@ async function _sendCoachMessage(message, context) {
     _coachSendBtn.disabled = false;
 
     if (!result || result.status === 0) {
-        _appendCoachMsg('coach', '🦝 Rickie stepped away from his burrow for a bit — try again in a little while.');
+        _appendCoachMsg('coach', '🦝 Ricky stepped away from his burrow for a bit — try again in a little while.');
     } else if (result.status === 429) {
         _appendCoachMsg('coach', 'You’ve reached today’s question limit — come back tomorrow.');
     } else if (result.status !== 200) {
-        _appendCoachMsg('coach', '🦝 Rickie stepped away from his burrow for a bit — try again in a little while.');
+        _appendCoachMsg('coach', '🦝 Ricky stepped away from his burrow for a bit — try again in a little while.');
     } else {
         _appendCoachMsg('coach', result.data.reply);
     }
