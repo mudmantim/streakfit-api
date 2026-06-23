@@ -866,7 +866,7 @@ def get_daily_brain_boost(date_str):
 
 
 def get_user_stats(user_id):
-    """Return current_streak, best_streak, and total_missions from one query."""
+    """Return current_streak, best_streak, total_missions, and brain_boost_answers."""
     completed_dates = sorted(set(db.session.execute(
         db.select(DailyCompletion.date)
         .where(DailyCompletion.user_id == user_id)
@@ -876,8 +876,14 @@ def get_user_stats(user_id):
 
     total_missions = len(completed_dates)
 
+    brain_boost_answers = db.session.execute(
+        db.select(db.func.count(BrainBoostAnswer.id))
+        .where(BrainBoostAnswer.user_id == user_id)
+    ).scalar() or 0
+
     if not completed_dates:
-        return {'current_streak': 0, 'best_streak': 0, 'total_missions': 0}
+        return {'current_streak': 0, 'best_streak': 0, 'total_missions': 0,
+                'brain_boost_answers': brain_boost_answers}
 
     date_set = set(completed_dates)
     today     = date.today()
@@ -896,7 +902,8 @@ def get_user_stats(user_id):
         best = max(best, run)
         prev = d
 
-    return {'current_streak': current, 'best_streak': best, 'total_missions': total_missions}
+    return {'current_streak': current, 'best_streak': best, 'total_missions': total_missions,
+            'brain_boost_answers': brain_boost_answers}
 
 
 def get_daily_exercises(user_id, date_str, skill_level):
@@ -1151,7 +1158,8 @@ def get_me():
         "display_mode": user.display_mode,
         "current_streak": stats['current_streak'],
         "best_streak": stats['best_streak'],
-        "total_missions": stats['total_missions']
+        "total_missions": stats['total_missions'],
+        "brain_boost_answers": stats['brain_boost_answers']
     }), 200
 
 @app.route('/api/me', methods=['PATCH'])
@@ -1186,7 +1194,8 @@ def update_me():
         "display_mode": user.display_mode,
         "current_streak": stats['current_streak'],
         "best_streak": stats['best_streak'],
-        "total_missions": stats['total_missions']
+        "total_missions": stats['total_missions'],
+        "brain_boost_answers": stats['brain_boost_answers']
     }), 200
 
 @app.route('/api/challenges', methods=['POST'])

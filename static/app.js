@@ -528,6 +528,15 @@ async function loadDailyExercises() {
         statsRow.hidden = false;
     }
 
+    // Populate Progress Signal card (missions, streak, Brain Boost answers)
+    var progressCard = document.getElementById('progress-card');
+    if (progressCard && currentUser) {
+        document.getElementById('progress-missions').textContent    = currentUser.total_missions || 0;
+        document.getElementById('progress-streak').textContent      = currentUser.current_streak || 0;
+        document.getElementById('progress-brain-boost').textContent = currentUser.brain_boost_answers || 0;
+        progressCard.hidden = false;
+    }
+
     // Update progress bar
     var pct = (daily.completed_count / 5) * 100;
     var bar = document.getElementById('daily-progress-bar');
