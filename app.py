@@ -646,6 +646,97 @@ def get_daily_insight(date_str):
     return INSIGHT_LIBRARY[idx]
 
 
+# --- Brain Boost ---
+# One multiple-choice question per day, same question for every user that day
+# (same day-of-year indexing pattern as Today's Insight). Answering is optional,
+# allowed once per user per day, and never affects streaks or completion.
+
+BRAIN_BOOST_CORRECT_POINTS = 10
+BRAIN_BOOST_INCORRECT_POINTS = 3
+
+BRAIN_BOOST_LIBRARY = [
+    {'question': "About how long should you hold a stretch for it to actually help?",
+     'options': ["2-3 seconds", "20-30 seconds", "5 minutes", "It doesn't matter"],
+     'correct_index': 1,
+     'explanation': "Holding a stretch for 20 to 30 seconds gives your muscles enough time to actually relax and lengthen — shorter than that barely does anything."},
+    {'question': "What usually causes muscle soreness a day or two after exercise?",
+     'options': ["Muscle damage that's getting worse", "Your body repairing and adapting",
+                 "Dehydration only", "A sign you should stop exercising"],
+     'correct_index': 1,
+     'explanation': "That achy feeling usually means your muscles are rebuilding stronger, not breaking down further. Sharp, lasting pain is the one to actually worry about."},
+    {'question': "Which helps most people fall asleep faster?",
+     'options': ["A warmer room", "A cooler room", "Bright lights before bed", "A late afternoon nap"],
+     'correct_index': 1,
+     'explanation': "Your body naturally drops in temperature to fall asleep, so a cooler room works with that instead of against it."},
+    {'question': "What's a good way to test your balance at home?",
+     'options': ["Standing on one foot for a few seconds", "Running in place",
+                 "Holding your breath", "Closing both eyes while walking fast"],
+     'correct_index': 0,
+     'explanation': "A simple one-foot stand is one of the easiest ways to check — and train — your balance, no equipment needed."},
+    {'question': "How much does a short walk after a meal typically help?",
+     'options': ["No effect at all", "Helps your body handle the food better",
+                 "Only helps if it's an hour long", "Only helps before eating"],
+     'correct_index': 1,
+     'explanation': "Even a short walk after eating can help your body process that meal more smoothly — you don't need a long workout for the benefit."},
+    {'question': "What's true about flexibility throughout the day?",
+     'options': ["You're equally flexible all day", "Most people are looser in the evening",
+                 "Morning is always more flexible", "Flexibility doesn't change"],
+     'correct_index': 1,
+     'explanation': "Your muscles warm up over the course of the day, so most people are naturally more flexible by evening than first thing in the morning."},
+    {'question': "What's the best way to build a new habit?",
+     'options': ["Make it as big as possible right away", "Tie it to something you already do every day",
+                 "Only do it when you feel motivated", "Wait until you have a perfect plan"],
+     'correct_index': 1,
+     'explanation': "Habits stick best when they ride along with something you already do every day — like stretching right after you brush your teeth."},
+    {'question': "Which is closest to the size of your heart?",
+     'options': ["A grain of rice", "About the size of your fist",
+                 "The size of a basketball", "The size of your head"],
+     'correct_index': 1,
+     'explanation': "Your heart is roughly the size of your own closed fist — small, but it beats around 100,000 times a day."},
+    {'question': "What's the best response to missing one day of a habit?",
+     'options': ["Start over from scratch next month", "Just continue the next day",
+                 "Quit the habit entirely", "Double the work the next day"],
+     'correct_index': 1,
+     'explanation': "One missed day almost never breaks a habit — what actually breaks it is treating one miss as a reason to quit."},
+    {'question': "What does climbing stairs do, compared to most everyday movements?",
+     'options': ["Works fewer muscles than walking",
+                 "Works more muscles at once than almost any other everyday movement",
+                 "Has no real exercise benefit", "Only works your calves"],
+     'correct_index': 1,
+     'explanation': "Climbing stairs works your legs, core, and even your arms (if you swing them) all at once — it's a surprisingly complete movement."},
+    {'question': "How do kids tend to pick up movement habits?",
+     'options': ["From being told to be active", "Mostly by copying the adults around them",
+                 "Movement habits aren't learned", "Only from school gym class"],
+     'correct_index': 1,
+     'explanation': "Kids tend to mirror what they see at home far more than what they're told to do — movement included."},
+    {'question': "What helps most people get better at balance?",
+     'options': ["One long practice session, once", "Short, frequent practice",
+                 "Avoiding any unstable surfaces", "Only practicing with eyes closed"],
+     'correct_index': 1,
+     'explanation': "Balance improves fastest with little, regular practice — a minute here and there beats one long session."},
+    {'question': "True or false: pound for pound, bones are stronger than steel.",
+     'options': ["True", "False", "Only baby bones", "Only in animals, not humans"],
+     'correct_index': 0,
+     'explanation': "Pound for pound, bone is actually stronger than steel — it's just lighter, so a steel beam the same size would weigh far more."},
+    {'question': "What's true about short naps?",
+     'options': ["Any nap ruins your night's sleep", "A short nap can help focus without ruining night sleep",
+                 "Naps are only useful for kids", "Naps should always be 2+ hours"],
+     'correct_index': 1,
+     'explanation': "A short nap (think 10-20 minutes) can sharpen focus without leaving you groggy or messing with your sleep that night."},
+    {'question': "What's a good sign that recovery, not damage, happened after a workout?",
+     'options': ["Sharp pain that doesn't go away", "General tiredness and mild soreness",
+                 "Swelling that gets worse for a week", "Inability to move the area at all"],
+     'correct_index': 1,
+     'explanation': "Mild soreness and tiredness are normal signs of recovery. Sharp pain that lingers or gets worse is your body asking you to back off."},
+]
+
+
+def get_daily_brain_boost(date_str):
+    d = date.fromisoformat(date_str)
+    idx = (d.timetuple().tm_yday - 1) % len(BRAIN_BOOST_LIBRARY)
+    return BRAIN_BOOST_LIBRARY[idx]
+
+
 def get_user_stats(user_id):
     """Return current_streak, best_streak, and total_missions from one query."""
     completed_dates = sorted(set(db.session.execute(
@@ -779,6 +870,19 @@ class DailyCompletion(db.Model):
     __table_args__ = (
         db.UniqueConstraint('user_id', 'date', 'exercise_key', name='uq_daily_completion'),
         db.Index('ix_daily_completion_user_date', 'user_id', 'date'),
+    )
+
+class BrainBoostAnswer(db.Model):
+    __tablename__ = 'brain_boost_answer'
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    date = db.Column(db.Date, nullable=False)
+    correct = db.Column(db.Boolean, nullable=False)
+    points_earned = db.Column(db.Integer, nullable=False)
+    answered_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+
+    __table_args__ = (
+        db.UniqueConstraint('user_id', 'date', name='uq_brain_boost_answer'),
     )
 
 # --- Frontend ---
@@ -1058,6 +1162,25 @@ def get_daily():
     today_str = today.isoformat()
     exercises = get_daily_exercises(user_id, today_str, user.skill_level)
     insight   = get_daily_insight(today_str)
+    boost     = get_daily_brain_boost(today_str)
+
+    boost_answer = db.session.execute(
+        db.select(BrainBoostAnswer).where(
+            BrainBoostAnswer.user_id == user_id,
+            BrainBoostAnswer.date == today
+        )
+    ).scalar_one_or_none()
+
+    brain_boost_payload = {
+        "question": boost['question'],
+        "options": boost['options'],
+        "answered": boost_answer is not None,
+    }
+    if boost_answer is not None:
+        brain_boost_payload["correct"] = boost_answer.correct
+        brain_boost_payload["points_earned"] = boost_answer.points_earned
+        brain_boost_payload["correct_index"] = boost['correct_index']
+        brain_boost_payload["explanation"] = boost['explanation']
 
     completed_keys = set(db.session.execute(
         db.select(DailyCompletion.exercise_key).where(
@@ -1095,6 +1218,7 @@ def get_daily():
         "completed_count": len(completed_keys),
         "rise_again": rise_again,
         "insight": insight,
+        "brain_boost": brain_boost_payload,
         "exercises": [
             {
                 "key": ex['key'],
@@ -1181,6 +1305,69 @@ def complete_daily_exercise(exercise_key):
         "message": "Exercise completed",
         "exercise_key": exercise_key,
         "completed_count": completed_count
+    }), 200
+
+
+@app.route('/api/brain-boost/answer', methods=['POST'])
+@jwt_required()
+def answer_brain_boost():
+    data = request.get_json(silent=True) or {}
+    selected_index = data.get('selected_index')
+    if not isinstance(selected_index, int) or isinstance(selected_index, bool):
+        return jsonify({"error": "selected_index_required"}), 400
+
+    user_id = int(get_jwt_identity())
+    today = date.today()
+    boost = get_daily_brain_boost(today.isoformat())
+
+    if selected_index < 0 or selected_index >= len(boost['options']):
+        return jsonify({"error": "invalid_selected_index"}), 400
+
+    existing = db.session.execute(
+        db.select(BrainBoostAnswer).where(
+            BrainBoostAnswer.user_id == user_id,
+            BrainBoostAnswer.date == today
+        )
+    ).scalar_one_or_none()
+
+    if existing:
+        return jsonify({
+            "correct": existing.correct,
+            "points_earned": existing.points_earned,
+            "correct_index": boost['correct_index'],
+            "explanation": boost['explanation']
+        }), 200
+
+    is_correct = (selected_index == boost['correct_index'])
+    points = BRAIN_BOOST_CORRECT_POINTS if is_correct else BRAIN_BOOST_INCORRECT_POINTS
+
+    try:
+        db.session.add(BrainBoostAnswer(
+            user_id=user_id, date=today, correct=is_correct, points_earned=points
+        ))
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+        existing = db.session.execute(
+            db.select(BrainBoostAnswer).where(
+                BrainBoostAnswer.user_id == user_id,
+                BrainBoostAnswer.date == today
+            )
+        ).scalar_one_or_none()
+        if existing:
+            return jsonify({
+                "correct": existing.correct,
+                "points_earned": existing.points_earned,
+                "correct_index": boost['correct_index'],
+                "explanation": boost['explanation']
+            }), 200
+        abort(500)
+
+    return jsonify({
+        "correct": is_correct,
+        "points_earned": points,
+        "correct_index": boost['correct_index'],
+        "explanation": boost['explanation']
     }), 200
 
 

@@ -556,6 +556,45 @@ input:focus {
     color: var(--gray-700);
 }
 
+/* ── Brain Boost teaser / reveal ──────────────────────────────────────────── */
+.insight-teaser-top {
+    display: flex;
+    align-items: center;
+    gap: .6rem;
+    margin-bottom: .65rem;
+}
+
+.rickie-avatar-sm {
+    width: 32px;
+    height: 32px;
+    flex-shrink: 0;
+    border-radius: 50%;
+    background: var(--indigo-pale);
+}
+
+.insight-teaser-text {
+    font-size: .9rem;
+    line-height: 1.55;
+    color: var(--gray-700);
+    margin: 0;
+}
+
+.insight-reveal-btn {
+    background: var(--t-primary);
+    color: #fff;
+    border: none;
+    border-radius: 8px;
+    padding: .65rem 1rem;
+    font-size: .85rem;
+    font-weight: 700;
+    cursor: pointer;
+    min-height: 44px;
+    -webkit-tap-highlight-color: transparent;
+    transition: opacity .15s, transform .1s;
+}
+.insight-reveal-btn:hover  { opacity: .85; }
+.insight-reveal-btn:active { transform: scale(.97); }
+
 /* ── Insight tell-more link ───────────────────────────────────────────────── */
 .insight-tell-more {
     background: none;
@@ -571,6 +610,77 @@ input:focus {
 }
 
 .insight-tell-more:hover { opacity: .75; }
+
+/* ── Brain Boost question (multiple choice) ───────────────────────────────── */
+.bb-question-wrap {
+    margin-bottom: .85rem;
+    padding-bottom: .75rem;
+    border-bottom: 1px solid var(--gray-200);
+}
+
+.bb-question-text {
+    font-size: .92rem;
+    font-weight: 700;
+    color: var(--gray-900);
+    margin: 0 0 .65rem;
+    line-height: 1.45;
+}
+
+.bb-options {
+    display: flex;
+    flex-direction: column;
+    gap: .5rem;
+}
+
+.bb-option-btn {
+    width: 100%;
+    min-height: 44px;
+    text-align: left;
+    background: #fff;
+    border: 1.5px solid var(--gray-200);
+    border-radius: 8px;
+    padding: .6rem .85rem;
+    font-size: .87rem;
+    color: var(--gray-700);
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+    transition: border-color .15s, background .15s;
+}
+
+.bb-option-btn:hover:not(:disabled) { border-color: var(--t-primary); }
+.bb-option-btn:active:not(:disabled) { transform: scale(.99); }
+.bb-option-btn:disabled { cursor: default; opacity: .7; }
+
+.bb-option-correct {
+    border-color: var(--green) !important;
+    background: var(--green-light) !important;
+    color: #065f46 !important;
+    font-weight: 700;
+    opacity: 1 !important;
+}
+
+.bb-feedback {
+    margin: .65rem 0 0;
+    font-size: .85rem;
+    font-weight: 700;
+}
+
+.bb-feedback-correct   { color: #065f46; }
+.bb-feedback-incorrect { color: #92400e; }
+
+.bb-explanation {
+    font-size: .85rem;
+    line-height: 1.55;
+    color: var(--gray-700);
+    margin: .4rem 0 0;
+}
+
+.bb-points-note {
+    font-size: .75rem;
+    font-weight: 600;
+    color: var(--gray-500);
+    margin: .5rem 0 0;
+}
 
 /* ── Coach panel ──────────────────────────────────────────────────────────── */
 .coach-panel {

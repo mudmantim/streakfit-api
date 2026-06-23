@@ -633,6 +633,9 @@ async function loadDailyExercises() {
         if (daily.insight) {
             list.appendChild(renderInsightCard(daily.insight));
         }
+        if (daily.brain_boost) {
+            list.appendChild(renderBrainBoostCard(daily.brain_boost));
+        }
     }
 
     // Render exercises
@@ -739,6 +742,35 @@ function renderInsightCard(insight) {
     var card = document.createElement('div');
     card.className = 'insight-card';
 
+    var teaser = document.createElement('div');
+    teaser.className = 'insight-teaser';
+
+    var teaserTop = document.createElement('div');
+    teaserTop.className = 'insight-teaser-top';
+
+    var teaserAvatar = document.createElement('img');
+    teaserAvatar.className = 'rickie-avatar-sm';
+    teaserAvatar.src = '/static/rickie.svg';
+    teaserAvatar.alt = 'Rickie';
+
+    var teaserText = document.createElement('p');
+    teaserText.className = 'insight-teaser-text';
+    teaserText.textContent = '🦝 Rickie found today\'s Insight...';
+
+    teaserTop.appendChild(teaserAvatar);
+    teaserTop.appendChild(teaserText);
+
+    var revealBtn = document.createElement('button');
+    revealBtn.className = 'insight-reveal-btn';
+    revealBtn.textContent = 'Reveal Insight';
+
+    teaser.appendChild(teaserTop);
+    teaser.appendChild(revealBtn);
+
+    var revealed = document.createElement('div');
+    revealed.className = 'insight-revealed';
+    revealed.hidden = true;
+
     var category = document.createElement('p');
     category.className = 'insight-category';
     category.textContent = insight.category;
@@ -747,8 +779,8 @@ function renderInsightCard(insight) {
     text.className = 'insight-text';
     text.textContent = insight.text;
 
-    card.appendChild(category);
-    card.appendChild(text);
+    revealed.appendChild(category);
+    revealed.appendChild(text);
 
     if (!isGuest) {
         var tellMore = document.createElement('button');
@@ -757,10 +789,147 @@ function renderInsightCard(insight) {
         tellMore.addEventListener('click', function () {
             openCoach({ type: 'insight', insight_text: insight.text, insight_category: insight.category });
         });
-        card.appendChild(tellMore);
+        revealed.appendChild(tellMore);
     }
 
+    revealBtn.addEventListener('click', function () {
+        teaser.hidden = true;
+        revealed.hidden = false;
+    });
+
+    card.appendChild(teaser);
+    card.appendChild(revealed);
+
     return card;
+}
+
+// ── Brain Boost card (own card, multiple choice, answer once, no penalties) ───
+
+function renderBrainBoostCard(brainBoost) {
+    var card = document.createElement('div');
+    card.className = 'insight-card';
+
+    var teaser = document.createElement('div');
+    teaser.className = 'insight-teaser';
+
+    var teaserTop = document.createElement('div');
+    teaserTop.className = 'insight-teaser-top';
+
+    var teaserAvatar = document.createElement('img');
+    teaserAvatar.className = 'rickie-avatar-sm';
+    teaserAvatar.src = '/static/rickie.svg';
+    teaserAvatar.alt = 'Rickie';
+
+    var teaserText = document.createElement('p');
+    teaserText.className = 'insight-teaser-text';
+    teaserText.textContent = '🦝 Rickie found today\'s Brain Boost...';
+
+    teaserTop.appendChild(teaserAvatar);
+    teaserTop.appendChild(teaserText);
+
+    var revealBtn = document.createElement('button');
+    revealBtn.className = 'insight-reveal-btn';
+    revealBtn.textContent = 'Reveal Brain Boost';
+
+    teaser.appendChild(teaserTop);
+    teaser.appendChild(revealBtn);
+
+    var revealed = document.createElement('div');
+    revealed.className = 'insight-revealed';
+    revealed.hidden = true;
+    revealed.appendChild(renderBrainBoostQuestion(brainBoost));
+
+    revealBtn.addEventListener('click', function () {
+        teaser.hidden = true;
+        revealed.hidden = false;
+    });
+
+    card.appendChild(teaser);
+    card.appendChild(revealed);
+
+    return card;
+}
+
+function renderBrainBoostQuestion(brainBoost) {
+    var wrap = document.createElement('div');
+    wrap.className = 'bb-question-wrap';
+
+    var qText = document.createElement('p');
+    qText.className = 'bb-question-text';
+    qText.textContent = brainBoost.question;
+    wrap.appendChild(qText);
+
+    var optionsWrap = document.createElement('div');
+    optionsWrap.className = 'bb-options';
+
+    var feedback = document.createElement('p');
+    feedback.className = 'bb-feedback';
+    feedback.hidden = true;
+
+    var explanation = document.createElement('p');
+    explanation.className = 'bb-explanation';
+    explanation.hidden = true;
+
+    var pointsNote = document.createElement('p');
+    pointsNote.className = 'bb-points-note';
+    pointsNote.hidden = true;
+
+    function showResult(correct, points, correctIndex, explanationText) {
+        var buttons = optionsWrap.querySelectorAll('.bb-option-btn');
+        buttons.forEach(function (btn, i) {
+            btn.disabled = true;
+            if (i === correctIndex) btn.classList.add('bb-option-correct');
+        });
+        feedback.textContent = correct
+            ? '🦝 Rickie\'s impressed — you got it!'
+            : '🦝 Even Rickie had to think about that one.';
+        feedback.className = 'bb-feedback ' + (correct ? 'bb-feedback-correct' : 'bb-feedback-incorrect');
+        feedback.hidden = false;
+
+        if (explanationText) {
+            explanation.textContent = explanationText;
+            explanation.hidden = false;
+        }
+
+        pointsNote.textContent = '+' + points + ' points';
+        pointsNote.hidden = false;
+    }
+
+    brainBoost.options.forEach(function (opt, i) {
+        var btn = document.createElement('button');
+        btn.className = 'bb-option-btn';
+        btn.textContent = opt;
+        optionsWrap.appendChild(btn);
+
+        if (brainBoost.answered) {
+            btn.disabled = true;
+        } else {
+            btn.addEventListener('click', async function () {
+                var buttons = optionsWrap.querySelectorAll('.bb-option-btn');
+                buttons.forEach(function (b) { b.disabled = true; });
+
+                var result = await api('/api/brain-boost/answer', 'POST', { selected_index: i });
+                if (!result || result.status !== 200) {
+                    buttons.forEach(function (b) { b.disabled = false; });
+                    feedback.textContent = "Couldn't save that — try again later.";
+                    feedback.className = 'bb-feedback';
+                    feedback.hidden = false;
+                    return;
+                }
+                showResult(result.data.correct, result.data.points_earned, result.data.correct_index, result.data.explanation);
+            });
+        }
+    });
+
+    if (brainBoost.answered) {
+        showResult(brainBoost.correct, brainBoost.points_earned, brainBoost.correct_index, brainBoost.explanation);
+    }
+
+    wrap.appendChild(optionsWrap);
+    wrap.appendChild(feedback);
+    wrap.appendChild(explanation);
+    wrap.appendChild(pointsNote);
+    return wrap;
 }
 
 var CATEGORY_PILL = {
