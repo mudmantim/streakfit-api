@@ -2649,9 +2649,20 @@ function openCoach(context) {
         var header = document.createElement('div');
         header.className = 'coach-header';
 
+        var headerLeft = document.createElement('div');
+        headerLeft.className = 'coach-header-left';
+
+        var avatar = document.createElement('img');
+        avatar.className = 'coach-avatar';
+        avatar.src = '/static/rickie.svg';
+        avatar.alt = 'Rickie';
+
         var title = document.createElement('p');
         title.className = 'coach-title';
-        title.textContent = 'Coach';
+        title.textContent = 'Rickie';
+
+        headerLeft.appendChild(avatar);
+        headerLeft.appendChild(title);
 
         var closeBtn = document.createElement('button');
         closeBtn.className = 'coach-close';
@@ -2660,7 +2671,7 @@ function openCoach(context) {
             _coachPanel.hidden = true;
         });
 
-        header.appendChild(title);
+        header.appendChild(headerLeft);
         header.appendChild(closeBtn);
 
         _coachThread = document.createElement('div');
@@ -2672,7 +2683,7 @@ function openCoach(context) {
         _coachInput = document.createElement('input');
         _coachInput.type = 'text';
         _coachInput.className = 'coach-input';
-        _coachInput.placeholder = 'Ask about StreakFit…';
+        _coachInput.placeholder = 'Ask Rickie…';
         _coachInput.maxLength = 500;
         _coachInput.setAttribute('autocomplete', 'off');
         _coachInput.addEventListener('keydown', function (e) {

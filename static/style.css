@@ -584,6 +584,20 @@ input:focus {
     margin-bottom: .6rem;
 }
 
+.coach-header-left {
+    display: flex;
+    align-items: center;
+    gap: .55rem;
+}
+
+.coach-avatar {
+    width: 36px;
+    height: 36px;
+    flex-shrink: 0;
+    border-radius: 50%;
+    background: var(--indigo-pale);
+}
+
 .coach-title {
     font-weight: 700;
     font-size: .95rem;
