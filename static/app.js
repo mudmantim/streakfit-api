@@ -11,7 +11,9 @@ var _deferredInstallPrompt = null;
 window.addEventListener('beforeinstallprompt', function (e) {
     e.preventDefault();
     _deferredInstallPrompt = e;
-    // Show banner after the user reaches the dashboard (not on the auth screen)
+    // May fire after the dashboard already rendered — upgrade the install
+    // card from its fallback text to the real button if so.
+    updateInstallCard();
 });
 
 function _isStandalone() {
@@ -27,9 +29,11 @@ function _isIOSSafari() {
 }
 
 // ── Retention prompts ─────────────────────────────────────────────────────────
-// Called once per dashboard session. Shows install banner and/or notification
-// ask. Never shown to guests. Each prompt stores a localStorage flag after
-// being acted on so it never appears again.
+// Called once per dashboard session. Refreshes the install card and shows the
+// notification ask. Never shown to guests. The notification ask stores a
+// localStorage flag after being acted on so it never appears again; the
+// install card has no such flag — it should reflect current install state
+// every time the dashboard loads.
 
 function _getOrCreatePromptsContainer() {
     var el = document.getElementById('retention-prompts');
@@ -44,104 +48,67 @@ function _getOrCreatePromptsContainer() {
 
 function checkRetentionPrompts() {
     if (isGuest) return;
+    updateInstallCard();
     if (_isStandalone()) {
         // Already installed — skip install, go straight to notification ask
         _maybeShowNotificationBanner();
         return;
     }
-    _maybeShowInstallBanner();
     _maybeShowNotificationBanner();
 }
 
-// ── Install banner ────────────────────────────────────────────────────────────
+// ── Install card ──────────────────────────────────────────────────────────────
+// Persistent (not dismissible) card on the dashboard, below Progress. Reflects
+// whatever install path is actually available right now — re-run any time
+// that might have changed (dashboard load, beforeinstallprompt firing late).
 
-function _maybeShowInstallBanner() {
-    if (localStorage.getItem('sf_install_dismissed')) return;
+function updateInstallCard() {
+    var card = document.getElementById('install-card');
+    if (!card) return;
+    var text = document.getElementById('install-card-text');
+    var btn  = document.getElementById('install-card-btn');
+
+    if (isGuest || _isStandalone()) {
+        card.hidden = true;
+        return;
+    }
 
     if (_deferredInstallPrompt) {
-        _showAndroidInstallBanner();
+        text.textContent = 'Add StreakFit to your home screen for quick access to your daily mission.';
+        btn.textContent = 'Install StreakFit';
+        btn.hidden = false;
+        btn.disabled = false;
+        btn.onclick = function () {
+            var captured = _deferredInstallPrompt;
+            if (!captured) return;
+            btn.disabled = true;
+            fireEvent('install_prompt_accepted');
+            _deferredInstallPrompt = null; // browsers only allow one call
+            captured.prompt();
+            captured.userChoice.then(function (choice) {
+                if (choice.outcome === 'accepted') {
+                    card.hidden = true;
+                } else {
+                    fireEvent('install_prompt_dismissed');
+                    btn.disabled = false;
+                    updateInstallCard(); // prompt consumed — falls back to menu guidance
+                }
+            }).catch(function () {
+                btn.disabled = false;
+            });
+        };
+        card.hidden = false;
+        fireEvent('install_prompt_shown');
     } else if (_isIOSSafari()) {
-        _showIOSInstallBanner();
+        text.innerHTML = 'Add StreakFit to your home screen: tap <strong>Share ↑</strong>, then <strong>Add to Home Screen</strong>.';
+        btn.hidden = true;
+        card.hidden = false;
+        fireEvent('install_prompt_shown');
+    } else {
+        text.textContent = 'Install from Chrome menu: ⋮ → Install app or Add to Home screen';
+        btn.hidden = true;
+        card.hidden = false;
     }
-    // On other browsers with no prompt: do nothing
-}
-
-function _buildInstallBannerShell(container) {
-    var banner = document.createElement('div');
-    banner.className = 'retention-banner';
-    banner.id = 'install-banner';
-
-    var dismiss = document.createElement('button');
-    dismiss.className = 'retention-dismiss';
-    dismiss.setAttribute('aria-label', 'Dismiss');
-    dismiss.textContent = '×';
-    dismiss.onclick = function () {
-        localStorage.setItem('sf_install_dismissed', '1');
-        fireEvent('install_prompt_dismissed');
-        banner.remove();
-    };
-    banner.appendChild(dismiss);
-    container.insertBefore(banner, container.firstChild);
-    return banner;
-}
-
-function _showAndroidInstallBanner() {
-    var container = _getOrCreatePromptsContainer();
-    var banner = _buildInstallBannerShell(container);
-
-    var text = document.createElement('p');
-    text.className = 'retention-text';
-    text.textContent = 'Add StreakFit to your home screen for quick access to your daily mission.';
-
-    var installBtn = document.createElement('button');
-    installBtn.className = 'retention-btn';
-    installBtn.textContent = 'Add to Home Screen';
-    installBtn.onclick = function () {
-        if (!_deferredInstallPrompt) {
-            // Prompt already used once — browser consumed it; explain state
-            installBtn.textContent = 'Open browser menu to install';
-            installBtn.disabled = true;
-            return;
-        }
-        installBtn.disabled = true;
-        fireEvent('install_prompt_accepted');
-        var captured = _deferredInstallPrompt;
-        _deferredInstallPrompt = null; // browsers only allow one call
-        captured.prompt();
-        captured.userChoice.then(function (choice) {
-            if (choice.outcome === 'accepted') {
-                // User accepted — dismiss permanently
-                localStorage.setItem('sf_install_dismissed', '1');
-                banner.remove();
-            } else {
-                // User dismissed the OS dialog — keep banner, re-enable button
-                installBtn.textContent = 'Add to Home Screen';
-                installBtn.disabled = false;
-                // Browsers don't re-fire beforeinstallprompt after a dismiss;
-                // guide user to browser menu instead
-                text.textContent = 'To install, use your browser menu (⋮ → Add to Home Screen).';
-            }
-        }).catch(function () {
-            installBtn.textContent = 'Add to Home Screen';
-            installBtn.disabled = false;
-        });
-    };
-
-    banner.appendChild(text);
-    banner.appendChild(installBtn);
-    fireEvent('install_prompt_shown');
-}
-
-function _showIOSInstallBanner() {
-    var container = _getOrCreatePromptsContainer();
-    var banner = _buildInstallBannerShell(container);
-
-    var text = document.createElement('p');
-    text.className = 'retention-text';
-    text.innerHTML = 'Add StreakFit to your home screen: tap <strong>Share ↑</strong>, then <strong>Add to Home Screen</strong>.';
-
-    banner.appendChild(text);
-    fireEvent('install_prompt_shown');
 }
 
 // ── Notification ask banner ───────────────────────────────────────────────────

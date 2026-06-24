@@ -1096,6 +1096,22 @@ input:focus {
     margin: .85rem 0 0;
 }
 
+/* ── Install card ─────────────────────────────────────────────────────────── */
+.install-card {
+    text-align: center;
+}
+
+.install-card-text {
+    font-size: .85rem;
+    color: var(--gray-700);
+    margin: 0;
+    line-height: 1.45;
+}
+
+.install-card-btn {
+    margin-top: .85rem;
+}
+
 /* ── Side Quests section ──────────────────────────────────────────────────── */
 .side-quests-section {
     padding: 1rem 0 .25rem;
@@ -1310,25 +1326,6 @@ body.theme-classic .theme-btn.active { background: rgba(79,70,229,.2); }
     padding: .9rem 2.5rem .9rem 1rem;
     box-shadow: var(--shadow);
 }
-
-.retention-dismiss {
-    position: absolute;
-    top: .15rem;
-    right: .15rem;
-    width: 40px;
-    height: 40px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: none;
-    border: none;
-    font-size: 1.2rem;
-    line-height: 1;
-    color: var(--gray-400);
-    cursor: pointer;
-    padding: 0;
-}
-.retention-dismiss:hover { color: var(--gray-700); }
 
 .retention-text {
     font-size: .88rem;
