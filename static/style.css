@@ -684,6 +684,14 @@ input:focus {
     opacity: 1 !important;
 }
 
+.bb-option-incorrect {
+    border-color: var(--amber) !important;
+    background: var(--amber-light) !important;
+    color: #92400e !important;
+    font-weight: 700;
+    opacity: 1 !important;
+}
+
 .bb-feedback {
     margin: .65rem 0 0;
     font-size: .85rem;

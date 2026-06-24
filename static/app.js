@@ -896,11 +896,12 @@ function renderBrainBoostQuestion(brainBoost) {
     pointsNote.className = 'bb-points-note';
     pointsNote.hidden = true;
 
-    function showResult(correct, points, correctIndex, explanationText) {
+    function showResult(correct, points, correctIndex, explanationText, selectedIndex) {
         var buttons = optionsWrap.querySelectorAll('.bb-option-btn');
         buttons.forEach(function (btn, i) {
             btn.disabled = true;
             if (i === correctIndex) btn.classList.add('bb-option-correct');
+            else if (i === selectedIndex) btn.classList.add('bb-option-incorrect');
         });
         feedback.textContent = correct
             ? '🦝 Ricky\'s impressed — you got it!'
@@ -938,7 +939,7 @@ function renderBrainBoostQuestion(brainBoost) {
                     feedback.hidden = false;
                     return;
                 }
-                showResult(result.data.correct, result.data.points_earned, result.data.correct_index, result.data.explanation);
+                showResult(result.data.correct, result.data.points_earned, result.data.correct_index, result.data.explanation, i);
             });
         }
     });
