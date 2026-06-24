@@ -137,6 +137,15 @@ body {
     color: var(--gray-600);
 }
 
+.ricky-mission-intro {
+    display: flex;
+    align-items: center;
+    gap: .5rem;
+    margin: 0 0 .85rem;
+    font-size: .82rem;
+    color: var(--gray-600);
+}
+
 /* ── Auth guest divider & button ──────────────────────────────────────────── */
 .auth-guest-divider {
     display: flex;
@@ -488,6 +497,12 @@ input:focus {
     font-size: .8rem;
     color: #047857;
     margin-top: .1rem;
+}
+
+.ricky-handoff-line {
+    font-size: .85rem;
+    color: var(--gray-600);
+    margin: 0 0 .85rem;
 }
 
 /* ── Guest complete banner ────────────────────────────────────────────────── */

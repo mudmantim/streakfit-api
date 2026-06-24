@@ -483,6 +483,13 @@ async function loadDailyExercises() {
         dateEl.textContent = dateStr + ' · ' + level + ' · Refreshes tomorrow';
     }
 
+    // Ricky's pre-mission intro line — hidden once the mission is complete,
+    // since the post-completion Ricky handoff line takes over from there.
+    var rickyIntro = document.getElementById('ricky-mission-intro');
+    if (rickyIntro) {
+        rickyIntro.hidden = daily.completed_count >= 5;
+    }
+
     // Populate streak helper text (below progress bar, hidden when mission complete)
     var helperEl = document.getElementById('daily-streak-helper');
     if (helperEl) {
@@ -638,6 +645,12 @@ async function loadDailyExercises() {
             banner.appendChild(bannerText);
             list.appendChild(banner);
         }
+
+        // Mission → Insight → Ricky: hand the user off to what's next.
+        var rickyHandoff = document.createElement('p');
+        rickyHandoff.className = 'ricky-handoff-line';
+        rickyHandoff.textContent = '🦝 Nice work. Ready for today’s insight?';
+        list.appendChild(rickyHandoff);
 
         if (daily.insight) {
             list.appendChild(renderInsightCard(daily.insight));
