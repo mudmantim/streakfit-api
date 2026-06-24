@@ -1101,15 +1101,18 @@ input:focus {
     text-align: center;
 }
 
-.install-card-text {
-    font-size: .85rem;
-    color: var(--gray-700);
-    margin: 0;
-    line-height: 1.45;
+.install-card-title {
+    font-size: .95rem;
+    font-weight: 700;
+    color: var(--gray-900);
+    margin: 0 0 .85rem;
 }
 
-.install-card-btn {
-    margin-top: .85rem;
+.install-card-instructions {
+    font-size: .85rem;
+    color: var(--gray-700);
+    line-height: 1.45;
+    margin: .75rem 0 0;
 }
 
 /* ── Side Quests section ──────────────────────────────────────────────────── */

@@ -11,8 +11,9 @@ var _deferredInstallPrompt = null;
 window.addEventListener('beforeinstallprompt', function (e) {
     e.preventDefault();
     _deferredInstallPrompt = e;
-    // May fire after the dashboard already rendered — upgrade the install
-    // card from its fallback text to the real button if so.
+    // The install card's click handler reads _deferredInstallPrompt fresh each
+    // time, so a late-firing event is already picked up automatically. Still
+    // safe to call in case the card hasn't initialized yet on this load.
     updateInstallCard();
 });
 
@@ -26,6 +27,12 @@ function _isIOSSafari() {
     return /iphone|ipad|ipod/i.test(ua) &&
            /safari/i.test(ua) &&
            !/chrome|crios|fxios|edgios/i.test(ua);
+}
+
+function _isAndroidChrome() {
+    var ua = navigator.userAgent;
+    return /android/i.test(ua) && /chrome/i.test(ua) &&
+           !/edg|opr|samsungbrowser|firefox/i.test(ua);
 }
 
 // ── Retention prompts ─────────────────────────────────────────────────────────
@@ -58,29 +65,31 @@ function checkRetentionPrompts() {
 }
 
 // ── Install card ──────────────────────────────────────────────────────────────
-// Persistent (not dismissible) card on the dashboard, below Progress. Reflects
-// whatever install path is actually available right now — re-run any time
-// that might have changed (dashboard load, beforeinstallprompt firing late).
+// Persistent (not dismissible) card on the dashboard, below Progress. Always
+// shows the same app-level CTA — no browser-specific text up front. Only on
+// click, if there's no real install prompt to trigger, do we expand
+// platform-specific instructions (and only then does Chrome get named, and
+// only for Android Chrome specifically).
 
 function updateInstallCard() {
     var card = document.getElementById('install-card');
     if (!card) return;
-    var text = document.getElementById('install-card-text');
-    var btn  = document.getElementById('install-card-btn');
+    var btn = document.getElementById('install-card-btn');
+    var instructions = document.getElementById('install-card-instructions');
 
     if (isGuest || _isStandalone()) {
         card.hidden = true;
         return;
     }
 
-    if (_deferredInstallPrompt) {
-        text.textContent = 'Add StreakFit to your home screen for quick access to your daily mission.';
-        btn.textContent = 'Install StreakFit';
-        btn.hidden = false;
-        btn.disabled = false;
-        btn.onclick = function () {
-            var captured = _deferredInstallPrompt;
-            if (!captured) return;
+    card.hidden = false;
+    btn.disabled = false;
+    instructions.hidden = true;
+    instructions.textContent = '';
+
+    btn.onclick = function () {
+        var captured = _deferredInstallPrompt;
+        if (captured) {
             btn.disabled = true;
             fireEvent('install_prompt_accepted');
             _deferredInstallPrompt = null; // browsers only allow one call
@@ -91,24 +100,28 @@ function updateInstallCard() {
                 } else {
                     fireEvent('install_prompt_dismissed');
                     btn.disabled = false;
-                    updateInstallCard(); // prompt consumed — falls back to menu guidance
+                    _showInstallInstructions(instructions); // prompt consumed — explain manually
                 }
             }).catch(function () {
                 btn.disabled = false;
             });
-        };
-        card.hidden = false;
-        fireEvent('install_prompt_shown');
-    } else if (_isIOSSafari()) {
-        text.innerHTML = 'Add StreakFit to your home screen: tap <strong>Share ↑</strong>, then <strong>Add to Home Screen</strong>.';
-        btn.hidden = true;
-        card.hidden = false;
-        fireEvent('install_prompt_shown');
+        } else {
+            _showInstallInstructions(instructions);
+        }
+    };
+
+    fireEvent('install_prompt_shown');
+}
+
+function _showInstallInstructions(instructions) {
+    if (_isIOSSafari()) {
+        instructions.textContent = 'Tap Share, then Add to Home Screen.';
+    } else if (_isAndroidChrome()) {
+        instructions.textContent = 'Install from Chrome menu: ⋮ → Install app or Add to Home screen.';
     } else {
-        text.textContent = 'Install from Chrome menu: ⋮ → Install app or Add to Home screen';
-        btn.hidden = true;
-        card.hidden = false;
+        instructions.textContent = "Use your browser's install option or create shortcut option.";
     }
+    instructions.hidden = false;
 }
 
 // ── Notification ask banner ───────────────────────────────────────────────────
