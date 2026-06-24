@@ -1154,13 +1154,56 @@ def admin_stats():
                 ).filter(AnalyticsEvent.event_name == event_name).scalar() or 0,
             }
 
+        today = date.today()
+        seven_days_ago = today - timedelta(days=6)  # inclusive 7-day window
+
+        total_registered_users = db.session.query(
+            db.func.count(User.id)
+        ).scalar() or 0
+
+        active_users_today = db.session.query(
+            db.func.count(db.func.distinct(DailyCompletion.user_id))
+        ).filter(DailyCompletion.date == today).scalar() or 0
+
+        completions_today = db.session.query(
+            db.func.count(DailyCompletion.id)
+        ).filter(DailyCompletion.date == today).scalar() or 0
+
+        completions_7d = db.session.query(
+            db.func.count(DailyCompletion.id)
+        ).filter(DailyCompletion.date >= seven_days_ago).scalar() or 0
+
+        completions_all_time = db.session.query(
+            db.func.count(DailyCompletion.id)
+        ).scalar() or 0
+
         return jsonify({
             'generated_at': now.isoformat() + 'Z',
+            'users': {
+                'total_registered': total_registered_users,
+            },
+            'active_users': {
+                'today_by_completion': active_users_today,
+            },
+            'mission_completions': {
+                'today':    completions_today,
+                'week':     completions_7d,
+                'all_time': completions_all_time,
+            },
             'events': {
                 'guest_start':                counts('guest_start'),
                 'guest_complete':             counts('guest_complete'),
                 'guest_create_account_click': counts('guest_create_account_click'),
-            }
+            },
+            # Calls out which numbers above are exact counts vs. derived
+            # approximations, since this app has no unique-visitor or
+            # login-session tracking — only registration and completion events.
+            'metric_notes': {
+                'users.total_registered':            'exact',
+                'active_users.today_by_completion':  'approximation — counts users with >=1 mission completion today; not session/login based, so inactive-but-logged-in users are not counted',
+                'mission_completions':                'exact — count of DailyCompletion rows',
+                'events.guest_start':                 'proxy for visits — not unique-visitor tracking',
+            },
         })
     except Exception:
         db.session.rollback()

@@ -66,6 +66,29 @@
     padding-bottom: 8px; margin-bottom: 20px;
   }
 
+  /* ── Overview cards ── */
+  .overview-grid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 12px; margin-bottom: 36px;
+  }
+  .card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 8px; padding: 14px 16px;
+  }
+  .card-label {
+    font-size: 10px; font-weight: 700; letter-spacing: .06em;
+    text-transform: uppercase; color: var(--muted); margin-bottom: 8px;
+    display: flex; align-items: center; gap: 6px;
+  }
+  .card-value { font-size: 24px; font-weight: 700; color: var(--text); }
+  .card-sub { font-size: 11px; color: var(--muted); margin-top: 4px; }
+  .badge {
+    font-size: 9px; font-weight: 700; letter-spacing: .04em;
+    text-transform: uppercase; border-radius: 3px; padding: 1px 5px;
+  }
+  .badge.exact  { color: var(--green); background: rgba(52,211,153,.12); }
+  .badge.approx { color: var(--amber); background: rgba(251,191,36,.12); }
+
   /* ── Funnel table ── */
   .funnel { width: 100%; border-collapse: collapse; margin-bottom: 8px; }
 
@@ -218,16 +241,39 @@
     });
   };
 
+  function card(label, value, badgeClass, badgeText, sub) {
+    return '<div class="card">'
+         + '<div class="card-label">' + label
+         + ' <span class="badge ' + badgeClass + '">' + badgeText + '</span></div>'
+         + '<div class="card-value">' + fmt(value) + '</div>'
+         + (sub ? '<div class="card-sub">' + sub + '</div>' : '')
+         + '</div>';
+  }
+
   function render(data) {
     var e = data.events;
     var gs  = e.guest_start;
     var gc  = e.guest_complete;
     var gca = e.guest_create_account_click;
+    var u  = data.users || {};
+    var au = data.active_users || {};
+    var mc = data.mission_completions || {};
 
     // Update timestamp
     var d = new Date(data.generated_at);
     document.getElementById('ts').textContent =
       'Generated ' + d.toUTCString();
+
+    var overviewHtml =
+      '<div class="section-label">Overview</div>'
+      + '<div class="overview-grid">'
+      + card('Registered Users', u.total_registered, 'exact', 'exact')
+      + card('Active Today', au.today_by_completion, 'approx', '~approx',
+             'by mission completion, not login')
+      + card('Completions Today', mc.today, 'exact', 'exact')
+      + card('Completions 7d', mc.week, 'exact', 'exact')
+      + card('Completions All-Time', mc.all_time, 'exact', 'exact')
+      + '</div>';
 
     // Conversion rates — Today, Week, Month
     var cols = ['today', 'week', 'month'];
@@ -277,7 +323,10 @@
            + '</tr>';
     }
 
-    var html = '<div class="section-label">Guest Funnel</div>'
+    var html = overviewHtml
+             + '<div class="section-label">Guest Funnel '
+             + '<span class="badge approx" style="text-transform:none;letter-spacing:0;font-weight:600;">'
+             + 'not unique-visitor tracking</span></div>'
              + '<table class="funnel">'
              + '<thead><tr>'
              + '<th></th>'
@@ -287,7 +336,7 @@
              + '<th>All Time</th>'
              + '</tr></thead>'
              + '<tbody>'
-             + eventRow('guest_start',               'Guest Start',               'visitor chose guest mode')
+             + eventRow('guest_start',               'Guest Start',               'guest-mode session started — proxy for visits, not unique visitors')
              + arrowRow('completed mission',          'guest_complete',            'guest_start')
              + eventRow('guest_complete',             'Guest Complete',            'finished all 5 exercises')
              + arrowRow('clicked Create Account',    'guest_create_account_click','guest_complete')
