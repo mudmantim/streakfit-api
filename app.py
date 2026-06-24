@@ -1099,6 +1099,16 @@ def frontend():
     return app.send_static_file('index.html')
 
 
+@app.route('/sw.js')
+def service_worker():
+    # Served at root (not /static/sw.js) so its default scope covers the
+    # whole app — a script under /static/ would only control /static/ and
+    # never the '/' start_url, breaking PWA installability.
+    response = app.make_response(app.send_static_file('sw.js'))
+    response.headers['Service-Worker-Allowed'] = '/'
+    return response
+
+
 # --- Health Check ---
 
 @app.route('/health', methods=['GET'])

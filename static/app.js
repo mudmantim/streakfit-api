@@ -1,6 +1,6 @@
 // ── Service Worker ────────────────────────────────────────────────────────────
 if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('/static/sw.js').catch(function () {
+    navigator.serviceWorker.register('/sw.js').catch(function () {
         // Registration failed — app still works without PWA features
     });
 }
