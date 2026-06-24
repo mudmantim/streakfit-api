@@ -2434,7 +2434,7 @@ function renderDailyExercise(ex) {
 
     var coachLink = document.createElement('button');
     coachLink.className = 'btn-coach-link';
-    coachLink.textContent = 'Open Coach';
+    coachLink.textContent = 'Exercise Tips';
     coachLink.addEventListener('click', function () { openExerciseModal(ex); });
 
     var linkRow = document.createElement('div');
