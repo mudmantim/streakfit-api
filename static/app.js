@@ -940,6 +940,15 @@ function renderBrainBoostQuestion(brainBoost) {
                     return;
                 }
                 showResult(result.data.correct, result.data.points_earned, result.data.correct_index, result.data.explanation, i);
+
+                // Reflect the new total in the Progress card without a full reload —
+                // this is the user's first answer today (this branch only runs when
+                // brainBoost.answered was false), so incrementing by 1 is exact.
+                if (currentUser) {
+                    currentUser.brain_boost_answers = (currentUser.brain_boost_answers || 0) + 1;
+                    var bbStat = document.getElementById('progress-brain-boost');
+                    if (bbStat) bbStat.textContent = currentUser.brain_boost_answers;
+                }
             });
         }
     });
