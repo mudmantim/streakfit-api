@@ -129,6 +129,27 @@
   .overall-row td { border-top: 2px solid var(--border); padding-top: 14px; }
   .overall-label { font-size: 11px; color: var(--muted); }
 
+  /* ── Recent users table ── */
+  .users-table { width: 100%; border-collapse: collapse; margin-bottom: 8px; }
+  .users-table th {
+    text-align: right; font-size: 10px; font-weight: 700;
+    letter-spacing: .08em; text-transform: uppercase;
+    color: var(--muted); padding: 0 16px 10px 0;
+  }
+  .users-table th:first-child,
+  .users-table th:nth-child(2) { text-align: left; }
+  .users-table th:first-child { padding-left: 0; }
+  .users-table td {
+    padding: 8px 16px 8px 0; text-align: right;
+    border-top: 1px solid var(--border); vertical-align: middle;
+    font-size: 12px;
+  }
+  .users-table td:first-child,
+  .users-table td:nth-child(2) { text-align: left; }
+  .users-table td:first-child { padding-left: 0; }
+  .users-table .username { font-weight: 600; color: var(--text); }
+  .users-table .muted-cell { color: var(--muted); }
+
   /* ── States ── */
   .state {
     text-align: center; padding: 48px 0; color: var(--muted); font-size: 13px;
@@ -200,6 +221,12 @@
 
   function fmt(n) {
     return n.toLocaleString();
+  }
+
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
   }
 
   function renderPctCell(num, denom) {
@@ -323,6 +350,29 @@
            + '</tr>';
     }
 
+    function recentUsersHtml(users) {
+      var rows = (users || []).map(function (u) {
+        return '<tr>'
+             + '<td class="username">' + escapeHtml(u.username) + '</td>'
+             + '<td class="muted-cell">' + u.id + '</td>'
+             + '<td>' + fmt(u.missions_completed) + '</td>'
+             + '<td>' + fmt(u.current_streak) + '</td>'
+             + '<td>' + (u.last_active ? escapeHtml(u.last_active) : '<span class="muted-cell">Unknown</span>') + '</td>'
+             + '</tr>';
+      }).join('');
+
+      return '<div class="section-label">Recent Users '
+           + '<span class="badge approx" style="text-transform:none;letter-spacing:0;font-weight:600;">'
+           + 'sorted by ID, not join date</span></div>'
+           + '<table class="users-table">'
+           + '<thead><tr>'
+           + '<th>Username</th><th>User ID</th><th>Missions Completed</th>'
+           + '<th>Current Streak</th><th>Last Active</th>'
+           + '</tr></thead>'
+           + '<tbody>' + (rows || '<tr><td colspan="5" class="muted-cell">No users yet.</td></tr>') + '</tbody>'
+           + '</table>';
+    }
+
     var html = overviewHtml
              + '<div class="section-label">Guest Funnel '
              + '<span class="badge approx" style="text-transform:none;letter-spacing:0;font-weight:600;">'
@@ -343,7 +393,8 @@
              + eventRow('guest_create_account_click','Create Account Click',      'tapped Create Account on banner')
              + overallRow()
              + '</tbody>'
-             + '</table>';
+             + '</table>'
+             + recentUsersHtml(data.recent_users);
 
     document.getElementById('output').innerHTML = html;
     document.getElementById('refresh-btn').hidden = false;

@@ -1177,6 +1177,24 @@ def admin_stats():
             db.func.count(DailyCompletion.id)
         ).scalar() or 0
 
+        # Most recent 50 users by ID. There's no created_at column on User,
+        # so ID order (not a real join date) is the best available proxy
+        # for signup recency — never label this as a join date.
+        recent_users_rows = db.session.query(User).order_by(User.id.desc()).limit(50).all()
+        recent_users = []
+        for u in recent_users_rows:
+            stats = get_user_stats(u.id)
+            last_active = db.session.query(
+                db.func.max(DailyCompletion.date)
+            ).filter(DailyCompletion.user_id == u.id).scalar()
+            recent_users.append({
+                'id':                  u.id,
+                'username':            u.username,
+                'missions_completed':  stats['total_missions'],
+                'current_streak':      stats['current_streak'],
+                'last_active':         last_active.isoformat() if last_active else None,
+            })
+
         return jsonify({
             'generated_at': now.isoformat() + 'Z',
             'users': {
@@ -1195,6 +1213,7 @@ def admin_stats():
                 'guest_complete':             counts('guest_complete'),
                 'guest_create_account_click': counts('guest_create_account_click'),
             },
+            'recent_users': recent_users,
             # Calls out which numbers above are exact counts vs. derived
             # approximations, since this app has no unique-visitor or
             # login-session tracking — only registration and completion events.
@@ -1203,6 +1222,7 @@ def admin_stats():
                 'active_users.today_by_completion':  'approximation — counts users with >=1 mission completion today; not session/login based, so inactive-but-logged-in users are not counted',
                 'mission_completions':                'exact — count of DailyCompletion rows',
                 'events.guest_start':                 'proxy for visits — not unique-visitor tracking',
+                'recent_users':                       'sorted by user ID descending, not join date — User has no creation timestamp column. last_active is "Unknown" (null) if the user has never completed a mission.',
             },
         })
     except Exception:
