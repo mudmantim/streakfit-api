@@ -905,7 +905,7 @@ function renderBrainBoostQuestion(brainBoost) {
         });
         feedback.textContent = correct
             ? '🦝 Ricky\'s impressed — you got it!'
-            : '🦝 Even Ricky had to think about that one.';
+            : '🦝 Not quite — but you still learned something.';
         feedback.className = 'bb-feedback ' + (correct ? 'bb-feedback-correct' : 'bb-feedback-incorrect');
         feedback.hidden = false;
 
