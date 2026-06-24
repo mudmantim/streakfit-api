@@ -282,14 +282,18 @@
     var gs  = e.guest_start;
     var gc  = e.guest_complete;
     var gca = e.guest_create_account_click;
-    var u  = data.users || {};
-    var au = data.active_users || {};
-    var mc = data.mission_completions || {};
+    var u   = data.users || {};
+    var au  = data.active_users || {};
+    var mc  = data.mission_completions || {};
+    var wc  = data.users_with_completion || {};
+    var rnd = data.returned_next_day || {};
 
     // Update timestamp
     var d = new Date(data.generated_at);
     document.getElementById('ts').textContent =
       'Generated ' + d.toUTCString();
+
+    var rndPct = pct(rnd.returned, rnd.active_yesterday);
 
     var overviewHtml =
       '<div class="section-label">Overview</div>'
@@ -297,9 +301,14 @@
       + card('Registered Users', u.total_registered, 'exact', 'exact')
       + card('Active Today', au.today_by_completion, 'approx', '~approx',
              'by mission completion, not login')
+      + card('Users w/ 1+ Mission', wc.count, 'exact', 'exact',
+             'all-time, ever completed a full Daily Mission')
       + card('Completions Today', mc.today, 'exact', 'exact')
       + card('Completions 7d', mc.week, 'exact', 'exact')
       + card('Completions All-Time', mc.all_time, 'exact', 'exact')
+      + card('Returned Next Day', rnd.returned, 'approx', 'thin signal',
+             (rnd.active_yesterday || 0) + ' active yesterday · ' + pctStr(rndPct)
+             + ' — needs more days to mean much')
       + '</div>';
 
     // Conversion rates — Today, Week, Month
@@ -391,6 +400,8 @@
              + eventRow('guest_complete',             'Guest Complete',            'finished all 5 exercises')
              + arrowRow('clicked Create Account',    'guest_create_account_click','guest_complete')
              + eventRow('guest_create_account_click','Create Account Click',      'tapped Create Account on banner')
+             + arrowRow('became an account',         'account_created',           'guest_create_account_click')
+             + eventRow('account_created',           'Account Created',           'real signup, fired server-side — not just a click')
              + overallRow()
              + '</tbody>'
              + '</table>'

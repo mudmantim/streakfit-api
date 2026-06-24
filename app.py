@@ -1195,6 +1195,33 @@ def admin_stats():
                 'last_active':         last_active.isoformat() if last_active else None,
             })
 
+        # Users with >=1 full Daily Mission (all 5 exercises in one day) ever.
+        full_mission_days = (
+            db.session.query(DailyCompletion.user_id)
+            .group_by(DailyCompletion.user_id, DailyCompletion.date)
+            .having(db.func.count(DailyCompletion.exercise_key) >= 5)
+            .subquery()
+        )
+        users_with_completion = db.session.query(
+            db.func.count(db.func.distinct(full_mission_days.c.user_id))
+        ).scalar() or 0
+
+        # Day-over-day return: of users active yesterday, how many were
+        # also active today. Derived entirely from existing DailyCompletion
+        # rows — no new tracking needed. Only reflects one day of transition,
+        # so it's a thin signal until more days accumulate.
+        yesterday = today - timedelta(days=1)
+        yesterday_user_ids = {
+            row[0] for row in db.session.query(DailyCompletion.user_id)
+            .filter(DailyCompletion.date == yesterday).distinct().all()
+        }
+        today_user_ids = {
+            row[0] for row in db.session.query(DailyCompletion.user_id)
+            .filter(DailyCompletion.date == today).distinct().all()
+        }
+        active_yesterday_count = len(yesterday_user_ids)
+        returned_next_day_count = len(yesterday_user_ids & today_user_ids)
+
         return jsonify({
             'generated_at': now.isoformat() + 'Z',
             'users': {
@@ -1212,8 +1239,16 @@ def admin_stats():
                 'guest_start':                counts('guest_start'),
                 'guest_complete':             counts('guest_complete'),
                 'guest_create_account_click': counts('guest_create_account_click'),
+                'account_created':            counts('account_created'),
             },
             'recent_users': recent_users,
+            'users_with_completion': {
+                'count': users_with_completion,
+            },
+            'returned_next_day': {
+                'returned':         returned_next_day_count,
+                'active_yesterday': active_yesterday_count,
+            },
             # Calls out which numbers above are exact counts vs. derived
             # approximations, since this app has no unique-visitor or
             # login-session tracking — only registration and completion events.
@@ -1222,7 +1257,10 @@ def admin_stats():
                 'active_users.today_by_completion':  'approximation — counts users with >=1 mission completion today; not session/login based, so inactive-but-logged-in users are not counted',
                 'mission_completions':                'exact — count of DailyCompletion rows',
                 'events.guest_start':                 'proxy for visits — not unique-visitor tracking',
+                'events.account_created':              'exact — fired server-side in /api/register on every successful signup, recorded from this deploy forward; pre-existing accounts are not backfilled',
                 'recent_users':                       'sorted by user ID descending, not join date — User has no creation timestamp column. last_active is "Unknown" (null) if the user has never completed a mission.',
+                'users_with_completion':               'exact — distinct users with >=1 day of all 5 exercises completed, all-time',
+                'returned_next_day':                   'exact, but a single-day cohort — only meaningful once several days of yesterday→today transitions have accumulated',
             },
         })
     except Exception:
@@ -1272,6 +1310,14 @@ def register():
     new_user = User(username=data['username'], password_hash=hashed_pw)
     db.session.add(new_user)
     db.session.commit()
+
+    try:
+        db.session.add(AnalyticsEvent(event_name='account_created'))
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+        app.logger.warning('analytics write failed for event: account_created')
+
     return jsonify({"message": "User registered successfully"}), 201
 
 @app.route('/api/login', methods=['POST'])
