@@ -38,11 +38,11 @@
             </div>
 
             <div class="tabs">
-                <button id="tab-login" class="tab active" onclick="showTab('login')">Log In</button>
-                <button id="tab-register" class="tab" onclick="showTab('register')">Register</button>
+                <button id="tab-login" class="tab" onclick="showTab('login')">Log In</button>
+                <button id="tab-register" class="tab active" onclick="showTab('register')">Register</button>
             </div>
 
-            <form id="login-form" onsubmit="handleLogin(event)">
+            <form id="login-form" onsubmit="handleLogin(event)" hidden>
                 <input id="login-username" type="text" placeholder="Username"
                        autocomplete="username" required>
                 <input id="login-password" type="password" placeholder="Password"
@@ -51,7 +51,7 @@
                 <p id="login-error" class="error" role="alert"></p>
             </form>
 
-            <form id="register-form" onsubmit="handleRegister(event)" hidden>
+            <form id="register-form" onsubmit="handleRegister(event)">
                 <input id="reg-username" type="text" placeholder="Choose a username"
                        autocomplete="username" required maxlength="80">
                 <input id="reg-password" type="password" placeholder="Choose a password"
