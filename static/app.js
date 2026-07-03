@@ -41,6 +41,11 @@ function _isAndroidChrome() {
 // localStorage flag after being acted on so it never appears again; the
 // install card has no such flag — it should reflect current install state
 // every time the dashboard loads.
+//
+// The notification ask is withheld until the user has completed at least one
+// mission ever — a brand-new user should see the app deliver value before
+// being asked for a permission, not get a permission prompt as the first
+// thing they see on their very first dashboard load.
 
 function _getOrCreatePromptsContainer() {
     var el = document.getElementById('retention-prompts');
@@ -56,11 +61,7 @@ function _getOrCreatePromptsContainer() {
 function checkRetentionPrompts() {
     if (isGuest) return;
     updateInstallCard();
-    if (_isStandalone()) {
-        // Already installed — skip install, go straight to notification ask
-        _maybeShowNotificationBanner();
-        return;
-    }
+    if (!currentUser || !currentUser.total_missions) return;
     _maybeShowNotificationBanner();
 }
 
