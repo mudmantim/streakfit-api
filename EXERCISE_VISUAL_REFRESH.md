@@ -2,7 +2,8 @@
 
 Started: July 2026
 Status: Active
-Progress: 52 / 90 visuals complete
+Progress: 60 / 90 visuals complete
+Milestone: Intermediate visual refresh complete.
 
 ## Overview
 
@@ -13,9 +14,9 @@ Replacing StreakFit's original monochrome stick-figure exercise illustrations wi
 | Tier         | Completed | Total  |
 | ------------ | --------- | ------ |
 | Beginner     | 30        | 30     |
-| Intermediate | 22        | 30     |
+| Intermediate | 30        | 30     |
 | Advanced     | 0         | 30     |
-| **Overall**  | **52**    | **90** |
+| **Overall**  | **60**    | **90** |
 
 ## Beginner Completion Summary (30 / 30)
 
@@ -29,7 +30,7 @@ Completed across five phases:
 
 All Beginner Exercise Tips visuals are Rickie-style, verified in production.
 
-## Intermediate Completion Summary (22 / 30)
+## Intermediate Completion Summary (30 / 30) — COMPLETE
 
 **P1 (4)**
 
@@ -68,6 +69,21 @@ All Beginner Exercise Tips visuals are Rickie-style, verified in production.
 * doorway_pec_stretch
 * pigeon_pose
 
+**hollow_body_hold (1)** — adapted from `superman`, flipped from a prone back-extension arch to a supine "banana hold": both legs together and both arms together (instead of one-limb-extended/one-tucked), a much shallower curve, bold lift cues at both tips.
+
+**P6 (3)** — first genuinely new pose in this project: an inverted-V silhouette (hips as the peak, straight line to a planted heel, straight line through the shoulder to a planted hand), designed fresh in `downdog_calf_stretch` and copied/adapted into the other two. No shared template files were added — each SVG still maps 1:1 to its `EXERCISE_LIBRARY` key.
+
+* downdog_calf_stretch — base pose, bold downward heel-press cue
+* pike_push_up — same base pose, bold press double-arrow near the arm
+* plank_to_downdog — same base pose, faint ghost-plank silhouette + upward transition arrow
+
+**P7 (4)** — final Intermediate batch, sideways-stance and transition-pose originals:
+
+* lateral_lunge — new "sideways stance" base pose (one knee bent tracking over the foot, other leg straight and extended to the side, pelvis shifted)
+* skater_jump — reuses `lateral_lunge`'s stance with the straight leg replaced by a lifted trailing leg crossing behind, plus a bold lateral motion arrow
+* worlds_greatest_stretch — deep runner's lunge, one arm planted near the front foot, the other reaching straight up, torso rotated open; treated as a hero pose, no extra arrows needed
+* no_jump_burpee — compressed to one recognizable midpoint posture (crouched, hands near the floor, hips elevated) rather than encoding all four burpee phases, with a bold vertical hip-drive cue
+
 ## Quality Improvements
 
 ### bicycle_crunch
@@ -81,7 +97,12 @@ All Beginner Exercise Tips visuals are Rickie-style, verified in production.
 * Matches coaching copy: "hands lightly behind your head"
 * Hip hinge remains visually clear
 
-Both fixes verified on production.
+### russian_twist (caught during P5 production verification)
+
+* Initial bold twist-arrow reposition still wasn't visible at 80px because it sat in a crowded area near the torso/arms
+* Repositioned to open space near the raised arm — now reads clearly at 80px
+
+All three fixes verified on production.
 
 ## Verification Standard
 
@@ -98,33 +119,17 @@ Each batch follows the same pipeline:
 
 Zero regressions have been introduced through all visual batches.
 
-## Remaining Intermediate Exercises (8)
-
-Require genuinely new pose work rather than adaptation:
-
-* pike_push_up
-* downdog_calf_stretch
-* lateral_lunge
-* skater_jump
-* worlds_greatest_stretch
-* no_jump_burpee
-* plank_to_downdog
-* hollow_body_hold *(depending on final adaptation decision)*
-
-These represent the transition from **asset adaptation** to **new illustration design**.
-
 ## Current Milestone
 
-**52 / 90 Rickie-style visuals complete and live**
+**Intermediate visual refresh complete. 60 / 90 Rickie-style visuals complete and live.**
 
 * Beginner: **100% complete**
-* Intermediate: **73% complete**
+* Intermediate: **100% complete**
 * Advanced: **0% complete**
 
-Intermediate adaptation methodology has been proven successful at scale. Remaining Intermediate work is primarily original pose creation rather than reuse. Advanced tier (30 exercises) has not yet been started.
+The inverted-V (P6) and sideways-stance/transition-pose (P7) batches proved that genuinely original poses can work within the Rickie system, not just adaptations of existing exercise art. That confidence now carries into Advanced, which is a fresh chapter rather than an extension of this one — none of its 30 exercises have adaptable Beginner/Intermediate bases the way most of Intermediate did.
 
 ## Next Steps
 
-* Decide whether `hollow_body_hold` can still be adapted (from `superman`, inverted/mirrored) or needs original pose work
-* Plan and approve a batch approach for the remaining new-pose Intermediate exercises
-* Once Intermediate reaches 30/30, produce an Intermediate Visual Completion report and a rollout recommendation for Advanced
+* Advanced tier (30 exercises) has not yet been started — needs its own audit: which exercises have any reusable base at all, and which are original-pose work from the start
+* Plan and approve an Advanced P1 batch before implementing anything

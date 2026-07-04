@@ -63,7 +63,9 @@ After committing: decide whether to push/deploy, or continue with the next gamif
 
 See [EXERCISE_VISUAL_REFRESH.md](EXERCISE_VISUAL_REFRESH.md)
 
-Current progress: 52 / 90 visuals complete
+Milestone: Intermediate visual refresh complete.
+
+Current progress: 60 / 90 visuals complete
 Beginner: 30 / 30
-Intermediate: 22 / 30
+Intermediate: 30 / 30
 Advanced: 0 / 30
