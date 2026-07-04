@@ -11,9 +11,11 @@
 
   <line x1="100" y1="140" x2="135" y2="123" stroke="#4F46E5" stroke-width="30" stroke-linecap="round"/>
 
-  <line x1="135" y1="123" x2="148" y2="145" stroke="#E8A872" stroke-width="16" stroke-linecap="round"/>
-  <line x1="135" y1="123" x2="140" y2="132" stroke="#4F46E5" stroke-width="16" stroke-linecap="round"/>
-  <circle cx="148" cy="145" r="8" fill="#E8A872"/>
+  <line x1="135" y1="123" x2="118" y2="113" stroke="#E8A872" stroke-width="16" stroke-linecap="round"/>
+  <line x1="135" y1="123" x2="128" y2="119" stroke="#4F46E5" stroke-width="16" stroke-linecap="round"/>
+  <circle cx="118" cy="113" r="8" fill="#CF8E55"/>
+  <line x1="118" y1="113" x2="118" y2="98" stroke="#E8A872" stroke-width="16" stroke-linecap="round"/>
+  <circle cx="118" cy="98" r="8" fill="#E8A872"/>
 
   <line x1="135" y1="123" x2="142" y2="115" stroke="#E8A872" stroke-width="14" stroke-linecap="round"/>
   <circle cx="150" cy="102" r="20" fill="#E8A872"/>
