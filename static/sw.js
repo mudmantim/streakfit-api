@@ -1,4 +1,4 @@
-const CACHE = 'streakfit-v0718';
+const CACHE = 'streakfit-v0719';
 const STATIC = [
   '/static/style.css',
   '/static/app.js',
