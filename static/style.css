@@ -122,9 +122,16 @@ body {
 
 .tagline {
     color: var(--gray-500);
-    margin: .3rem 0 1.5rem;
+    margin: .3rem 0 .35rem;
     font-size: .875rem;
     line-height: 1.5;
+}
+
+.tagline-sub {
+    color: var(--gray-400);
+    margin: 0 0 1.5rem;
+    font-size: .8rem;
+    line-height: 1.4;
 }
 
 .auth-rickie-intro {
@@ -190,6 +197,16 @@ body {
     border-radius: var(--radius);
     box-shadow: var(--shadow);
     padding: 1.5rem;
+}
+
+.guest-mode-banner {
+    background: var(--indigo-pale);
+    color: var(--indigo-dark);
+    border-radius: var(--radius);
+    padding: .6rem 1rem;
+    margin: 0 0 1rem;
+    font-size: .82rem;
+    text-align: center;
 }
 
 /* ── Tabs ─────────────────────────────────────────────────────────────────── */

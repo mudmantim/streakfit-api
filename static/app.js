@@ -298,6 +298,9 @@ function handleExitGuest() {
 }
 
 function setGuestUI(guest) {
+    var guestBanner = document.getElementById('guest-mode-banner');
+    if (guestBanner) guestBanner.hidden = !guest;
+
     var skillSel = document.getElementById('skill-level-select');
     if (skillSel) skillSel.hidden = guest;
 
