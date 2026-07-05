@@ -9,6 +9,26 @@ Milestone: Advanced P1-P3 complete.
 
 Replacing StreakFit's original monochrome stick-figure exercise illustrations with warm "Rickie-style" flat-color illustrations that match the app's raccoon mascot brand. Work proceeds tier by tier (Beginner → Intermediate → Advanced), in small approved batches: implement, verify locally (direct SVG + live Exercise Tips modal), commit, deploy, verify in production.
 
+## Design Principles
+
+### Depict the Hero Moment
+
+Illustrations should represent the single most recognizable and coachable moment of an exercise rather than attempting to encode an entire movement sequence.
+
+Examples:
+- burpee → recognizable midpoint posture
+- plank_to_downdog → transition destination with ghost cue
+- worlds_greatest_stretch → fully opened position
+- no_jump_burpee → compressed hero pose
+- broad_jump → airborne/explosive instant
+- tuck_jump_burpee (future) → one representative moment, not every phase
+
+Goals:
+- readability at 80px
+- coaching-copy alignment
+- reduced ambiguity
+- preservation of the Rickie visual language
+
 ## Current Progress
 
 | Tier         | Completed | Total  |
