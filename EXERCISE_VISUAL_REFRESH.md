@@ -2,8 +2,8 @@
 
 Started: July 2026
 Status: Active
-Progress: 80 / 90 visuals complete
-Milestone: Advanced P4 complete.
+Progress: 85 / 90 visuals complete
+Milestone: Advanced P5 complete.
 
 ## Overview
 
@@ -35,8 +35,8 @@ Goals:
 | ------------ | --------- | ------ |
 | Beginner     | 30        | 30     |
 | Intermediate | 30        | 30     |
-| Advanced     | 20        | 30     |
-| **Overall**  | **80**    | **90** |
+| Advanced     | 25        | 30     |
+| **Overall**  | **85**    | **90** |
 
 ## Beginner Completion Summary (30 / 30)
 
@@ -158,6 +158,34 @@ Verification:
 - production verified on streakfit.pro
 - sw.js advanced to streakfit-v0725
 
+## Advanced P5 Completion Summary (25 / 30)
+
+**P5 (5)** — squat/lunge/jump/sprint family batch
+
+* assisted_pistol_squat
+* plyometric_lunge
+* broad_jump_consecutive
+* shuttle_run
+* shrimp_squat
+
+Highlights:
+
+- assisted_pistol_squat introduces a support-pole prop matching the coaching copy's "doorframe" example.
+- plyometric_lunge shows the airborne leg-switch instant, not the before/after lunges.
+- broad_jump_consecutive reuses broad_jump's figure with a continuation shadow and arrow rather than a new pose.
+- shuttle_run reuses sprint_intervals' pose with a bidirectional arrow replacing the one-way speed ticks.
+- shrimp_squat required a dedicated readability pass: the first draft's tucked leg and standing leg silhouettes overlapped into an ambiguous cluster, especially against assisted_pistol_squat. Fixed by separating the tucked knee (low, near the floor) from the held foot (higher, meeting the hand).
+
+Verification:
+
+- 220px modal verification complete
+- 80px inline verification complete
+- assisted_pistol_squat vs shrimp_squat verified side-by-side at 80px
+- coaching-copy alignment confirmed
+- zero regressions
+- production verified on streakfit.pro
+- sw.js advanced to streakfit-v0726
+
 ## Coaching-Copy and Readability Catches
 
 Every batch since Intermediate P4 has caught at least one real issue before it shipped — this has become a reliable part of the process, not an exception:
@@ -188,19 +216,25 @@ Zero regressions have been introduced through all visual batches.
 
 ## Current Milestone
 
-**80 / 90 Rickie-style visuals complete and live**
+**85 / 90 Rickie-style visuals complete and live**
 
 * Beginner: **100% complete**
 * Intermediate: **100% complete**
-* Advanced: **67% complete**
+* Advanced: **83% complete**
 
 ## Next Steps
 
-Advanced P5 planning remains pending.
+Advanced P6 planning only — the final batch.
 
-Remaining Advanced exercises: 10
+Remaining Advanced exercises: 5
 
-Advanced P5 should focus on:
+* wall_handstand_hold
+* l_sit_hold
+* straddle_v_up
+* pancake_stretch
+* tuck_jump_burpee
+
+Advanced P6 is the "Original Pose Collection" — the first batch with no existing donor silhouette to adapt from. Should focus on:
 - hero-moment readability
 - new-pose design
 - 80px verification first
