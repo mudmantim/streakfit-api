@@ -20,6 +20,13 @@ if DATABASE_URL and DATABASE_URL.startswith("postgres://"):
 
 app.config['SQLALCHEMY_DATABASE_URI'] = DATABASE_URL or 'sqlite:///streakfit.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+# pool_pre_ping checks each connection before use so a connection the DB has
+# silently closed (e.g. Neon's serverless auto-suspend) is replaced instead of
+# failing the request; pool_recycle retires connections before that can happen.
+app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
+    'pool_pre_ping': True,
+    'pool_recycle': 280,
+}
 _secret_key = os.environ.get('SECRET_KEY')
 if not _secret_key:
     raise RuntimeError("SECRET_KEY environment variable is required but not set")
@@ -1871,6 +1878,7 @@ def not_found(e):
 
 @app.errorhandler(500)
 def internal_error(e):
+    app.logger.error('Unhandled exception: %s', e, exc_info=True)
     return jsonify({"error": "Internal server error"}), 500
 
 
