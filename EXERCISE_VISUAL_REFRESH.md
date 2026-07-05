@@ -2,8 +2,8 @@
 
 Started: July 2026
 Status: Active
-Progress: 60 / 90 visuals complete
-Milestone: Intermediate visual refresh complete.
+Progress: 75 / 90 visuals complete
+Milestone: Advanced P1-P3 complete.
 
 ## Overview
 
@@ -15,8 +15,8 @@ Replacing StreakFit's original monochrome stick-figure exercise illustrations wi
 | ------------ | --------- | ------ |
 | Beginner     | 30        | 30     |
 | Intermediate | 30        | 30     |
-| Advanced     | 0         | 30     |
-| **Overall**  | **60**    | **90** |
+| Advanced     | 15        | 30     |
+| **Overall**  | **75**    | **90** |
 
 ## Beginner Completion Summary (30 / 30)
 
@@ -84,25 +84,44 @@ All Beginner Exercise Tips visuals are Rickie-style, verified in production.
 * worlds_greatest_stretch — deep runner's lunge, one arm planted near the front foot, the other reaching straight up, torso rotated open; treated as a hero pose, no extra arrows needed
 * no_jump_burpee — compressed to one recognizable midpoint posture (crouched, hands near the floor, hips elevated) rather than encoding all four burpee phases, with a bold vertical hip-drive cue
 
-## Quality Improvements
+## Advanced Completion Summary (15 / 30)
 
-### bicycle_crunch
+**P1 (5)** — near-exact reuse and single-edit adaptations of existing Beginner/Intermediate assets:
 
-* Replaced subtle twist cue with a bold arrow treatment
-* Confirmed readable at real 80px inline scale
+* hollow_body_rock — `hollow_body_hold` unchanged, bold double-headed rocking arrow added beneath the torso
+* tabata_mountain_climber — `mountain_climber`'s motion arrow emboldened (solid instead of thin dashed) plus small fast-pace tick marks
+* shoulder_cars — `arm_circles` adapted so one arm rests at the side while the other traces a full circle, matching the coaching copy
+* cossack_squat — `lateral_lunge`'s hip dropped and the bent leg's angle sharpened for a deeper squat, torso/arms/head shifted down to match
+* full_burpee — `no_jump_burpee`'s hip-drive cue extended into a taller, bolder explosive arrow plus a faint ghost circle above suggesting the jump apex
 
-### bodyweight_good_morning
+**P2 (5)** — same methodology, first two coaching-copy catches:
 
-* Arm repositioned upward
-* Matches coaching copy: "hands lightly behind your head"
-* Hip hinge remains visually clear
+* tuck_to_straight_leg_raise — `straight_leg_raise`'s leg replaced with a tucked position, bold vertical cycle arrow; one arm repositioned to reach overhead along the floor
+* pike_walk_out — `downdog_calf_stretch`'s inverted-V reused unchanged, heel-press cue replaced with small bold step-tick marks
+* single_leg_good_morning — `bodyweight_good_morning`'s second planted leg replaced with a straight leg lifted behind the body
+* front_split_prep — `worlds_greatest_stretch`'s deep lunge legs extended further, the one-arm-up/one-arm-down reach replaced with both hands reaching down near the floor
+* planche_lean — `plank`'s shoulder shifted forward and up past the fixed hand position for a noticeably steeper forward lean
 
-### russian_twist (caught during P5 production verification)
+**P3 (5)** — the push family, two more readability catches:
 
-* Initial bold twist-arrow reposition still wasn't visible at 80px because it sat in a crowded area near the torso/arms
-* Repositioned to open space near the raised arm — now reads clearly at 80px
+* pseudo_planche_push_up — `planche_lean`'s forward lean preserved, elbow bend exaggerated outward for a real push-up-style bend
+* archer_push_up — `push_up`'s bent support arm kept, a second fully straight arm added reaching wide to the side
+* assisted_one_arm_push_up — `push_up`'s bent arm kept dominant, a short secondary arm added resting on a small "book" prop
+* typewriter_push_up — `wide_push_up`'s shoulder shifted to one side with a faint ghost torso at the opposite position and a bold double-headed lateral arrow
+* plyometric_push_up — `push_up` unchanged, faint ghost circle above the hand plus a bold explosive upward arrow
 
-All three fixes verified on production.
+## Coaching-Copy and Readability Catches
+
+Every batch since Intermediate P4 has caught at least one real issue before it shipped — this has become a reliable part of the process, not an exception:
+
+* **bicycle_crunch** (Intermediate P4) — subtle twist cue replaced with a bold arrow treatment
+* **bodyweight_good_morning** (Intermediate P4) — arm repositioned upward to match "hands lightly behind your head"
+* **russian_twist** (Intermediate P5, caught in production verification) — bold twist arrow was still unreadable at 80px in its original crowded position; repositioned to open space
+* **shoulder_cars** (Advanced P1) — initial symmetric both-arms-circling version didn't match "hold one arm firmly against your side"; redesigned to one still arm + one circling arm
+* **tuck_to_straight_leg_raise** (Advanced P2) — arm didn't match "arms stretched overhead, pressing into the floor"; repositioned overhead
+* **front_split_prep** (Advanced P2) — support arm reached only to the thigh, not "hands on the floor for support"; extended to the floor
+* **assisted_one_arm_push_up** (Advanced P3) — without a visual prop, the assisting arm was indistinguishable from a normal push-up at 80px; added a small "book" prop matching the coaching copy's own example
+* **typewriter_push_up** (Advanced P3) — initial shoulder shift and lateral arrow were too subtle, read as a plain wide push-up at 80px; widened the shoulder offset and emboldened the arrow
 
 ## Verification Standard
 
@@ -121,15 +140,17 @@ Zero regressions have been introduced through all visual batches.
 
 ## Current Milestone
 
-**Intermediate visual refresh complete. 60 / 90 Rickie-style visuals complete and live.**
+**Advanced P1-P3 complete. 75 / 90 Rickie-style visuals complete and live.**
 
 * Beginner: **100% complete**
 * Intermediate: **100% complete**
-* Advanced: **0% complete**
+* Advanced: **50% complete**
 
-The inverted-V (P6) and sideways-stance/transition-pose (P7) batches proved that genuinely original poses can work within the Rickie system, not just adaptations of existing exercise art. That confidence now carries into Advanced, which is a fresh chapter rather than an extension of this one — none of its 30 exercises have adaptable Beginner/Intermediate bases the way most of Intermediate did.
+The Advanced tier has proven that the adaptation methodology developed in Beginner/Intermediate carries over cleanly — every P1-P3 exercise reused or adapted an existing asset, with zero brand-new silhouette families required so far. The remaining 15 Advanced exercises include the genuinely novel poses (wall handstand, L-sit, straddle V-up) that will need original design work.
 
 ## Next Steps
 
-* Advanced tier (30 exercises) has not yet been started — needs its own audit: which exercises have any reusable base at all, and which are original-pose work from the start
-* Plan and approve an Advanced P1 batch before implementing anything
+* Advanced P4 (planning candidate): tuck_jump, sprint_intervals, broad_jump, assisted_pistol_squat, bodyweight_jefferson_curl — highest remaining adaptation potential
+* Advanced P5 (planning candidate): wall_handstand_hold, l_sit_hold, straddle_v_up, pancake_stretch, wrist_prep — genuinely new pose work
+* Advanced P6 (planning candidate): shuttle_run, broad_jump_consecutive, tuck_jump_burpee — blocked on other Advanced exercises existing first
+* Do not implement any further batch without explicit approval
