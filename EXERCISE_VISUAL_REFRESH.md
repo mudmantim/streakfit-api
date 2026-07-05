@@ -2,8 +2,8 @@
 
 Started: July 2026
 Status: Active
-Progress: 75 / 90 visuals complete
-Milestone: Advanced P1-P3 complete.
+Progress: 80 / 90 visuals complete
+Milestone: Advanced P4 complete.
 
 ## Overview
 
@@ -35,8 +35,8 @@ Goals:
 | ------------ | --------- | ------ |
 | Beginner     | 30        | 30     |
 | Intermediate | 30        | 30     |
-| Advanced     | 15        | 30     |
-| **Overall**  | **75**    | **90** |
+| Advanced     | 20        | 30     |
+| **Overall**  | **80**    | **90** |
 
 ## Beginner Completion Summary (30 / 30)
 
@@ -130,6 +130,34 @@ All Beginner Exercise Tips visuals are Rickie-style, verified in production.
 * typewriter_push_up — `wide_push_up`'s shoulder shifted to one side with a faint ghost torso at the opposite position and a bold double-headed lateral arrow
 * plyometric_push_up — `push_up` unchanged, faint ghost circle above the hand plus a bold explosive upward arrow
 
+## Advanced P4 Completion Summary (20 / 30)
+
+**P4 (5)** — original-pose and adaptation hybrid batch
+
+* wrist_prep
+* sprint_intervals
+* tuck_jump
+* broad_jump
+* bodyweight_jefferson_curl
+
+Highlights:
+
+- wrist_prep required a dedicated readability pass to differentiate it from bird_dog.
+- First draft failed at 80px.
+- Final version uses a flatter torso silhouette and enlarged wrist-circle cue.
+- tuck_jump received an airborne-gap adjustment for small-scale readability.
+- bodyweight_jefferson_curl received an increased fold depth for coaching-copy alignment.
+
+Verification:
+
+- 220px modal verification complete
+- 80px inline verification complete
+- wrist_prep vs bird_dog verified side-by-side at 80px
+- coaching-copy alignment confirmed
+- zero regressions
+- production verified on streakfit.pro
+- sw.js advanced to streakfit-v0725
+
 ## Coaching-Copy and Readability Catches
 
 Every batch since Intermediate P4 has caught at least one real issue before it shipped — this has become a reliable part of the process, not an exception:
@@ -160,17 +188,20 @@ Zero regressions have been introduced through all visual batches.
 
 ## Current Milestone
 
-**Advanced P1-P3 complete. 75 / 90 Rickie-style visuals complete and live.**
+**80 / 90 Rickie-style visuals complete and live**
 
 * Beginner: **100% complete**
 * Intermediate: **100% complete**
-* Advanced: **50% complete**
-
-The Advanced tier has proven that the adaptation methodology developed in Beginner/Intermediate carries over cleanly — every P1-P3 exercise reused or adapted an existing asset, with zero brand-new silhouette families required so far. The remaining 15 Advanced exercises include the genuinely novel poses (wall handstand, L-sit, straddle V-up) that will need original design work.
+* Advanced: **67% complete**
 
 ## Next Steps
 
-* Advanced P4 (planning candidate): tuck_jump, sprint_intervals, broad_jump, assisted_pistol_squat, bodyweight_jefferson_curl — highest remaining adaptation potential
-* Advanced P5 (planning candidate): wall_handstand_hold, l_sit_hold, straddle_v_up, pancake_stretch, wrist_prep — genuinely new pose work
-* Advanced P6 (planning candidate): shuttle_run, broad_jump_consecutive, tuck_jump_burpee — blocked on other Advanced exercises existing first
-* Do not implement any further batch without explicit approval
+Advanced P5 planning remains pending.
+
+Remaining Advanced exercises: 10
+
+Advanced P5 should focus on:
+- hero-moment readability
+- new-pose design
+- 80px verification first
+- coaching-copy alignment

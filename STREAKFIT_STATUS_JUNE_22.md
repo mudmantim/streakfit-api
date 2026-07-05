@@ -63,12 +63,22 @@ After committing: decide whether to push/deploy, or continue with the next gamif
 
 See [EXERCISE_VISUAL_REFRESH.md](EXERCISE_VISUAL_REFRESH.md)
 
-Milestone: Advanced P1-P3 complete.
+Milestone: Advanced P4 complete.
 
-Current progress: 75 / 90 visuals complete
+Current progress: 80 / 90 visuals complete
+
 Beginner: 30 / 30
 Intermediate: 30 / 30
-Advanced: 15 / 30
+Advanced: 20 / 30
+
+Verification:
+- Production verified on streakfit.pro
+- 80px readability verified
+- Exercise Tips modals verified
+- wrist_prep distinguished from bird_dog at 80px
+- guest and registered flows validated
+- no console errors
+- service worker cache refreshed successfully (streakfit-v0725)
 
 ## Sprint C — First Two Minutes Polish (July 2026)
 
