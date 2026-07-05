@@ -82,20 +82,19 @@ Shipped:
   "Guest mode — sign up anytime to save your streak."
 
 Verification:
-- Production verified
-- Desktop verified
-- 320px mobile verified
-- CLS = 0
-- No console errors
-- Guest and registered flows validated
+- Production verified on streakfit.pro
+- Desktop layouts verified
+- 320px mobile layouts verified
+- Warm Rickie renders correctly across all touchpoints
+- Guest banner appears only for guest users
+- Registered users do not see the guest banner
+- Cumulative Layout Shift (CLS) = 0
+- No console errors observed
+- Service worker cache refreshed successfully (streakfit-v0724)
+- Guest and registered user flows validated end-to-end
 
-Operational lesson:
-- Any modification to assets inside static/ (SVG, CSS, JS, imagery) requires a service-worker cache bump.
-- sw.js cache version advanced to streakfit-v0724.
-
-## Operational Notes
-
-Registration reliability issue:
-- pool_pre_ping + pool_recycle deployed
-- observed signup 500s no longer reproducible
-- monitor only, no longer considered a beta blocker
+Operational Notes:
+- Any change to assets under `static/` (SVG, CSS, JS, imagery) requires a service worker cache version bump.
+- Cache advanced to `streakfit-v0724`.
+- Registration reliability fix (`pool_pre_ping` + `pool_recycle`) remains stable in production.
+- Registration 500s are now considered a monitoring item rather than a beta blocker.
