@@ -1,9 +1,9 @@
 # Exercise Visual Refresh
 
 Started: July 2026
-Status: Active
-Progress: 85 / 90 visuals complete
-Milestone: Advanced P5 complete.
+Status: Complete
+Progress: 90 / 90 visuals complete
+Milestone: Exercise Visual Refresh complete.
 
 ## Overview
 
@@ -35,8 +35,8 @@ Goals:
 | ------------ | --------- | ------ |
 | Beginner     | 30        | 30     |
 | Intermediate | 30        | 30     |
-| Advanced     | 25        | 30     |
-| **Overall**  | **85**    | **90** |
+| Advanced     | 30        | 30     |
+| **Overall**  | **90**    | **90** |
 
 ## Beginner Completion Summary (30 / 30)
 
@@ -186,6 +186,34 @@ Verification:
 - production verified on streakfit.pro
 - sw.js advanced to streakfit-v0726
 
+## Advanced P6 Completion Summary (30 / 30) — COMPLETE
+
+**P6 (5)** — the "Original Pose Collection": three adaptation-heavy exercises plus two genuinely new silhouette families with no existing donor pose
+
+* pancake_stretch
+* straddle_v_up
+* tuck_jump_burpee
+* l_sit_hold
+* wall_handstand_hold
+
+Highlights:
+
+- pancake_stretch inherits bodyweight_jefferson_curl's "head low = stretch" vocabulary directly — the easiest of the five.
+- straddle_v_up widens the supine-family raised-torso convention into an asymmetric V (one leg steep, one shallow), since a true side-view illustration can't show literal left-right leg spread. First draft's legs read as together; needed a much larger angular difference to read as "straddle."
+- tuck_jump_burpee reuses tuck_jump's airborne apex almost exactly, with a deliberately bold ghost-plank bar and two solid handprint marks at the base. First draft's ghost was too subtle and read as identical to tuck_jump at 80px; boldened it until the two were unmistakable side by side.
+- l_sit_hold is a new "seated but elevated" silhouette family. First draft's two arms going straight down from a hip point read exactly like a standing figure's legs — the same visual vocabulary every other pose in the system uses for legs on the ground. Rebuilt around a single long diagonal support arm bridging a large, unambiguous gap.
+- wall_handstand_hold is a new inverted-orientation silhouette family with a wall prop, deliberately the boldest/thickest prop in the entire library. First draft's head was the same skin-tone color as the arms and sat directly in their path, visually swallowing them; fixed by offsetting the head to the side, out of the arms' column.
+
+Verification:
+
+- 220px modal verification complete
+- 80px inline verification complete
+- Distinctness verification (new required step): l_sit_hold vs pancake_stretch, tuck_jump_burpee vs tuck_jump, straddle_v_up vs straight_leg_raise family — all confirmed distinct at 80px
+- coaching-copy alignment confirmed
+- regression check: wrist_prep, bird_dog, assisted_pistol_squat, shrimp_squat, bicycle_crunch, russian_twist, bodyweight_good_morning — all unaffected
+- production verified on streakfit.pro
+- sw.js advanced to streakfit-v0727
+
 ## Coaching-Copy and Readability Catches
 
 Every batch since Intermediate P4 has caught at least one real issue before it shipped — this has become a reliable part of the process, not an exception:
@@ -216,26 +244,12 @@ Zero regressions have been introduced through all visual batches.
 
 ## Current Milestone
 
-**85 / 90 Rickie-style visuals complete and live**
+**90 / 90 Rickie-style visuals complete and live — Exercise Visual Refresh complete**
 
 * Beginner: **100% complete**
 * Intermediate: **100% complete**
-* Advanced: **83% complete**
+* Advanced: **100% complete**
 
 ## Next Steps
 
-Advanced P6 planning only — the final batch.
-
-Remaining Advanced exercises: 5
-
-* wall_handstand_hold
-* l_sit_hold
-* straddle_v_up
-* pancake_stretch
-* tuck_jump_burpee
-
-Advanced P6 is the "Original Pose Collection" — the first batch with no existing donor silhouette to adapt from. Should focus on:
-- hero-moment readability
-- new-pose design
-- 80px verification first
-- coaching-copy alignment
+None — the exercise visual refresh project is complete. All 90 exercises across Beginner, Intermediate, and Advanced tiers now use Rickie-style illustrations, verified in production with a documented methodology: hero-moment design principle, 80px readability standard, coaching-copy alignment, distinctness verification, regression checks, and service-worker deployment discipline.
