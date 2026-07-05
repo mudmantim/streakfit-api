@@ -69,3 +69,33 @@ Current progress: 75 / 90 visuals complete
 Beginner: 30 / 30
 Intermediate: 30 / 30
 Advanced: 15 / 30
+
+## Sprint C — First Two Minutes Polish (July 2026)
+
+Status: Complete
+
+Shipped:
+- Warm-colored Rickie avatar (replaced flat gray version)
+- Register screen value proposition:
+  "Tiny wins every day. Build healthy streaks together."
+- Guest-mode dashboard banner:
+  "Guest mode — sign up anytime to save your streak."
+
+Verification:
+- Production verified
+- Desktop verified
+- 320px mobile verified
+- CLS = 0
+- No console errors
+- Guest and registered flows validated
+
+Operational lesson:
+- Any modification to assets inside static/ (SVG, CSS, JS, imagery) requires a service-worker cache bump.
+- sw.js cache version advanced to streakfit-v0724.
+
+## Operational Notes
+
+Registration reliability issue:
+- pool_pre_ping + pool_recycle deployed
+- observed signup 500s no longer reproducible
+- monitor only, no longer considered a beta blocker
