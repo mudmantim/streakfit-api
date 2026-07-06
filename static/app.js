@@ -370,11 +370,12 @@ var RICKIE_LINES = {
     ],
     returning: [
         "You came back. That's what matters.",
-        "Rickie missed seeing you.",
         "Welcome back.",
         "Good to see you again.",
         "Rickie kept your spot.",
-        "However long it's been, you're here now."
+        "Whenever you're ready, Rickie's here.",
+        "However long it's been, you're here now.",
+        "Let's pick up where we left off."
     ],
     fun: [
         "Rickie once tried to do a push-up. It did not go well.",
