@@ -1451,6 +1451,7 @@ def get_me():
     if user is None:
         abort(404)
     stats = get_user_stats(user_id)
+    level_info = xp_to_level(user.xp_total)
     return jsonify({
         "id": user.id,
         "username": user.username,
@@ -1459,7 +1460,14 @@ def get_me():
         "current_streak": stats['current_streak'],
         "best_streak": stats['best_streak'],
         "total_missions": stats['total_missions'],
-        "brain_boost_answers": stats['brain_boost_answers']
+        "brain_boost_answers": stats['brain_boost_answers'],
+        "xp_total": user.xp_total,
+        "acorns_total": user.acorns_total,
+        "level": level_info['level'],
+        "level_title": level_info['level_title'],
+        "xp_into_level": level_info['xp_into_level'],
+        "xp_required": level_info['xp_required'],
+        "xp_to_next_level": level_info['xp_to_next']
     }), 200
 
 @app.route('/api/me', methods=['PATCH'])
@@ -1497,6 +1505,143 @@ def update_me():
         "total_missions": stats['total_missions'],
         "brain_boost_answers": stats['brain_boost_answers']
     }), 200
+
+_MEMORY_BOOK_TIMELINE_LIMIT = 30
+
+_MILESTONE_DEFINITIONS = [
+    {'key': 'first_mission',  'label': 'First Mission',      'metric': 'missions_completed',    'target': 1},
+    {'key': 'exercises_100',  'label': '100 Exercises',       'metric': 'exercises_completed',   'target': 100},
+    {'key': 'exercises_500',  'label': '500 Exercises',       'metric': 'exercises_completed',   'target': 500},
+    {'key': 'brain_boost_100', 'label': '100 Brain Boosts',   'metric': 'brain_boosts_answered', 'target': 100},
+    {'key': 'xp_1000',        'label': '1000 XP',             'metric': 'xp_total',              'target': 1000},
+    {'key': 'acorns_100',     'label': '100 Acorns',          'metric': 'acorns_total',           'target': 100},
+    {'key': 'level_10',       'label': 'Level 10',            'metric': 'level',                  'target': 10},
+]
+
+
+def _resolve_exercise_meta(exercise_key):
+    """Look up an exercise's display name/category from EXERCISE_LIBRARY by
+    key, searching across every skill tier since DailyCompletion doesn't
+    record which tier a key was completed under."""
+    for pools in EXERCISE_LIBRARY.values():
+        for exercises in pools.values():
+            for ex in exercises:
+                if ex['key'] == exercise_key:
+                    return ex['name'], ex['category']
+    return exercise_key, None
+
+
+@app.route('/api/memory-book', methods=['GET'])
+@jwt_required()
+def get_memory_book():
+    user_id = int(get_jwt_identity())
+    user = db.session.get(User, user_id)
+    if user is None:
+        abort(404)
+
+    stats = get_user_stats(user_id)
+    level_info = xp_to_level(user.xp_total)
+
+    exercises_completed = db.session.execute(
+        db.select(db.func.count(DailyCompletion.id)).where(DailyCompletion.user_id == user_id)
+    ).scalar() or 0
+
+    correct_answers = db.session.execute(
+        db.select(db.func.count(BrainBoostAnswer.id)).where(
+            BrainBoostAnswer.user_id == user_id, BrainBoostAnswer.correct == True
+        )
+    ).scalar() or 0
+
+    completion_dates = set(db.session.execute(
+        db.select(DailyCompletion.date).where(DailyCompletion.user_id == user_id).distinct()
+    ).scalars().all())
+    brain_boost_dates = set(db.session.execute(
+        db.select(BrainBoostAnswer.date).where(BrainBoostAnswer.user_id == user_id).distinct()
+    ).scalars().all())
+    days_active = len(completion_dates | brain_boost_dates)
+
+    lifetime = {
+        'xp_total': user.xp_total,
+        'acorns_total': user.acorns_total,
+        'missions_completed': stats['total_missions'],
+        'brain_boosts_answered': stats['brain_boost_answers'],
+        'correct_answers': correct_answers,
+        'exercises_completed': exercises_completed,
+        'days_active': days_active,
+    }
+
+    metric_values = dict(lifetime)
+    metric_values['level'] = level_info['level']
+
+    milestones = [
+        {
+            'key': m['key'],
+            'label': m['label'],
+            'target': m['target'],
+            'progress': min(metric_values[m['metric']], m['target']),
+            'unlocked': metric_values[m['metric']] >= m['target'],
+        }
+        for m in _MILESTONE_DEFINITIONS
+    ]
+
+    favorite_row = db.session.execute(
+        db.select(DailyCompletion.exercise_key, db.func.count(DailyCompletion.id).label('n'))
+        .where(DailyCompletion.user_id == user_id)
+        .group_by(DailyCompletion.exercise_key)
+        .order_by(db.desc('n'))
+        .limit(1)
+    ).first()
+
+    if favorite_row:
+        fav_name, fav_category = _resolve_exercise_meta(favorite_row.exercise_key)
+    else:
+        fav_name, fav_category = None, None
+
+    category_row = None
+    if favorite_row:
+        # category isn't stored on DailyCompletion, so tally categories in
+        # Python from each completion's resolved exercise metadata.
+        category_counts = {}
+        all_rows = db.session.execute(
+            db.select(DailyCompletion.exercise_key).where(DailyCompletion.user_id == user_id)
+        ).scalars().all()
+        for key in all_rows:
+            _, cat = _resolve_exercise_meta(key)
+            if cat:
+                category_counts[cat] = category_counts.get(cat, 0) + 1
+        if category_counts:
+            category_row = max(category_counts.items(), key=lambda kv: kv[1])[0]
+
+    favorites = {
+        'favorite_exercise': fav_name,
+        'favorite_category': category_row,
+    }
+
+    events = db.session.execute(
+        db.select(ProgressEvent)
+        .where(ProgressEvent.user_id == user_id)
+        .order_by(ProgressEvent.created_at.desc(), ProgressEvent.id.desc())
+        .limit(_MEMORY_BOOK_TIMELINE_LIMIT)
+    ).scalars().all()
+
+    timeline = [
+        {
+            'event_type': e.event_type,
+            'xp_delta': e.xp_delta,
+            'acorn_delta': e.acorn_delta,
+            'created_at': e.created_at.isoformat(),
+        }
+        for e in events
+    ]
+
+    return jsonify({
+        'version': 1,
+        'lifetime': lifetime,
+        'milestones': milestones,
+        'favorites': favorites,
+        'timeline': timeline,
+    }), 200
+
 
 @app.route('/api/challenges', methods=['POST'])
 @jwt_required()
