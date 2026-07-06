@@ -1056,6 +1056,8 @@ class User(db.Model):
     password_hash = db.Column(db.String(256), nullable=False)
     skill_level  = db.Column(db.String(20), nullable=False, default='beginner')
     display_mode = db.Column(db.String(20), nullable=False, default='game')
+    xp_total = db.Column(db.Integer, nullable=False, default=0)
+    acorns_total = db.Column(db.Integer, nullable=False, default=0)
     challenges = db.relationship('Challenge', backref='owner', lazy=True)
 
 class AnalyticsEvent(db.Model):
@@ -1098,6 +1100,16 @@ class BrainBoostAnswer(db.Model):
     __table_args__ = (
         db.UniqueConstraint('user_id', 'date', name='uq_brain_boost_answer'),
     )
+
+class ProgressEvent(db.Model):
+    __tablename__ = 'progress_event'
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    event_type = db.Column(db.String(40), nullable=False)
+    xp_delta = db.Column(db.Integer, nullable=False, default=0)
+    acorn_delta = db.Column(db.Integer, nullable=False, default=0)
+    team_id = db.Column(db.Integer, nullable=True)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
 
 # --- Frontend ---
 
