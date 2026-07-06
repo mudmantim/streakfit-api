@@ -1193,12 +1193,18 @@ input:focus {
     width: 100%;
     padding: .65rem 1rem;
     border-radius: var(--radius);
-    border: 1px solid var(--gray-200);
-    background: var(--gray-50);
-    color: var(--gray-400);
+    border: 1px solid var(--indigo-pale);
+    background: var(--indigo-pale);
+    color: var(--t-primary);
     font-size: .85rem;
     font-weight: 700;
-    cursor: not-allowed;
+    cursor: pointer;
+    transition: background .15s;
+    -webkit-tap-highlight-color: transparent;
+}
+
+.journey-memory-book-btn:hover {
+    background: #e0e0fc;
 }
 
 /* ── Install card ─────────────────────────────────────────────────────────── */
@@ -1656,4 +1662,224 @@ body.theme-classic .theme-btn.active { background: rgba(79,70,229,.2); }
 @media (max-width: 400px) {
     .rickie-reaction { padding: .8rem .9rem; gap: .6rem; }
     .rickie-reaction-avatar { width: 34px; height: 34px; }
+}
+
+/* ── Rickie's Memory Book ──────────────────────────────────────────────────── */
+.mb-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,.52);
+    z-index: 200;
+    align-items: flex-end;
+    justify-content: center;
+    overscroll-behavior: contain;
+}
+.mb-overlay.open { display: flex; }
+
+@media (min-width: 540px) {
+    .mb-overlay { align-items: center; padding: 1.5rem; }
+    .mb-book { border-radius: var(--radius); }
+}
+
+.mb-book {
+    position: relative;
+    width: 100%;
+    max-width: 480px;
+    max-height: 88vh;
+    overflow-y: auto;
+    background: linear-gradient(180deg, #fffaf0 0%, #ffffff 45%);
+    border-radius: var(--radius) var(--radius) 0 0;
+    padding: 1.5rem 1.5rem 1.25rem;
+    box-shadow: var(--shadow-md);
+}
+
+.mb-close {
+    position: absolute;
+    top: .9rem;
+    right: .9rem;
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    border: none;
+    background: var(--gray-100);
+    color: var(--gray-500);
+    font-size: .9rem;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+}
+
+.mb-header {
+    display: flex;
+    align-items: center;
+    gap: .8rem;
+    margin-bottom: 1.1rem;
+    padding-right: 2rem;
+}
+
+.mb-avatar {
+    width: 56px;
+    height: 56px;
+    border-radius: 50%;
+    background: var(--amber-light);
+    flex-shrink: 0;
+}
+
+.mb-header-text {
+    min-width: 0;
+}
+
+.mb-title {
+    font-size: 1.05rem;
+    font-weight: 800;
+    color: var(--gray-900);
+    margin: 0 0 .2rem;
+}
+
+.mb-subtitle {
+    font-size: .82rem;
+    color: var(--gray-500);
+    margin: 0;
+}
+
+.mb-page-title {
+    font-size: .95rem;
+    font-weight: 700;
+    color: #b45309;
+    margin: 0 0 .9rem;
+    padding-bottom: .6rem;
+    border-bottom: 1px dashed var(--gray-200);
+}
+
+.mb-page-content {
+    min-height: 140px;
+    margin-bottom: 1.1rem;
+}
+
+.mb-empty {
+    font-size: .9rem;
+    color: var(--gray-500);
+    font-style: italic;
+    line-height: 1.6;
+    margin: 1.5rem 0;
+}
+
+.mb-memory-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: .7rem;
+}
+
+.mb-memory-item {
+    font-size: .9rem;
+    color: var(--gray-700);
+    line-height: 1.5;
+    padding-left: 1.1rem;
+    position: relative;
+}
+
+.mb-memory-item::before {
+    content: '•';
+    position: absolute;
+    left: 0;
+    color: var(--amber);
+}
+
+.mb-day-label {
+    font-size: .78rem;
+    font-weight: 700;
+    color: var(--gray-500);
+    text-transform: uppercase;
+    letter-spacing: .03em;
+    margin: 1rem 0 .5rem;
+}
+.mb-day-label:first-child {
+    margin-top: 0;
+}
+
+.mb-journey-line {
+    font-size: .95rem;
+    font-weight: 700;
+    color: var(--gray-900);
+    margin: 0 0 .3rem;
+}
+
+.mb-journey-sub {
+    font-size: .85rem;
+    color: var(--gray-500);
+    margin: 0 0 .9rem;
+}
+
+.mb-milestone-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: .6rem;
+}
+
+.mb-milestone-item {
+    font-size: .88rem;
+    color: var(--gray-400);
+    line-height: 1.5;
+    padding: .55rem .7rem;
+    border-radius: 8px;
+    background: var(--gray-50);
+}
+
+.mb-milestone-item.unlocked {
+    color: var(--gray-900);
+    background: var(--amber-light);
+    font-weight: 600;
+}
+
+.mb-nav {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding-top: .9rem;
+    border-top: 1px solid var(--gray-100);
+}
+
+.mb-nav-btn {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    border: 1px solid var(--gray-200);
+    background: #fff;
+    color: var(--t-primary);
+    font-size: 1.1rem;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+}
+
+.mb-nav-btn:disabled {
+    color: var(--gray-300, #d1d5db);
+    cursor: not-allowed;
+    border-color: var(--gray-100);
+}
+
+.mb-dots {
+    display: flex;
+    gap: .4rem;
+}
+
+.mb-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--gray-200);
+}
+
+.mb-dot.active {
+    background: var(--amber);
+}
+
+@media (max-width: 400px) {
+    .mb-book { padding: 1.2rem 1.1rem 1rem; max-height: 92vh; }
+    .mb-avatar { width: 48px; height: 48px; }
 }

@@ -347,6 +347,356 @@ function showRickieReaction(line, summary) {
     }, displayMs);
 }
 
+// ── Rickie's Memory Book ────────────────────────────────────────────────────────
+// This is a scrapbook, not a stats page. Memories lead; numbers only ever
+// support them. Never guilt, never shame, never mention missed days, never
+// compare to other users.
+
+var MEMORY_BOOK_PAGES = [
+    { key: 'today',      title: '📖 Today' },
+    { key: 'thisWeek',   title: '📖 Earlier this week' },
+    { key: 'journey',    title: '📖 Your Journey' },
+    { key: 'milestones', title: '📖 Your Milestones' },
+    { key: 'notes',      title: "📖 Rickie's Notes" }
+];
+
+var MEMORY_EVENT_COPY = {
+    mission_complete:    "You completed the day's mission.",
+    perfect_mission:     "A perfect day — all five, done.",
+    new_exercise:        "You tried something new.",
+    brain_boost_attempt: "You gave a Brain Boost question a try.",
+    brain_boost_correct: "You got a Brain Boost question right.",
+    family_session:      "A family session happened."
+};
+
+// Event types that can repeat within one day get a count-aware line instead
+// of one identical bullet per occurrence — a scrapbook summarizes, it
+// doesn't itemize like a receipt.
+var MEMORY_EVENT_COPY_MULTI = {
+    new_exercise: function (n) {
+        return n === 1 ? "You tried something new." : "You tried " + n + " new things.";
+    },
+    family_session: function (n) {
+        return n === 1 ? "A family session happened." : n + " family sessions happened.";
+    }
+};
+
+var MEMORY_CATEGORY_LABELS = {
+    upper_body:   'Upper Body',
+    lower_body:   'Lower Body',
+    core:         'Core',
+    mobility:     'Mobility',
+    conditioning: 'Conditioning'
+};
+
+var MEMORY_MILESTONE_COPY = {
+    first_mission:    { unlocked: "🎉 Your first mission — that's when this all began.",
+                         locked:  "Your first mission is still ahead." },
+    exercises_100:    { unlocked: "🎉 100 exercises completed. That adds up to something real.",
+                         locked:  "exercises completed so far, on the way to 100." },
+    exercises_500:    { unlocked: "🎉 500 exercises completed. That's a lot of showing up.",
+                         locked:  "exercises completed so far, on the way to 500." },
+    brain_boost_100:  { unlocked: "🎉 100 Brain Boost questions answered. Rickie's impressed.",
+                         locked:  "Brain Boost questions answered so far, on the way to 100." },
+    xp_1000:          { unlocked: "🎉 1000 XP earned. A whole journey's worth.",
+                         locked:  "XP earned so far, on the way to 1000." },
+    acorns_100:       { unlocked: "🎉 100 acorns collected. Quite a stash.",
+                         locked:  "acorns collected so far, on the way to 100." },
+    level_10:         { unlocked: "🎉 Level 10 reached. Look how far you've come.",
+                         locked:  "Still climbing toward Level 10." }
+};
+
+var _mbOverlay = null;
+var _mbData = null;
+var _mbPageIndex = 0;
+
+function _mbDateOnly(isoString) {
+    return isoString.slice(0, 10);
+}
+
+function _mbRelativeDayLabel(isoDateStr, todayStr) {
+    var d = new Date(isoDateStr + 'T00:00:00');
+    var today = new Date(todayStr + 'T00:00:00');
+    var diffDays = Math.round((today - d) / 86400000);
+    if (diffDays === 0) return 'Today';
+    if (diffDays === 1) return 'Yesterday';
+    return diffDays + ' days ago';
+}
+
+// Groups events by type (order = first-seen, which is newest since the
+// timeline arrives newest-first) and returns one warm, count-aware line per
+// type rather than one bullet per raw event.
+function _mbGroupEventLines(events) {
+    var counts = {};
+    var order = [];
+    events.forEach(function (e) {
+        if (!counts[e.event_type]) { counts[e.event_type] = 0; order.push(e.event_type); }
+        counts[e.event_type]++;
+    });
+    return order.map(function (type) {
+        var n = counts[type];
+        if (MEMORY_EVENT_COPY_MULTI[type]) return MEMORY_EVENT_COPY_MULTI[type](n);
+        return MEMORY_EVENT_COPY[type] || "Something good happened.";
+    });
+}
+
+function _mbEl(tag, className, text) {
+    var el = document.createElement(tag);
+    if (className) el.className = className;
+    if (text !== undefined) el.textContent = text;
+    return el;
+}
+
+function _mbBuildToday(data) {
+    var frag = document.createDocumentFragment();
+    var todayStr = new Date().toISOString().slice(0, 10);
+    var events = (data.timeline || []).filter(function (e) {
+        return _mbDateOnly(e.created_at) === todayStr;
+    });
+
+    if (events.length === 0) {
+        frag.appendChild(_mbEl('p', 'mb-empty', "Nothing written down yet today — Rickie's ready whenever you are."));
+        return frag;
+    }
+
+    var list = _mbEl('ul', 'mb-memory-list');
+    _mbGroupEventLines(events).forEach(function (line) {
+        list.appendChild(_mbEl('li', 'mb-memory-item', line));
+    });
+    frag.appendChild(list);
+    return frag;
+}
+
+function _mbBuildThisWeek(data) {
+    var frag = document.createDocumentFragment();
+    var todayStr = new Date().toISOString().slice(0, 10);
+    var weekAgo = new Date();
+    weekAgo.setDate(weekAgo.getDate() - 7);
+    var weekAgoStr = weekAgo.toISOString().slice(0, 10);
+
+    var events = (data.timeline || []).filter(function (e) {
+        var d = _mbDateOnly(e.created_at);
+        return d !== todayStr && d >= weekAgoStr;
+    });
+
+    if (events.length === 0) {
+        frag.appendChild(_mbEl('p', 'mb-empty', "Nothing from earlier this week yet — today's page is still being written."));
+        return frag;
+    }
+
+    var byDay = {};
+    var order = [];
+    events.forEach(function (e) {
+        var d = _mbDateOnly(e.created_at);
+        if (!byDay[d]) { byDay[d] = []; order.push(d); }
+        byDay[d].push(e);
+    });
+
+    order.forEach(function (d) {
+        frag.appendChild(_mbEl('p', 'mb-day-label', _mbRelativeDayLabel(d, todayStr)));
+        var list = _mbEl('ul', 'mb-memory-list');
+        _mbGroupEventLines(byDay[d]).forEach(function (line) {
+            list.appendChild(_mbEl('li', 'mb-memory-item', line));
+        });
+        frag.appendChild(list);
+    });
+    return frag;
+}
+
+function _mbBuildJourney(data) {
+    var frag = document.createDocumentFragment();
+    var level      = (currentUser && currentUser.level) || 1;
+    var title      = (currentUser && currentUser.level_title) || 'Explorer';
+    var xpToNext   = (currentUser && currentUser.xp_to_next_level) || 0;
+    var daysActive = data.lifetime.days_active || 0;
+
+    frag.appendChild(_mbEl('p', 'mb-journey-line',
+        "Right now you're Level " + level + " — " + title + "."));
+    frag.appendChild(_mbEl('p', 'mb-journey-sub',
+        xpToNext + " XP until the next chapter."));
+    frag.appendChild(_mbEl('p', 'mb-journey-line',
+        "You've shown up on " + daysActive + (daysActive === 1 ? ' day' : ' days') + " so far."));
+    frag.appendChild(_mbEl('p', 'mb-journey-sub',
+        '🌰 ' + (data.lifetime.acorns_total || 0) + ' acorns collected along the way.'));
+    return frag;
+}
+
+function _mbBuildMilestones(data) {
+    var frag = document.createDocumentFragment();
+    var milestones = data.milestones || [];
+
+    var list = _mbEl('ul', 'mb-milestone-list');
+    milestones.forEach(function (m) {
+        var copy = MEMORY_MILESTONE_COPY[m.key];
+        var item = _mbEl('li', 'mb-milestone-item' + (m.unlocked ? ' unlocked' : ''));
+        if (m.unlocked) {
+            item.textContent = copy ? copy.unlocked : ('🎉 ' + m.label);
+        } else {
+            var prefix = m.progress + ' / ' + m.target + ' — ';
+            item.textContent = '🔒 ' + prefix + (copy ? copy.locked : m.label.toLowerCase());
+        }
+        list.appendChild(item);
+    });
+    frag.appendChild(list);
+    return frag;
+}
+
+function _mbBuildNotes(data) {
+    var frag = document.createDocumentFragment();
+    var notes = [];
+    var lifetime = data.lifetime;
+    var favorites = data.favorites;
+
+    if (lifetime.missions_completed >= 1) {
+        notes.push("Rickie remembers your first mission — that's when this all started.");
+    }
+    if (favorites.favorite_exercise) {
+        notes.push("Your favorite move seems to be " + favorites.favorite_exercise + ". Rickie's noticed.");
+    }
+    if (favorites.favorite_category) {
+        var label = MEMORY_CATEGORY_LABELS[favorites.favorite_category] || favorites.favorite_category;
+        notes.push("You gravitate toward " + label + " days.");
+    }
+    if (lifetime.days_active >= 1) {
+        notes.push("You've shown up on " + lifetime.days_active +
+            (lifetime.days_active === 1 ? ' different day.' : ' different days.') + " That's not nothing.");
+    }
+    if (currentUser && currentUser.level_title) {
+        notes.push("Right now, your title is " + currentUser.level_title + ". Rickie's excited to see what's next.");
+    }
+
+    if (notes.length === 0) {
+        frag.appendChild(_mbEl('p', 'mb-empty', "Rickie hasn't written anything yet — let's make a memory today."));
+        return frag;
+    }
+
+    var list = _mbEl('ul', 'mb-memory-list');
+    notes.forEach(function (n) { list.appendChild(_mbEl('li', 'mb-memory-item', n)); });
+    frag.appendChild(list);
+    return frag;
+}
+
+var MEMORY_BOOK_BUILDERS = {
+    today:      _mbBuildToday,
+    thisWeek:   _mbBuildThisWeek,
+    journey:    _mbBuildJourney,
+    milestones: _mbBuildMilestones,
+    notes:      _mbBuildNotes
+};
+
+function _renderMemoryBookPage() {
+    if (!_mbOverlay || !_mbData) return;
+    var pageDef = MEMORY_BOOK_PAGES[_mbPageIndex];
+
+    document.getElementById('mb-page-title').textContent = pageDef.title;
+
+    var pageContent = document.getElementById('mb-page-content');
+    pageContent.innerHTML = '';
+    pageContent.appendChild(MEMORY_BOOK_BUILDERS[pageDef.key](_mbData));
+
+    document.getElementById('mb-prev').disabled = _mbPageIndex === 0;
+    document.getElementById('mb-next').disabled = _mbPageIndex === MEMORY_BOOK_PAGES.length - 1;
+
+    var dots = document.getElementById('mb-dots');
+    dots.innerHTML = '';
+    MEMORY_BOOK_PAGES.forEach(function (p, i) {
+        var dot = _mbEl('span', 'mb-dot' + (i === _mbPageIndex ? ' active' : ''));
+        dots.appendChild(dot);
+    });
+}
+
+function _mbGoToPage(index) {
+    if (index < 0 || index >= MEMORY_BOOK_PAGES.length) return;
+    _mbPageIndex = index;
+    _renderMemoryBookPage();
+}
+
+function closeMemoryBook() {
+    if (_mbOverlay) {
+        _mbOverlay.classList.remove('open');
+        document.body.style.overflow = '';
+    }
+}
+
+async function openMemoryBook() {
+    if (!_mbOverlay) {
+        _mbOverlay = document.createElement('div');
+        _mbOverlay.className = 'mb-overlay';
+        _mbOverlay.setAttribute('role', 'dialog');
+        _mbOverlay.setAttribute('aria-modal', 'true');
+        _mbOverlay.setAttribute('aria-labelledby', 'mb-page-title');
+        _mbOverlay.addEventListener('click', function (e) {
+            if (e.target === _mbOverlay) closeMemoryBook();
+        });
+        document.addEventListener('keydown', function (e) {
+            if (e.key === 'Escape' && _mbOverlay.classList.contains('open')) closeMemoryBook();
+        });
+
+        var book = _mbEl('div', 'mb-book');
+
+        var closeBtn = _mbEl('button', 'mb-close', '✕');
+        closeBtn.id = 'mb-close';
+        closeBtn.setAttribute('aria-label', 'Close Memory Book');
+        closeBtn.addEventListener('click', closeMemoryBook);
+
+        var header = _mbEl('div', 'mb-header');
+        var avatar = document.createElement('img');
+        avatar.className = 'mb-avatar';
+        avatar.src = '/static/rickie.svg';
+        avatar.alt = '';
+        var headerText = _mbEl('div', 'mb-header-text');
+        headerText.appendChild(_mbEl('h2', 'mb-title', "Rickie's Memory Book"));
+        headerText.appendChild(_mbEl('p', 'mb-subtitle', "Let's remember what we've done together."));
+        header.appendChild(avatar);
+        header.appendChild(headerText);
+
+        var pageTitle = _mbEl('h3', 'mb-page-title');
+        pageTitle.id = 'mb-page-title';
+
+        var pageContent = _mbEl('div', 'mb-page-content');
+        pageContent.id = 'mb-page-content';
+
+        var nav = _mbEl('div', 'mb-nav');
+        var prevBtn = _mbEl('button', 'mb-nav-btn', '‹');
+        prevBtn.id = 'mb-prev';
+        prevBtn.setAttribute('aria-label', 'Previous page');
+        prevBtn.addEventListener('click', function () { _mbGoToPage(_mbPageIndex - 1); });
+        var dots = _mbEl('div', 'mb-dots');
+        dots.id = 'mb-dots';
+        var nextBtn = _mbEl('button', 'mb-nav-btn', '›');
+        nextBtn.id = 'mb-next';
+        nextBtn.setAttribute('aria-label', 'Next page');
+        nextBtn.addEventListener('click', function () { _mbGoToPage(_mbPageIndex + 1); });
+        nav.appendChild(prevBtn);
+        nav.appendChild(dots);
+        nav.appendChild(nextBtn);
+
+        book.appendChild(closeBtn);
+        book.appendChild(header);
+        book.appendChild(pageTitle);
+        book.appendChild(pageContent);
+        book.appendChild(nav);
+
+        _mbOverlay.appendChild(book);
+        document.body.appendChild(_mbOverlay);
+    }
+
+    document.getElementById('mb-page-content').innerHTML = '<p class="mb-empty">Rickie is turning the pages…</p>';
+    _mbOverlay.classList.add('open');
+    document.body.style.overflow = 'hidden';
+
+    var result = await api('/api/memory-book');
+    if (!result || result.status !== 200) {
+        document.getElementById('mb-page-content').innerHTML =
+            '<p class="mb-empty">Couldn\'t open the book right now — try again in a moment.</p>';
+        return;
+    }
+
+    _mbData = result.data;
+    _mbPageIndex = 0;
+    _renderMemoryBookPage();
+}
+
 // ── Analytics ─────────────────────────────────────────────────────────────────
 // Fire-and-forget. Swallows all errors — never affects user experience.
 function fireEvent(name) {
