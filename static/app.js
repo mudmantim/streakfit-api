@@ -251,6 +251,102 @@ function renderJourneyCard() {
     journeyCard.hidden = false;
 }
 
+// ── Rickie's Reaction (completion toast) ───────────────────────────────────────
+// This is not a reward scoreboard — it's Rickie noticing the user showed up.
+// The line always leads; XP/acorns are a quiet secondary detail, never the
+// headline. Never guilt, never shame, never mention missed days or urgency.
+var RICKIE_EXERCISE_LINES = [
+    "Nice work. That one counts.",
+    "We showed up today.",
+    "That was a good step.",
+    "Rickie saw that.",
+    "A little stronger, one move at a time.",
+    "That's how a journey gets built.",
+    "You added something good today.",
+    "Small wins still count.",
+    "Rickie is proud of that one."
+];
+
+var RICKIE_BRAIN_BOOST_CORRECT_LINES = [
+    "Good thinking.",
+    "Rickie likes that answer.",
+    "That brain got some exercise too."
+];
+
+var RICKIE_BRAIN_BOOST_INCORRECT_LINES = [
+    "Nice try. We learned something.",
+    "Curious counts too."
+];
+
+var _lastRickieLine = null;
+
+function _pickRickieLine(pool) {
+    if (pool.length === 1) return pool[0];
+    var choice;
+    do {
+        choice = pool[Math.floor(Math.random() * pool.length)];
+    } while (choice === _lastRickieLine);
+    _lastRickieLine = choice;
+    return choice;
+}
+
+function _summarizeProgress(data) {
+    if (!data) return { xp: 0, acorns: 0, leveledUp: false };
+    return {
+        xp: data.xp_awarded || 0,
+        acorns: data.acorns_awarded || 0,
+        leveledUp: !!data.leveled_up,
+        newLevel: data.new_level,
+        levelTitle: data.level_title
+    };
+}
+
+var _rickieReactionHideTimer = null;
+var _rickieReactionRemoveTimer = null;
+
+function showRickieReaction(line, summary) {
+    summary = summary || {};
+    var toast = document.getElementById('rickie-reaction');
+    if (!toast) return;
+
+    document.getElementById('rickie-reaction-line').textContent = line;
+
+    var progressEl = document.getElementById('rickie-reaction-progress');
+    var xp = summary.xp || 0;
+    var acorns = summary.acorns || 0;
+    if (xp > 0 || acorns > 0) {
+        var parts = [];
+        if (xp > 0) parts.push('+' + xp + ' XP');
+        if (acorns > 0) parts.push('+' + acorns + ' 🌰');
+        progressEl.textContent = parts.join('  ·  ');
+        progressEl.hidden = false;
+    } else {
+        progressEl.hidden = true;
+    }
+
+    var levelUpEl = document.getElementById('rickie-reaction-levelup');
+    if (summary.leveledUp) {
+        levelUpEl.textContent = '🎉 Level ' + summary.newLevel + ' — ' + summary.levelTitle;
+        levelUpEl.hidden = false;
+    } else {
+        levelUpEl.hidden = true;
+    }
+
+    if (_rickieReactionHideTimer) clearTimeout(_rickieReactionHideTimer);
+    if (_rickieReactionRemoveTimer) clearTimeout(_rickieReactionRemoveTimer);
+    toast.classList.remove('leaving');
+    toast.hidden = false;
+
+    var displayMs = summary.leveledUp ? 4600 : 3600;
+    _rickieReactionHideTimer = setTimeout(function () {
+        toast.classList.add('leaving');
+        _rickieReactionRemoveTimer = setTimeout(function () {
+            toast.hidden = true;
+            toast.classList.remove('leaving');
+        }, 300);
+    }, displayMs);
+}
+
 // ── Analytics ─────────────────────────────────────────────────────────────────
 // Fire-and-forget. Swallows all errors — never affects user experience.
 function fireEvent(name) {
@@ -960,6 +1056,12 @@ function renderBrainBoostQuestion(brainBoost) {
                     return;
                 }
                 showResult(result.data.correct, result.data.points_earned, result.data.correct_index, result.data.explanation, i);
+
+                var summary = _summarizeProgress(result.data);
+                if (summary.xp > 0 || summary.acorns > 0) {
+                    var pool = result.data.correct ? RICKIE_BRAIN_BOOST_CORRECT_LINES : RICKIE_BRAIN_BOOST_INCORRECT_LINES;
+                    showRickieReaction(_pickRickieLine(pool), summary);
+                }
 
                 // Brain Boost now awards XP/acorns too, so refresh from /api/me
                 // rather than hand-patching a single counter.
@@ -2541,6 +2643,10 @@ async function handleCompleteExercise(key, btn, row) {
     if (!result) return;
 
     if (result.status === 200) {
+        var summary = _summarizeProgress(result.data);
+        if (summary.xp > 0 || summary.acorns > 0) {
+            showRickieReaction(_pickRickieLine(RICKIE_EXERCISE_LINES), summary);
+        }
         // Let the flash animation play, then reload
         setTimeout(function () { loadDailyExercises(); }, 480);
     } else {

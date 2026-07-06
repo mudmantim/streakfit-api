@@ -1579,3 +1579,81 @@ body.theme-classic .theme-btn.active { background: rgba(79,70,229,.2); }
     padding: .7rem .9rem;
     margin: 0;
 }
+
+/* ── Rickie's Reaction (completion toast) ─────────────────────────────────── */
+.rickie-reaction {
+    position: fixed;
+    left: 50%;
+    bottom: calc(1rem + env(safe-area-inset-bottom, 0px));
+    transform: translateX(-50%);
+    width: min(360px, calc(100vw - 2rem));
+    background: #fff;
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-md);
+    padding: .9rem 1.1rem;
+    display: flex;
+    align-items: flex-start;
+    gap: .7rem;
+    z-index: 150;
+    pointer-events: none;
+    animation: rickie-reaction-in .35s cubic-bezier(.4,0,.2,1);
+}
+
+.rickie-reaction.leaving {
+    animation: rickie-reaction-out .3s ease-in forwards;
+}
+
+@keyframes rickie-reaction-in {
+    from { opacity: 0; transform: translateX(-50%) translateY(16px); }
+    to   { opacity: 1; transform: translateX(-50%) translateY(0); }
+}
+
+@keyframes rickie-reaction-out {
+    from { opacity: 1; transform: translateX(-50%) translateY(0); }
+    to   { opacity: 0; transform: translateX(-50%) translateY(16px); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .rickie-reaction { animation: none; }
+    .rickie-reaction.leaving { animation: none; }
+}
+
+.rickie-reaction-avatar {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    background: var(--indigo-pale);
+    flex-shrink: 0;
+}
+
+.rickie-reaction-body {
+    min-width: 0;
+    flex: 1;
+}
+
+.rickie-reaction-line {
+    font-size: .95rem;
+    font-weight: 700;
+    color: var(--gray-900);
+    margin: 0;
+    line-height: 1.35;
+}
+
+.rickie-reaction-progress {
+    font-size: .78rem;
+    font-weight: 600;
+    color: var(--gray-500);
+    margin: .35rem 0 0;
+}
+
+.rickie-reaction-levelup {
+    font-size: .8rem;
+    font-weight: 700;
+    color: var(--t-primary);
+    margin: .35rem 0 0;
+}
+
+@media (max-width: 400px) {
+    .rickie-reaction { padding: .8rem .9rem; gap: .6rem; }
+    .rickie-reaction-avatar { width: 34px; height: 34px; }
+}
