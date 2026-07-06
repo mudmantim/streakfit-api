@@ -1111,6 +1111,96 @@ class ProgressEvent(db.Model):
     team_id = db.Column(db.Integer, nullable=True)
     created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
 
+
+# --- Retention: XP / Acorns (helper layer only — nothing wired to routes yet) ---
+
+MISSION_COMPLETE_XP = 25
+PERFECT_MISSION_XP = 15
+BRAIN_BOOST_CORRECT_XP = 10
+BRAIN_BOOST_ATTEMPT_XP = 3
+NEW_EXERCISE_BONUS_XP = 20
+FAMILY_SESSION_XP = 30
+
+MISSION_COMPLETE_ACORNS = 3
+PERFECT_MISSION_ACORNS = 2
+BRAIN_BOOST_CORRECT_ACORNS = 1
+NEW_EXERCISE_BONUS_ACORNS = 5
+
+LEVEL_TITLES = {
+    1: 'Explorer',
+    2: 'Adventurer',
+    3: 'Pathfinder',
+    4: 'Trailblazer',
+    5: 'Guide',
+    6: 'Ranger',
+    7: 'Champion',
+    8: 'Legend',
+}
+
+
+def _level_threshold(level):
+    """Cumulative XP required to reach the start of `level` (level 1 = 0 XP).
+
+    Thresholds follow the approved curve (0, 100, 250, 450, 700, ...), where
+    each level costs 50 more XP than the last to reach — continued smoothly
+    forever rather than capped, so numeric level always keeps climbing even
+    past the last named title."""
+    n = level - 1
+    return 25 * n * n + 75 * n
+
+
+def xp_to_level(xp_total):
+    """Derive level/title/progress from lifetime XP. Never stored — always
+    computed fresh so the curve can be retuned without a data migration."""
+    level = 1
+    while _level_threshold(level + 1) <= xp_total:
+        level += 1
+
+    xp_into_level = xp_total - _level_threshold(level)
+    xp_required = _level_threshold(level + 1) - _level_threshold(level)
+    xp_to_next = xp_required - xp_into_level
+    level_title = LEVEL_TITLES.get(level, LEVEL_TITLES[max(LEVEL_TITLES)])
+
+    return {
+        'level': level,
+        'level_title': level_title,
+        'xp_into_level': xp_into_level,
+        'xp_required': xp_required,
+        'xp_to_next': xp_to_next,
+    }
+
+
+def award_progress(user, event_type, xp, acorns, team_id=None):
+    """Record an XP/Acorn award: writes a ProgressEvent, increments the
+    user's lifetime counters, and reports whether this award crossed a
+    level boundary. XP and acorns never decrease — this is the only
+    function that should ever change xp_total/acorns_total."""
+    old_level = xp_to_level(user.xp_total)['level']
+
+    db.session.add(ProgressEvent(
+        user_id=user.id,
+        event_type=event_type,
+        xp_delta=xp,
+        acorn_delta=acorns,
+        team_id=team_id,
+    ))
+    user.xp_total += xp
+    user.acorns_total += acorns
+    db.session.commit()
+
+    new_level_info = xp_to_level(user.xp_total)
+    new_level = new_level_info['level']
+
+    return {
+        'xp_awarded': xp,
+        'acorns_awarded': acorns,
+        'old_level': old_level,
+        'new_level': new_level,
+        'leveled_up': new_level > old_level,
+        'level_title': new_level_info['level_title'],
+    }
+
+
 # --- Frontend ---
 
 @app.route('/')
