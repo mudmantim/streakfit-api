@@ -208,21 +208,22 @@ var isGuest = false;
 var guestCompleted = new Set();
 var guestCompleteFired = false;
 
+// Picked once per page load, reused across re-renders — see renderJourneyCard's
+// caller and the Ricky intro line below.
+var _cachedGreetingLine = null;
+
 // ── Rickie's Journey ──────────────────────────────────────────────────────────
 // Never guilt, never shame, never mention losing progress — only encouragement.
-var JOURNEY_MESSAGES = [
-    "Every little adventure counts.",
-    "You're building something that lasts.",
-    "Rickie can't wait to see what you do next.",
-    "One step today, a whole journey over time.",
-    "Rickie's cheering you on.",
-    "Small moves add up to big stories.",
-    "This is the good kind of building — slow and steady."
-];
-
+// Message pool lives in RICKIE_LINES (general + an occasional fun aside) so
+// Rickie's Journey draws from the same voice as every other surface.
 function _journeyMessageForToday() {
     var dayOfYear = Math.floor((Date.now() - new Date(new Date().getFullYear(), 0, 0)) / 86400000);
-    return JOURNEY_MESSAGES[dayOfYear % JOURNEY_MESSAGES.length];
+    // Deterministic per day (stable across re-renders, same as before) —
+    // roughly one day in five pulls a lighter, funnier aside instead of
+    // straight encouragement, so the card doesn't feel like it's reciting
+    // the same seven lines on a loop.
+    var pool = (dayOfYear % 5 === 0) ? RICKIE_LINES.fun : RICKIE_LINES.general;
+    return pool[dayOfYear % pool.length];
 }
 
 function renderJourneyCard() {
@@ -251,43 +252,165 @@ function renderJourneyCard() {
     journeyCard.hidden = false;
 }
 
-// ── Rickie's Reaction (completion toast) ───────────────────────────────────────
-// This is not a reward scoreboard — it's Rickie noticing the user showed up.
-// The line always leads; XP/acorns are a quiet secondary detail, never the
-// headline. Never guilt, never shame, never mention missed days or urgency.
-var RICKIE_EXERCISE_LINES = [
-    "Nice work. That one counts.",
-    "We showed up today.",
-    "That was a good step.",
-    "Rickie saw that.",
-    "A little stronger, one move at a time.",
-    "That's how a journey gets built.",
-    "You added something good today.",
-    "Small wins still count.",
-    "Rickie is proud of that one."
-];
+// ── Rickie's voice ──────────────────────────────────────────────────────────────
+// Every line in here follows the same rules, everywhere Rickie speaks:
+// he never guilts, nags, pressures, compares, or manipulates. He notices,
+// celebrates, encourages, and keeps it short. This is the single library —
+// every Rickie-voiced surface in the app (greeting, reactions, Journey,
+// Rise Again, Memory Book) draws from it, so his voice stays consistent
+// instead of each surface inventing its own tone.
+var RICKIE_LINES = {
+    morning: [
+        "Morning! Rickie's already up.",
+        "Good morning. Ready when you are.",
+        "Rise and shine.",
+        "A fresh morning, a fresh mission.",
+        "Rickie had an acorn for breakfast.",
+        "Morning light looks good on you."
+    ],
+    afternoon: [
+        "Afternoon! Rickie's here.",
+        "Halfway through the day — nice.",
+        "Afternoon check-in: Rickie's around.",
+        "Hope your day's going well so far.",
+        "Rickie's taking a break too. Join him?",
+        "Good afternoon. Whenever you're ready."
+    ],
+    evening: [
+        "Evening! Rickie's winding down too.",
+        "Ending the day on a good note.",
+        "Evenings are for showing up too.",
+        "Rickie likes evening visits best.",
+        "Good evening. Rickie's here.",
+        "The day's not over yet."
+    ],
+    missionComplete: [
+        "Nice work. That one counts.",
+        "We showed up today.",
+        "That was a good step.",
+        "Rickie saw that.",
+        "A little stronger, one move at a time.",
+        "That's how a journey gets built.",
+        "You added something good today.",
+        "Small wins still count.",
+        "Rickie is proud of that one.",
+        "That's one more for the books.",
+        "Rickie noticed that.",
+        "Nice. Onward."
+    ],
+    brainBoostCorrect: [
+        "Good thinking.",
+        "Rickie likes that answer.",
+        "That brain got some exercise too.",
+        "Sharp.",
+        "Rickie's impressed.",
+        "You got it."
+    ],
+    brainBoostIncorrect: [
+        "Nice try. We learned something.",
+        "Curious counts too.",
+        "Close enough to count as trying.",
+        "Rickie still thinks that was a good guess.",
+        "Now you know for next time."
+    ],
+    levelUp: [
+        "Level up! Look at you.",
+        "New level, same great you.",
+        "Rickie's throwing acorns in the air right now.",
+        "That's a new chapter.",
+        "Leveled up. Rickie's doing a little dance.",
+        "Onward and upward."
+    ],
+    perfectMission: [
+        "All five, done. Rickie's impressed.",
+        "A perfect day for showing up.",
+        "Every single one. Nice.",
+        "That's a clean sweep.",
+        "Rickie counted. All five.",
+        "Full mission, no shortcuts."
+    ],
+    firstMission: [
+        "Your very first mission. Rickie will remember this one.",
+        "That's the first of many.",
+        "Welcome to the journey — that was mission one.",
+        "First one's done. Rickie's excited for what's next.",
+        "That's how it starts."
+    ],
+    firstWeek: [
+        "A whole week. That's real.",
+        "Seven days — Rickie's genuinely impressed.",
+        "One week in the books.",
+        "That's a habit forming.",
+        "A week together. Rickie likes this."
+    ],
+    milestone: [
+        "Rickie's been keeping track — you've earned a few of these.",
+        "Look at everything you've built so far.",
+        "Rickie flips back through these sometimes. Good stuff in here.",
+        "A few milestones deep already.",
+        "Every one of these took showing up.",
+        "Rickie's proud of this collection."
+    ],
+    general: [
+        "Every little adventure counts.",
+        "You're building something that lasts.",
+        "Rickie can't wait to see what you do next.",
+        "One step today, a whole journey over time.",
+        "Rickie's cheering you on.",
+        "Small moves add up to big stories.",
+        "This is the good kind of building — slow and steady.",
+        "Rickie's glad you're here."
+    ],
+    guest: [
+        "Trying things out? Rickie approves.",
+        "No pressure — look around as long as you like.",
+        "Guest or not, Rickie's glad you showed up.",
+        "Take your time deciding.",
+        "Rickie likes new faces."
+    ],
+    returning: [
+        "You came back. That's what matters.",
+        "Rickie missed seeing you.",
+        "Welcome back.",
+        "Good to see you again.",
+        "Rickie kept your spot.",
+        "However long it's been, you're here now."
+    ],
+    fun: [
+        "Rickie once tried to do a push-up. It did not go well.",
+        "Fun fact: raccoons wash their food. Rickie is very committed to this.",
+        "Rickie thinks acorns are underrated as currency.",
+        "If Rickie had thumbs, he'd give you one up right now.",
+        "Rickie's favorite exercise is naps. Unofficially.",
+        "Somewhere, a raccoon is proud of you.",
+        "Rickie's been told he has good posture for a raccoon.",
+        "This message brought to you by a very supportive raccoon."
+    ]
+};
 
-var RICKIE_BRAIN_BOOST_CORRECT_LINES = [
-    "Good thinking.",
-    "Rickie likes that answer.",
-    "That brain got some exercise too."
-];
+var _lastRickieLineByPool = {};
 
-var RICKIE_BRAIN_BOOST_INCORRECT_LINES = [
-    "Nice try. We learned something.",
-    "Curious counts too."
-];
-
-var _lastRickieLine = null;
-
-function _pickRickieLine(pool) {
+// Picks from a named pool in RICKIE_LINES, never repeating the immediately
+// previous pick *within that same pool* (each pool tracks its own history,
+// so an exercise-completion pick can't be blocked by a Brain Boost pick).
+function _pickRickieLine(poolKey) {
+    var pool = RICKIE_LINES[poolKey];
+    if (!pool || pool.length === 0) return '';
     if (pool.length === 1) return pool[0];
+    var last = _lastRickieLineByPool[poolKey];
     var choice;
     do {
         choice = pool[Math.floor(Math.random() * pool.length)];
-    } while (choice === _lastRickieLine);
-    _lastRickieLine = choice;
+    } while (choice === last);
+    _lastRickieLineByPool[poolKey] = choice;
     return choice;
+}
+
+function _rickieTimeOfDayPool() {
+    var hour = new Date().getHours();
+    if (hour < 12) return 'morning';
+    if (hour < 18) return 'afternoon';
+    return 'evening';
 }
 
 function _summarizeProgress(data) {
@@ -326,7 +449,7 @@ function showRickieReaction(line, summary) {
 
     var levelUpEl = document.getElementById('rickie-reaction-levelup');
     if (summary.leveledUp) {
-        levelUpEl.textContent = '🎉 Level ' + summary.newLevel + ' — ' + summary.levelTitle;
+        levelUpEl.textContent = _pickRickieLine('levelUp') + ' 🎉 Level ' + summary.newLevel + ' — ' + summary.levelTitle;
         levelUpEl.hidden = false;
     } else {
         levelUpEl.hidden = true;
@@ -564,6 +687,15 @@ function _mbBuildNotes(data) {
     if (currentUser && currentUser.level_title) {
         notes.push("Right now, your title is " + currentUser.level_title + ". Rickie's excited to see what's next.");
     }
+    var unlockedCount = (data.milestones || []).filter(function (m) { return m.unlocked; }).length;
+    if (unlockedCount >= 2) {
+        notes.push(_pickRickieLine('milestone'));
+    }
+    // A small, occasional aside — not on every visit, just often enough to
+    // feel like Rickie sometimes says something a little different.
+    if (Math.random() < 0.25) {
+        notes.push(_pickRickieLine('fun'));
+    }
 
     if (notes.length === 0) {
         frag.appendChild(_mbEl('p', 'mb-empty', "Rickie hasn't written anything yet — let's make a memory today."));
@@ -688,7 +820,7 @@ async function openMemoryBook() {
     var result = await api('/api/memory-book');
     if (!result || result.status !== 200) {
         document.getElementById('mb-page-content').innerHTML =
-            '<p class="mb-empty">Couldn\'t open the book right now — try again in a moment.</p>';
+            '<p class="mb-empty">🦝 Rickie couldn\'t quite find the pages — try again in a moment.</p>';
         return;
     }
 
@@ -914,7 +1046,7 @@ async function loadDailyExercises() {
     // Show spinner while loading
     var spinner = document.createElement('div');
     spinner.className = 'state-loading';
-    spinner.innerHTML = '<div class="spinner"></div><p>Today\'s Mission is loading…</p>';
+    spinner.innerHTML = '<div class="spinner"></div><p>Rickie\'s getting today\'s mission ready…</p>';
     list.appendChild(spinner);
 
     var daily;
@@ -958,9 +1090,23 @@ async function loadDailyExercises() {
 
     // Ricky's pre-mission intro line — hidden once the mission is complete,
     // since the post-completion Ricky handoff line takes over from there.
+    // Varies by time of day (and by guest vs. registered) instead of a single
+    // fixed line every visit — small thing, but it's the difference between
+    // software and a companion who's actually there in the moment.
     var rickyIntro = document.getElementById('ricky-mission-intro');
     if (rickyIntro) {
         rickyIntro.hidden = daily.completed_count >= 5;
+        var introTextEl = document.getElementById('ricky-intro-text');
+        if (introTextEl && !rickyIntro.hidden) {
+            // Picked once per page load and reused across re-renders (e.g.
+            // after each of exercises 1-4) so the greeting doesn't flicker
+            // to a new line after every click — just once per visit.
+            if (!_cachedGreetingLine) {
+                var greetingPool = isGuest ? 'guest' : _rickieTimeOfDayPool();
+                _cachedGreetingLine = _pickRickieLine(greetingPool);
+            }
+            introTextEl.textContent = _cachedGreetingLine + ' Complete today’s mission and come see me afterward.';
+        }
     }
 
     // Populate streak helper text (below progress bar, hidden when mission complete)
@@ -1036,6 +1182,11 @@ async function loadDailyExercises() {
         var ceremony = document.createElement('div');
         ceremony.className = 'rise-again-ceremony';
 
+        var rAvatar = document.createElement('img');
+        rAvatar.className = 'rickie-avatar-sm rise-again-avatar';
+        rAvatar.src = '/static/rickie.svg';
+        rAvatar.alt = '';
+
         var rEmoji = document.createElement('p');
         rEmoji.className = 'rise-again-emoji';
         rEmoji.textContent = '🌅';
@@ -1044,9 +1195,12 @@ async function loadDailyExercises() {
         rTitle.className = 'rise-again-title';
         rTitle.textContent = 'Rise Again';
 
+        // This is the app's most important anti-guilt moment, so it draws
+        // from the "returning" pool — Rickie's voice, never a mention of
+        // how long it's been or why.
         var rLine1 = document.createElement('p');
         rLine1.className = 'rise-again-body';
-        rLine1.textContent = 'You came back.';
+        rLine1.textContent = _pickRickieLine('returning');
 
         var rLine2 = document.createElement('p');
         rLine2.className = 'rise-again-body';
@@ -1065,6 +1219,7 @@ async function loadDailyExercises() {
             if (pt) pt.textContent = daily.completed_count + ' / 5 completed';
         });
 
+        ceremony.appendChild(rAvatar);
         ceremony.appendChild(rEmoji);
         ceremony.appendChild(rTitle);
         ceremony.appendChild(rLine1);
@@ -1113,9 +1268,13 @@ async function loadDailyExercises() {
         }
 
         // Mission → Insight → Ricky: hand the user off to what's next.
+        // Varies by context instead of one fixed line every day — a streak
+        // of exactly 7 gets its own moment; otherwise a general pick keeps
+        // this from feeling identical on the 50th visit as the 1st.
+        var handoffPoolKey = (!isGuest && bannerStreak === 7) ? 'firstWeek' : 'general';
         var rickyHandoff = document.createElement('p');
         rickyHandoff.className = 'ricky-handoff-line';
-        rickyHandoff.textContent = '🦝 Nice work. Ready for today’s insight?';
+        rickyHandoff.textContent = '🦝 ' + _pickRickieLine(handoffPoolKey) + ' Ready for today’s insight?';
         list.appendChild(rickyHandoff);
 
         if (daily.insight) {
@@ -1409,8 +1568,8 @@ function renderBrainBoostQuestion(brainBoost) {
 
                 var summary = _summarizeProgress(result.data);
                 if (summary.xp > 0 || summary.acorns > 0) {
-                    var pool = result.data.correct ? RICKIE_BRAIN_BOOST_CORRECT_LINES : RICKIE_BRAIN_BOOST_INCORRECT_LINES;
-                    showRickieReaction(_pickRickieLine(pool), summary);
+                    var poolKey = result.data.correct ? 'brainBoostCorrect' : 'brainBoostIncorrect';
+                    showRickieReaction(_pickRickieLine(poolKey), summary);
                 }
 
                 // Brain Boost now awards XP/acorns too, so refresh from /api/me
@@ -2989,13 +3148,24 @@ async function handleCompleteExercise(key, btn, row) {
         return;
     }
 
+    // Captured before the request: whether this user has never completed a
+    // mission before, so a genuine first-ever completion gets its own line
+    // rather than the generic pool.
+    var wasFirstMissionEver = !!(currentUser && currentUser.total_missions === 0);
+
     var result = await api('/api/daily/' + key + '/complete', 'POST');
     if (!result) return;
 
     if (result.status === 200) {
         var summary = _summarizeProgress(result.data);
         if (summary.xp > 0 || summary.acorns > 0) {
-            showRickieReaction(_pickRickieLine(RICKIE_EXERCISE_LINES), summary);
+            var poolKey = 'missionComplete';
+            if (result.data.completed_count === 5 && wasFirstMissionEver) {
+                poolKey = 'firstMission';
+            } else if (result.data.completed_count === 5) {
+                poolKey = 'perfectMission';
+            }
+            showRickieReaction(_pickRickieLine(poolKey), summary);
         }
         // Let the flash animation play, then reload
         setTimeout(function () { loadDailyExercises(); }, 480);
