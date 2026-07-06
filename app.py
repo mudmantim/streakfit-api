@@ -1700,6 +1700,22 @@ def get_demo_daily():
     }), 200
 
 
+def _progress_response(old_level, user, events):
+    """Combine a list of award_progress() results into the additive response
+    fields shared by both completion routes. Route-response shaping only —
+    not part of the R1.2 helper layer itself."""
+    new_level_info = xp_to_level(user.xp_total)
+    return {
+        'xp_awarded': sum(e['xp_awarded'] for e in events),
+        'acorns_awarded': sum(e['acorns_awarded'] for e in events),
+        'old_level': old_level,
+        'new_level': new_level_info['level'],
+        'leveled_up': new_level_info['level'] > old_level,
+        'level_title': new_level_info['level_title'],
+        'progress_events': events,
+    }
+
+
 @app.route('/api/daily/<string:exercise_key>/complete', methods=['POST'])
 @jwt_required()
 def complete_daily_exercise(exercise_key):
@@ -1715,6 +1731,9 @@ def complete_daily_exercise(exercise_key):
     if exercise_key not in valid_keys:
         return jsonify({"error": "Exercise not in today's daily list"}), 400
 
+    old_level = xp_to_level(user.xp_total)['level']
+    events = []
+
     existing = db.session.execute(
         db.select(DailyCompletion).where(
             DailyCompletion.user_id == user_id,
@@ -1724,6 +1743,15 @@ def complete_daily_exercise(exercise_key):
     ).scalar_one_or_none()
 
     if not existing:
+        # Must check "ever completed this key before" BEFORE inserting today's
+        # row, otherwise the row we're about to add would make this always true.
+        is_new_exercise_ever = db.session.execute(
+            db.select(db.func.count(DailyCompletion.id)).where(
+                DailyCompletion.user_id == user_id,
+                DailyCompletion.exercise_key == exercise_key
+            )
+        ).scalar() == 0
+
         db.session.add(DailyCompletion(
             user_id=user_id,
             date=today,
@@ -1731,18 +1759,34 @@ def complete_daily_exercise(exercise_key):
         ))
         db.session.commit()
 
-    completed_count = db.session.execute(
-        db.select(db.func.count(DailyCompletion.id)).where(
-            DailyCompletion.user_id == user_id,
-            DailyCompletion.date == today
-        )
-    ).scalar()
+        completed_count = db.session.execute(
+            db.select(db.func.count(DailyCompletion.id)).where(
+                DailyCompletion.user_id == user_id,
+                DailyCompletion.date == today
+            )
+        ).scalar()
 
-    return jsonify({
+        if is_new_exercise_ever:
+            events.append(award_progress(user, 'new_exercise', NEW_EXERCISE_BONUS_XP, NEW_EXERCISE_BONUS_ACORNS))
+
+        if completed_count == 5:
+            events.append(award_progress(user, 'mission_complete', MISSION_COMPLETE_XP, MISSION_COMPLETE_ACORNS))
+            events.append(award_progress(user, 'perfect_mission', PERFECT_MISSION_XP, PERFECT_MISSION_ACORNS))
+    else:
+        completed_count = db.session.execute(
+            db.select(db.func.count(DailyCompletion.id)).where(
+                DailyCompletion.user_id == user_id,
+                DailyCompletion.date == today
+            )
+        ).scalar()
+
+    response = {
         "message": "Exercise completed",
         "exercise_key": exercise_key,
         "completed_count": completed_count
-    }), 200
+    }
+    response.update(_progress_response(old_level, user, events))
+    return jsonify(response), 200
 
 
 @app.route('/api/brain-boost/answer', methods=['POST'])
@@ -1754,11 +1798,17 @@ def answer_brain_boost():
         return jsonify({"error": "selected_index_required"}), 400
 
     user_id = int(get_jwt_identity())
+    user = db.session.get(User, user_id)
+    if user is None:
+        abort(404)
+
     today = date.today()
     boost = get_daily_brain_boost(today.isoformat())
 
     if selected_index < 0 or selected_index >= len(boost['options']):
         return jsonify({"error": "invalid_selected_index"}), 400
+
+    old_level = xp_to_level(user.xp_total)['level']
 
     existing = db.session.execute(
         db.select(BrainBoostAnswer).where(
@@ -1768,12 +1818,14 @@ def answer_brain_boost():
     ).scalar_one_or_none()
 
     if existing:
-        return jsonify({
+        response = {
             "correct": existing.correct,
             "points_earned": existing.points_earned,
             "correct_index": boost['correct_index'],
             "explanation": boost['explanation']
-        }), 200
+        }
+        response.update(_progress_response(old_level, user, []))
+        return jsonify(response), 200
 
     is_correct = (selected_index == boost['correct_index'])
     points = BRAIN_BOOST_CORRECT_POINTS if is_correct else BRAIN_BOOST_INCORRECT_POINTS
@@ -1792,20 +1844,28 @@ def answer_brain_boost():
             )
         ).scalar_one_or_none()
         if existing:
-            return jsonify({
+            response = {
                 "correct": existing.correct,
                 "points_earned": existing.points_earned,
                 "correct_index": boost['correct_index'],
                 "explanation": boost['explanation']
-            }), 200
+            }
+            response.update(_progress_response(old_level, user, []))
+            return jsonify(response), 200
         abort(500)
 
-    return jsonify({
+    events = [award_progress(user, 'brain_boost_attempt', BRAIN_BOOST_ATTEMPT_XP, 0)]
+    if is_correct:
+        events.append(award_progress(user, 'brain_boost_correct', BRAIN_BOOST_CORRECT_XP, BRAIN_BOOST_CORRECT_ACORNS))
+
+    response = {
         "correct": is_correct,
         "points_earned": points,
         "correct_index": boost['correct_index'],
         "explanation": boost['explanation']
-    }), 200
+    }
+    response.update(_progress_response(old_level, user, events))
+    return jsonify(response), 200
 
 
 # --- Coach v1 ---
