@@ -208,6 +208,49 @@ var isGuest = false;
 var guestCompleted = new Set();
 var guestCompleteFired = false;
 
+// ── Rickie's Journey ──────────────────────────────────────────────────────────
+// Never guilt, never shame, never mention losing progress — only encouragement.
+var JOURNEY_MESSAGES = [
+    "Every little adventure counts.",
+    "You're building something that lasts.",
+    "Rickie can't wait to see what you do next.",
+    "One step today, a whole journey over time.",
+    "Rickie's cheering you on.",
+    "Small moves add up to big stories.",
+    "This is the good kind of building — slow and steady."
+];
+
+function _journeyMessageForToday() {
+    var dayOfYear = Math.floor((Date.now() - new Date(new Date().getFullYear(), 0, 0)) / 86400000);
+    return JOURNEY_MESSAGES[dayOfYear % JOURNEY_MESSAGES.length];
+}
+
+function renderJourneyCard() {
+    var journeyCard = document.getElementById('journey-card');
+    if (!journeyCard || !currentUser) return;
+
+    document.getElementById('journey-level').textContent = 'Level ' + (currentUser.level || 1);
+    document.getElementById('journey-level-title').textContent = currentUser.level_title || 'Explorer';
+
+    var xpIntoLevel = currentUser.xp_into_level || 0;
+    var xpRequired  = currentUser.xp_required   || 100;
+    var xpToNext    = currentUser.xp_to_next_level;
+    if (xpToNext === undefined || xpToNext === null) xpToNext = xpRequired - xpIntoLevel;
+
+    var pct = xpRequired > 0 ? Math.min(100, (xpIntoLevel / xpRequired) * 100) : 100;
+    var fill = document.getElementById('journey-xp-fill');
+    if (fill) fill.style.width = pct + '%';
+    var track = document.querySelector('.journey-xp-track');
+    if (track) track.setAttribute('aria-valuenow', Math.round(pct));
+
+    document.getElementById('journey-xp-caption').textContent = xpToNext + ' XP to next level';
+
+    document.getElementById('journey-acorns-value').textContent = currentUser.acorns_total || 0;
+    document.getElementById('journey-message').textContent = _journeyMessageForToday();
+
+    journeyCard.hidden = false;
+}
+
 // ── Analytics ─────────────────────────────────────────────────────────────────
 // Fire-and-forget. Swallows all errors — never affects user experience.
 function fireEvent(name) {
@@ -519,14 +562,7 @@ async function loadDailyExercises() {
         statsRow.hidden = false;
     }
 
-    // Populate Progress Signal card (missions, streak, Brain Boost answers)
-    var progressCard = document.getElementById('progress-card');
-    if (progressCard && currentUser) {
-        document.getElementById('progress-missions').textContent    = currentUser.total_missions || 0;
-        document.getElementById('progress-streak').textContent      = currentUser.current_streak || 0;
-        document.getElementById('progress-brain-boost').textContent = currentUser.brain_boost_answers || 0;
-        progressCard.hidden = false;
-    }
+    renderJourneyCard();
 
     // Update progress bar
     var pct = (daily.completed_count / 5) * 100;
@@ -925,13 +961,12 @@ function renderBrainBoostQuestion(brainBoost) {
                 }
                 showResult(result.data.correct, result.data.points_earned, result.data.correct_index, result.data.explanation, i);
 
-                // Reflect the new total in the Progress card without a full reload —
-                // this is the user's first answer today (this branch only runs when
-                // brainBoost.answered was false), so incrementing by 1 is exact.
-                if (currentUser) {
-                    currentUser.brain_boost_answers = (currentUser.brain_boost_answers || 0) + 1;
-                    var bbStat = document.getElementById('progress-brain-boost');
-                    if (bbStat) bbStat.textContent = currentUser.brain_boost_answers;
+                // Brain Boost now awards XP/acorns too, so refresh from /api/me
+                // rather than hand-patching a single counter.
+                var meResult = await api('/api/me');
+                if (meResult && meResult.status === 200) {
+                    currentUser = meResult.data;
+                    renderJourneyCard();
                 }
             });
         }

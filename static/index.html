@@ -143,24 +143,34 @@
                 </div>
             </section>
 
-            <!-- Progress Signal ─────────────────────────────────────── -->
-            <section id="progress-card" class="card progress-card" hidden>
-                <h2 class="progress-title">Your Progress</h2>
-                <div class="progress-stats-row">
-                    <div class="progress-stat">
-                        <span class="progress-stat-value" id="progress-missions">0</span>
-                        <span class="progress-stat-label">Missions Completed</span>
-                    </div>
-                    <div class="progress-stat">
-                        <span class="progress-stat-value" id="progress-streak">0</span>
-                        <span class="progress-stat-label">Current Streak</span>
-                    </div>
-                    <div class="progress-stat">
-                        <span class="progress-stat-value" id="progress-brain-boost">0</span>
-                        <span class="progress-stat-label">Brain Boost Answers</span>
+            <!-- Rickie's Journey ────────────────────────────────────── -->
+            <section id="journey-card" class="card journey-card" hidden>
+                <div class="journey-header">
+                    <img src="/static/rickie.svg" alt="Rickie" class="journey-avatar">
+                    <div class="journey-header-text">
+                        <h2 class="journey-title">Rickie's Journey</h2>
+                        <p class="journey-level-line">
+                            <span id="journey-level" class="journey-level"></span>
+                            <span id="journey-level-title" class="journey-level-title"></span>
+                        </p>
                     </div>
                 </div>
-                <p class="progress-rickie-caption">🦝 Ricky's keeping count.</p>
+
+                <div class="journey-xp-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-label="Progress to next level">
+                    <div id="journey-xp-fill" class="journey-xp-fill"></div>
+                </div>
+                <p id="journey-xp-caption" class="journey-xp-caption"></p>
+
+                <div class="journey-acorns-row">
+                    <span class="journey-acorns-icon" aria-hidden="true">🌰</span>
+                    <span id="journey-acorns-value" class="journey-acorns-value">0</span>
+                    <span class="journey-acorns-label">Acorns</span>
+                </div>
+
+                <p id="journey-message" class="journey-message"></p>
+
+                <button id="journey-memory-book-btn" class="journey-memory-book-btn" disabled
+                        title="Coming soon">Memory Book →</button>
             </section>
 
             <!-- Install StreakFit ──────────────────────────────────── -->

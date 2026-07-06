@@ -1067,50 +1067,138 @@ input:focus {
     color: var(--gray-400);
 }
 
-/* ── Progress Signal card ──────────────────────────────────────────────────── */
-.progress-card {
-    text-align: center;
+/* ── Rickie's Journey card ────────────────────────────────────────────────── */
+.journey-card {
+    text-align: left;
 }
 
-.progress-title {
-    font-size: .95rem;
-    font-weight: 700;
-    color: var(--gray-900);
-    margin: 0 0 .85rem;
-}
-
-.progress-stats-row {
+.journey-header {
     display: flex;
-    justify-content: space-around;
-    gap: .5rem;
+    align-items: center;
+    gap: .9rem;
+    margin-bottom: 1.1rem;
+}
+
+.journey-avatar {
+    width: 72px;
+    height: 72px;
+    flex-shrink: 0;
+    border-radius: 50%;
+    background: var(--indigo-pale);
+    animation: journey-avatar-bob 4s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .journey-avatar {
+        animation: none;
+    }
+}
+
+@keyframes journey-avatar-bob {
+    0%, 100% { transform: translateY(0) rotate(0deg); }
+    50%      { transform: translateY(-4px) rotate(-2deg); }
+}
+
+.journey-header-text {
+    display: flex;
+    flex-direction: column;
+    gap: .2rem;
+    min-width: 0;
+}
+
+.journey-title {
+    font-size: 1.05rem;
+    font-weight: 800;
+    color: var(--gray-900);
+    margin: 0;
+}
+
+.journey-level-line {
+    display: flex;
+    align-items: baseline;
+    gap: .4rem;
+    margin: 0;
     flex-wrap: wrap;
 }
 
-.progress-stat {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: .2rem;
-    min-width: 80px;
-}
-
-.progress-stat-value {
-    font-size: 1.5rem;
+.journey-level {
+    font-size: 1.1rem;
     font-weight: 800;
     color: var(--t-primary);
 }
 
-.progress-stat-label {
-    font-size: .72rem;
+.journey-level-title {
+    font-size: .85rem;
+    font-weight: 600;
+    color: var(--gray-500);
+}
+
+.journey-xp-track {
+    height: 10px;
+    background: var(--gray-200);
+    border-radius: 5px;
+    margin-bottom: .5rem;
+    overflow: hidden;
+}
+
+.journey-xp-fill {
+    height: 100%;
+    width: 0%;
+    background: linear-gradient(90deg, var(--indigo) 0%, var(--violet) 100%);
+    border-radius: 5px;
+    transition: width .45s cubic-bezier(.4,0,.2,1);
+}
+
+.journey-xp-caption {
+    font-size: .78rem;
+    font-weight: 600;
+    color: var(--gray-500);
+    margin: 0 0 1rem;
+}
+
+.journey-acorns-row {
+    display: flex;
+    align-items: center;
+    gap: .4rem;
+    margin-bottom: 1rem;
+}
+
+.journey-acorns-icon {
+    font-size: 1.1rem;
+    line-height: 1;
+}
+
+.journey-acorns-value {
+    font-size: 1.15rem;
+    font-weight: 800;
+    color: var(--gray-900);
+}
+
+.journey-acorns-label {
+    font-size: .78rem;
     font-weight: 600;
     color: var(--gray-500);
     letter-spacing: .02em;
 }
 
-.progress-rickie-caption {
-    font-size: .78rem;
-    color: var(--gray-500);
-    margin: .85rem 0 0;
+.journey-message {
+    font-size: .88rem;
+    font-style: italic;
+    color: var(--gray-700);
+    margin: 0 0 1.1rem;
+    line-height: 1.5;
+}
+
+.journey-memory-book-btn {
+    width: 100%;
+    padding: .65rem 1rem;
+    border-radius: var(--radius);
+    border: 1px solid var(--gray-200);
+    background: var(--gray-50);
+    color: var(--gray-400);
+    font-size: .85rem;
+    font-weight: 700;
+    cursor: not-allowed;
 }
 
 /* ── Install card ─────────────────────────────────────────────────────────── */
@@ -1322,6 +1410,9 @@ body.theme-classic .theme-btn.active { background: rgba(79,70,229,.2); }
     .site-header { padding: .7rem 1rem; }
     .header-brand { font-size: 1.1rem; }
     .challenge-card { padding: .9rem 1rem; }
+    .journey-avatar { width: 56px; height: 56px; }
+    .journey-header { gap: .7rem; }
+    .journey-title { font-size: .95rem; }
 }
 
 /* header-right wraps instead of squeezing on narrow phones */
