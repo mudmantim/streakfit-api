@@ -1214,6 +1214,132 @@ input:focus {
     background: #e0e0fc;
 }
 
+/* ── Teams section ────────────────────────────────────────────────────────── */
+.teams-section {
+    padding: 1rem 0 .25rem;
+}
+
+.teams-header {
+    margin-bottom: .85rem;
+}
+
+.teams-title {
+    font-size: 1rem;
+    font-weight: 700;
+    color: var(--gray-700);
+    margin: 0 0 .15rem;
+}
+
+.teams-subtitle {
+    font-size: .78rem;
+    color: var(--gray-500);
+    margin: 0;
+}
+
+.team-card {
+    background: #fff;
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    padding: 1rem 1.1rem;
+    margin-bottom: .7rem;
+    border-left: 4px solid var(--indigo-pale);
+}
+
+.team-rickie-card {
+    border-left-color: var(--amber);
+}
+
+.team-card-header {
+    display: flex;
+    align-items: center;
+    gap: .7rem;
+    margin-bottom: .6rem;
+}
+
+.team-card-title {
+    font-size: .95rem;
+    font-weight: 700;
+    color: var(--gray-900);
+    margin: 0;
+}
+
+.team-rickie-line {
+    font-size: .8rem;
+    font-style: italic;
+    color: var(--gray-500);
+    margin: .15rem 0 0;
+}
+
+.team-card-meta {
+    font-size: .8rem;
+    color: var(--gray-500);
+    margin: 0;
+}
+
+.team-card-stats {
+    font-size: .85rem;
+    font-weight: 600;
+    color: var(--gray-700);
+    margin: 0 0 .7rem;
+}
+
+.team-card-open-btn {
+    padding: .5rem 1rem;
+    border-radius: var(--radius);
+    border: 1px solid var(--gray-200);
+    background: var(--gray-100);
+    color: var(--gray-400);
+    font-size: .82rem;
+    font-weight: 700;
+    cursor: not-allowed;
+}
+
+.team-empty-card {
+    text-align: center;
+}
+
+.team-empty-card .team-card-title {
+    margin-bottom: .3rem;
+}
+
+.team-empty-card .team-card-meta {
+    margin-bottom: 1rem;
+    line-height: 1.5;
+}
+
+.team-empty-btn-row {
+    display: flex;
+    gap: .6rem;
+    justify-content: center;
+}
+
+.team-empty-btn-row .team-card-open-btn {
+    flex: 1;
+    max-width: 160px;
+}
+
+.team-guest-card {
+    text-align: center;
+}
+
+.team-guest-card .team-card-title {
+    font-weight: 600;
+    color: var(--gray-500);
+    margin: 0;
+}
+
+.teams-error-state {
+    text-align: center;
+    padding: .5rem 0 1rem;
+}
+
+.teams-retry-btn {
+    margin-top: .5rem;
+    padding: .5rem 1.2rem;
+    font-size: .82rem;
+    width: auto;
+}
+
 /* ── Install card ─────────────────────────────────────────────────────────── */
 .install-card {
     text-align: center;

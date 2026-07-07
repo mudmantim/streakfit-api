@@ -258,6 +258,227 @@ function renderJourneyCard() {
     journeyCard.hidden = false;
 }
 
+// ── Teams (R2.2 Team List UI) ────────────────────────────────────────────────
+// Read-only display of R2.1's team data. No create/join actions wired here —
+// this sprint is "make existing team data visible," not "add new interactive
+// capability." Team Rickie is UI-only throughout: no API call, no fake team
+// id, no campfire, no membership row — it renders from data the dashboard
+// already has (currentUser, currentRickieExpression).
+
+var CAMPFIRE_STAGE_EMOJI = {
+    'Kindling':    '✨',
+    'Small Flame': '🔥',
+    'Campfire':    '🔥',
+    'Bonfire':     '🔥',
+    'Beacon':      '🔥'
+};
+
+async function loadTeams() {
+    var container = document.getElementById('teams-list');
+    if (!container) return;
+
+    if (isGuest) {
+        renderTeamsSection({ guest: true });
+        return;
+    }
+
+    renderTeamsSection({ loading: true });
+
+    var result = await api('/api/teams');
+    if (!result || result.status !== 200) {
+        renderTeamsSection({ error: true });
+        return;
+    }
+
+    renderTeamsSection({ teams: result.data });
+}
+
+function renderTeamsSection(state) {
+    var container = document.getElementById('teams-list');
+    if (!container) return;
+    container.innerHTML = '';
+
+    if (state.guest) {
+        container.appendChild(_buildGuestTeamsPreview());
+        return;
+    }
+
+    if (state.loading) {
+        var loading = document.createElement('div');
+        loading.className = 'state-loading';
+        loading.innerHTML = '<div class="spinner"></div><p>Loading teams…</p>';
+        container.appendChild(loading);
+        return;
+    }
+
+    if (state.error) {
+        var errWrap = document.createElement('div');
+        errWrap.className = 'teams-error-state';
+        var errMsg = document.createElement('p');
+        errMsg.className = 'error';
+        errMsg.textContent = "Couldn't load teams — try again in a moment.";
+        var retryBtn = document.createElement('button');
+        retryBtn.className = 'btn-primary teams-retry-btn';
+        retryBtn.textContent = 'Retry';
+        retryBtn.onclick = loadTeams;
+        errWrap.appendChild(errMsg);
+        errWrap.appendChild(retryBtn);
+        container.appendChild(errWrap);
+        return;
+    }
+
+    // Team Rickie always renders first — present whether or not any real
+    // teams exist yet, same as day one.
+    container.appendChild(_buildTeamRickieCard());
+
+    var teams = state.teams || [];
+    if (teams.length === 0) {
+        container.appendChild(_buildEmptyTeamsCard());
+    } else {
+        teams.forEach(function (team) {
+            container.appendChild(_buildTeamCard(team));
+        });
+    }
+}
+
+function _buildTeamRickieCard() {
+    var card = document.createElement('div');
+    card.className = 'team-card team-rickie-card';
+
+    var header = document.createElement('div');
+    header.className = 'team-card-header';
+
+    var avatar = document.createElement('img');
+    avatar.className = 'rickie-avatar-sm';
+    avatar.src = RICKIE_EXPRESSION_SVG[currentRickieExpression] || RICKIE_EXPRESSION_SVG.neutral;
+    avatar.alt = '';
+
+    var titleWrap = document.createElement('div');
+    var title = document.createElement('p');
+    title.className = 'team-card-title';
+    title.textContent = '🦝 Team Rickie';
+    titleWrap.appendChild(title);
+
+    if (_rickieMode() !== 'minimal') {
+        var line = document.createElement('p');
+        line.className = 'team-rickie-line';
+        line.textContent = _pickRickieLine('general');
+        titleWrap.appendChild(line);
+    }
+
+    header.appendChild(avatar);
+    header.appendChild(titleWrap);
+    card.appendChild(header);
+
+    // Team Rickie has no Campfire — this shows the user's own Journey stats
+    // in that visual slot instead, per TEAM_SYSTEM_BASELINE Section 1.
+    var streak = (currentUser && currentUser.current_streak) || 0;
+    var stats = document.createElement('p');
+    stats.className = 'team-card-stats';
+    stats.textContent = '🔥 ' + streak + (streak === 1 ? ' day' : ' days') + ' together';
+    card.appendChild(stats);
+
+    return card;
+}
+
+// Team Rickie's avatar/streak are derived from currentUser and
+// currentRickieExpression, both of which change after every completion —
+// re-rendered wherever renderJourneyCard() is (same freshness dependency),
+// without re-fetching the real teams list, which nothing here changed.
+function _refreshTeamRickieCard() {
+    var existing = document.querySelector('.team-rickie-card');
+    if (!existing) return;
+    existing.replaceWith(_buildTeamRickieCard());
+}
+
+function _buildTeamCard(team) {
+    var card = document.createElement('div');
+    card.className = 'team-card';
+
+    var header = document.createElement('div');
+    header.className = 'team-card-header';
+
+    var titleWrap = document.createElement('div');
+    var title = document.createElement('p');
+    title.className = 'team-card-title';
+    title.textContent = team.name;
+    titleWrap.appendChild(title);
+
+    var meta = document.createElement('p');
+    meta.className = 'team-card-meta';
+    meta.textContent = team.member_count + (team.member_count === 1 ? ' member' : ' members');
+    titleWrap.appendChild(meta);
+
+    header.appendChild(titleWrap);
+    card.appendChild(header);
+
+    var stats = document.createElement('p');
+    stats.className = 'team-card-stats';
+    var stageEmoji = CAMPFIRE_STAGE_EMOJI[team.campfire_stage] || '✨';
+    stats.textContent = stageEmoji + ' ' + team.campfire_stage + ' · ' +
+        team.total_team_missions + (team.total_team_missions === 1 ? ' log' : ' logs');
+    card.appendChild(stats);
+
+    var openBtn = document.createElement('button');
+    openBtn.className = 'team-card-open-btn';
+    openBtn.textContent = 'Open';
+    openBtn.disabled = true;
+    openBtn.title = 'Coming soon';
+    card.appendChild(openBtn);
+
+    return card;
+}
+
+function _buildEmptyTeamsCard() {
+    var card = document.createElement('div');
+    card.className = 'team-card team-empty-card';
+
+    var title = document.createElement('p');
+    title.className = 'team-card-title';
+    title.textContent = 'Create or join a team';
+    card.appendChild(title);
+
+    var sub = document.createElement('p');
+    sub.className = 'team-card-meta';
+    sub.textContent = (_rickieMode() === 'minimal')
+        ? 'Build a shared Campfire with people you know.'
+        : "Bring people along — a family, a few friends, whoever you want cheering you on.";
+    card.appendChild(sub);
+
+    var btnRow = document.createElement('div');
+    btnRow.className = 'team-empty-btn-row';
+
+    var createBtn = document.createElement('button');
+    createBtn.className = 'team-card-open-btn';
+    createBtn.textContent = 'Create a team';
+    createBtn.disabled = true;
+    createBtn.title = 'Coming soon';
+
+    var joinBtn = document.createElement('button');
+    joinBtn.className = 'team-card-open-btn';
+    joinBtn.textContent = 'Join a team';
+    joinBtn.disabled = true;
+    joinBtn.title = 'Coming soon';
+
+    btnRow.appendChild(createBtn);
+    btnRow.appendChild(joinBtn);
+    card.appendChild(btnRow);
+
+    return card;
+}
+
+function _buildGuestTeamsPreview() {
+    var card = document.createElement('div');
+    card.className = 'team-card team-guest-card';
+
+    var title = document.createElement('p');
+    title.className = 'team-card-title';
+    title.textContent = 'Sign up to build teams with Rickie.';
+    card.appendChild(title);
+
+    return card;
+}
+
 // ── Rickie's voice ──────────────────────────────────────────────────────────────
 // Every line in here follows the same rules, everywhere Rickie speaks:
 // he never guilts, nags, pressures, compares, or manipulates. He notices,
@@ -991,6 +1212,7 @@ function handleGuestMode() {
     setGuestUI(true);
     fireEvent('guest_start');
     loadDailyExercises();
+    loadTeams();
     showView('dashboard');
 }
 
@@ -1091,6 +1313,7 @@ async function loadDashboard() {
     await loadDailyExercises();
     await loadChallenges();
     checkRetentionPrompts();
+    await loadTeams();
 }
 
 async function loadUserPreferences() {
@@ -1282,6 +1505,7 @@ async function loadDailyExercises() {
     }
 
     renderJourneyCard();
+    _refreshTeamRickieCard();
 
     // Update progress bar
     var pct = (daily.completed_count / 5) * 100;
@@ -1719,6 +1943,7 @@ function renderBrainBoostQuestion(brainBoost) {
                 if (meResult && meResult.status === 200) {
                     currentUser = meResult.data;
                     renderJourneyCard();
+                    _refreshTeamRickieCard();
                 }
             });
         }
