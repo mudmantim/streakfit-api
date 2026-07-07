@@ -443,6 +443,60 @@ function _rickieAllowsReaction(isMilestoneMoment) {
     return true;
 }
 
+// ── R1.5.2 Expression Engine ─────────────────────────────────────────────────
+// Which SVG each expression maps to. Neutral/Happy/Proud/Curious are real
+// Phase A assets; the rest have no dedicated art yet (Phase B), so they fall
+// back to the closest existing expression rather than a broken image.
+var RICKIE_EXPRESSION_SVG = {
+    neutral:     '/static/rickie.svg',
+    happy:       '/static/rickie_happy.svg',
+    proud:       '/static/rickie_proud.svg',
+    curious:     '/static/rickie_curious.svg',
+    celebrating: '/static/rickie_proud.svg',   // placeholder — no dedicated asset yet
+    encouraging: '/static/rickie.svg',         // placeholder — no dedicated asset yet
+    thinking:    '/static/rickie.svg',         // placeholder — no trigger reaches this yet either
+    cozy:        '/static/rickie.svg'          // placeholder — no trigger reaches this yet either
+};
+
+var currentRickieExpression = 'neutral';
+
+// Single source of truth for "what should Rickie's face look like right now."
+// Reuses the exact same signals the R1.6 reaction-line system already computes
+// (firstMissionEver, leveledUp, completed_count === 5) in the same priority
+// order (first_mission > level_up > perfect_mission > mission_complete) —
+// this is not a second priority system, it's the same one read differently.
+function getRickieExpression(eventContext) {
+    eventContext = eventContext || {};
+    switch (eventContext.type) {
+        case 'mission_complete':
+            if (eventContext.firstMissionEver) return 'celebrating';
+            if (eventContext.leveledUp) return 'celebrating';
+            if (eventContext.perfectMission) return 'proud';
+            return 'happy';
+        case 'brain_boost_correct':
+            return 'curious';
+        case 'returning_user':
+            return 'encouraging';
+        case 'guest_mode':
+        case 'idle_dashboard':
+        default:
+            return 'neutral';
+    }
+}
+
+// Pushes currentRickieExpression to every surface that shows Rickie's face.
+// Minimal mode always displays neutral regardless of the computed expression —
+// same "branding only" rule _updateRickieMoodBadge already applies to the mood
+// badge, applied here to the avatar itself.
+function _applyRickieExpression() {
+    var expr = (_rickieMode() === 'minimal') ? 'neutral' : currentRickieExpression;
+    var src = RICKIE_EXPRESSION_SVG[expr] || RICKIE_EXPRESSION_SVG.neutral;
+    var avatarEls = document.querySelectorAll(
+        '.journey-avatar, .rickie-avatar-sm, .rickie-reaction-avatar, .coach-avatar, .mb-avatar'
+    );
+    avatarEls.forEach(function (el) { el.src = src; });
+}
+
 function _summarizeProgress(data) {
     if (!data) return { xp: 0, acorns: 0, leveledUp: false };
     return {
@@ -847,6 +901,7 @@ async function openMemoryBook() {
     document.getElementById('mb-page-content').innerHTML = '<p class="mb-empty">Rickie is turning the pages…</p>';
     _mbOverlay.classList.add('open');
     document.body.style.overflow = 'hidden';
+    _applyRickieExpression();
 
     var result = await api('/api/memory-book');
     if (!result || result.status !== 200) {
@@ -1121,6 +1176,19 @@ async function loadDailyExercises() {
         if (result.status !== 200) return;
         daily = result.data;
     }
+
+    // Baseline Rickie expression for this load — overridden moment-to-moment
+    // by mission-complete/Brain Boost reactions, then recomputed back to this
+    // baseline the next time loadDailyExercises runs (e.g. 480ms after a
+    // completion), the same way the reaction toast is itself transient.
+    if (isGuest) {
+        currentRickieExpression = getRickieExpression({ type: 'guest_mode' });
+    } else if (daily.rise_again) {
+        currentRickieExpression = getRickieExpression({ type: 'returning_user' });
+    } else {
+        currentRickieExpression = getRickieExpression({ type: 'idle_dashboard' });
+    }
+    _applyRickieExpression();
 
     // Sync the skill-level select
     var select = document.getElementById('skill-level-select');
@@ -1636,6 +1704,13 @@ function renderBrainBoostQuestion(brainBoost) {
                 if ((summary.xp > 0 || summary.acorns > 0) && _rickieMode() === 'full') {
                     var poolKey = result.data.correct ? 'brainBoostCorrect' : 'brainBoostIncorrect';
                     showRickieReaction(_pickRickieLine(poolKey), summary);
+                    // Only "correct" has a defined expression mapping — incorrect
+                    // answers leave the current expression as-is rather than
+                    // inventing an unspecified one.
+                    if (result.data.correct) {
+                        currentRickieExpression = getRickieExpression({ type: 'brain_boost_correct' });
+                        _applyRickieExpression();
+                    }
                 }
 
                 // Brain Boost now awards XP/acorns too, so refresh from /api/me
@@ -3225,14 +3300,28 @@ async function handleCompleteExercise(key, btn, row) {
     if (result.status === 200) {
         var summary = _summarizeProgress(result.data);
         var isMilestoneMoment = result.data.completed_count === 5 || summary.leveledUp;
-        if ((summary.xp > 0 || summary.acorns > 0) && _rickieAllowsReaction(isMilestoneMoment)) {
-            var poolKey = 'missionComplete';
-            if (result.data.completed_count === 5 && wasFirstMissionEver) {
-                poolKey = 'firstMission';
-            } else if (result.data.completed_count === 5) {
-                poolKey = 'perfectMission';
+        var allowsReaction = _rickieAllowsReaction(isMilestoneMoment);
+        if (summary.xp > 0 || summary.acorns > 0) {
+            if (allowsReaction) {
+                var poolKey = 'missionComplete';
+                var wasFirstMission = result.data.completed_count === 5 && wasFirstMissionEver;
+                var wasPerfectMission = result.data.completed_count === 5;
+                if (wasFirstMission) {
+                    poolKey = 'firstMission';
+                } else if (wasPerfectMission) {
+                    poolKey = 'perfectMission';
+                }
+                showRickieReaction(_pickRickieLine(poolKey), summary);
+                currentRickieExpression = getRickieExpression({
+                    type: 'mission_complete',
+                    firstMissionEver: wasFirstMission,
+                    leveledUp: summary.leveledUp,
+                    perfectMission: wasPerfectMission
+                });
+            } else {
+                currentRickieExpression = 'neutral';
             }
-            showRickieReaction(_pickRickieLine(poolKey), summary);
+            _applyRickieExpression();
         }
         // Let the flash animation play, then reload
         setTimeout(function () { loadDailyExercises(); }, 480);
@@ -3657,6 +3746,7 @@ function openCoach(context) {
 
     _coachPanel.hidden = false;
     _updateRickieMoodBadge();
+    _applyRickieExpression();
     _coachPanel.scrollIntoView({ behavior: 'smooth', block: 'start' });
 
     if (context && context.type === 'insight') {
