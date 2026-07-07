@@ -1,6 +1,7 @@
 import os
 import hashlib
 import random
+import string
 from datetime import datetime, date, timedelta
 from flask import Flask, request, jsonify, abort
 from flask_sqlalchemy import SQLAlchemy
@@ -1060,6 +1061,7 @@ class User(db.Model):
     rickie_mode  = db.Column(db.String(20), nullable=False, default='full')
     xp_total = db.Column(db.Integer, nullable=False, default=0)
     acorns_total = db.Column(db.Integer, nullable=False, default=0)
+    is_plus = db.Column(db.Boolean, nullable=False, default=False)
     challenges = db.relationship('Challenge', backref='owner', lazy=True)
 
 class AnalyticsEvent(db.Model):
@@ -1112,6 +1114,79 @@ class ProgressEvent(db.Model):
     acorn_delta = db.Column(db.Integer, nullable=False, default=0)
     team_id = db.Column(db.Integer, nullable=True)
     created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+
+# --- Teams (R2.1 Team Foundations — see TEAM_SYSTEM_BASELINE.md) ---
+# Team Rickie is deliberately not represented here — it has no membership row,
+# no chat, no Campfire. It's UI-only, built from data these tables don't touch.
+
+class Team(db.Model):
+    __tablename__ = 'team'
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(100), nullable=False)
+    created_by_user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+
+class TeamMembership(db.Model):
+    __tablename__ = 'team_membership'
+    id = db.Column(db.Integer, primary_key=True)
+    team_id = db.Column(db.Integer, db.ForeignKey('team.id'), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    joined_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+
+    __table_args__ = (
+        db.UniqueConstraint('team_id', 'user_id', name='uq_team_membership'),
+        db.Index('ix_team_membership_user_id', 'user_id'),
+    )
+
+class TeamInviteCode(db.Model):
+    __tablename__ = 'team_invite_code'
+    id = db.Column(db.Integer, primary_key=True)
+    team_id = db.Column(db.Integer, db.ForeignKey('team.id'), nullable=False)
+    code = db.Column(db.String(8), nullable=False)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    rotated_at = db.Column(db.DateTime, nullable=True)
+
+    __table_args__ = (
+        db.UniqueConstraint('team_id', name='uq_team_invite_code_team'),
+        db.UniqueConstraint('code', name='uq_team_invite_code_code'),
+    )
+
+class TeamMessage(db.Model):
+    __tablename__ = 'team_message'
+    id = db.Column(db.Integer, primary_key=True)
+    team_id = db.Column(db.Integer, db.ForeignKey('team.id'), nullable=False)
+    sender_type = db.Column(db.String(10), nullable=False)  # 'user' | 'rickie'
+    sender_user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True)
+    body = db.Column(db.Text, nullable=False)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+
+    __table_args__ = (
+        db.Index('ix_team_message_team_id', 'team_id'),
+    )
+
+class TeamMoment(db.Model):
+    __tablename__ = 'team_moment'
+    id = db.Column(db.Integer, primary_key=True)
+    team_id = db.Column(db.Integer, db.ForeignKey('team.id'), nullable=False)
+    moment_type = db.Column(db.String(40), nullable=False)
+    subject_user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True)
+    occurred_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    moment_metadata = db.Column(db.Text, nullable=True)  # JSON string; named to avoid colliding with SQLAlchemy's Model.metadata
+
+    __table_args__ = (
+        db.Index('ix_team_moment_team_id', 'team_id'),
+    )
+
+class TeamCampfire(db.Model):
+    __tablename__ = 'team_campfire'
+    id = db.Column(db.Integer, primary_key=True)
+    team_id = db.Column(db.Integer, db.ForeignKey('team.id'), nullable=False)
+    total_team_missions = db.Column(db.Integer, nullable=False, default=0)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+
+    __table_args__ = (
+        db.UniqueConstraint('team_id', name='uq_team_campfire_team'),
+    )
 
 
 # --- Retention: XP / Acorns (helper layer only — nothing wired to routes yet) ---
@@ -2020,6 +2095,319 @@ def answer_brain_boost():
     }
     response.update(_progress_response(old_level, user, events))
     return jsonify(response), 200
+
+
+# --- Teams (R2.1 Team Foundations) ---
+# Schema-and-plumbing sprint only: no chat routes, no moments routes, no
+# Rickie behavior, no UI. team_message and team_moment tables exist (see
+# Database Models above) but have no routes yet — that's R2.4/R2.5.
+#
+# Team member cap = highest plan tier held by any CURRENT member of that
+# team (TEAM_SYSTEM_BASELINE.md Section 12). Team-count cap = the joining
+# user's own tier. Neither cap check uses row locking (contrast check_in's
+# SELECT...FOR UPDATE) — a genuine race exists if two people join the same
+# near-full team at the exact same instant. Accepted, not fixed, for this
+# foundations sprint: low-traffic, low-probability, not the "no admin"-style
+# decision this project reopens without a real incident driving it.
+
+TEAM_FREE_MEMBER_CAP = 8
+TEAM_PLUS_MEMBER_CAP = 25
+TEAM_FREE_TEAM_COUNT_CAP = 10  # Plus: unlimited (no cap check at all)
+
+CAMPFIRE_STAGE_THRESHOLDS = [
+    (0, 'Kindling'),
+    (100, 'Small Flame'),
+    (300, 'Campfire'),
+    (750, 'Bonfire'),
+    (2000, 'Beacon'),
+]
+
+def _campfire_stage(total_missions):
+    stage = CAMPFIRE_STAGE_THRESHOLDS[0][1]
+    for threshold, name in CAMPFIRE_STAGE_THRESHOLDS:
+        if total_missions >= threshold:
+            stage = name
+    return stage
+
+def _generate_team_invite_code():
+    alphabet = string.ascii_uppercase + string.digits
+    for _ in range(20):
+        code = ''.join(random.choice(alphabet) for _ in range(6))
+        exists = db.session.execute(
+            db.select(TeamInviteCode).where(TeamInviteCode.code == code)
+        ).scalar_one_or_none()
+        if not exists:
+            return code
+    abort(500)
+
+def _team_member_cap(team_id):
+    has_plus_member = db.session.execute(
+        db.select(TeamMembership.id)
+        .join(User, User.id == TeamMembership.user_id)
+        .where(TeamMembership.team_id == team_id, User.is_plus == True)
+        .limit(1)
+    ).scalar_one_or_none()
+    return TEAM_PLUS_MEMBER_CAP if has_plus_member else TEAM_FREE_MEMBER_CAP
+
+def _user_team_count_cap(user):
+    return None if user.is_plus else TEAM_FREE_TEAM_COUNT_CAP
+
+
+@app.route('/api/teams', methods=['POST'])
+@jwt_required()
+@limiter.limit("10 per minute")
+def create_team():
+    data = request.get_json()
+    if not data or not data.get('name') or not data['name'].strip():
+        return jsonify({"error": "Team name is required"}), 400
+
+    user_id = int(get_jwt_identity())
+    user = db.session.get(User, user_id)
+
+    count_cap = _user_team_count_cap(user)
+    if count_cap is not None:
+        current_count = db.session.execute(
+            db.select(db.func.count(TeamMembership.id)).where(TeamMembership.user_id == user_id)
+        ).scalar()
+        if current_count >= count_cap:
+            return jsonify({"error": f"You've reached the {count_cap}-team limit for your plan"}), 403
+
+    team = Team(name=data['name'].strip()[:100], created_by_user_id=user_id)
+    db.session.add(team)
+    db.session.flush()
+
+    db.session.add(TeamMembership(team_id=team.id, user_id=user_id))
+    db.session.add(TeamCampfire(team_id=team.id, total_team_missions=0))
+    invite = TeamInviteCode(team_id=team.id, code=_generate_team_invite_code())
+    db.session.add(invite)
+    db.session.commit()
+
+    return jsonify({
+        "message": "Team created",
+        "team": {"id": team.id, "name": team.name, "invite_code": invite.code}
+    }), 201
+
+
+@app.route('/api/teams', methods=['GET'])
+@jwt_required()
+def list_teams():
+    user_id = int(get_jwt_identity())
+
+    memberships = db.session.execute(
+        db.select(TeamMembership).where(TeamMembership.user_id == user_id)
+    ).scalars().all()
+
+    result = []
+    for m in memberships:
+        team = db.session.get(Team, m.team_id)
+        member_count = db.session.execute(
+            db.select(db.func.count(TeamMembership.id)).where(TeamMembership.team_id == team.id)
+        ).scalar()
+        campfire = db.session.execute(
+            db.select(TeamCampfire).where(TeamCampfire.team_id == team.id)
+        ).scalar_one_or_none()
+        total_missions = campfire.total_team_missions if campfire else 0
+        result.append({
+            "id": team.id,
+            "name": team.name,
+            "member_count": member_count,
+            "campfire_stage": _campfire_stage(total_missions),
+            "total_team_missions": total_missions,
+        })
+
+    return jsonify(result), 200
+
+
+@app.route('/api/teams/lookup/<code>', methods=['GET'])
+@jwt_required()
+def lookup_team_by_code(code):
+    invite = db.session.execute(
+        db.select(TeamInviteCode).where(TeamInviteCode.code == code.strip().upper())
+    ).scalar_one_or_none()
+    if not invite:
+        return jsonify({"error": "Invalid invite code"}), 404
+
+    team = db.session.get(Team, invite.team_id)
+    member_count = db.session.execute(
+        db.select(db.func.count(TeamMembership.id)).where(TeamMembership.team_id == team.id)
+    ).scalar()
+    campfire = db.session.execute(
+        db.select(TeamCampfire).where(TeamCampfire.team_id == team.id)
+    ).scalar_one_or_none()
+    total_missions = campfire.total_team_missions if campfire else 0
+
+    return jsonify({
+        "team_id": team.id,
+        "name": team.name,
+        "member_count": member_count,
+        "campfire_stage": _campfire_stage(total_missions),
+    }), 200
+
+
+@app.route('/api/teams/<int:team_id>', methods=['GET'])
+@jwt_required()
+def get_team(team_id):
+    user_id = int(get_jwt_identity())
+
+    membership = db.session.execute(
+        db.select(TeamMembership).where(TeamMembership.team_id == team_id, TeamMembership.user_id == user_id)
+    ).scalar_one_or_none()
+    if not membership:
+        return jsonify({"error": "Forbidden"}), 403
+
+    team = db.session.get(Team, team_id)
+    if not team:
+        abort(404)
+
+    memberships = db.session.execute(
+        db.select(TeamMembership).where(TeamMembership.team_id == team_id)
+    ).scalars().all()
+    members = []
+    for m in memberships:
+        member_user = db.session.get(User, m.user_id)
+        members.append({
+            "user_id": member_user.id,
+            "username": member_user.username,
+            "is_creator": member_user.id == team.created_by_user_id,
+        })
+
+    invite = db.session.execute(
+        db.select(TeamInviteCode).where(TeamInviteCode.team_id == team_id)
+    ).scalar_one_or_none()
+
+    campfire = db.session.execute(
+        db.select(TeamCampfire).where(TeamCampfire.team_id == team_id)
+    ).scalar_one_or_none()
+    total_missions = campfire.total_team_missions if campfire else 0
+
+    return jsonify({
+        "id": team.id,
+        "name": team.name,
+        "created_by_user_id": team.created_by_user_id,
+        "is_creator": team.created_by_user_id == user_id,
+        "members": members,
+        "member_count": len(members),
+        "member_cap": _team_member_cap(team_id),
+        "invite_code": invite.code if invite else None,
+        "campfire": {
+            "total_team_missions": total_missions,
+            "stage": _campfire_stage(total_missions),
+        },
+    }), 200
+
+
+@app.route('/api/teams/<int:team_id>/join', methods=['POST'])
+@jwt_required()
+@limiter.limit("10 per minute")
+def join_team(team_id):
+    data = request.get_json()
+    code = (data or {}).get('code', '').strip().upper()
+    if not code:
+        return jsonify({"error": "Invite code is required"}), 400
+
+    user_id = int(get_jwt_identity())
+    user = db.session.get(User, user_id)
+
+    team = db.session.get(Team, team_id)
+    if not team:
+        abort(404)
+
+    invite = db.session.execute(
+        db.select(TeamInviteCode).where(TeamInviteCode.team_id == team_id)
+    ).scalar_one_or_none()
+    if not invite or invite.code != code:
+        return jsonify({"error": "Invalid invite code"}), 403
+
+    existing = db.session.execute(
+        db.select(TeamMembership).where(TeamMembership.team_id == team_id, TeamMembership.user_id == user_id)
+    ).scalar_one_or_none()
+    if existing:
+        return jsonify({"error": "Already a member of this team"}), 400
+
+    count_cap = _user_team_count_cap(user)
+    if count_cap is not None:
+        current_count = db.session.execute(
+            db.select(db.func.count(TeamMembership.id)).where(TeamMembership.user_id == user_id)
+        ).scalar()
+        if current_count >= count_cap:
+            return jsonify({"error": f"You've reached the {count_cap}-team limit for your plan"}), 403
+
+    member_cap = _team_member_cap(team_id)
+    current_member_count = db.session.execute(
+        db.select(db.func.count(TeamMembership.id)).where(TeamMembership.team_id == team_id)
+    ).scalar()
+    if current_member_count >= member_cap:
+        return jsonify({"error": f"This team is at its {member_cap}-member limit"}), 403
+
+    db.session.add(TeamMembership(team_id=team_id, user_id=user_id))
+    db.session.commit()
+
+    return jsonify({"message": "Joined team", "team_id": team_id}), 200
+
+
+@app.route('/api/teams/<int:team_id>/leave', methods=['POST'])
+@jwt_required()
+def leave_team(team_id):
+    user_id = int(get_jwt_identity())
+
+    membership = db.session.execute(
+        db.select(TeamMembership).where(TeamMembership.team_id == team_id, TeamMembership.user_id == user_id)
+    ).scalar_one_or_none()
+    if not membership:
+        return jsonify({"error": "Not a member of this team"}), 404
+
+    db.session.delete(membership)
+    db.session.commit()
+
+    return jsonify({"message": "Left team"}), 200
+
+
+@app.route('/api/teams/<int:team_id>/rotate-invite', methods=['POST'])
+@jwt_required()
+def rotate_team_invite(team_id):
+    user_id = int(get_jwt_identity())
+
+    team = db.session.get(Team, team_id)
+    if not team:
+        abort(404)
+    if team.created_by_user_id != user_id:
+        return jsonify({"error": "Forbidden"}), 403
+
+    invite = db.session.execute(
+        db.select(TeamInviteCode).where(TeamInviteCode.team_id == team_id)
+    ).scalar_one_or_none()
+    if not invite:
+        abort(404)
+
+    invite.code = _generate_team_invite_code()
+    invite.rotated_at = datetime.utcnow()
+    db.session.commit()
+
+    return jsonify({"message": "Invite code rotated", "invite_code": invite.code}), 200
+
+
+@app.route('/api/teams/<int:team_id>/campfire', methods=['GET'])
+@jwt_required()
+def get_team_campfire(team_id):
+    user_id = int(get_jwt_identity())
+
+    membership = db.session.execute(
+        db.select(TeamMembership).where(TeamMembership.team_id == team_id, TeamMembership.user_id == user_id)
+    ).scalar_one_or_none()
+    if not membership:
+        return jsonify({"error": "Forbidden"}), 403
+
+    campfire = db.session.execute(
+        db.select(TeamCampfire).where(TeamCampfire.team_id == team_id)
+    ).scalar_one_or_none()
+    if not campfire:
+        abort(404)
+
+    return jsonify({
+        "team_id": team_id,
+        "total_team_missions": campfire.total_team_missions,
+        "stage": _campfire_stage(campfire.total_team_missions),
+    }), 200
 
 
 # --- Coach v1 ---
