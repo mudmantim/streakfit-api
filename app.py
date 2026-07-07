@@ -1,5 +1,6 @@
 import os
 import hashlib
+import json
 import random
 import string
 from datetime import datetime, date, timedelta
@@ -2021,12 +2022,31 @@ def complete_daily_exercise(exercise_key):
                 ).scalar_one_or_none()
                 if not campfire:
                     continue
+                stage_before = _campfire_stage(campfire.total_team_missions)
                 campfire.total_team_missions += 1
+                stage_after = _campfire_stage(campfire.total_team_missions)
                 team_campfire_updates.append({
                     "team_id": m.team_id,
                     "total_team_missions": campfire.total_team_missions,
-                    "stage": _campfire_stage(campfire.total_team_missions),
+                    "stage": stage_after,
                 })
+
+                # R2.4 Team Moments MVP: the log itself is always recorded
+                # (raw ledger data for a future contribution-history view,
+                # per TEAM_SYSTEM_BASELINE Section 10 -- not meant to be
+                # rendered 1:1 as a moment card). The stage moment only
+                # fires when the increment actually crossed a threshold --
+                # comparing before/after here means no separate dedup guard
+                # is needed, same reasoning as the campfire increment itself.
+                create_team_moment(
+                    m.team_id, 'campfire_log_added', subject_user_id=user_id,
+                    metadata={"total_team_missions": campfire.total_team_missions}
+                )
+                if stage_after != stage_before:
+                    create_team_moment(
+                        m.team_id, 'campfire_stage_reached', subject_user_id=None,
+                        metadata={"stage": stage_after, "total_team_missions": campfire.total_team_missions}
+                    )
             if team_campfire_updates:
                 db.session.commit()
     else:
@@ -2170,6 +2190,21 @@ def _generate_team_invite_code():
             return code
     abort(500)
 
+def create_team_moment(team_id, moment_type, subject_user_id=None, metadata=None):
+    """R2.4 Team Moments MVP -- the durable historical record
+    TEAM_SYSTEM_BASELINE Section 10 already speced. Moments are history, not
+    a feed: never records absence (no missed-day moment type exists), never
+    ranks members (no leaderboard moment type exists). Caller commits;
+    this only stages the row alongside whatever else that caller is doing."""
+    moment = TeamMoment(
+        team_id=team_id,
+        moment_type=moment_type,
+        subject_user_id=subject_user_id,
+        moment_metadata=json.dumps(metadata) if metadata is not None else None,
+    )
+    db.session.add(moment)
+    return moment
+
 def _team_member_cap(team_id):
     has_plus_member = db.session.execute(
         db.select(TeamMembership.id)
@@ -2210,6 +2245,7 @@ def create_team():
     db.session.add(TeamCampfire(team_id=team.id, total_team_missions=0))
     invite = TeamInviteCode(team_id=team.id, code=_generate_team_invite_code())
     db.session.add(invite)
+    create_team_moment(team.id, 'team_created', subject_user_id=user_id)
     db.session.commit()
 
     return jsonify({
@@ -2370,6 +2406,7 @@ def join_team(team_id):
         return jsonify({"error": f"This team is at its {member_cap}-member limit"}), 403
 
     db.session.add(TeamMembership(team_id=team_id, user_id=user_id))
+    create_team_moment(team_id, 'member_joined', subject_user_id=user_id)
     db.session.commit()
 
     return jsonify({"message": "Joined team", "team_id": team_id}), 200
@@ -2387,6 +2424,7 @@ def leave_team(team_id):
         return jsonify({"error": "Not a member of this team"}), 404
 
     db.session.delete(membership)
+    create_team_moment(team_id, 'member_left', subject_user_id=user_id)
     db.session.commit()
 
     return jsonify({"message": "Left team"}), 200
@@ -2438,6 +2476,58 @@ def get_team_campfire(team_id):
         "total_team_missions": campfire.total_team_missions,
         "stage": _campfire_stage(campfire.total_team_missions),
     }), 200
+
+
+def _moment_display_text(moment_type, subject_username, metadata):
+    """Kept deliberately plain -- not Rickie's voice. Rickie-voiced moment
+    callbacks are a later sprint (team chat / Memory Book), not this one."""
+    if moment_type == 'team_created':
+        return f"{subject_username} created the team" if subject_username else "The team was created"
+    if moment_type == 'member_joined':
+        return f"{subject_username} joined the team" if subject_username else "A member joined"
+    if moment_type == 'member_left':
+        return f"{subject_username} left the team" if subject_username else "A member left"
+    if moment_type == 'campfire_log_added':
+        return f"{subject_username} added a log to the campfire" if subject_username else "A log was added to the campfire"
+    if moment_type == 'campfire_stage_reached':
+        stage = (metadata or {}).get('stage')
+        return f"The campfire reached {stage}" if stage else "The campfire reached a new stage"
+    return None
+
+
+@app.route('/api/teams/<int:team_id>/moments', methods=['GET'])
+@jwt_required()
+def get_team_moments(team_id):
+    user_id = int(get_jwt_identity())
+
+    membership = db.session.execute(
+        db.select(TeamMembership).where(TeamMembership.team_id == team_id, TeamMembership.user_id == user_id)
+    ).scalar_one_or_none()
+    if not membership:
+        return jsonify({"error": "Forbidden"}), 403
+
+    moments = db.session.execute(
+        db.select(TeamMoment)
+        .where(TeamMoment.team_id == team_id)
+        .order_by(TeamMoment.occurred_at.desc())
+    ).scalars().all()
+
+    result = []
+    for m in moments:
+        subject_username = None
+        if m.subject_user_id:
+            subject_user = db.session.get(User, m.subject_user_id)
+            subject_username = subject_user.username if subject_user else None
+        metadata = json.loads(m.moment_metadata) if m.moment_metadata else None
+        result.append({
+            "moment_type": m.moment_type,
+            "subject_username": subject_username,
+            "occurred_at": m.occurred_at.isoformat(),
+            "metadata": metadata,
+            "display_text": _moment_display_text(m.moment_type, subject_username, metadata),
+        })
+
+    return jsonify(result), 200
 
 
 # --- Coach v1 ---
