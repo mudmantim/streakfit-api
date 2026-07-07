@@ -144,7 +144,7 @@ body {
     color: var(--gray-600);
 }
 
-.ricky-mission-intro {
+.rickie-mission-intro {
     display: flex;
     align-items: center;
     gap: .5rem;
@@ -523,7 +523,7 @@ input:focus {
     margin-top: .1rem;
 }
 
-.ricky-handoff-line {
+.rickie-handoff-line {
     font-size: .85rem;
     color: var(--gray-600);
     margin: 0 0 .85rem;

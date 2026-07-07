@@ -209,7 +209,7 @@ var guestCompleted = new Set();
 var guestCompleteFired = false;
 
 // Picked once per page load, reused across re-renders — see renderJourneyCard's
-// caller and the Ricky intro line below.
+// caller and the Rickie intro line below.
 var _cachedGreetingLine = null;
 
 // ── Rickie's Journey ──────────────────────────────────────────────────────────
@@ -1083,7 +1083,7 @@ async function handleRickieModeChange(mode) {
     // the PATCH response doesn't include) and re-renders the Journey card,
     // so the new mode's effects show up immediately without a page refresh.
     await loadDailyExercises();
-    _updateRickyMoodBadge();
+    _updateRickieMoodBadge();
 }
 
 async function loadDailyExercises() {
@@ -1142,16 +1142,16 @@ async function loadDailyExercises() {
         dateEl.textContent = dateStr + ' · ' + level + ' · Refreshes tomorrow';
     }
 
-    // Ricky's pre-mission intro line — hidden once the mission is complete,
-    // since the post-completion Ricky handoff line takes over from there.
+    // Rickie's pre-mission intro line — hidden once the mission is complete,
+    // since the post-completion Rickie handoff line takes over from there.
     // Varies by time of day (and by guest vs. registered) instead of a single
     // fixed line every visit — small thing, but it's the difference between
     // software and a companion who's actually there in the moment.
-    var rickyIntro = document.getElementById('ricky-mission-intro');
-    if (rickyIntro) {
-        rickyIntro.hidden = daily.completed_count >= 5;
-        var introTextEl = document.getElementById('ricky-intro-text');
-        if (introTextEl && !rickyIntro.hidden) {
+    var rickieIntro = document.getElementById('rickie-mission-intro');
+    if (rickieIntro) {
+        rickieIntro.hidden = daily.completed_count >= 5;
+        var introTextEl = document.getElementById('rickie-intro-text');
+        if (introTextEl && !rickieIntro.hidden) {
             if (_rickieMode() === 'minimal') {
                 // No personality greeting — plain functional line only.
                 introTextEl.textContent = 'Complete today’s mission and come see me afterward.';
@@ -1326,20 +1326,20 @@ async function loadDailyExercises() {
             list.appendChild(banner);
         }
 
-        // Mission → Insight → Ricky: hand the user off to what's next.
+        // Mission → Insight → Rickie: hand the user off to what's next.
         // Varies by context instead of one fixed line every day — a streak
         // of exactly 7 gets its own moment; otherwise a general pick keeps
         // this from feeling identical on the 50th visit as the 1st.
         // Minimal mode drops the personality pick entirely for neutral copy.
-        var rickyHandoff = document.createElement('p');
-        rickyHandoff.className = 'ricky-handoff-line';
+        var rickieHandoff = document.createElement('p');
+        rickieHandoff.className = 'rickie-handoff-line';
         if (_rickieMode() === 'minimal') {
-            rickyHandoff.textContent = 'Ready for today’s insight?';
+            rickieHandoff.textContent = 'Ready for today’s insight?';
         } else {
             var handoffPoolKey = (!isGuest && bannerStreak === 7) ? 'firstWeek' : 'general';
-            rickyHandoff.textContent = '🦝 ' + _pickRickieLine(handoffPoolKey) + ' Ready for today’s insight?';
+            rickieHandoff.textContent = '🦝 ' + _pickRickieLine(handoffPoolKey) + ' Ready for today’s insight?';
         }
-        list.appendChild(rickyHandoff);
+        list.appendChild(rickieHandoff);
 
         if (daily.insight) {
             list.appendChild(renderInsightCard(daily.insight));
@@ -1462,11 +1462,11 @@ function renderInsightCard(insight) {
     var teaserAvatar = document.createElement('img');
     teaserAvatar.className = 'rickie-avatar-sm';
     teaserAvatar.src = '/static/rickie.svg';
-    teaserAvatar.alt = 'Ricky';
+    teaserAvatar.alt = 'Rickie';
 
     var teaserText = document.createElement('p');
     teaserText.className = 'insight-teaser-text';
-    teaserText.textContent = '🦝 Ricky found today\'s Insight...';
+    teaserText.textContent = '🦝 Rickie found today\'s Insight...';
 
     teaserTop.appendChild(teaserAvatar);
     teaserTop.appendChild(teaserText);
@@ -1529,11 +1529,11 @@ function renderBrainBoostCard(brainBoost) {
     var teaserAvatar = document.createElement('img');
     teaserAvatar.className = 'rickie-avatar-sm';
     teaserAvatar.src = '/static/rickie.svg';
-    teaserAvatar.alt = 'Ricky';
+    teaserAvatar.alt = 'Rickie';
 
     var teaserText = document.createElement('p');
     teaserText.className = 'insight-teaser-text';
-    teaserText.textContent = '🦝 Ricky found today\'s Brain Boost...';
+    teaserText.textContent = '🦝 Rickie found today\'s Brain Boost...';
 
     teaserTop.appendChild(teaserAvatar);
     teaserTop.appendChild(teaserText);
@@ -1593,7 +1593,7 @@ function renderBrainBoostQuestion(brainBoost) {
             else if (i === selectedIndex) btn.classList.add('bb-option-incorrect');
         });
         feedback.textContent = correct
-            ? '🦝 Ricky\'s impressed — you got it!'
+            ? '🦝 Rickie\'s impressed — you got it!'
             : '🦝 Not quite — but you still learned something.';
         feedback.className = 'bb-feedback ' + (correct ? 'bb-feedback-correct' : 'bb-feedback-incorrect');
         feedback.hidden = false;
@@ -3554,16 +3554,16 @@ var _coachThread  = null;
 var _coachInput   = null;
 var _coachSendBtn = null;
 
-// ── Ricky mood (UI-only — derived from existing currentUser data, never sent to the backend) ──
+// ── Rickie mood (UI-only — derived from existing currentUser data, never sent to the backend) ──
 
-var RICKY_MOODS = {
+var RICKIE_MOODS = {
     neutral:     { emoji: '🦝', title: 'Ready when you are' },
     'warming-up': { emoji: '🔥', title: 'Streak warming up' },
     'fired-up':   { emoji: '⚡', title: 'Streak is on fire' },
     celebrating: { emoji: '🎉', title: 'Milestone day!' }
 };
 
-function getRickyMood() {
+function getRickieMood() {
     var streak = (currentUser && currentUser.current_streak) || 0;
     if ([7, 14, 30, 100].indexOf(streak) !== -1) return 'celebrating';
     if (streak >= 7) return 'fired-up';
@@ -3571,7 +3571,7 @@ function getRickyMood() {
     return 'neutral';
 }
 
-function _updateRickyMoodBadge() {
+function _updateRickieMoodBadge() {
     var badge = document.getElementById('coach-mood-badge');
     if (!badge) return;
     if (_rickieMode() === 'minimal') {
@@ -3579,10 +3579,10 @@ function _updateRickyMoodBadge() {
         return;
     }
     badge.hidden = false;
-    var mood = RICKY_MOODS[getRickyMood()];
+    var mood = RICKIE_MOODS[getRickieMood()];
     badge.textContent = mood.emoji;
     badge.title = mood.title;
-    badge.className = 'coach-mood-badge coach-mood-' + getRickyMood();
+    badge.className = 'coach-mood-badge coach-mood-' + getRickieMood();
 }
 
 function openCoach(context) {
@@ -3599,11 +3599,11 @@ function openCoach(context) {
         var avatar = document.createElement('img');
         avatar.className = 'coach-avatar';
         avatar.src = '/static/rickie.svg';
-        avatar.alt = 'Ricky';
+        avatar.alt = 'Rickie';
 
         var title = document.createElement('p');
         title.className = 'coach-title';
-        title.textContent = 'Ricky';
+        title.textContent = 'Rickie';
 
         var moodBadge = document.createElement('span');
         moodBadge.id = 'coach-mood-badge';
@@ -3632,7 +3632,7 @@ function openCoach(context) {
         _coachInput = document.createElement('input');
         _coachInput.type = 'text';
         _coachInput.className = 'coach-input';
-        _coachInput.placeholder = 'Ask Ricky…';
+        _coachInput.placeholder = 'Ask Rickie…';
         _coachInput.maxLength = 500;
         _coachInput.setAttribute('autocomplete', 'off');
         _coachInput.addEventListener('keydown', function (e) {
@@ -3656,7 +3656,7 @@ function openCoach(context) {
     }
 
     _coachPanel.hidden = false;
-    _updateRickyMoodBadge();
+    _updateRickieMoodBadge();
     _coachPanel.scrollIntoView({ behavior: 'smooth', block: 'start' });
 
     if (context && context.type === 'insight') {
@@ -3691,11 +3691,11 @@ async function _sendCoachMessage(message, context) {
     _coachSendBtn.disabled = false;
 
     if (!result || result.status === 0) {
-        _appendCoachMsg('coach', '🦝 Ricky stepped away from his burrow for a bit — try again in a little while.');
+        _appendCoachMsg('coach', '🦝 Rickie stepped away from his burrow for a bit — try again in a little while.');
     } else if (result.status === 429) {
         _appendCoachMsg('coach', 'You’ve reached today’s question limit — come back tomorrow.');
     } else if (result.status !== 200) {
-        _appendCoachMsg('coach', '🦝 Ricky stepped away from his burrow for a bit — try again in a little while.');
+        _appendCoachMsg('coach', '🦝 Rickie stepped away from his burrow for a bit — try again in a little while.');
     } else {
         _appendCoachMsg('coach', result.data.reply);
     }

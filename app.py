@@ -873,13 +873,13 @@ def get_daily_brain_boost(date_str):
     return BRAIN_BOOST_LIBRARY[idx]
 
 
-# --- Ricky's joke library ---
+# --- Rickie's joke library ---
 # Family-friendly, kid-friendly, fitness/health/wellness themed. No sarcasm,
 # no political or adult humor, no medical advice. Used by the Coach route to
-# give Ricky real, pre-written jokes to draw from instead of inventing one
+# give Rickie real, pre-written jokes to draw from instead of inventing one
 # on the fly when a user asks for a joke or something silly.
 
-RICKY_JOKES = [
+RICKIE_JOKES = [
     "Why did the bicycle fall over? It was two-tired.",
     "Why don't kettlebells ever tell secrets? They always spill the iron.",
     "Why did the jump rope quit its job? It was tired of being skipped.",
@@ -939,7 +939,7 @@ RICKY_JOKES = [
     "Why did the cloud feel lighter after the rain? It let go of what it didn't need.",
     "What do you call a well-stretched rubber band? Flexible and ready for anything.",
     "Why did the river keep moving? It liked the steady flow of a good routine.",
-    "What do you call a happy, well-rested raccoon? Ricky, probably.",
+    "What do you call a happy, well-rested raccoon? Rickie, probably.",
 ]
 
 _JOKE_TRIGGER_WORDS = ('joke', 'funny', 'silly', 'laugh', 'pun', 'hilarious')
@@ -2025,7 +2025,7 @@ def answer_brain_boost():
 # --- Coach v1 ---
 
 _COACH_SYSTEM_PROMPT = """\
-You are Ricky, a friendly raccoon who is StreakFit's mascot and coach. You help users \
+You are Rickie, a friendly raccoon who is StreakFit's mascot and coach. You help users \
 understand how StreakFit works and expand on Today's Insight.
 
 Voice: a friendly coach and health educator first — warm, encouraging, and clear. \
@@ -2045,7 +2045,7 @@ jokes provided to you in this prompt (verbatim or lightly adapted) instead of \
 redirecting back to StreakFit features. Let the joke stand on its own. No mission \
 redirect, no coaching pivot.
 - Format every joke with line breaks: the setup on its own line, a blank line, then \
-the punchline on its own line, a blank line, then one short reaction in Ricky's own \
+the punchline on its own line, a blank line, then one short reaction in Rickie's own \
 voice — a self-aware raccoon, not a generic comedian. Never use "Ha!", "Classic!", \
 or "Good one!" — instead sound like an actual raccoon, e.g. "My standards are low. \
 I'm a raccoon." or "That joke was found in a dumpster." Plain text only — no \
@@ -2104,7 +2104,7 @@ Only answer questions about StreakFit features described above, Today's Insight,
 and — when asked — a family-friendly joke from the list provided to you.
 Do not answer questions about fitness training, exercise substitutions, \
 nutrition, diet, medical topics, Teams, or Campfire.
-When a question is outside Ricky's allowed topics, return the exact refusal \
+When a question is outside Rickie's allowed topics, return the exact refusal \
 message and nothing else: \
 "I'm focused on StreakFit and Today's Insight — I can't help with that one." \
 """
@@ -2142,7 +2142,7 @@ def coach():
             )
 
     if any(word in message.lower() for word in _JOKE_TRIGGER_WORDS):
-        sample = random.sample(RICKY_JOKES, min(5, len(RICKY_JOKES)))
+        sample = random.sample(RICKIE_JOKES, min(5, len(RICKIE_JOKES)))
         system += (
             "\n\nThe user seems to want a joke or something silly. Here are some "
             "options you can use (pick one, verbatim or lightly adapted):\n- "
