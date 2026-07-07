@@ -391,9 +391,28 @@ function _refreshTeamRickieCard() {
     existing.replaceWith(_buildTeamRickieCard());
 }
 
+// R2.3 Campfire MVP: patches already-rendered team cards in place from the
+// completion response's team_campfire_updates, so a mission completion shows
+// up immediately without re-fetching the whole teams list. A page reload
+// would show the same numbers anyway — GET /api/teams always computes them
+// fresh — this is purely so the user doesn't have to reload to see it.
+function _applyCampfireUpdates(updates) {
+    if (!updates || !updates.length) return;
+    updates.forEach(function (u) {
+        var card = document.querySelector('.team-card[data-team-id="' + u.team_id + '"]');
+        if (!card) return;
+        var statsEl = card.querySelector('.team-card-stats');
+        if (!statsEl) return;
+        var stageEmoji = CAMPFIRE_STAGE_EMOJI[u.stage] || '✨';
+        statsEl.textContent = stageEmoji + ' ' + u.stage + ' · ' +
+            u.total_team_missions + (u.total_team_missions === 1 ? ' log' : ' logs');
+    });
+}
+
 function _buildTeamCard(team) {
     var card = document.createElement('div');
     card.className = 'team-card';
+    card.dataset.teamId = team.id;
 
     var header = document.createElement('div');
     header.className = 'team-card-header';
@@ -3548,6 +3567,7 @@ async function handleCompleteExercise(key, btn, row) {
             }
             _applyRickieExpression();
         }
+        _applyCampfireUpdates(result.data.team_campfire_updates);
         // Let the flash animation play, then reload
         setTimeout(function () { loadDailyExercises(); }, 480);
     } else {

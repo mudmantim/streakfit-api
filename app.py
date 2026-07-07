@@ -1998,9 +1998,37 @@ def complete_daily_exercise(exercise_key):
         if is_new_exercise_ever:
             events.append(award_progress(user, 'new_exercise', NEW_EXERCISE_BONUS_XP, NEW_EXERCISE_BONUS_ACORNS))
 
+        team_campfire_updates = []
         if completed_count == 5:
             events.append(award_progress(user, 'mission_complete', MISSION_COMPLETE_XP, MISSION_COMPLETE_ACORNS))
             events.append(award_progress(user, 'perfect_mission', PERFECT_MISSION_XP, PERFECT_MISSION_ACORNS))
+
+            # R2.3 Campfire MVP: this branch (not existing -> just inserted,
+            # completed_count == 5) can only be reached once per user per day,
+            # the same way it already is for mission_complete/perfect_mission
+            # above -- the unique constraint on DailyCompletion makes a 5th
+            # *new* completion today a one-time event, so this is naturally
+            # idempotent, not something guarded separately. One completion
+            # counts for every real team the user belongs to, simultaneously
+            # (TEAM_SYSTEM_BASELINE Section 3) -- no "which team" picker.
+            # Team Rickie is UI-only and has no team_campfire row to touch.
+            memberships = db.session.execute(
+                db.select(TeamMembership).where(TeamMembership.user_id == user_id)
+            ).scalars().all()
+            for m in memberships:
+                campfire = db.session.execute(
+                    db.select(TeamCampfire).where(TeamCampfire.team_id == m.team_id)
+                ).scalar_one_or_none()
+                if not campfire:
+                    continue
+                campfire.total_team_missions += 1
+                team_campfire_updates.append({
+                    "team_id": m.team_id,
+                    "total_team_missions": campfire.total_team_missions,
+                    "stage": _campfire_stage(campfire.total_team_missions),
+                })
+            if team_campfire_updates:
+                db.session.commit()
     else:
         completed_count = db.session.execute(
             db.select(db.func.count(DailyCompletion.id)).where(
@@ -2008,11 +2036,13 @@ def complete_daily_exercise(exercise_key):
                 DailyCompletion.date == today
             )
         ).scalar()
+        team_campfire_updates = []
 
     response = {
         "message": "Exercise completed",
         "exercise_key": exercise_key,
-        "completed_count": completed_count
+        "completed_count": completed_count,
+        "team_campfire_updates": team_campfire_updates
     }
     response.update(_progress_response(old_level, user, events))
     return jsonify(response), 200
