@@ -54,6 +54,7 @@ limiter = Limiter(
 
 VALID_SKILL_LEVELS  = {'beginner', 'intermediate', 'advanced', 'custom'}
 VALID_DISPLAY_MODES = {'classic', 'bright', 'game'}
+VALID_RICKIE_MODES  = {'full', 'quiet', 'minimal'}
 
 EXERCISE_LIBRARY = {
     'beginner': {
@@ -1056,6 +1057,7 @@ class User(db.Model):
     password_hash = db.Column(db.String(256), nullable=False)
     skill_level  = db.Column(db.String(20), nullable=False, default='beginner')
     display_mode = db.Column(db.String(20), nullable=False, default='game')
+    rickie_mode  = db.Column(db.String(20), nullable=False, default='full')
     xp_total = db.Column(db.Integer, nullable=False, default=0)
     acorns_total = db.Column(db.Integer, nullable=False, default=0)
     challenges = db.relationship('Challenge', backref='owner', lazy=True)
@@ -1457,6 +1459,7 @@ def get_me():
         "username": user.username,
         "skill_level": user.skill_level,
         "display_mode": user.display_mode,
+        "rickie_mode": user.rickie_mode,
         "current_streak": stats['current_streak'],
         "best_streak": stats['best_streak'],
         "total_missions": stats['total_missions'],
@@ -1474,14 +1477,17 @@ def get_me():
 @jwt_required()
 def update_me():
     data = request.get_json()
-    if not data or ('skill_level' not in data and 'display_mode' not in data):
-        return jsonify({"error": "Provide skill_level and/or display_mode"}), 400
+    if not data or ('skill_level' not in data and 'display_mode' not in data and 'rickie_mode' not in data):
+        return jsonify({"error": "Provide skill_level, display_mode, and/or rickie_mode"}), 400
 
     if 'skill_level' in data and data['skill_level'] not in VALID_SKILL_LEVELS:
         return jsonify({"error": "Invalid skill_level. Must be one of: beginner, intermediate, advanced, custom"}), 400
 
     if 'display_mode' in data and data['display_mode'] not in VALID_DISPLAY_MODES:
         return jsonify({"error": "Invalid display_mode. Must be one of: classic, bright, game"}), 400
+
+    if 'rickie_mode' in data and data['rickie_mode'] not in VALID_RICKIE_MODES:
+        return jsonify({"error": "Invalid rickie_mode. Must be one of: full, quiet, minimal"}), 400
 
     user_id = int(get_jwt_identity())
     user = db.session.get(User, user_id)
@@ -1492,6 +1498,8 @@ def update_me():
         user.skill_level = data['skill_level']
     if 'display_mode' in data:
         user.display_mode = data['display_mode']
+    if 'rickie_mode' in data:
+        user.rickie_mode = data['rickie_mode']
 
     db.session.commit()
     stats = get_user_stats(user_id)
@@ -1500,6 +1508,7 @@ def update_me():
         "username": user.username,
         "skill_level": user.skill_level,
         "display_mode": user.display_mode,
+        "rickie_mode": user.rickie_mode,
         "current_streak": stats['current_streak'],
         "best_streak": stats['best_streak'],
         "total_missions": stats['total_missions'],

@@ -221,8 +221,8 @@ function _journeyMessageForToday() {
     // Deterministic per day (stable across re-renders, same as before) —
     // roughly one day in five pulls a lighter, funnier aside instead of
     // straight encouragement, so the card doesn't feel like it's reciting
-    // the same seven lines on a loop.
-    var pool = (dayOfYear % 5 === 0) ? RICKIE_LINES.fun : RICKIE_LINES.general;
+    // the same seven lines on a loop. Quiet/minimal never get the fun pool.
+    var pool = (_rickieAllowsFun() && dayOfYear % 5 === 0) ? RICKIE_LINES.fun : RICKIE_LINES.general;
     return pool[dayOfYear % pool.length];
 }
 
@@ -247,7 +247,13 @@ function renderJourneyCard() {
     document.getElementById('journey-xp-caption').textContent = xpToNext + ' XP to next level';
 
     document.getElementById('journey-acorns-value').textContent = currentUser.acorns_total || 0;
-    document.getElementById('journey-message').textContent = _journeyMessageForToday();
+    var messageEl = document.getElementById('journey-message');
+    if (_rickieMode() === 'minimal') {
+        messageEl.hidden = true;
+    } else {
+        messageEl.hidden = false;
+        messageEl.textContent = _journeyMessageForToday();
+    }
 
     journeyCard.hidden = false;
 }
@@ -412,6 +418,29 @@ function _rickieTimeOfDayPool() {
     if (hour < 12) return 'morning';
     if (hour < 18) return 'afternoon';
     return 'evening';
+}
+
+// ── Rickie preference gating ─────────────────────────────────────────────────
+// Guests always get 'full' — no persisted preference exists for them, and the
+// mode selector is registered-users-only. Defaults to 'full' if currentUser
+// hasn't loaded yet, matching the server-side default.
+function _rickieMode() {
+    if (isGuest || !currentUser) return 'full';
+    return currentUser.rickie_mode || 'full';
+}
+
+function _rickieAllowsFun() {
+    return _rickieMode() === 'full';
+}
+
+// Reaction toasts: full shows every time; quiet only for milestone-significant
+// moments (mission complete, perfect mission, first mission, level-up) and
+// never for Brain Boost or exercises 1-4; minimal shows none.
+function _rickieAllowsReaction(isMilestoneMoment) {
+    var mode = _rickieMode();
+    if (mode === 'minimal') return false;
+    if (mode === 'quiet') return !!isMilestoneMoment;
+    return true;
 }
 
 function _summarizeProgress(data) {
@@ -694,7 +723,8 @@ function _mbBuildNotes(data) {
     }
     // A small, occasional aside — not on every visit, just often enough to
     // feel like Rickie sometimes says something a little different.
-    if (Math.random() < 0.25) {
+    // Quiet/minimal never get the fun pool.
+    if (_rickieAllowsFun() && Math.random() < 0.25) {
         notes.push(_pickRickieLine('fun'));
     }
 
@@ -926,6 +956,9 @@ function setGuestUI(guest) {
     var skillSel = document.getElementById('skill-level-select');
     if (skillSel) skillSel.hidden = guest;
 
+    var rickieSel = document.getElementById('rickie-mode-select');
+    if (rickieSel) rickieSel.hidden = guest;
+
     var sideQuests = document.getElementById('side-quests-section');
     if (sideQuests) sideQuests.hidden = guest;
 
@@ -1012,6 +1045,8 @@ async function loadUserPreferences() {
     applyTheme(result.data.display_mode);
     var sel = document.getElementById('skill-level-select');
     if (sel && result.data.skill_level) sel.value = result.data.skill_level;
+    var rickieSel = document.getElementById('rickie-mode-select');
+    if (rickieSel && result.data.rickie_mode) rickieSel.value = result.data.rickie_mode;
 }
 
 var THEME_COLORS = { game: '#4338ca', bright: '#0891b2', classic: '#4f46e5' };
@@ -1038,6 +1073,17 @@ async function handleDisplayModeChange(mode) {
         // Server rejected it — reload preferences to restore correct state
         await loadUserPreferences();
     }
+}
+
+async function handleRickieModeChange(mode) {
+    var result = await api('/api/me', 'PATCH', { rickie_mode: mode });
+    if (!result) return;
+    // Reload either way — on failure, reverts the select to server value.
+    // loadDailyExercises() refetches the full /api/me (with xp/level fields
+    // the PATCH response doesn't include) and re-renders the Journey card,
+    // so the new mode's effects show up immediately without a page refresh.
+    await loadDailyExercises();
+    _updateRickyMoodBadge();
 }
 
 async function loadDailyExercises() {
@@ -1080,6 +1126,13 @@ async function loadDailyExercises() {
     var select = document.getElementById('skill-level-select');
     if (select) select.value = daily.skill_level;
 
+    // Sync the Rickie Mode select — registered users only, currentUser has
+    // the field since it's a guest-hidden control anyway.
+    var rickieModeSel = document.getElementById('rickie-mode-select');
+    if (rickieModeSel && currentUser && currentUser.rickie_mode) {
+        rickieModeSel.value = currentUser.rickie_mode;
+    }
+
     // Populate mission subtitle: date · skill level · Refreshes tomorrow
     var dateEl = document.getElementById('daily-mission-date');
     if (dateEl) {
@@ -1099,14 +1152,19 @@ async function loadDailyExercises() {
         rickyIntro.hidden = daily.completed_count >= 5;
         var introTextEl = document.getElementById('ricky-intro-text');
         if (introTextEl && !rickyIntro.hidden) {
-            // Picked once per page load and reused across re-renders (e.g.
-            // after each of exercises 1-4) so the greeting doesn't flicker
-            // to a new line after every click — just once per visit.
-            if (!_cachedGreetingLine) {
-                var greetingPool = isGuest ? 'guest' : _rickieTimeOfDayPool();
-                _cachedGreetingLine = _pickRickieLine(greetingPool);
+            if (_rickieMode() === 'minimal') {
+                // No personality greeting — plain functional line only.
+                introTextEl.textContent = 'Complete today’s mission and come see me afterward.';
+            } else {
+                // Picked once per page load and reused across re-renders (e.g.
+                // after each of exercises 1-4) so the greeting doesn't flicker
+                // to a new line after every click — just once per visit.
+                if (!_cachedGreetingLine) {
+                    var greetingPool = isGuest ? 'guest' : _rickieTimeOfDayPool();
+                    _cachedGreetingLine = _pickRickieLine(greetingPool);
+                }
+                introTextEl.textContent = _cachedGreetingLine + ' Complete today’s mission and come see me afterward.';
             }
-            introTextEl.textContent = _cachedGreetingLine + ' Complete today’s mission and come see me afterward.';
         }
     }
 
@@ -1272,10 +1330,15 @@ async function loadDailyExercises() {
         // Varies by context instead of one fixed line every day — a streak
         // of exactly 7 gets its own moment; otherwise a general pick keeps
         // this from feeling identical on the 50th visit as the 1st.
-        var handoffPoolKey = (!isGuest && bannerStreak === 7) ? 'firstWeek' : 'general';
+        // Minimal mode drops the personality pick entirely for neutral copy.
         var rickyHandoff = document.createElement('p');
         rickyHandoff.className = 'ricky-handoff-line';
-        rickyHandoff.textContent = '🦝 ' + _pickRickieLine(handoffPoolKey) + ' Ready for today’s insight?';
+        if (_rickieMode() === 'minimal') {
+            rickyHandoff.textContent = 'Ready for today’s insight?';
+        } else {
+            var handoffPoolKey = (!isGuest && bannerStreak === 7) ? 'firstWeek' : 'general';
+            rickyHandoff.textContent = '🦝 ' + _pickRickieLine(handoffPoolKey) + ' Ready for today’s insight?';
+        }
         list.appendChild(rickyHandoff);
 
         if (daily.insight) {
@@ -1568,7 +1631,9 @@ function renderBrainBoostQuestion(brainBoost) {
                 showResult(result.data.correct, result.data.points_earned, result.data.correct_index, result.data.explanation, i);
 
                 var summary = _summarizeProgress(result.data);
-                if (summary.xp > 0 || summary.acorns > 0) {
+                // Brain Boost reactions are Full-only — quiet mode explicitly
+                // treats Brain Boost as noise to suppress, not just per-exercise.
+                if ((summary.xp > 0 || summary.acorns > 0) && _rickieMode() === 'full') {
                     var poolKey = result.data.correct ? 'brainBoostCorrect' : 'brainBoostIncorrect';
                     showRickieReaction(_pickRickieLine(poolKey), summary);
                 }
@@ -3159,7 +3224,8 @@ async function handleCompleteExercise(key, btn, row) {
 
     if (result.status === 200) {
         var summary = _summarizeProgress(result.data);
-        if (summary.xp > 0 || summary.acorns > 0) {
+        var isMilestoneMoment = result.data.completed_count === 5 || summary.leveledUp;
+        if ((summary.xp > 0 || summary.acorns > 0) && _rickieAllowsReaction(isMilestoneMoment)) {
             var poolKey = 'missionComplete';
             if (result.data.completed_count === 5 && wasFirstMissionEver) {
                 poolKey = 'firstMission';
@@ -3508,6 +3574,11 @@ function getRickyMood() {
 function _updateRickyMoodBadge() {
     var badge = document.getElementById('coach-mood-badge');
     if (!badge) return;
+    if (_rickieMode() === 'minimal') {
+        badge.hidden = true;
+        return;
+    }
+    badge.hidden = false;
     var mood = RICKY_MOODS[getRickyMood()];
     badge.textContent = mood.emoji;
     badge.title = mood.title;

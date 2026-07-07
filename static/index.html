@@ -82,6 +82,12 @@
                     <option value="advanced">Advanced</option>
                     <option value="custom" disabled>Custom</option>
                 </select>
+                <select id="rickie-mode-select" class="skill-select" title="How much of Rickie's personality you want"
+                        onchange="handleRickieModeChange(this.value)">
+                    <option value="full">🦝 Full Rickie</option>
+                    <option value="quiet">🦝 Quiet Rickie</option>
+                    <option value="minimal">🦝 Minimal Rickie</option>
+                </select>
                 <div class="theme-toggle" role="group" aria-label="Display mode">
                     <button class="theme-btn" data-mode="classic" onclick="handleDisplayModeChange('classic')" title="Classic">📋</button>
                     <button class="theme-btn" data-mode="bright"  onclick="handleDisplayModeChange('bright')"  title="Bright">✨</button>
