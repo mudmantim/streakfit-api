@@ -1328,6 +1328,189 @@ input:focus {
     margin: 0;
 }
 
+.team-card-open-btn-active {
+    background: var(--indigo);
+    border-color: var(--indigo);
+    color: #fff;
+    cursor: pointer;
+}
+.team-card-open-btn-active:hover { opacity: .9; }
+
+/* ── Team Panel (R2.5 Team Chat MVP) ─────────────────────────────────────── */
+.team-panel-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,.52);
+    z-index: 200;
+    align-items: flex-end;
+    justify-content: center;
+    overscroll-behavior: contain;
+}
+.team-panel-overlay.open { display: flex; }
+
+@media (min-width: 540px) {
+    .team-panel-overlay { align-items: center; padding: 1.5rem; }
+    .team-panel { border-radius: var(--radius); }
+}
+
+.team-panel {
+    background: var(--t-card-bg, #fff);
+    border-radius: var(--radius) var(--radius) 0 0;
+    width: 100%;
+    max-width: 480px;
+    max-height: 88dvh;
+    overflow-y: auto;
+    padding: 1.4rem 1.1rem 1.1rem;
+    position: relative;
+    box-shadow: 0 -4px 24px rgba(0,0,0,.18);
+    overscroll-behavior: contain;
+    display: flex;
+    flex-direction: column;
+}
+
+.team-panel-close {
+    position: absolute;
+    top: .85rem;
+    right: .85rem;
+    background: none;
+    border: none;
+    font-size: 1rem;
+    color: var(--gray-400);
+    cursor: pointer;
+    padding: .25rem .4rem;
+    border-radius: 4px;
+    line-height: 1;
+    -webkit-tap-highlight-color: transparent;
+}
+.team-panel-close:hover { color: var(--gray-700); background: var(--gray-100); }
+
+.team-panel-title {
+    font-size: 1.1rem;
+    font-weight: 700;
+    color: var(--gray-900);
+    margin: 0 1.5rem .2rem 0;
+}
+
+.team-panel-meta {
+    font-size: .8rem;
+    color: var(--gray-500);
+    margin: 0 0 .3rem;
+}
+
+.team-panel-stats {
+    font-size: .85rem;
+    font-weight: 600;
+    color: var(--gray-700);
+    margin: 0 0 .9rem;
+}
+
+.team-panel-thread {
+    flex: 1;
+    min-height: 160px;
+    max-height: 340px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: .5rem;
+    margin-bottom: .8rem;
+    scroll-behavior: smooth;
+}
+
+.team-msg {
+    font-size: .88rem;
+    line-height: 1.5;
+    padding: .5rem .75rem;
+    border-radius: 10px;
+    max-width: 85%;
+    word-break: break-word;
+}
+
+.team-msg-sender {
+    font-size: .72rem;
+    font-weight: 700;
+    color: var(--gray-500);
+    margin: 0 0 .15rem;
+}
+
+.team-msg-body {
+    margin: 0;
+    color: var(--gray-700);
+}
+
+.team-msg-other {
+    background: var(--gray-100);
+    align-self: flex-start;
+}
+
+.team-msg-self {
+    background: var(--indigo-pale);
+    align-self: flex-end;
+}
+
+.team-panel-empty {
+    text-align: center;
+    font-size: .85rem;
+    color: var(--gray-500);
+    margin: auto;
+}
+
+.team-msg-send-error {
+    text-align: center;
+    font-size: .78rem;
+    color: var(--red, #dc2626);
+    margin: 0;
+}
+
+.team-panel-reaction-row {
+    display: flex;
+    gap: .4rem;
+    margin-bottom: .6rem;
+    flex-wrap: wrap;
+}
+
+.team-panel-reaction-btn {
+    background: var(--gray-100);
+    border: none;
+    border-radius: 8px;
+    font-size: 1.1rem;
+    line-height: 1;
+    padding: .4rem .55rem;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+}
+.team-panel-reaction-btn:hover { background: var(--gray-200); }
+
+.team-panel-input-row {
+    display: flex;
+    gap: .5rem;
+}
+
+.team-panel-input {
+    flex: 1;
+    min-width: 0;
+    border: 1.5px solid var(--gray-200);
+    border-radius: 8px;
+    padding: .55rem .75rem;
+    font-size: .9rem;
+    background: var(--bg-card);
+    color: var(--t-main);
+    transition: border-color .15s, box-shadow .15s;
+}
+
+.team-panel-input:focus {
+    outline: none;
+    border-color: var(--indigo);
+    box-shadow: 0 0 0 3px rgba(79,70,229,.12);
+}
+
+.team-panel-send {
+    padding: .55rem .9rem;
+    font-size: .88rem;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
 .teams-error-state {
     text-align: center;
     padding: .5rem 0 1rem;

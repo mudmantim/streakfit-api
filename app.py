@@ -2530,6 +2530,73 @@ def get_team_moments(team_id):
     return jsonify(result), 200
 
 
+TEAM_MESSAGE_MAX_LENGTH = 240
+
+
+def _serialize_team_message(m):
+    sender_username = None
+    if m.sender_type == 'user' and m.sender_user_id:
+        sender = db.session.get(User, m.sender_user_id)
+        sender_username = sender.username if sender else None
+    return {
+        "sender_type": m.sender_type,
+        "sender_username": sender_username,
+        "body": m.body,
+        "created_at": m.created_at.isoformat(),
+    }
+
+
+@app.route('/api/teams/<int:team_id>/messages', methods=['GET'])
+@jwt_required()
+def get_team_messages(team_id):
+    user_id = int(get_jwt_identity())
+
+    membership = db.session.execute(
+        db.select(TeamMembership).where(TeamMembership.team_id == team_id, TeamMembership.user_id == user_id)
+    ).scalar_one_or_none()
+    if not membership:
+        return jsonify({"error": "Forbidden"}), 403
+
+    messages = db.session.execute(
+        db.select(TeamMessage)
+        .where(TeamMessage.team_id == team_id)
+        .order_by(TeamMessage.created_at.asc())
+    ).scalars().all()
+
+    return jsonify([_serialize_team_message(m) for m in messages]), 200
+
+
+@app.route('/api/teams/<int:team_id>/messages', methods=['POST'])
+@jwt_required()
+@limiter.limit("30 per minute")
+def post_team_message(team_id):
+    user_id = int(get_jwt_identity())
+
+    membership = db.session.execute(
+        db.select(TeamMembership).where(TeamMembership.team_id == team_id, TeamMembership.user_id == user_id)
+    ).scalar_one_or_none()
+    if not membership:
+        return jsonify({"error": "Forbidden"}), 403
+
+    data = request.get_json(silent=True) or {}
+    body = (data.get('body') or '').strip()
+    if not body:
+        return jsonify({"error": "message_required"}), 400
+    if len(body) > TEAM_MESSAGE_MAX_LENGTH:
+        return jsonify({"error": "message_too_long"}), 400
+
+    message = TeamMessage(
+        team_id=team_id,
+        sender_type='user',
+        sender_user_id=user_id,
+        body=body,
+    )
+    db.session.add(message)
+    db.session.commit()
+
+    return jsonify(_serialize_team_message(message)), 201
+
+
 # --- Coach v1 ---
 
 _COACH_SYSTEM_PROMPT = """\

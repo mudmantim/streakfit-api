@@ -439,10 +439,9 @@ function _buildTeamCard(team) {
     card.appendChild(stats);
 
     var openBtn = document.createElement('button');
-    openBtn.className = 'team-card-open-btn';
+    openBtn.className = 'team-card-open-btn team-card-open-btn-active';
     openBtn.textContent = 'Open';
-    openBtn.disabled = true;
-    openBtn.title = 'Coming soon';
+    openBtn.addEventListener('click', function () { openTeamPanel(team); });
     card.appendChild(openBtn);
 
     return card;
@@ -496,6 +495,224 @@ function _buildGuestTeamsPreview() {
     card.appendChild(title);
 
     return card;
+}
+
+// ── Team Panel (R2.5 Team Chat MVP) ──────────────────────────────────────────
+// Tiny team-scoped chat on top of the existing team_message table. No DMs, no
+// global chat, no attachments, no edit/delete, no read receipts, no
+// notifications -- just a message list and an input box, plus a row of quick
+// reaction buttons that are just short messages under the hood.
+
+var TEAM_QUICK_REACTIONS = ['❤️', '🔥', '🎉', '💪', '😂', '🧠'];
+
+var _teamPanelOverlay  = null;
+var _teamPanelThread   = null;
+var _teamPanelInput    = null;
+var _teamPanelSendBtn  = null;
+var _teamPanelTeamId   = null;
+
+function openTeamPanel(team) {
+    _teamPanelTeamId = team.id;
+
+    if (!_teamPanelOverlay) {
+        _teamPanelOverlay = document.createElement('div');
+        _teamPanelOverlay.className = 'team-panel-overlay';
+        _teamPanelOverlay.setAttribute('role', 'dialog');
+        _teamPanelOverlay.setAttribute('aria-modal', 'true');
+        _teamPanelOverlay.addEventListener('click', function (e) {
+            if (e.target === _teamPanelOverlay) closeTeamPanel();
+        });
+        document.addEventListener('keydown', function (e) {
+            if (e.key === 'Escape' && _teamPanelOverlay.classList.contains('open')) {
+                closeTeamPanel();
+            }
+        });
+        document.body.appendChild(_teamPanelOverlay);
+    }
+
+    _teamPanelOverlay.innerHTML = '';
+
+    var panel = document.createElement('div');
+    panel.className = 'team-panel';
+
+    var closeBtn = document.createElement('button');
+    closeBtn.className = 'team-panel-close';
+    closeBtn.setAttribute('aria-label', 'Close');
+    closeBtn.textContent = '✕';
+    closeBtn.addEventListener('click', closeTeamPanel);
+    panel.appendChild(closeBtn);
+
+    var title = document.createElement('h2');
+    title.className = 'team-panel-title';
+    title.textContent = team.name;
+    panel.appendChild(title);
+
+    var meta = document.createElement('p');
+    meta.className = 'team-panel-meta';
+    meta.textContent = team.member_count + (team.member_count === 1 ? ' member' : ' members');
+    panel.appendChild(meta);
+
+    var stats = document.createElement('p');
+    stats.className = 'team-panel-stats';
+    var stageEmoji = CAMPFIRE_STAGE_EMOJI[team.campfire_stage] || '✨';
+    stats.textContent = stageEmoji + ' ' + team.campfire_stage + ' · ' +
+        team.total_team_missions + (team.total_team_missions === 1 ? ' log' : ' logs');
+    panel.appendChild(stats);
+
+    _teamPanelThread = document.createElement('div');
+    _teamPanelThread.className = 'team-panel-thread';
+    panel.appendChild(_teamPanelThread);
+
+    var reactionRow = document.createElement('div');
+    reactionRow.className = 'team-panel-reaction-row';
+    TEAM_QUICK_REACTIONS.forEach(function (emoji) {
+        var btn = document.createElement('button');
+        btn.className = 'team-panel-reaction-btn';
+        btn.type = 'button';
+        btn.textContent = emoji;
+        btn.addEventListener('click', function () { _sendTeamMessage(emoji); });
+        reactionRow.appendChild(btn);
+    });
+    panel.appendChild(reactionRow);
+
+    var inputRow = document.createElement('div');
+    inputRow.className = 'team-panel-input-row';
+
+    _teamPanelInput = document.createElement('input');
+    _teamPanelInput.type = 'text';
+    _teamPanelInput.className = 'team-panel-input';
+    _teamPanelInput.placeholder = 'Message your team…';
+    _teamPanelInput.maxLength = 240;
+    _teamPanelInput.setAttribute('autocomplete', 'off');
+    _teamPanelInput.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter') _submitTeamMessage();
+    });
+
+    _teamPanelSendBtn = document.createElement('button');
+    _teamPanelSendBtn.className = 'btn-primary team-panel-send';
+    _teamPanelSendBtn.textContent = 'Send';
+    _teamPanelSendBtn.addEventListener('click', _submitTeamMessage);
+
+    inputRow.appendChild(_teamPanelInput);
+    inputRow.appendChild(_teamPanelSendBtn);
+    panel.appendChild(inputRow);
+
+    _teamPanelOverlay.appendChild(panel);
+    _teamPanelOverlay.classList.add('open');
+    document.body.style.overflow = 'hidden';
+
+    _loadTeamMessages(team.id);
+}
+
+function closeTeamPanel() {
+    if (_teamPanelOverlay) {
+        _teamPanelOverlay.classList.remove('open');
+        document.body.style.overflow = '';
+    }
+    _teamPanelTeamId = null;
+}
+
+async function _loadTeamMessages(teamId) {
+    _teamPanelThread.innerHTML = '';
+    var loading = document.createElement('div');
+    loading.className = 'state-loading';
+    loading.innerHTML = '<div class="spinner"></div><p>Loading messages…</p>';
+    _teamPanelThread.appendChild(loading);
+
+    var result = await api('/api/teams/' + teamId + '/messages');
+
+    // The panel may have been closed (or reopened for a different team)
+    // before this resolved -- don't paint stale messages into it.
+    if (_teamPanelTeamId !== teamId) return;
+
+    _teamPanelThread.innerHTML = '';
+
+    if (!result || result.status !== 200) {
+        var errWrap = document.createElement('div');
+        errWrap.className = 'teams-error-state';
+        var errMsg = document.createElement('p');
+        errMsg.className = 'error';
+        errMsg.textContent = "Couldn't load messages — try again in a moment.";
+        var retryBtn = document.createElement('button');
+        retryBtn.className = 'btn-primary teams-retry-btn';
+        retryBtn.textContent = 'Retry';
+        retryBtn.onclick = function () { _loadTeamMessages(teamId); };
+        errWrap.appendChild(errMsg);
+        errWrap.appendChild(retryBtn);
+        _teamPanelThread.appendChild(errWrap);
+        return;
+    }
+
+    if (result.data.length === 0) {
+        var empty = document.createElement('p');
+        empty.className = 'team-panel-empty';
+        empty.textContent = 'No messages yet — say hi!';
+        _teamPanelThread.appendChild(empty);
+        return;
+    }
+
+    result.data.forEach(function (m) { _appendTeamMsg(m); });
+    _teamPanelThread.scrollTop = _teamPanelThread.scrollHeight;
+}
+
+function _appendTeamMsg(m) {
+    var isSelf = currentUser && m.sender_username === currentUser.username;
+
+    var wrap = document.createElement('div');
+    wrap.className = 'team-msg ' + (isSelf ? 'team-msg-self' : 'team-msg-other');
+
+    if (!isSelf) {
+        var sender = document.createElement('p');
+        sender.className = 'team-msg-sender';
+        sender.textContent = m.sender_username || 'Someone';
+        wrap.appendChild(sender);
+    }
+
+    var body = document.createElement('p');
+    body.className = 'team-msg-body';
+    body.textContent = m.body; // textContent — never innerHTML
+    wrap.appendChild(body);
+
+    _teamPanelThread.appendChild(wrap);
+    _teamPanelThread.scrollTop = _teamPanelThread.scrollHeight;
+    return wrap;
+}
+
+function _submitTeamMessage() {
+    var msg = _teamPanelInput.value.trim();
+    if (!msg) return;
+    _teamPanelInput.value = '';
+    _sendTeamMessage(msg);
+}
+
+async function _sendTeamMessage(body) {
+    var teamId = _teamPanelTeamId;
+    if (!teamId) return;
+
+    _teamPanelInput.disabled   = true;
+    _teamPanelSendBtn.disabled = true;
+
+    var result = await api('/api/teams/' + teamId + '/messages', 'POST', { body: body });
+
+    _teamPanelInput.disabled   = false;
+    _teamPanelSendBtn.disabled = false;
+
+    if (_teamPanelTeamId !== teamId) return; // panel closed/switched while sending
+
+    if (!result || result.status !== 201) {
+        var errEl = document.createElement('p');
+        errEl.className = 'team-msg-send-error';
+        errEl.textContent = "Couldn't send — try again.";
+        _teamPanelThread.appendChild(errEl);
+        _teamPanelThread.scrollTop = _teamPanelThread.scrollHeight;
+        return;
+    }
+
+    var empty = _teamPanelThread.querySelector('.team-panel-empty');
+    if (empty) empty.remove();
+
+    _appendTeamMsg(result.data);
+    _teamPanelInput.focus();
 }
 
 // ── Rickie's voice ──────────────────────────────────────────────────────────────
