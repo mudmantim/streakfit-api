@@ -2042,11 +2042,18 @@ def complete_daily_exercise(exercise_key):
                     m.team_id, 'campfire_log_added', subject_user_id=user_id,
                     metadata={"total_team_missions": campfire.total_team_missions}
                 )
+                # R2.6 Rickie Team Reactions MVP: only the team's very first
+                # log gets a Rickie message -- every log after that is a
+                # moment (raw ledger) but not a chat post, or Rickie would
+                # spam the thread on every single mission completion.
+                if campfire.total_team_missions == 1:
+                    create_rickie_team_message(m.team_id, 'first_log')
                 if stage_after != stage_before:
                     create_team_moment(
                         m.team_id, 'campfire_stage_reached', subject_user_id=None,
                         metadata={"stage": stage_after, "total_team_missions": campfire.total_team_missions}
                     )
+                    create_rickie_team_message(m.team_id, 'campfire_stage_reached')
             if team_campfire_updates:
                 db.session.commit()
     else:
@@ -2407,6 +2414,7 @@ def join_team(team_id):
 
     db.session.add(TeamMembership(team_id=team_id, user_id=user_id))
     create_team_moment(team_id, 'member_joined', subject_user_id=user_id)
+    create_rickie_team_message(team_id, 'member_joined')
     db.session.commit()
 
     return jsonify({"message": "Joined team", "team_id": team_id}), 200
@@ -2531,6 +2539,41 @@ def get_team_moments(team_id):
 
 
 TEAM_MESSAGE_MAX_LENGTH = 240
+
+# R2.6 Rickie Team Reactions MVP -- fixed, pre-written templates only (no AI
+# generation). Rare and warm by construction: wired to just 3 trigger points
+# (member_joined, first-ever campfire log, campfire_stage_reached), never to
+# every campfire_log_added -- see TEAM_SYSTEM_BASELINE's "meaningful events,
+# not a feed" principle. Follows the same voice rules as RICKIE_LINES in
+# app.js: never mentions absence, never pressures a streak, never compares
+# or ranks members, no jokes at anyone's expense.
+RICKIE_TEAM_MESSAGES = {
+    'member_joined': [
+        "Welcome to the campfire.",
+        "Glad you're here.",
+    ],
+    'first_log': [
+        "First log added. The fire is starting.",
+    ],
+    'campfire_stage_reached': [
+        "The campfire grew brighter.",
+        "You built this together.",
+    ],
+}
+
+
+def create_rickie_team_message(team_id, trigger):
+    """Stages a Rickie-voiced TeamMessage for one of RICKIE_TEAM_MESSAGES'
+    fixed templates. Caller commits, same convention as create_team_moment."""
+    body = random.choice(RICKIE_TEAM_MESSAGES[trigger])
+    message = TeamMessage(
+        team_id=team_id,
+        sender_type='rickie',
+        sender_user_id=None,
+        body=body,
+    )
+    db.session.add(message)
+    return message
 
 
 def _serialize_team_message(m):

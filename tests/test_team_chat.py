@@ -48,9 +48,11 @@ def test_member_sees_other_members_message(client):
 
     post_message(client, creator_token, team['id'], 'Hi team')
 
+    # Joining posts a Rickie welcome message (R2.6) ahead of the chat message.
     messages = get_messages(client, member_token, team['id']).get_json()
-    assert len(messages) == 1
-    assert messages[0]['sender_username'] == 'creator'
+    assert len(messages) == 2
+    assert messages[0]['sender_type'] == 'rickie'
+    assert messages[1]['sender_username'] == 'creator'
 
 
 def test_messages_ordered_chronologically(client):

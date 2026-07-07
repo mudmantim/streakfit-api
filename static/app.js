@@ -656,15 +656,16 @@ async function _loadTeamMessages(teamId) {
 }
 
 function _appendTeamMsg(m) {
-    var isSelf = currentUser && m.sender_username === currentUser.username;
+    var isRickie = m.sender_type === 'rickie';
+    var isSelf = !isRickie && currentUser && m.sender_username === currentUser.username;
 
     var wrap = document.createElement('div');
-    wrap.className = 'team-msg ' + (isSelf ? 'team-msg-self' : 'team-msg-other');
+    wrap.className = 'team-msg ' + (isRickie ? 'team-msg-rickie' : (isSelf ? 'team-msg-self' : 'team-msg-other'));
 
-    if (!isSelf) {
+    if (isRickie || !isSelf) {
         var sender = document.createElement('p');
         sender.className = 'team-msg-sender';
-        sender.textContent = m.sender_username || 'Someone';
+        sender.textContent = isRickie ? '🦝 Rickie' : (m.sender_username || 'Someone');
         wrap.appendChild(sender);
     }
 

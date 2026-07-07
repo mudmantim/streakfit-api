@@ -1448,6 +1448,16 @@ input:focus {
     align-self: flex-end;
 }
 
+.team-msg-rickie {
+    background: #fff;
+    border: 1px solid var(--amber);
+    align-self: flex-start;
+}
+
+.team-msg-rickie .team-msg-sender {
+    color: var(--amber);
+}
+
 .team-panel-empty {
     text-align: center;
     font-size: .85rem;
