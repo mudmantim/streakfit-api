@@ -346,7 +346,21 @@ function renderTeamsSection(state) {
 
 function _buildTeamRickieCard() {
     var card = document.createElement('div');
-    card.className = 'team-card team-rickie-card';
+    card.className = 'team-card team-rickie-card team-rickie-card-tappable';
+
+    // TEAM_UI_BASELINE Screen 1: Team Rickie's one action is opening the
+    // existing Coach panel -- no chat table of its own, no fake persistence,
+    // just the same Coach conversation every other Rickie entry point uses.
+    card.setAttribute('role', 'button');
+    card.setAttribute('tabindex', '0');
+    card.setAttribute('aria-label', 'Open Rickie chat');
+    card.addEventListener('click', function () { openCoach({ type: 'general' }); });
+    card.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            openCoach({ type: 'general' });
+        }
+    });
 
     var header = document.createElement('div');
     header.className = 'team-card-header';
@@ -746,6 +760,9 @@ var _teamPanelThread   = null;
 var _teamPanelInput    = null;
 var _teamPanelSendBtn  = null;
 var _teamPanelTeamId   = null;
+var _teamPanelInfo     = null;
+var _teamPanelMeta     = null;
+var _teamPanelStats    = null;
 
 function openTeamPanel(team) {
     _teamPanelTeamId = team.id;
@@ -783,17 +800,21 @@ function openTeamPanel(team) {
     title.textContent = team.name;
     panel.appendChild(title);
 
-    var meta = document.createElement('p');
-    meta.className = 'team-panel-meta';
-    meta.textContent = team.member_count + (team.member_count === 1 ? ' member' : ' members');
-    panel.appendChild(meta);
+    _teamPanelMeta = document.createElement('p');
+    _teamPanelMeta.className = 'team-panel-meta';
+    _teamPanelMeta.textContent = team.member_count + (team.member_count === 1 ? ' member' : ' members');
+    panel.appendChild(_teamPanelMeta);
 
-    var stats = document.createElement('p');
-    stats.className = 'team-panel-stats';
+    _teamPanelStats = document.createElement('p');
+    _teamPanelStats.className = 'team-panel-stats';
     var stageEmoji = CAMPFIRE_STAGE_EMOJI[team.campfire_stage] || '✨';
-    stats.textContent = stageEmoji + ' ' + team.campfire_stage + ' · ' +
+    _teamPanelStats.textContent = stageEmoji + ' ' + team.campfire_stage + ' · ' +
         team.total_team_missions + (team.total_team_missions === 1 ? ' log' : ' logs');
-    panel.appendChild(stats);
+    panel.appendChild(_teamPanelStats);
+
+    _teamPanelInfo = document.createElement('div');
+    _teamPanelInfo.className = 'team-panel-info';
+    panel.appendChild(_teamPanelInfo);
 
     _teamPanelThread = document.createElement('div');
     _teamPanelThread.className = 'team-panel-thread';
@@ -837,6 +858,7 @@ function openTeamPanel(team) {
     _teamPanelOverlay.classList.add('open');
     document.body.style.overflow = 'hidden';
 
+    _loadTeamInfo(team.id);
     _loadTeamMessages(team.id);
 }
 
@@ -846,6 +868,196 @@ function closeTeamPanel() {
         document.body.style.overflow = '';
     }
     _teamPanelTeamId = null;
+}
+
+// R2.8 Operation: No Dead Ends -- roster, invite code, rotate, leave, and
+// remove-member all read from the one route (GET /api/teams/<id>) that
+// already returned every field these need; nothing here required a new
+// backend read. Loaded separately from the message thread so a slow/failed
+// fetch of one never blocks the other.
+async function _loadTeamInfo(teamId) {
+    _teamPanelInfo.innerHTML = '';
+    var loading = document.createElement('p');
+    loading.className = 'team-panel-info-loading';
+    loading.textContent = 'Loading team info…';
+    _teamPanelInfo.appendChild(loading);
+
+    var result = await api('/api/teams/' + teamId);
+
+    // Panel may have been closed or reopened for a different team by now.
+    if (_teamPanelTeamId !== teamId) return;
+
+    _teamPanelInfo.innerHTML = '';
+
+    if (!result || result.status !== 200) {
+        var err = document.createElement('p');
+        err.className = 'error';
+        err.textContent = "Couldn't load team info.";
+        _teamPanelInfo.appendChild(err);
+        return;
+    }
+
+    var data = result.data;
+
+    // Fresh counts from this fetch are more current than whatever the team
+    // card looked like at the moment "Open" was clicked -- a campfire log
+    // added by someone else between then and now would otherwise still
+    // show the stale number for the rest of this panel's lifetime.
+    if (_teamPanelMeta) {
+        _teamPanelMeta.textContent = data.member_count + (data.member_count === 1 ? ' member' : ' members');
+    }
+    if (_teamPanelStats) {
+        var stage = data.campfire.stage;
+        var total = data.campfire.total_team_missions;
+        var stageEmoji = CAMPFIRE_STAGE_EMOJI[stage] || '✨';
+        _teamPanelStats.textContent = stageEmoji + ' ' + stage + ' · ' + total + (total === 1 ? ' log' : ' logs');
+    }
+
+    _teamPanelInfo.appendChild(_buildRosterSection(data));
+    _teamPanelInfo.appendChild(_buildInviteSection(data));
+    _teamPanelInfo.appendChild(_buildLeaveTeamRow(data));
+}
+
+function _buildRosterSection(data) {
+    var wrap = document.createElement('div');
+    wrap.className = 'team-panel-info-section';
+
+    var label = document.createElement('p');
+    label.className = 'team-panel-section-label';
+    label.textContent = 'Members';
+    wrap.appendChild(label);
+
+    var roster = document.createElement('div');
+    roster.className = 'team-roster';
+
+    data.members.forEach(function (m) {
+        var row = document.createElement('div');
+        row.className = 'team-roster-row';
+
+        var name = document.createElement('span');
+        name.className = 'team-roster-name';
+        name.textContent = m.username + (m.is_creator ? ' (Creator)' : '');
+        row.appendChild(name);
+
+        // Creator can remove any other member -- never themselves (Leave
+        // Team is that action) and never rendered for anyone but the creator.
+        if (data.is_creator && m.user_id !== currentUser.id) {
+            var removeBtn = document.createElement('button');
+            removeBtn.type = 'button';
+            removeBtn.className = 'team-roster-remove-btn';
+            removeBtn.textContent = 'Remove';
+            removeBtn.addEventListener('click', function () {
+                if (removeBtn.dataset.confirming) {
+                    _submitRemoveMember(data.id, m.user_id, removeBtn);
+                } else {
+                    removeBtn.dataset.confirming = '1';
+                    removeBtn.textContent = 'Confirm?';
+                    removeBtn.classList.add('team-roster-remove-btn-confirm');
+                }
+            });
+            row.appendChild(removeBtn);
+        }
+
+        roster.appendChild(row);
+    });
+
+    wrap.appendChild(roster);
+    return wrap;
+}
+
+async function _submitRemoveMember(teamId, memberUserId, btn) {
+    btn.disabled = true;
+    btn.textContent = 'Removing…';
+
+    var result = await api('/api/teams/' + teamId + '/members/' + memberUserId, 'DELETE');
+
+    if (!result || (result.status !== 200 && result.status !== 204)) {
+        btn.disabled = false;
+        btn.textContent = (result && result.data && result.data.error) || "Couldn't remove — try again.";
+        return;
+    }
+
+    // Refresh this panel's roster/counts and the outer teams list's
+    // member_count in the background -- the panel stays open, only the
+    // removed person's row disappears.
+    if (_teamPanelTeamId === teamId) _loadTeamInfo(teamId);
+    loadTeams();
+}
+
+function _buildInviteSection(data) {
+    var wrap = document.createElement('div');
+    wrap.className = 'team-panel-info-section';
+
+    var label = document.createElement('p');
+    label.className = 'team-panel-section-label';
+    label.textContent = 'Invite';
+    wrap.appendChild(label);
+
+    var row = document.createElement('div');
+    row.className = 'team-panel-invite-row';
+
+    var codeEl = document.createElement('span');
+    codeEl.className = 'team-invite-code team-invite-code-inline';
+    codeEl.textContent = data.invite_code;
+    row.appendChild(codeEl);
+
+    var copyBtn = document.createElement('button');
+    copyBtn.type = 'button';
+    copyBtn.className = 'btn-primary';
+    copyBtn.textContent = 'Copy Link';
+    copyBtn.addEventListener('click', function () {
+        var link = window.location.origin + '/?join=' + codeEl.textContent;
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(link).then(function () {
+                copyBtn.textContent = 'Copied!';
+                setTimeout(function () { copyBtn.textContent = 'Copy Link'; }, 1500);
+            });
+        }
+    });
+    row.appendChild(copyBtn);
+
+    if (data.is_creator) {
+        var rotateBtn = document.createElement('button');
+        rotateBtn.type = 'button';
+        rotateBtn.className = 'retention-btn retention-btn-ghost';
+        rotateBtn.textContent = 'Rotate Code';
+        rotateBtn.addEventListener('click', async function () {
+            rotateBtn.disabled = true;
+            var result = await api('/api/teams/' + data.id + '/rotate-invite', 'POST');
+            rotateBtn.disabled = false;
+            if (!result || result.status !== 200) return;
+            codeEl.textContent = result.data.invite_code;
+            rotateBtn.textContent = 'Rotated!';
+            setTimeout(function () { rotateBtn.textContent = 'Rotate Code'; }, 1500);
+        });
+        row.appendChild(rotateBtn);
+    }
+
+    wrap.appendChild(row);
+    return wrap;
+}
+
+function _buildLeaveTeamRow(data) {
+    var wrap = document.createElement('div');
+    wrap.className = 'team-panel-info-section team-panel-leave-row';
+
+    var leaveBtn = document.createElement('button');
+    leaveBtn.type = 'button';
+    leaveBtn.className = 'retention-btn retention-btn-ghost';
+    leaveBtn.textContent = 'Leave Team';
+    leaveBtn.addEventListener('click', async function () {
+        leaveBtn.disabled = true;
+        var result = await api('/api/teams/' + data.id + '/leave', 'POST');
+        if (!result || result.status !== 200) {
+            leaveBtn.disabled = false;
+            return;
+        }
+        closeTeamPanel();
+        loadTeams();
+    });
+    wrap.appendChild(leaveBtn);
+
+    return wrap;
 }
 
 async function _loadTeamMessages(teamId) {

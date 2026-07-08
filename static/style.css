@@ -1249,6 +1249,16 @@ input:focus {
     border-left-color: var(--amber);
 }
 
+.team-rickie-card-tappable {
+    cursor: pointer;
+    transition: box-shadow .15s;
+}
+.team-rickie-card-tappable:hover,
+.team-rickie-card-tappable:focus-visible {
+    box-shadow: var(--shadow-md);
+    outline: none;
+}
+
 .team-card-header {
     display: flex;
     align-items: center;
@@ -1425,6 +1435,94 @@ input:focus {
     font-weight: 600;
     color: var(--gray-700);
     margin: 0 0 .9rem;
+}
+
+/* ── Team Panel Info: roster, invite, leave (Operation: No Dead Ends) ────── */
+.team-panel-info {
+    border-top: 1px solid var(--gray-100);
+    border-bottom: 1px solid var(--gray-100);
+    padding: .8rem 0;
+    margin-bottom: .8rem;
+}
+
+.team-panel-info-loading {
+    font-size: .82rem;
+    color: var(--gray-500);
+    text-align: center;
+    margin: 0;
+}
+
+.team-panel-info-section {
+    margin-bottom: .8rem;
+}
+.team-panel-info-section:last-child {
+    margin-bottom: 0;
+}
+
+.team-panel-section-label {
+    font-size: .72rem;
+    font-weight: 700;
+    letter-spacing: .04em;
+    text-transform: uppercase;
+    color: var(--gray-500);
+    margin: 0 0 .4rem;
+}
+
+.team-roster {
+    display: flex;
+    flex-direction: column;
+    gap: .35rem;
+}
+
+.team-roster-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: .5rem;
+    font-size: .85rem;
+}
+
+.team-roster-name {
+    color: var(--gray-700);
+    word-break: break-word;
+}
+
+.team-roster-remove-btn {
+    background: none;
+    border: 1px solid var(--gray-200);
+    color: var(--gray-500);
+    border-radius: 6px;
+    padding: .25rem .6rem;
+    font-size: .75rem;
+    font-weight: 600;
+    cursor: pointer;
+    flex-shrink: 0;
+    -webkit-tap-highlight-color: transparent;
+}
+.team-roster-remove-btn:hover { background: var(--gray-100); }
+.team-roster-remove-btn-confirm {
+    background: var(--red);
+    border-color: var(--red);
+    color: #fff;
+}
+.team-roster-remove-btn-confirm:hover { background: var(--red); opacity: .9; }
+
+.team-panel-invite-row {
+    display: flex;
+    align-items: center;
+    gap: .5rem;
+    flex-wrap: wrap;
+}
+
+.team-invite-code-inline {
+    font-size: .95rem;
+    padding: .3rem .6rem;
+    margin: 0;
+}
+
+.team-panel-leave-row {
+    display: flex;
+    justify-content: center;
 }
 
 .team-panel-thread {

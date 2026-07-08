@@ -2438,6 +2438,37 @@ def leave_team(team_id):
     return jsonify({"message": "Left team"}), 200
 
 
+@app.route('/api/teams/<int:team_id>/members/<int:member_user_id>', methods=['DELETE'])
+@jwt_required()
+def remove_team_member(team_id, member_user_id):
+    """Team System Baseline Section 4's first of exactly two creator safety
+    powers (the second is rotate_team_invite below) -- the narrow, safety-
+    scoped exception to "no admin," not a general moderation feature. Kept
+    silent on purpose: no team_moment, no chat message, no Rickie reaction.
+    Removal is a private safety action between the creator and whoever's
+    being removed, not something to broadcast to the rest of the team."""
+    user_id = int(get_jwt_identity())
+
+    team = db.session.get(Team, team_id)
+    if not team:
+        abort(404)
+    if team.created_by_user_id != user_id:
+        return jsonify({"error": "Forbidden"}), 403
+    if member_user_id == user_id:
+        return jsonify({"error": "Use Leave Team to remove yourself"}), 400
+
+    membership = db.session.execute(
+        db.select(TeamMembership).where(TeamMembership.team_id == team_id, TeamMembership.user_id == member_user_id)
+    ).scalar_one_or_none()
+    if not membership:
+        return jsonify({"error": "Not a member of this team"}), 404
+
+    db.session.delete(membership)
+    db.session.commit()
+
+    return jsonify({"message": "Member removed"}), 200
+
+
 @app.route('/api/teams/<int:team_id>/rotate-invite', methods=['POST'])
 @jwt_required()
 def rotate_team_invite(team_id):
