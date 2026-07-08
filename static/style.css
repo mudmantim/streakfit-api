@@ -1318,6 +1318,28 @@ input:focus {
     max-width: 160px;
 }
 
+/* ── Team Onboarding (R2.7) ───────────────────────────────────────────────── */
+.team-inline-form {
+    margin-top: .7rem;
+}
+
+.team-created-success {
+    border-left-color: var(--green);
+    text-align: center;
+}
+
+.team-invite-code {
+    font-family: ui-monospace, 'SF Mono', 'Cascadia Code', monospace;
+    font-size: 1.3rem;
+    font-weight: 700;
+    letter-spacing: .08em;
+    color: var(--gray-900);
+    background: var(--green-light);
+    border-radius: 8px;
+    padding: .5rem;
+    margin: .5rem 0 .8rem;
+}
+
 .team-guest-card {
     text-align: center;
 }

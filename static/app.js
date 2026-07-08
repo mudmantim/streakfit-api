@@ -205,6 +205,12 @@ var currentUser = null;
 // ── Guest state ───────────────────────────────────────────────────────────────
 // In-memory only — intentionally resets on page refresh.
 var isGuest = false;
+
+// R2.7: invite code captured from a ?join=CODE link, consumed once by the
+// Teams section's Join form (pre-filled, not auto-submitted -- joining a
+// team is still a real choice the user has to make, not a side effect of
+// clicking a link).
+var _pendingJoinCode = null;
 var guestCompleted = new Set();
 var guestCompleteFired = false;
 
@@ -332,13 +338,10 @@ function renderTeamsSection(state) {
     container.appendChild(_buildTeamRickieCard());
 
     var teams = state.teams || [];
-    if (teams.length === 0) {
-        container.appendChild(_buildEmptyTeamsCard());
-    } else {
-        teams.forEach(function (team) {
-            container.appendChild(_buildTeamCard(team));
-        });
-    }
+    teams.forEach(function (team) {
+        container.appendChild(_buildTeamCard(team));
+    });
+    container.appendChild(_buildTeamActionsCard(teams.length > 0));
 }
 
 function _buildTeamRickieCard() {
@@ -447,42 +450,275 @@ function _buildTeamCard(team) {
     return card;
 }
 
-function _buildEmptyTeamsCard() {
+// R2.7 Complete Team Onboarding Path — Create/Join are wired to the existing
+// R2.1 backend routes (POST /api/teams, GET /api/teams/lookup/<code>,
+// POST /api/teams/<id>/join). One shared card/form pair handles both the
+// zero-teams empty state and the "add another team" case once a user
+// already has teams, so there's exactly one implementation of this logic,
+// not two.
+function _buildTeamActionsCard(hasTeams) {
     var card = document.createElement('div');
     card.className = 'team-card team-empty-card';
 
     var title = document.createElement('p');
     title.className = 'team-card-title';
-    title.textContent = 'Create or join a team';
+    title.textContent = hasTeams ? 'Create or join another team' : 'Create or join a team';
     card.appendChild(title);
 
-    var sub = document.createElement('p');
-    sub.className = 'team-card-meta';
-    sub.textContent = (_rickieMode() === 'minimal')
-        ? 'Build a shared Campfire with people you know.'
-        : "Bring people along — a family, a few friends, whoever you want cheering you on.";
-    card.appendChild(sub);
+    if (!hasTeams) {
+        var sub = document.createElement('p');
+        sub.className = 'team-card-meta';
+        sub.textContent = (_rickieMode() === 'minimal')
+            ? 'Build a shared Campfire with people you know.'
+            : "Bring people along — a family, a few friends, whoever you want cheering you on.";
+        card.appendChild(sub);
+    }
 
     var btnRow = document.createElement('div');
     btnRow.className = 'team-empty-btn-row';
 
     var createBtn = document.createElement('button');
-    createBtn.className = 'team-card-open-btn';
+    createBtn.type = 'button';
+    createBtn.className = 'team-card-open-btn team-card-open-btn-active';
     createBtn.textContent = 'Create a team';
-    createBtn.disabled = true;
-    createBtn.title = 'Coming soon';
 
     var joinBtn = document.createElement('button');
-    joinBtn.className = 'team-card-open-btn';
+    joinBtn.type = 'button';
+    joinBtn.className = 'team-card-open-btn team-card-open-btn-active';
     joinBtn.textContent = 'Join a team';
-    joinBtn.disabled = true;
-    joinBtn.title = 'Coming soon';
 
     btnRow.appendChild(createBtn);
     btnRow.appendChild(joinBtn);
     card.appendChild(btnRow);
 
+    var createForm = _buildCreateTeamForm();
+    var joinForm = _buildJoinTeamForm();
+    createForm.hidden = true;
+    joinForm.hidden = true;
+    card.appendChild(createForm);
+    card.appendChild(joinForm);
+
+    createBtn.addEventListener('click', function () {
+        joinForm.hidden = true;
+        createForm.hidden = !createForm.hidden;
+        if (!createForm.hidden) createForm.querySelector('input').focus();
+    });
+    joinBtn.addEventListener('click', function () {
+        createForm.hidden = true;
+        joinForm.hidden = !joinForm.hidden;
+        if (!joinForm.hidden) joinForm.querySelector('input').focus();
+    });
+
+    // Arrived via a ?join=CODE link -- open the Join form pre-filled, but
+    // still require the explicit Join click (see _pendingJoinCode's note).
+    if (_pendingJoinCode) {
+        joinForm.querySelector('input').value = _pendingJoinCode;
+        _pendingJoinCode = null;
+        createForm.hidden = true;
+        joinForm.hidden = false;
+    }
+
     return card;
+}
+
+function _buildCreateTeamForm() {
+    var wrap = document.createElement('div');
+    wrap.className = 'team-inline-form';
+
+    var row = document.createElement('div');
+    row.className = 'input-row';
+
+    var input = document.createElement('input');
+    input.type = 'text';
+    input.placeholder = 'Team name, e.g. Hill Family';
+    input.maxLength = 100;
+    input.setAttribute('autocomplete', 'off');
+
+    var btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'btn-primary';
+    btn.textContent = 'Create';
+
+    row.appendChild(input);
+    row.appendChild(btn);
+
+    var errorEl = document.createElement('p');
+    errorEl.className = 'error';
+
+    wrap.appendChild(row);
+    wrap.appendChild(errorEl);
+
+    function submit() {
+        var name = input.value.trim();
+        if (!name) {
+            errorEl.textContent = 'Team name is required';
+            return;
+        }
+        _submitCreateTeam(name, btn, input, errorEl);
+    }
+
+    btn.addEventListener('click', submit);
+    input.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter') submit();
+    });
+
+    return wrap;
+}
+
+function _buildJoinTeamForm() {
+    var wrap = document.createElement('div');
+    wrap.className = 'team-inline-form';
+
+    var row = document.createElement('div');
+    row.className = 'input-row';
+
+    var input = document.createElement('input');
+    input.type = 'text';
+    input.placeholder = 'Invite code';
+    input.maxLength = 8;
+    input.setAttribute('autocomplete', 'off');
+    input.setAttribute('autocapitalize', 'characters');
+
+    var btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'btn-primary';
+    btn.textContent = 'Join';
+
+    row.appendChild(input);
+    row.appendChild(btn);
+
+    var errorEl = document.createElement('p');
+    errorEl.className = 'error';
+
+    wrap.appendChild(row);
+    wrap.appendChild(errorEl);
+
+    function submit() {
+        var code = input.value.trim().toUpperCase();
+        if (!code) {
+            errorEl.textContent = 'Invite code is required';
+            return;
+        }
+        _submitJoinTeam(code, btn, input, errorEl);
+    }
+
+    btn.addEventListener('click', submit);
+    input.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter') submit();
+    });
+
+    return wrap;
+}
+
+async function _submitCreateTeam(name, btn, input, errorEl) {
+    errorEl.textContent = '';
+    btn.disabled = true;
+    input.disabled = true;
+
+    var result = await api('/api/teams', 'POST', { name: name });
+
+    if (!result || result.status !== 201) {
+        btn.disabled = false;
+        input.disabled = false;
+        errorEl.textContent = (result && result.data && result.data.error) || "Couldn't create team — try again.";
+        return;
+    }
+
+    _showTeamCreatedSuccess(result.data.team);
+}
+
+async function _submitJoinTeam(code, btn, input, errorEl) {
+    errorEl.textContent = '';
+    btn.disabled = true;
+    input.disabled = true;
+
+    // The code alone isn't enough to call /join (which is keyed by team_id
+    // in the URL) -- lookup resolves code -> team_id first. join_team still
+    // independently re-validates the same code against that team_id server
+    // side, so this isn't a shortcut around that check, just two calls
+    // instead of one.
+    var lookup = await api('/api/teams/lookup/' + encodeURIComponent(code));
+    if (!lookup || lookup.status !== 200) {
+        btn.disabled = false;
+        input.disabled = false;
+        errorEl.textContent = (lookup && lookup.data && lookup.data.error) || 'Invalid invite code';
+        return;
+    }
+
+    var result = await api('/api/teams/' + lookup.data.team_id + '/join', 'POST', { code: code });
+
+    if (!result || result.status !== 200) {
+        btn.disabled = false;
+        input.disabled = false;
+        errorEl.textContent = (result && result.data && result.data.error) || "Couldn't join team — try again.";
+        return;
+    }
+
+    await loadTeams();
+}
+
+// GET /api/teams (used to refresh the list right after this) never returns
+// invite_code -- only POST /api/teams's create response does, once, at
+// creation time -- so this transient card is the only chance to show it
+// before the user would have to fall back to Rotate Invite Code later.
+function _showTeamCreatedSuccess(team) {
+    var container = document.getElementById('teams-list');
+    if (!container) return;
+
+    var actionsCard = container.querySelector('.team-empty-card');
+    if (actionsCard) actionsCard.hidden = true;
+
+    var card = document.createElement('div');
+    card.className = 'team-card team-created-success';
+
+    var title = document.createElement('p');
+    title.className = 'team-card-title';
+    title.textContent = '🎉 ' + team.name + ' created!';
+    card.appendChild(title);
+
+    var sub = document.createElement('p');
+    sub.className = 'team-card-meta';
+    sub.textContent = 'Share this so others can join:';
+    card.appendChild(sub);
+
+    var codeEl = document.createElement('p');
+    codeEl.className = 'team-invite-code';
+    codeEl.textContent = team.invite_code;
+    card.appendChild(codeEl);
+
+    var btnRow = document.createElement('div');
+    btnRow.className = 'team-empty-btn-row';
+
+    var copyBtn = document.createElement('button');
+    copyBtn.type = 'button';
+    copyBtn.className = 'btn-primary';
+    copyBtn.textContent = 'Copy Link';
+    copyBtn.addEventListener('click', function () {
+        var link = window.location.origin + '/?join=' + team.invite_code;
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(link).then(function () {
+                copyBtn.textContent = 'Copied!';
+                setTimeout(function () { copyBtn.textContent = 'Copy Link'; }, 1500);
+            });
+        }
+    });
+
+    var doneBtn = document.createElement('button');
+    doneBtn.type = 'button';
+    doneBtn.className = 'retention-btn retention-btn-ghost';
+    doneBtn.textContent = 'Done';
+    doneBtn.addEventListener('click', loadTeams);
+
+    btnRow.appendChild(copyBtn);
+    btnRow.appendChild(doneBtn);
+    card.appendChild(btnRow);
+
+    var rickieCard = container.querySelector('.team-rickie-card');
+    if (rickieCard) {
+        rickieCard.insertAdjacentElement('afterend', card);
+    } else {
+        container.insertBefore(card, container.firstChild);
+    }
 }
 
 function _buildGuestTeamsPreview() {
@@ -3937,6 +4173,12 @@ async function handleCheckIn(id, btn) {
 // ── Init ──────────────────────────────────────────────────────────────────────
 
 async function init() {
+    var joinParam = new URLSearchParams(window.location.search).get('join');
+    if (joinParam) {
+        _pendingJoinCode = joinParam.trim().toUpperCase();
+        window.history.replaceState(null, '', window.location.pathname);
+    }
+
     if (localStorage.getItem('streakfit_token')) {
         await loadDashboard();
         if (localStorage.getItem('streakfit_token')) {
