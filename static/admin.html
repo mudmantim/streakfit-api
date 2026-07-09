@@ -301,7 +301,7 @@
     <div id="verify-history"><div class="state">Enter admin secret to load.</div></div>
   </section>
 
-  <div class="footer">No PII stored · UTC timestamps · "Run Verification" creates throwaway qa_smoke_* accounts, safe to run anytime</div>
+  <div class="footer">No PII stored · Times shown in server local time (America/Detroit) · "Run Verification" creates throwaway qa_smoke_* accounts, safe to run anytime</div>
 </div>
 
 <script>
@@ -355,9 +355,19 @@
            + pctStr(p) + '</span></td>';
   }
 
+  var DISPLAY_TZ = 'America/Detroit';
+
   function fmtTime(iso) {
     if (!iso) return '—';
-    return new Date(iso).toUTCString();
+    // Intl handles the EDT/EST switch itself via the IANA tz database --
+    // no manual DST math. timeZoneName: 'short' appends the correct
+    // abbreviation for whatever date this actually is.
+    return new Date(iso).toLocaleString('en-US', {
+      timeZone: DISPLAY_TZ,
+      year: 'numeric', month: 'short', day: 'numeric',
+      hour: 'numeric', minute: '2-digit',
+      timeZoneName: 'short',
+    });
   }
 
   function fmtDuration(seconds) {
@@ -687,8 +697,7 @@
     var wc  = data.users_with_completion || {};
     var rnd = data.returned_next_day || {};
 
-    var d = new Date(data.generated_at);
-    document.getElementById('ts').textContent = 'Generated ' + d.toUTCString();
+    document.getElementById('ts').textContent = 'Generated ' + fmtTime(data.generated_at);
 
     var rndPct = pct(rnd.returned, rnd.active_yesterday);
 
