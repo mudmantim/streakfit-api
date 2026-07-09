@@ -33,7 +33,17 @@ Exit codes: `0` all passed, `1` at least one check failed, `2` a setup step (e.g
 | `moments.py` | Team Moments history (`team_created`, `member_joined`, `campfire_log_added`, ordering) |
 | `chat.py` | Team Chat post/read, empty/over-length rejection, emoji reactions as plain messages |
 | `rickie.py` | Rickie's team reactions (welcome, first-log) — fixed templates, `sender_user_id` null |
-| `security.py` | Invite rotation, remove member, leave team, unauthorized access — runs **last**, mutates membership |
+| `security.py` | Invite rotation, remove member, leave team, unauthorized access — mutates membership |
+| `admin.py` | StreakFit Control's own routes (R3.0) are reachable and reject unauthenticated requests. Independent of the team scenario; runs last. Never triggers `POST /api/admin/verify` itself — that would recurse |
+
+Suite version and last-changed date live in `__init__.py` (`VERIFICATION_SUITE_VERSION`) — bump it by hand whenever this table changes, same discipline as the `static/sw.js` cache-version rule.
+
+## Two ways to reach the app
+
+Every module calls `api.request(method, path, token, body)` and never touches the transport directly, so the same check logic can run two ways:
+
+- **`ApiClient`** (`_client.py`) — real HTTP over the network. What the CLI, local development, and any future CI use.
+- **`WsgiClient`** (`_client.py`) — dispatches through Flask's `app.test_client()` in-process, no socket. What StreakFit Control's "Run Verification" button uses, since the app would otherwise be making a real HTTP call to itself — on a single-worker deployment, the one worker handling that request has nothing free to answer its own call with. `WsgiClient` sidesteps the problem entirely rather than requiring more workers.
 
 ## Not yet covered
 

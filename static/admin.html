@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>StreakFit Analytics</title>
+<title>StreakFit Control</title>
 <style>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -64,7 +64,10 @@
     text-transform: uppercase; color: var(--muted);
     border-bottom: 1px solid var(--border);
     padding-bottom: 8px; margin-bottom: 20px;
+    display: flex; align-items: baseline; gap: 8px;
   }
+  .section-sub { text-transform: none; letter-spacing: 0; font-weight: 500; color: var(--muted); }
+  section.op-section { margin-bottom: 36px; }
 
   /* ── Overview cards ── */
   .overview-grid {
@@ -81,6 +84,7 @@
     display: flex; align-items: center; gap: 6px;
   }
   .card-value { font-size: 24px; font-weight: 700; color: var(--text); }
+  .card-value.small { font-size: 16px; }
   .card-sub { font-size: 11px; color: var(--muted); margin-top: 4px; }
   .badge {
     font-size: 9px; font-weight: 700; letter-spacing: .04em;
@@ -89,7 +93,86 @@
   .badge.exact  { color: var(--green); background: rgba(52,211,153,.12); }
   .badge.approx { color: var(--amber); background: rgba(251,191,36,.12); }
 
-  /* ── Funnel table ── */
+  /* ── Status dots / pills (shared by Project Status, System Health, Release Readiness) ── */
+  .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+  .dot.green  { background: var(--green);  box-shadow: 0 0 0 3px rgba(52,211,153,.15); }
+  .dot.yellow { background: var(--amber);  box-shadow: 0 0 0 3px rgba(251,191,36,.15); }
+  .dot.red    { background: var(--red);    box-shadow: 0 0 0 3px rgba(248,113,113,.15); }
+  .dot.gray   { background: var(--muted); }
+
+  .pill {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: 11px; font-weight: 600; padding: 3px 9px; border-radius: 999px;
+  }
+  .pill.green  { color: var(--green);  background: rgba(52,211,153,.12); }
+  .pill.yellow { color: var(--amber);  background: rgba(251,191,36,.12); }
+  .pill.red    { color: var(--red);    background: rgba(248,113,113,.12); }
+  .pill.gray   { color: var(--muted);  background: rgba(107,114,128,.12); }
+
+  /* ── Verify Application ── */
+  .verify-actions { display: flex; align-items: center; gap: 12px; margin-bottom: 20px; }
+  .btn-primary {
+    background: var(--flame); color: #fff; border: none;
+    border-radius: 6px; padding: 10px 20px; font-family: inherit;
+    font-size: 13px; font-weight: 700; cursor: pointer;
+    transition: opacity .15s;
+  }
+  .btn-primary:hover:not(:disabled) { opacity: .88; }
+  .btn-primary:disabled { opacity: .5; cursor: default; }
+  .verify-live-note { font-size: 11px; color: var(--muted); }
+
+  .module-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 16px; }
+  .module-row {
+    display: flex; align-items: center; gap: 10px;
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 6px; padding: 8px 12px; font-size: 12px;
+  }
+  .module-row .module-name { flex: 1; font-weight: 600; }
+  .module-row .module-mark { font-size: 11px; font-weight: 700; width: 60px; text-align: right; }
+  .module-row .module-mark.pass    { color: var(--green); }
+  .module-row .module-mark.fail    { color: var(--red); }
+  .module-row .module-mark.running { color: var(--amber); }
+  .module-row .module-mark.pending { color: var(--muted); }
+
+  .verify-summary-line {
+    display: flex; align-items: baseline; gap: 14px; margin-bottom: 8px;
+    font-size: 13px;
+  }
+  .verify-summary-line .big-count { font-size: 20px; font-weight: 700; }
+
+  .failure-list { margin-top: 12px; display: flex; flex-direction: column; gap: 4px; }
+  .failure-row { font-size: 11px; color: var(--red); }
+  .failure-row .fail-detail { color: var(--muted); }
+
+  /* ── Release Readiness ── */
+  .readiness-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 20px; }
+  .readiness-row {
+    display: flex; align-items: center; gap: 10px;
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 6px; padding: 9px 12px; font-size: 12px;
+  }
+  .readiness-row .r-name { flex: 1; }
+  .readiness-row .r-note { font-size: 10px; color: var(--muted); }
+  .readiness-row input[type="checkbox"] {
+    width: 15px; height: 15px; accent-color: var(--flame); cursor: pointer;
+  }
+
+  .overall-ready {
+    display: flex; align-items: center; justify-content: space-between;
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 8px; padding: 16px 18px;
+  }
+  .overall-ready .r-label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .08em; }
+  .overall-ready .r-value { font-size: 18px; font-weight: 700; }
+  .overall-ready .r-value.ready     { color: var(--green); }
+  .overall-ready .r-value.not-ready { color: var(--red); }
+
+  /* Wide tables (funnel, recent users, verification history) get their
+     own horizontal scroll on narrow viewports instead of blowing out
+     the whole page body. */
+  .table-scroll { overflow-x: auto; }
+
+  /* ── Funnel table (Analytics) ── */
   .funnel { width: 100%; border-collapse: collapse; margin-bottom: 8px; }
 
   .funnel th {
@@ -129,32 +212,33 @@
   .overall-row td { border-top: 2px solid var(--border); padding-top: 14px; }
   .overall-label { font-size: 11px; color: var(--muted); }
 
-  /* ── Recent users table ── */
-  .users-table { width: 100%; border-collapse: collapse; margin-bottom: 8px; }
-  .users-table th {
+  /* ── Tables shared by Recent Users + Verification History ── */
+  .users-table, .history-table { width: 100%; border-collapse: collapse; margin-bottom: 8px; }
+  .users-table th, .history-table th {
     text-align: right; font-size: 10px; font-weight: 700;
     letter-spacing: .08em; text-transform: uppercase;
     color: var(--muted); padding: 0 16px 10px 0;
   }
-  .users-table th:first-child,
-  .users-table th:nth-child(2) { text-align: left; }
-  .users-table th:first-child { padding-left: 0; }
-  .users-table td {
+  .users-table th:first-child, .users-table th:nth-child(2),
+  .history-table th:first-child, .history-table th:nth-child(2) { text-align: left; }
+  .users-table th:first-child, .history-table th:first-child { padding-left: 0; }
+  .users-table td, .history-table td {
     padding: 8px 16px 8px 0; text-align: right;
     border-top: 1px solid var(--border); vertical-align: middle;
     font-size: 12px;
   }
-  .users-table td:first-child,
-  .users-table td:nth-child(2) { text-align: left; }
-  .users-table td:first-child { padding-left: 0; }
+  .users-table td:first-child, .users-table td:nth-child(2),
+  .history-table td:first-child, .history-table td:nth-child(2) { text-align: left; }
+  .users-table td:first-child, .history-table td:first-child { padding-left: 0; }
   .users-table .username { font-weight: 600; color: var(--text); }
-  .users-table .muted-cell { color: var(--muted); }
+  .users-table .muted-cell, .history-table .muted-cell { color: var(--muted); }
 
   /* ── States ── */
   .state {
-    text-align: center; padding: 48px 0; color: var(--muted); font-size: 13px;
+    text-align: center; padding: 24px 0; color: var(--muted); font-size: 13px;
   }
   .state.error { color: var(--red); }
+  .state.small { padding: 12px 0; font-size: 12px; }
 
   /* ── Footer ── */
   .footer {
@@ -169,38 +253,74 @@
   <div class="header">
     <span class="logo">🔥 StreakFit</span>
     <span class="header-sep">/</span>
-    <span class="header-title">Analytics</span>
+    <span class="header-title">Control</span>
     <span class="timestamp" id="ts"></span>
   </div>
 
   <div class="auth-bar">
     <input id="secret-input" type="password" placeholder="Admin secret"
            autocomplete="current-password" spellcheck="false">
-    <button onclick="load()">Load</button>
-    <button id="refresh-btn" onclick="load()" hidden>↻ Refresh</button>
+    <button onclick="loadAll()">Load</button>
+    <button id="refresh-btn" onclick="loadAll()" hidden>↻ Refresh</button>
   </div>
 
-  <div id="output">
-    <div class="state">Enter admin secret to load data.</div>
-  </div>
+  <!-- Section 1: Project Status -->
+  <section class="op-section">
+    <div class="section-label">Project Status</div>
+    <div id="project-status"><div class="state">Enter admin secret to load.</div></div>
+  </section>
 
-  <div class="footer">Read-only · No PII stored · UTC timestamps</div>
+  <!-- Section 2: Verify Application -->
+  <section class="op-section">
+    <div class="section-label">Verify Application</div>
+    <div id="verify-app"><div class="state">Enter admin secret to load.</div></div>
+  </section>
+
+  <!-- Section 3: System Health -->
+  <section class="op-section">
+    <div class="section-label">System Health <span class="section-sub">is the app alive right now</span></div>
+    <div id="system-health"><div class="state">Enter admin secret to load.</div></div>
+  </section>
+
+  <!-- Section 4: Analytics (existing dashboard, unchanged, moved below the operational sections) -->
+  <section class="op-section">
+    <div id="output">
+      <div class="state">Enter admin secret to load data.</div>
+    </div>
+  </section>
+
+  <!-- Section 5: Release Readiness -->
+  <section class="op-section">
+    <div class="section-label">Release Readiness <span class="section-sub">should I ship this</span></div>
+    <div id="release-readiness"><div class="state">Enter admin secret to load.</div></div>
+  </section>
+
+  <!-- Section 6: Verification History -->
+  <section class="op-section">
+    <div class="section-label">Verification History</div>
+    <div id="verify-history"><div class="state">Enter admin secret to load.</div></div>
+  </section>
+
+  <div class="footer">No PII stored · UTC timestamps · "Run Verification" creates throwaway qa_smoke_* accounts, safe to run anytime</div>
 </div>
 
 <script>
 (function () {
 
   var SECRET_KEY = 'sf_admin_secret';
+  var READINESS_KEY = 'sf_admin_readiness_v1';
+  var MODULE_LABELS = ['Auth', 'Teams', 'Mission', 'Campfire', 'Moments', 'Chat', 'Rickie', 'Security', 'Admin'];
+  var pollTimer = null;
 
   // Restore secret from sessionStorage
   var stored = sessionStorage.getItem(SECRET_KEY);
   if (stored) {
     document.getElementById('secret-input').value = stored;
-    load();
+    loadAll();
   }
 
   document.getElementById('secret-input').addEventListener('keydown', function (e) {
-    if (e.key === 'Enter') load();
+    if (e.key === 'Enter') loadAll();
   });
 
   function pct(num, denom) {
@@ -220,7 +340,7 @@
   }
 
   function fmt(n) {
-    return n.toLocaleString();
+    return (n === null || n === undefined) ? '—' : n.toLocaleString();
   }
 
   function escapeHtml(s) {
@@ -235,39 +355,319 @@
            + pctStr(p) + '</span></td>';
   }
 
-  window.load = function load() {
-    var secret = document.getElementById('secret-input').value.trim();
-    if (!secret) return;
-    sessionStorage.setItem(SECRET_KEY, secret);
+  function fmtTime(iso) {
+    if (!iso) return '—';
+    return new Date(iso).toUTCString();
+  }
 
-    document.getElementById('output').innerHTML =
-      '<div class="state">Loading…</div>';
+  function fmtDuration(seconds) {
+    if (seconds === null || seconds === undefined) return '—';
+    return seconds < 10 ? seconds.toFixed(1) + 's' : Math.round(seconds) + 's';
+  }
 
-    fetch('/api/admin/stats', {
-      headers: { 'X-Admin-Secret': secret }
-    })
-    .then(function (r) {
+  function healthPill(status) {
+    var ok = status === 'healthy' || status === true;
+    return '<span class="pill ' + (ok ? 'green' : 'red') + '"><span class="dot ' + (ok ? 'green' : 'red') + '"></span>'
+         + (ok ? 'Healthy' : 'Unhealthy') + '</span>';
+  }
+
+  function overallPill(level) {
+    var cls = level === 'green' ? 'green' : (level === 'yellow' ? 'yellow' : 'red');
+    var label = level === 'green' ? 'Healthy' : (level === 'yellow' ? 'Attention' : 'Unhealthy');
+    return '<span class="pill ' + cls + '"><span class="dot ' + cls + '"></span>' + label + '</span>';
+  }
+
+  function apiGet(secret, path) {
+    return fetch(path, { headers: { 'X-Admin-Secret': secret } }).then(function (r) {
       if (r.status === 403) throw new Error('403');
-      if (r.status === 503) throw new Error('503');
-      if (!r.ok) throw new Error(r.status);
+      if (!r.ok) throw new Error(String(r.status));
       return r.json();
-    })
-    .then(function (data) { render(data); })
-    .catch(function (err) {
-      var msg;
-      if (err.message === '403') {
-        msg = 'Access denied. Check your admin secret.';
-      } else if (err.message === '503') {
-        msg = 'Stats temporarily unavailable. Try Refresh.';
-        document.getElementById('refresh-btn').hidden = false;
-      } else {
-        msg = 'Failed to load data (' + err.message + ').';
-      }
-      document.getElementById('output').innerHTML =
-        '<div class="state error">' + msg + '</div>';
     });
-  };
+  }
 
+  function errorState(container, err) {
+    var msg = err.message === '403' ? 'Access denied. Check your admin secret.' : 'Failed to load (' + err.message + ').';
+    document.getElementById(container).innerHTML = '<div class="state error small">' + msg + '</div>';
+  }
+
+  // ── Section 1: Project Status ─────────────────────────────────────
+  function renderProjectStatus(data) {
+    var lv = data.last_verification;
+    var html = '<div class="overview-grid">'
+      + '<div class="card"><div class="card-label">Production Health</div>'
+      + '<div class="card-value small">' + healthPill(data.production_health) + '</div></div>'
+      + '<div class="card"><div class="card-label">Current Version</div>'
+      + '<div class="card-value small">' + escapeHtml(data.current_version || 'unknown') + '</div></div>'
+      + '<div class="card"><div class="card-label">Current Commit</div>'
+      + '<div class="card-value small">' + escapeHtml(data.commit_sha || 'unknown') + '</div></div>'
+      + '<div class="card"><div class="card-label">Last Deployment</div>'
+      + '<div class="card-value small">' + fmtTime(data.last_deployment_at) + '</div></div>'
+      + '<div class="card"><div class="card-label">Last Verification</div>'
+      + '<div class="card-value small">' + (lv ? fmtTime(lv.finished_at) : 'Never run') + '</div></div>'
+      + '<div class="card"><div class="card-label">Verification Result</div>'
+      + '<div class="card-value small">' + (lv ? (fmt(lv.passed) + ' / ' + fmt(lv.total) + ' Passed') : '—') + '</div></div>'
+      + '<div class="card"><div class="card-label">Overall Project Health</div>'
+      + '<div class="card-value small">' + overallPill(data.overall_health) + '</div></div>'
+      + '</div>';
+    document.getElementById('project-status').innerHTML = html;
+  }
+
+  function loadProjectStatus(secret) {
+    return apiGet(secret, '/api/admin/project-status')
+      .then(renderProjectStatus)
+      .catch(function (err) { errorState('project-status', err); });
+  }
+
+  // ── Section 2: Verify Application ─────────────────────────────────
+  function moduleRowsHtml(currentModule, running, checks) {
+    // Live progress while running: modules before/at current_module are
+    // "running" or implicitly done; after it, "pending". Once finished,
+    // checks[] tells us exactly which modules had any failing check.
+    var failedModules = {};
+    if (checks) {
+      checks.forEach(function (c) {
+        if (!c.passed) {
+          var mod = c.name.split('.')[0];
+          failedModules[mod] = true;
+        }
+      });
+    }
+    var currentIdx = currentModule ? MODULE_LABELS.map(function(m){return m.toLowerCase();}).indexOf(currentModule.toLowerCase()) : -1;
+
+    return MODULE_LABELS.map(function (label, i) {
+      var key = label.toLowerCase();
+      var mark = 'pending', markText = 'Pending';
+      if (!running && checks) {
+        if (failedModules[key]) { mark = 'fail'; markText = 'Failed'; }
+        else { mark = 'pass'; markText = 'Passed'; }
+      } else if (running) {
+        if (i < currentIdx) { mark = 'pass'; markText = 'Done'; }
+        else if (i === currentIdx) { mark = 'running'; markText = 'Running…'; }
+        else { mark = 'pending'; markText = 'Pending'; }
+      }
+      return '<div class="module-row"><span class="module-name">' + label + '</span>'
+           + '<span class="module-mark ' + mark + '">' + markText + '</span></div>';
+    }).join('');
+  }
+
+  function renderVerifyApp(data, running) {
+    var container = document.getElementById('verify-app');
+    var btnDisabled = running ? 'disabled' : '';
+    var btnLabel = running ? 'Running…' : 'Run Verification';
+
+    var summaryHtml = '';
+    if (data && data.status && data.status !== 'never_run') {
+      summaryHtml = '<div class="verify-summary-line">'
+        + '<span class="big-count">' + fmt(data.passed) + ' / ' + fmt(data.total) + '</span>'
+        + '<span>Passed</span>'
+        + '<span class="verify-live-note">Duration: ' + fmtDuration(
+            data.finished_at && data.started_at
+              ? (new Date(data.finished_at) - new Date(data.started_at)) / 1000
+              : null
+          ) + '</span>'
+        + '<span class="verify-live-note">Warnings: 0</span>'
+        + '<span class="verify-live-note">Failures: ' + fmt(data.failed) + '</span>'
+        + '</div>';
+
+      if (data.failed > 0 && data.checks) {
+        var failRows = data.checks.filter(function (c) { return !c.passed; }).map(function (c) {
+          return '<div class="failure-row">✗ ' + escapeHtml(c.name)
+               + (c.detail ? ' <span class="fail-detail">— ' + escapeHtml(c.detail) + '</span>' : '') + '</div>';
+        }).join('');
+        summaryHtml += '<div class="failure-list">' + failRows + '</div>';
+      }
+    } else if (!running) {
+      summaryHtml = '<div class="state small">No verification has been run yet.</div>';
+    }
+
+    container.innerHTML =
+      '<div class="verify-actions">'
+      + '<button class="btn-primary" id="run-verify-btn" ' + btnDisabled + '>' + btnLabel + '</button>'
+      + (running ? '<span class="verify-live-note">Real checks only — no simulation. This takes a few seconds.</span>' : '')
+      + '</div>'
+      + '<div class="module-list">' + moduleRowsHtml(data ? data.current_module : null, running, data ? data.checks : null) + '</div>'
+      + summaryHtml;
+
+    document.getElementById('run-verify-btn').addEventListener('click', function () {
+      runVerification(document.getElementById('secret-input').value.trim());
+    });
+  }
+
+  function loadVerifyStatus(secret) {
+    return apiGet(secret, '/api/admin/verify/status')
+      .then(function (data) { renderVerifyApp(data, !!data.running); return data; })
+      .catch(function (err) { errorState('verify-app', err); });
+  }
+
+  function runVerification(secret) {
+    if (!secret) return;
+    fetch('/api/admin/verify', { method: 'POST', headers: { 'X-Admin-Secret': secret } })
+      .then(function (r) {
+        if (r.status === 409) { pollVerifyStatus(secret); return null; }
+        if (r.status === 403) throw new Error('403');
+        if (!r.ok) throw new Error(String(r.status));
+        return r.json();
+      })
+      .then(function () {
+        renderVerifyApp(null, true);
+        pollVerifyStatus(secret);
+      })
+      .catch(function (err) { errorState('verify-app', err); });
+  }
+
+  function pollVerifyStatus(secret) {
+    if (pollTimer) clearInterval(pollTimer);
+    pollTimer = setInterval(function () {
+      apiGet(secret, '/api/admin/verify/status').then(function (data) {
+        renderVerifyApp(data, !!data.running);
+        if (!data.running) {
+          clearInterval(pollTimer);
+          pollTimer = null;
+          // A finished run changes Project Status, History, and Analytics
+          // too (it just created real qa_smoke_* users/a team).
+          loadProjectStatus(secret);
+          loadVerifyHistory(secret);
+          loadReleaseReadiness(secret, data);
+          loadAnalytics(secret);
+        }
+      }).catch(function () {
+        clearInterval(pollTimer);
+        pollTimer = null;
+      });
+    }, 1500);
+  }
+
+  // ── Section 3: System Health ──────────────────────────────────────
+  function renderSystemHealth(data) {
+    var html = '<div class="overview-grid">'
+      + '<div class="card"><div class="card-label">Current API</div>'
+      + '<div class="card-value small">' + healthPill(data.api) + '</div></div>'
+      + '<div class="card"><div class="card-label">Database</div>'
+      + '<div class="card-value small">' + healthPill(data.database) + '</div></div>'
+      + '<div class="card"><div class="card-label">Service Worker</div>'
+      + '<div class="card-value small">' + escapeHtml((data.service_worker && data.service_worker.cache_version) || 'unknown') + '</div></div>'
+      + '<div class="card"><div class="card-label">PWA</div>'
+      + '<div class="card-value small">' + healthPill(data.pwa && data.pwa.manifest_present && data.pwa.icons_present) + '</div></div>'
+      + '<div class="card"><div class="card-label">Notifications</div>'
+      + '<div class="card-value small"><span class="pill gray"><span class="dot gray"></span>Not Server-Checkable</span></div>'
+      + '<div class="card-sub">' + escapeHtml((data.notifications && data.notifications.note) || '') + '</div></div>'
+      + '<div class="card"><div class="card-label">Render Health</div>'
+      + '<div class="card-value small"><span class="pill gray"><span class="dot gray"></span>Unavailable</span></div>'
+      + '<div class="card-sub">' + escapeHtml((data.render && data.render.note) || '') + '</div></div>'
+      + '</div>';
+    document.getElementById('system-health').innerHTML = html;
+  }
+
+  function loadSystemHealth(secret) {
+    return apiGet(secret, '/api/admin/system-health')
+      .then(renderSystemHealth)
+      .catch(function (err) { errorState('system-health', err); });
+  }
+
+  // ── Section 5: Release Readiness ──────────────────────────────────
+  var MANUAL_ITEMS = [
+    { key: 'console_errors', label: 'No Console Errors', note: 'manual — Chrome DevTools check' },
+    { key: 'mobile_verified', label: 'Mobile Verified', note: 'manual — narrow-viewport pass' },
+    { key: 'accessibility', label: 'Accessibility', note: 'not yet automated' },
+    { key: 'performance', label: 'Performance (Lighthouse)', note: 'not yet automated' },
+  ];
+
+  function readManualState() {
+    try { return JSON.parse(localStorage.getItem(READINESS_KEY)) || {}; }
+    catch (e) { return {}; }
+  }
+
+  function writeManualState(state) {
+    localStorage.setItem(READINESS_KEY, JSON.stringify(state));
+  }
+
+  function renderReleaseReadiness(secret, verifyData) {
+    var manual = readManualState();
+    var verificationPassing = verifyData && verifyData.status === 'passed';
+
+    var rows = '<div class="readiness-row"><span class="r-name">Tests Passing</span>'
+      + '<span class="r-note">not yet automated — no CI configured</span></div>'
+      + '<div class="readiness-row"><span class="r-name">Verification Passing</span>'
+      + '<span class="r-note">' + (verifyData && verifyData.status
+          ? (verificationPassing ? (verifyData.passed + '/' + verifyData.total + ' passed') : verifyData.status)
+          : 'no run yet') + '</span></div>';
+
+    rows += MANUAL_ITEMS.map(function (item) {
+      var checked = manual[item.key] ? 'checked' : '';
+      return '<div class="readiness-row">'
+        + '<input type="checkbox" data-key="' + item.key + '" ' + checked + '>'
+        + '<span class="r-name">' + item.label + '</span>'
+        + '<span class="r-note">' + item.note + '</span>'
+        + '</div>';
+    }).join('');
+
+    var allManualChecked = MANUAL_ITEMS.every(function (item) { return !!manual[item.key]; });
+    var ready = verificationPassing && allManualChecked;
+
+    var html = '<div class="readiness-list">' + rows + '</div>'
+      + '<div class="overall-ready">'
+      + '<span class="r-label">Overall</span>'
+      + '<span class="r-value ' + (ready ? 'ready' : 'not-ready') + '">'
+      + (ready ? 'READY FOR REVIEW' : 'NOT READY') + '</span>'
+      + '</div>';
+
+    document.getElementById('release-readiness').innerHTML = html;
+
+    Array.prototype.forEach.call(document.querySelectorAll('#release-readiness input[type="checkbox"]'), function (cb) {
+      cb.addEventListener('change', function () {
+        var state = readManualState();
+        state[cb.getAttribute('data-key')] = cb.checked;
+        writeManualState(state);
+        renderReleaseReadiness(secret, verifyData);
+      });
+    });
+  }
+
+  function loadReleaseReadiness(secret, verifyData) {
+    if (verifyData) { renderReleaseReadiness(secret, verifyData); return Promise.resolve(); }
+    return apiGet(secret, '/api/admin/verify/status')
+      .then(function (data) { renderReleaseReadiness(secret, data); })
+      .catch(function (err) { errorState('release-readiness', err); });
+  }
+
+  // ── Section 6: Verification History ───────────────────────────────
+  function renderVerifyHistory(data) {
+    var runs = data.runs || [];
+    if (!runs.length) {
+      document.getElementById('verify-history').innerHTML = '<div class="state small">No verification runs yet.</div>';
+      return;
+    }
+    var rows = runs.map(function (r) {
+      var statusPill = r.status === 'passed'
+        ? '<span class="pill green"><span class="dot green"></span>Passed</span>'
+        : (r.status === 'running'
+            ? '<span class="pill yellow"><span class="dot yellow"></span>Running</span>'
+            : '<span class="pill red"><span class="dot red"></span>' + escapeHtml(r.status) + '</span>');
+      return '<tr>'
+        + '<td class="muted-cell">' + fmtTime(r.started_at) + '</td>'
+        + '<td class="muted-cell">' + escapeHtml(r.commit_sha || 'unknown') + '</td>'
+        + '<td>v' + fmt(r.suite_version) + '</td>'
+        + '<td>' + statusPill + '</td>'
+        + '<td>' + fmt(r.passed) + '</td>'
+        + '<td>' + fmt(r.failed) + '</td>'
+        + '<td>' + fmtDuration(r.duration_seconds) + '</td>'
+        + '</tr>';
+    }).join('');
+
+    document.getElementById('verify-history').innerHTML =
+      '<div class="table-scroll"><table class="history-table">'
+      + '<thead><tr><th>Date</th><th>Commit</th><th>Version</th><th>Status</th><th>Passed</th><th>Failed</th><th>Duration</th></tr></thead>'
+      + '<tbody>' + rows + '</tbody>'
+      + '</table></div>';
+  }
+
+  function loadVerifyHistory(secret) {
+    return apiGet(secret, '/api/admin/verify/history')
+      .then(renderVerifyHistory)
+      .catch(function (err) { errorState('verify-history', err); });
+  }
+
+  // ── Section 4: Analytics (existing dashboard — unchanged logic below) ──
   function card(label, value, badgeClass, badgeText, sub) {
     return '<div class="card">'
          + '<div class="card-label">' + label
@@ -277,10 +677,9 @@
          + '</div>';
   }
 
-  function render(data) {
+  function renderAnalytics(data) {
     var e = data.events;
     var gs  = e.guest_start;
-    var gc  = e.guest_complete;
     var gca = e.guest_create_account_click;
     var u   = data.users || {};
     var au  = data.active_users || {};
@@ -288,15 +687,13 @@
     var wc  = data.users_with_completion || {};
     var rnd = data.returned_next_day || {};
 
-    // Update timestamp
     var d = new Date(data.generated_at);
-    document.getElementById('ts').textContent =
-      'Generated ' + d.toUTCString();
+    document.getElementById('ts').textContent = 'Generated ' + d.toUTCString();
 
     var rndPct = pct(rnd.returned, rnd.active_yesterday);
 
     var overviewHtml =
-      '<div class="section-label">Overview</div>'
+      '<div class="section-label">Analytics</div>'
       + '<div class="overview-grid">'
       + card('Registered Users', u.total_registered, 'exact', 'exact')
       + card('Active Today', au.today_by_completion, 'approx', '~approx',
@@ -311,17 +708,12 @@
              + ' — needs more days to mean much')
       + '</div>';
 
-    // Conversion rates — Today, Week, Month
     var cols = ['today', 'week', 'month'];
 
     function arrowRow(label, numeratorKey, denominatorKey) {
       var cells = cols.map(function (c) {
-        return renderPctCell(
-          e[numeratorKey][c],
-          e[denominatorKey][c]
-        );
+        return renderPctCell(e[numeratorKey][c], e[denominatorKey][c]);
       }).join('');
-      // all-time cell
       var allP = pct(e[numeratorKey].all_time, e[denominatorKey].all_time);
       return '<tr class="arrow-row">'
            + '<td class="arrow-cell">↓ <span class="pct ' + pctClass(allP) + '">'
@@ -345,7 +737,6 @@
            + '</tr>';
     }
 
-    // Overall conversion Start → Click
     function overallRow() {
       var cells = cols.map(function (c) {
         var p = pct(gca[c], gs[c]);
@@ -373,20 +764,20 @@
       return '<div class="section-label">Recent Users '
            + '<span class="badge approx" style="text-transform:none;letter-spacing:0;font-weight:600;">'
            + 'sorted by ID, not join date</span></div>'
-           + '<table class="users-table">'
+           + '<div class="table-scroll"><table class="users-table">'
            + '<thead><tr>'
            + '<th>Username</th><th>User ID</th><th>Missions Completed</th>'
            + '<th>Current Streak</th><th>Last Active</th>'
            + '</tr></thead>'
            + '<tbody>' + (rows || '<tr><td colspan="5" class="muted-cell">No users yet.</td></tr>') + '</tbody>'
-           + '</table>';
+           + '</table></div>';
     }
 
     var html = overviewHtml
              + '<div class="section-label">Guest Funnel '
              + '<span class="badge approx" style="text-transform:none;letter-spacing:0;font-weight:600;">'
              + 'not unique-visitor tracking</span></div>'
-             + '<table class="funnel">'
+             + '<div class="table-scroll"><table class="funnel">'
              + '<thead><tr>'
              + '<th></th>'
              + '<th>Today</th>'
@@ -404,12 +795,47 @@
              + eventRow('account_created',           'Account Created',           'real signup, fired server-side — not just a click')
              + overallRow()
              + '</tbody>'
-             + '</table>'
+             + '</table></div>'
              + recentUsersHtml(data.recent_users);
 
     document.getElementById('output').innerHTML = html;
+  }
+
+  function loadAnalytics(secret) {
+    return apiGet(secret, '/api/admin/stats')
+      .then(renderAnalytics)
+      .catch(function (err) {
+        var msg = err.message === '403' ? 'Access denied. Check your admin secret.'
+                : err.message === '503' ? 'Stats temporarily unavailable. Try Refresh.'
+                : 'Failed to load data (' + err.message + ').';
+        document.getElementById('output').innerHTML = '<div class="state error">' + msg + '</div>';
+      });
+  }
+
+  // ── Master loader ──────────────────────────────────────────────────
+  // A plain hoisted declaration, not `window.loadAll = function(){}` --
+  // that pattern is a function *expression*, not hoisted, so the
+  // session-restore auto-call above (which runs earlier in the file)
+  // would throw ReferenceError calling it before the assignment ever
+  // ran. A hoisted declaration is callable from anywhere in this scope
+  // regardless of textual order; window.loadAll below just exposes it
+  // to the inline onclick="loadAll()" handlers in the HTML.
+  function loadAll() {
+    var secret = document.getElementById('secret-input').value.trim();
+    if (!secret) return;
+    sessionStorage.setItem(SECRET_KEY, secret);
+
+    loadProjectStatus(secret);
+    loadSystemHealth(secret);
+    loadAnalytics(secret);
+    loadVerifyHistory(secret);
+    loadVerifyStatus(secret).then(function (data) {
+      loadReleaseReadiness(secret, data);
+    });
+
     document.getElementById('refresh-btn').hidden = false;
   }
+  window.loadAll = loadAll;
 
 })();
 </script>

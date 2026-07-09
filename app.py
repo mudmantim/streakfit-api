@@ -3,6 +3,8 @@ import hashlib
 import json
 import random
 import string
+import subprocess
+import threading
 from datetime import datetime, date, timedelta
 from flask import Flask, request, jsonify, abort
 from flask_sqlalchemy import SQLAlchemy
@@ -13,7 +15,17 @@ from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 import anthropic as _anthropic_lib
 
+from scripts.verify_all import run_suite
+from scripts.verification._client import WsgiClient
+from scripts.verification import VERIFICATION_SUITE_VERSION
+
 app = Flask(__name__)
+
+# StreakFit Control / Mission Control (R3.0): a real proxy for "last
+# deployment" -- each Render deploy starts a fresh process, so this
+# process's own boot time is an honest stand-in for deploy time rather
+# than an invented value.
+_PROCESS_STARTED_AT = datetime.utcnow()
 
 # Fallback to local SQLite only if Render's PostgreSQL URL isn't present
 DATABASE_URL = os.environ.get('DATABASE_URL')
@@ -1190,6 +1202,27 @@ class TeamCampfire(db.Model):
     )
 
 
+class VerificationRun(db.Model):
+    """StreakFit Control / Mission Control (R3.0) -- one row per run of the
+    verification suite (scripts/verify_all.py, triggered from the admin
+    page via WsgiClient or from the CLI). Backs Project Status's "Last
+    Verification", the live run in Verify Application, and the
+    Verification History table. results_json is the same structured
+    (name, passed, detail) rows Results.check() already produces --
+    stored verbatim, not re-derived."""
+    __tablename__ = 'verification_run'
+    id = db.Column(db.Integer, primary_key=True)
+    started_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    finished_at = db.Column(db.DateTime, nullable=True)
+    suite_version = db.Column(db.Integer, nullable=False)
+    commit_sha = db.Column(db.String(40), nullable=True)
+    status = db.Column(db.String(20), nullable=False, default='running')  # running | passed | failed | error
+    total = db.Column(db.Integer, nullable=False, default=0)
+    passed = db.Column(db.Integer, nullable=False, default=0)
+    failed = db.Column(db.Integer, nullable=False, default=0)
+    results_json = db.Column(db.Text, nullable=True)
+
+
 # --- Retention: XP / Acorns (helper layer only — nothing wired to routes yet) ---
 
 MISSION_COMPLETE_XP = 25
@@ -1310,13 +1343,41 @@ def admin_dashboard():
     return app.send_static_file('admin.html')
 
 
-@app.route('/api/admin/stats')
-@limiter.limit("120 per minute")
-def admin_stats():
+def _require_admin_secret():
+    """Shared X-Admin-Secret gate for every /api/admin/* route -- same
+    model as admin_stats used alone for years; factored out now that
+    StreakFit Control (R3.0) adds four more routes needing the same check."""
     secret = request.headers.get('X-Admin-Secret', '')
     env_secret = os.environ.get('ADMIN_SECRET', '')
     if not env_secret or secret != env_secret:
         abort(403)
+
+
+def _get_commit_sha():
+    """Real value, not invented: prefers Render's own env var if present,
+    falls back to asking git directly (the deployed checkout still has
+    its .git directory on a normal Render deploy), else None -- shown
+    honestly as "unknown" rather than a fabricated commit."""
+    env_sha = os.environ.get('RENDER_GIT_COMMIT')
+    if env_sha:
+        return env_sha[:12]
+    try:
+        result = subprocess.run(
+            ['git', 'rev-parse', 'HEAD'],
+            cwd=os.path.dirname(os.path.abspath(__file__)),
+            capture_output=True, text=True, timeout=5,
+        )
+        if result.returncode == 0:
+            return result.stdout.strip()[:12]
+    except Exception:
+        pass
+    return None
+
+
+@app.route('/api/admin/stats')
+@limiter.limit("120 per minute")
+def admin_stats():
+    _require_admin_secret()
 
     now = datetime.utcnow()
     today_start  = datetime(now.year, now.month, now.day)
@@ -1454,6 +1515,242 @@ def admin_stats():
         db.session.rollback()
         app.logger.warning('admin_stats query failed')
         return jsonify({'error': 'stats_unavailable'}), 503
+
+
+# --- StreakFit Control / Mission Control (R3.0) ---
+#
+# _verification_state tracks the one background run this process can have
+# in flight at a time (v1 doesn't support concurrent runs -- the button is
+# disabled client-side while one is running, and the server rejects a
+# second start with 409 regardless). VerificationRun rows are the durable
+# record; this dict is just live progress for the poller.
+_verification_state = {"running": False, "current_module": None, "run_id": None}
+
+
+def _compute_system_health():
+    """Real checks only -- see CLAUDE.md / scripts/verification/README.md
+    for why Notifications and Render health are honestly labeled instead
+    of faked. Answering this request at all is the API's own health
+    signal, so there's no self-HTTP-call here (that would be the exact
+    self-referential-request problem WsgiClient exists to avoid)."""
+    db_healthy = True
+    try:
+        db.session.execute(db.text('SELECT 1'))
+    except Exception:
+        db.session.rollback()
+        db_healthy = False
+
+    repo_root = os.path.dirname(os.path.abspath(__file__))
+
+    sw_version = None
+    try:
+        with open(os.path.join(repo_root, 'static', 'sw.js')) as f:
+            for line in f:
+                if line.strip().startswith('const CACHE'):
+                    sw_version = line.split('=', 1)[1].strip().rstrip(';').strip().strip("'\"")
+                    break
+    except Exception:
+        sw_version = None
+
+    manifest_path = os.path.join(repo_root, 'static', 'manifest.json')
+    manifest_present = os.path.exists(manifest_path)
+    icons_present = False
+    if manifest_present:
+        try:
+            with open(manifest_path) as f:
+                manifest = json.load(f)
+            icon_paths = [icon.get('src', '') for icon in manifest.get('icons', [])]
+            icons_present = bool(icon_paths) and all(
+                os.path.exists(os.path.join(repo_root, p.lstrip('/'))) for p in icon_paths if p
+            )
+        except Exception:
+            icons_present = False
+
+    return {
+        "api": "healthy",
+        "database": "healthy" if db_healthy else "unhealthy",
+        "service_worker": {"cache_version": sw_version},
+        "pwa": {"manifest_present": manifest_present, "icons_present": icons_present},
+        "notifications": {
+            "status": "not_applicable",
+            "note": "Client-side only feature (browser Notification API + local service worker display) -- no server-side signal exists to check.",
+        },
+        "render": {
+            "status": "unavailable",
+            "note": "No Render API key configured in this environment.",
+        },
+    }
+
+
+def _run_verification_background(run_id):
+    """Runs the full suite via WsgiClient (in-process WSGI dispatch, not a
+    real socket -- see scripts/verify_all.py's docstring for why that
+    matters on a single-worker deployment) and writes the result to the
+    VerificationRun row this thread owns exclusively."""
+    client = WsgiClient(app)
+
+    def on_module_start(label):
+        _verification_state["current_module"] = label
+
+    try:
+        results = run_suite(client, on_module_start=on_module_start)
+        summary = results.to_dict()
+        with app.app_context():
+            run = db.session.get(VerificationRun, run_id)
+            run.finished_at = datetime.utcnow()
+            run.status = 'passed' if summary['failed'] == 0 else 'failed'
+            run.total = summary['total']
+            run.passed = summary['passed']
+            run.failed = summary['failed']
+            run.results_json = json.dumps(summary['checks'])
+            db.session.commit()
+    except SystemExit:
+        # Results.fatal() calls sys.exit(2) on an unrecoverable setup
+        # failure (e.g. registration itself failing) -- that's a CLI exit
+        # convention this background thread needs to catch, not propagate.
+        with app.app_context():
+            run = db.session.get(VerificationRun, run_id)
+            run.finished_at = datetime.utcnow()
+            run.status = 'error'
+            db.session.commit()
+    except Exception as e:
+        with app.app_context():
+            run = db.session.get(VerificationRun, run_id)
+            run.finished_at = datetime.utcnow()
+            run.status = 'error'
+            run.results_json = json.dumps({"error": str(e)})
+            db.session.commit()
+    finally:
+        _verification_state["running"] = False
+        _verification_state["current_module"] = None
+
+
+@app.route('/api/admin/project-status')
+@limiter.limit("60 per minute")
+def admin_project_status():
+    _require_admin_secret()
+    health = _compute_system_health()
+    latest = db.session.query(VerificationRun).order_by(VerificationRun.id.desc()).first()
+
+    system_ok = health["database"] == "healthy"
+    verification_stale = (
+        latest is not None and latest.finished_at is not None
+        and (datetime.utcnow() - latest.finished_at) > timedelta(hours=24)
+    )
+
+    if not system_ok or (latest is not None and latest.status == "failed"):
+        overall = "red"
+    elif latest is None or latest.status in ("running", "error") or verification_stale:
+        overall = "yellow"
+    else:
+        overall = "green"
+
+    commit_sha = _get_commit_sha()
+
+    return jsonify({
+        "production_health": "healthy" if system_ok else "unhealthy",
+        "commit_sha": commit_sha,
+        # No versioning scheme exists anywhere in this repo (see CLAUDE.md) --
+        # the commit SHA is the real, honest identity until one does.
+        "current_version": commit_sha or "unknown",
+        "last_deployment_at": _PROCESS_STARTED_AT.isoformat() + "Z",
+        "last_verification": None if latest is None else {
+            "run_id": latest.id,
+            "status": latest.status,
+            "suite_version": latest.suite_version,
+            "total": latest.total,
+            "passed": latest.passed,
+            "failed": latest.failed,
+            "finished_at": latest.finished_at.isoformat() + "Z" if latest.finished_at else None,
+        },
+        "overall_health": overall,
+    }), 200
+
+
+@app.route('/api/admin/system-health')
+@limiter.limit("60 per minute")
+def admin_system_health():
+    _require_admin_secret()
+    return jsonify(_compute_system_health()), 200
+
+
+@app.route('/api/admin/verify', methods=['POST'])
+@limiter.limit("6 per minute")
+def admin_verify_start():
+    _require_admin_secret()
+    if _verification_state["running"]:
+        return jsonify({"error": "verification_already_running"}), 409
+
+    run = VerificationRun(
+        suite_version=VERIFICATION_SUITE_VERSION,
+        commit_sha=_get_commit_sha(),
+        status='running',
+        total=0, passed=0, failed=0,
+    )
+    db.session.add(run)
+    db.session.commit()
+
+    _verification_state["running"] = True
+    _verification_state["current_module"] = None
+    _verification_state["run_id"] = run.id
+
+    thread = threading.Thread(target=_run_verification_background, args=(run.id,), daemon=True)
+    thread.start()
+
+    return jsonify({"run_id": run.id, "status": "started"}), 202
+
+
+@app.route('/api/admin/verify/status')
+@limiter.limit("120 per minute")
+def admin_verify_status():
+    _require_admin_secret()
+    run_id = _verification_state.get("run_id")
+    latest = db.session.get(VerificationRun, run_id) if run_id else None
+    if latest is None:
+        latest = db.session.query(VerificationRun).order_by(VerificationRun.id.desc()).first()
+    if latest is None:
+        return jsonify({"status": "never_run", "running": False}), 200
+
+    return jsonify({
+        "run_id": latest.id,
+        "status": latest.status,
+        "running": _verification_state["running"],
+        "current_module": _verification_state["current_module"] if _verification_state["running"] else None,
+        "suite_version": latest.suite_version,
+        "commit_sha": latest.commit_sha,
+        "started_at": latest.started_at.isoformat() + "Z",
+        "finished_at": latest.finished_at.isoformat() + "Z" if latest.finished_at else None,
+        "total": latest.total,
+        "passed": latest.passed,
+        "failed": latest.failed,
+        "checks": json.loads(latest.results_json) if latest.results_json else [],
+    }), 200
+
+
+@app.route('/api/admin/verify/history')
+@limiter.limit("60 per minute")
+def admin_verify_history():
+    _require_admin_secret()
+    runs = db.session.query(VerificationRun).order_by(VerificationRun.id.desc()).limit(20).all()
+    return jsonify({
+        "runs": [
+            {
+                "run_id": r.id,
+                "started_at": r.started_at.isoformat() + "Z",
+                "finished_at": r.finished_at.isoformat() + "Z" if r.finished_at else None,
+                "suite_version": r.suite_version,
+                "commit_sha": r.commit_sha,
+                "status": r.status,
+                "total": r.total,
+                "passed": r.passed,
+                "failed": r.failed,
+                "duration_seconds": (
+                    (r.finished_at - r.started_at).total_seconds() if r.finished_at else None
+                ),
+            }
+            for r in runs
+        ]
+    }), 200
 
 
 # --- Analytics ---

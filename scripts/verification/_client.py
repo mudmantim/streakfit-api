@@ -44,6 +44,27 @@ class ApiClient:
             return status, {"_raw": raw.decode(errors="replace")}
 
 
+class WsgiClient:
+    """Same .request() shape as ApiClient, but dispatches through Flask's
+    test client -- an in-process WSGI call, not a real socket. Used when
+    verification is triggered from inside the app itself (StreakFit
+    Control's "Run Verification"), so a single-worker deployment can't
+    deadlock a request waiting to answer its own self-referential call.
+    See scripts/verify_all.py's module docstring for the full rationale."""
+
+    def __init__(self, flask_app):
+        self._test_client = flask_app.test_client()
+        self.base_url = "wsgi://in-process"
+
+    def request(self, method, path, token=None, body=None):
+        headers = {}
+        if token:
+            headers["Authorization"] = "Bearer " + token
+        response = self._test_client.open(path, method=method, json=body, headers=headers)
+        data = response.get_json(silent=True)
+        return response.status_code, (data if data is not None else {})
+
+
 class Results:
     """Records each check as it runs, prints it immediately, and renders
     the final pass/fail table. A `fatal` stops the run early only for
@@ -67,6 +88,19 @@ class Results:
 
     def all_passed(self):
         return all(ok for _, ok, _ in self.rows)
+
+    def to_dict(self):
+        """Plain-JSON-serializable summary -- used by StreakFit Control to
+        hand results straight to the frontend and to VerificationRun.results_json,
+        no stdout-parsing required."""
+        total = len(self.rows)
+        passed = sum(1 for _, ok, _ in self.rows if ok)
+        return {
+            "total": total,
+            "passed": passed,
+            "failed": total - passed,
+            "checks": [{"name": name, "passed": ok, "detail": detail} for name, ok, detail in self.rows],
+        }
 
     def print_table(self, title=None):
         total = len(self.rows)
