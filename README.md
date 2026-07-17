@@ -2,6 +2,8 @@
 
 A production-ready Flask API built to calculate and track streaks for fitness challenges with millisecond precision. Designed for deployment on Render paired with a PostgreSQL database.
 
+StreakFit helps individuals and families build healthier routines through daily exercise missions, learning activities, shared progress, and encouraging streaks.
+
 ## Deployment Details
 
 - **Runtime:** Python
