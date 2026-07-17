@@ -7,8 +7,10 @@ A production-ready Flask API built to calculate and track streaks for fitness ch
 - **Runtime:** Python
 - **Build Command:** `pip install -r requirements.txt`
 - **Start Command:** `gunicorn app:app`
-- **Environment Variables Required:** - `DATABASE_URL`: Your live PostgreSQL connection string.
-  - `SECRET_KEY`: Security signature configuration variable.
+- **Required Environment Variables:**
+  - `DATABASE_URL`: PostgreSQL connection string. The app falls back to local SQLite when omitted.
+  - `SECRET_KEY`: Flask application secret.
+  - `JWT_SECRET_KEY`: Secret used to sign JWT access tokens.
 
 ## Verification Suite
 
