@@ -1,4 +1,4 @@
-# StreakFit Engine
+# StreakFit API
 
 A production-ready Flask API built to calculate and track streaks for fitness challenges with millisecond precision. Designed for deployment on Render paired with a PostgreSQL database.
 
