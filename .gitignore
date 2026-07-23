@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# Virtualenvs
+.venv/
+venv/
+env/
+
+# Secrets / local config
+.env
+.env.*
+!.env.example
+
+# Flask instance folder (local SQLite DBs, runtime data)
+instance/
+
+# OS / editor
+.DS_Store
+*.swp
