@@ -20,3 +20,6 @@ instance/
 # OS / editor
 .DS_Store
 *.swp
+
+# Exercise-illustration style exploration — kept locally, not shipped
+static/exercise_samples/
