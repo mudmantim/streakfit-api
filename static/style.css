@@ -125,7 +125,7 @@ body {
 
 .auth-hero {
     text-align: center;
-    margin-bottom: 1.15rem;
+    margin-bottom: .9rem;
 }
 
 .auth-hero .auth-logo {
@@ -147,9 +147,9 @@ body {
     list-style: none;
     display: flex;
     flex-direction: column;
-    gap: .8rem;
-    margin: 0 0 1.35rem;
-    padding: 1rem 1rem;
+    gap: .7rem;
+    margin: 0 0 1.1rem;
+    padding: .85rem .9rem;
     background: linear-gradient(180deg, rgba(255,255,255,.55) 0%, rgba(255,255,255,.25) 100%);
     border: 1px solid rgba(79,70,229,.1);
     border-radius: var(--radius);

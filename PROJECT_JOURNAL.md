@@ -112,3 +112,37 @@ progress glow reward the eye without a modal or a full-screen takeover.
   (indigo-tinted) shadow so it reads as elevated above the rest of the page.
 
 All motion respects `prefers-reduced-motion`. No console errors introduced.
+
+## 4 — Verification & housekeeping
+
+- **Mobile checked for real.** Because the automation window wouldn't resize its viewport, I
+  rendered the app inside a 370px-wide same-origin iframe (a true mobile viewport, so the
+  `max-width: 400/480/540px` media queries actually fire) and drove the auth screen, dashboard,
+  and settings menu through it. Tightened the auth screen's vertical rhythm so the whole
+  value-prop + form + guest CTA fits a common phone without hunting for the guest button.
+- **Backend untouched, and proven so:** all 56 pytest tests pass. Every change this session is
+  HTML/CSS/JS in `static/` — no route, model, or API change.
+- **No new console errors** across the flows I exercised (guest, register, login, full mission
+  completion, level-up, settings menu, theme switching).
+- **Service worker cache bumped** `v0741 → v0742` per the project rule that any `static/` change
+  must bump it, so returning users actually receive the new CSS/JS instead of a stale cache.
+
+## What I deliberately did NOT do
+
+- **Left Rickie's voice alone.** The RICKIE_LINES pools, expression system, and mode gating are
+  already excellent and on-brand (per the Character Bible). Priority 3 asked for a companion, not
+  a chatbot — it already is one. I only made sure the new celebration respects the same quiet/
+  minimal-mode gating the toast uses, so Rickie doesn't get louder than the user asked for.
+- **Didn't touch the retention loops' logic.** The "come back tomorrow for Day N" banner and the
+  Mission → Insight → Brain Boost unlock are already strong Priority-6 mechanics. Strengthening
+  beat inventing here.
+- **No new features.** Everything is polish or clarity on something that already shipped.
+
+## Worth discussing tomorrow
+
+- The notification opt-in card ("Would you like a daily reminder?") renders *above* the mission
+  on load, pushing a returning user's mission down. It's tied to notification-permission state so
+  I left it, but it may deserve to sit below the mission, or become a smaller inline nudge.
+- Difficulty now lives in the settings menu. If you'd rather it stay one tap away (people do
+  experiment with it early), it could instead sit as a small control on the mission card itself.
+  I chose the calmer header; easy to revisit.
