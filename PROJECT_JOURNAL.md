@@ -146,3 +146,38 @@ All motion respects `prefers-reduced-motion`. No console errors introduced.
 - Difficulty now lives in the settings menu. If you'd rather it stay one tap away (people do
   experiment with it early), it could instead sit as a small control on the mission card itself.
   I chose the calmer header; easy to revisit.
+
+---
+
+# Session 3 (2026-07-23) — "Would a friend trust and recommend this?"
+
+Branch: `trust-and-delight` (off `overnight-ux-polish`). Reviewed the app end-to-end as a
+skeptical first-time user + QA engineer, hunting specifically for things that erode trust or feel
+unfinished.
+
+## Fix — account creation had no password floor (trust + security)
+
+A skeptical reviewer's first probe: I registered with password `"1"` and it was **accepted (201)**.
+An app that stores a streak you care about should never allow a one-character password — it reads
+as unfinished and untrustworthy the moment anyone tests it.
+
+- **Server (authoritative):** `/api/register` now requires a password ≥ 8 chars and a username of
+  2–80 chars, with friendly, specific messages ("Password needs to be at least 8 characters.",
+  "That username is taken — try another." instead of the terse "Username already exists").
+- **Client:** `minlength` on the register inputs (matches the server), a quiet hint under the
+  password field — *"At least 8 characters. No email needed — just a username."* — so the rule is
+  known *before* submitting, not discovered through rejection.
+- **Trust line** at the foot of the auth card: *"No email, no ads, no selling your data. Your
+  streak is yours."* A first-time user handing over a password deserves to know what they're (not)
+  signing up for. Verified accurate: registration takes only a username + password.
+
+*Why:* this is the single biggest trust gap found in the app — cheap to fix, server-verified,
+and it changes the very first impression a careful person forms. All 56 tests still pass.
+
+## Reviewed and deliberately left alone (already good)
+
+- **"Ask Rickie" with no API key** degrades *in character*: "🦝 Rickie stepped away from his burrow
+  for a bit — try again in a little while." No raw error, no broken state — exactly the graceful
+  failure that builds trust. No change.
+- Dashboard copy, empty states (Teams, Side Quests), and time-of-day Rickie greetings are on-brand
+  and finished. Left as-is.

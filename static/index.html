@@ -65,15 +65,17 @@
 
             <form id="register-form" onsubmit="handleRegister(event)">
                 <input id="reg-username" type="text" placeholder="Choose a username"
-                       autocomplete="username" required maxlength="80">
+                       autocomplete="username" required minlength="2" maxlength="80">
                 <input id="reg-password" type="password" placeholder="Choose a password"
-                       autocomplete="new-password" required>
+                       autocomplete="new-password" required minlength="8">
+                <p class="field-hint">At least 8 characters. No email needed — just a username.</p>
                 <button type="submit" class="btn-primary btn-full">Start free — takes 10 seconds</button>
                 <p id="register-error" class="error" role="alert"></p>
             </form>
 
             <div class="auth-guest-divider"><span>or</span></div>
             <button class="btn-guest" onclick="handleGuestMode()">Peek at today's mission first — no signup</button>
+            <p class="auth-trust-line">No email, no ads, no selling your data. Your streak is yours.</p>
         </div>
     </div>
 

@@ -1785,13 +1785,24 @@ def record_event():
 def register():
     data = request.get_json()
     if not data or not data.get('username') or not data.get('password'):
-        return jsonify({"error": "Missing credentials"}), 400
+        return jsonify({"error": "Please choose a username and password."}), 400
 
-    if User.query.filter_by(username=data['username']).first():
-        return jsonify({"error": "Username already exists"}), 400
+    username = data['username'].strip()
+    password = data['password']
 
-    hashed_pw = generate_password_hash(data['password'], method='pbkdf2:sha256')
-    new_user = User(username=data['username'], password_hash=hashed_pw)
+    # Basic, honest account hygiene. A skeptical first-time user should never be
+    # able to set a one-character password on something that stores a streak they
+    # care about — this is server-authoritative, mirrored by the form's minlength.
+    if len(username) < 2 or len(username) > 80:
+        return jsonify({"error": "Username needs to be 2–80 characters."}), 400
+    if len(password) < 8:
+        return jsonify({"error": "Password needs to be at least 8 characters."}), 400
+
+    if User.query.filter_by(username=username).first():
+        return jsonify({"error": "That username is taken — try another."}), 400
+
+    hashed_pw = generate_password_hash(password, method='pbkdf2:sha256')
+    new_user = User(username=username, password_hash=hashed_pw)
     db.session.add(new_user)
     db.session.commit()
 

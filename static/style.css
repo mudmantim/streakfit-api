@@ -197,6 +197,23 @@ body {
     color: var(--gray-600);
 }
 
+/* Small helper text under a field (e.g. password requirements) */
+.field-hint {
+    font-size: .75rem;
+    color: var(--gray-500);
+    margin: -.35rem 0 .1rem;
+    line-height: 1.4;
+}
+
+/* Quiet trust reassurance at the foot of the auth card */
+.auth-trust-line {
+    text-align: center;
+    font-size: .72rem;
+    color: var(--gray-400);
+    margin: .9rem 0 0;
+    line-height: 1.4;
+}
+
 /* ── Auth guest divider & button ──────────────────────────────────────────── */
 .auth-guest-divider {
     display: flex;
