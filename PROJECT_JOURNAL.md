@@ -56,3 +56,31 @@ well under 30 seconds, and (b) the guest button copy changed from "Continue as G
 framed as an invitation, not a fallback. Register CTA changed to "Start free — takes 10 seconds"
 to name the (low) cost of the primary path. Copy was kept accurate to the Rise Again design — it
 does not claim the streak never breaks, only that you're never punished for it.
+
+## 2 — Home screen: header declutter + honest zero-state (Priority 2)
+
+**Change A — one gear instead of five controls.** The dashboard header used to carry a
+difficulty select, a Rickie-mode select, a three-button theme toggle, and a logout button, all
+competing with the mission. They now live behind a single ⚙️ settings menu (opens on tap, closes
+on outside-click / Escape). Every control kept its *exact* original id and onchange handler — the
+JS that reads/writes `#skill-level-select`, `#rickie-mode-select`, the `.theme-btn`s and
+`#btn-logout` is untouched; they just moved into a dropdown. Guests see only Theme + Exit (the
+difficulty/Rickie rows hide for guests, matching the old behaviour).
+
+**Reasoning:** The home screen should lead with the mission, not with configuration. These are
+set-once-and-forget preferences; burying them behind a gear is standard for a reason. Header is
+now just brand + gear — calm, focused, unmistakably "here's your thing to do today."
+
+**Change B — no wall of zeros for new users.** A brand-new account used to see
+`🔥 0 days · Best: 0 days · ✓ 0 missions`. The stats row is now hidden until there's at least one
+day of streak or one completed mission; until then the "Complete all 5 to start your streak"
+helper carries the message.
+
+**Reasoning:** Three zeros is the one moment this otherwise-encouraging app accidentally says
+"you're behind." A fresh start should look like a fresh start. The stats appear the instant
+they're worth celebrating.
+
+**Bonus fix (latent bug):** `--gray-300`, `--gray-600`, `--gray-800` were referenced in the CSS
+but never defined in `:root`, so six existing rules silently inherited the wrong colour (this is
+what made the relocated Log Out button render white-on-white at first). Defined all three with
+the standard grey ramp, repairing those existing usages too.

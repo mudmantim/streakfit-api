@@ -1868,6 +1868,32 @@ function showView(name) {
     document.getElementById('dashboard-view').hidden = (name !== 'dashboard');
 }
 
+// ── Settings menu ─────────────────────────────────────────────────────────────
+// Houses the controls that used to crowd the header (difficulty, Rickie mode,
+// theme, logout). Every control keeps its original id + handler — this only
+// moves them behind a single gear so the home screen leads with the mission,
+// not with configuration.
+function toggleSettings(forceOpen) {
+    var menu = document.getElementById('settings-menu');
+    var btn = document.getElementById('settings-toggle');
+    if (!menu || !btn) return;
+    var open = (typeof forceOpen === 'boolean') ? forceOpen : menu.hidden;
+    menu.hidden = !open;
+    btn.setAttribute('aria-expanded', String(open));
+    btn.classList.toggle('active', open);
+}
+
+// Close the settings menu on any outside click / Escape.
+document.addEventListener('click', function (e) {
+    var menu = document.getElementById('settings-menu');
+    if (!menu || menu.hidden) return;
+    var wrap = e.target.closest('#settings-menu, #settings-toggle');
+    if (!wrap) toggleSettings(false);
+});
+document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape') toggleSettings(false);
+});
+
 function showTab(name) {
     document.getElementById('login-form').hidden    = (name !== 'login');
     document.getElementById('register-form').hidden = (name !== 'register');
@@ -1915,11 +1941,13 @@ function setGuestUI(guest) {
     var guestBanner = document.getElementById('guest-mode-banner');
     if (guestBanner) guestBanner.hidden = !guest;
 
-    var skillSel = document.getElementById('skill-level-select');
-    if (skillSel) skillSel.hidden = guest;
+    // Difficulty + Rickie mode are registered-only prefs — hide their whole
+    // settings rows for guests (theme + Exit stay available).
+    var skillRow = document.getElementById('settings-row-skill');
+    if (skillRow) skillRow.hidden = guest;
 
-    var rickieSel = document.getElementById('rickie-mode-select');
-    if (rickieSel) rickieSel.hidden = guest;
+    var rickieRow = document.getElementById('settings-row-rickie');
+    if (rickieRow) rickieRow.hidden = guest;
 
     var sideQuests = document.getElementById('side-quests-section');
     if (sideQuests) sideQuests.hidden = guest;
@@ -2180,13 +2208,21 @@ async function loadDailyExercises() {
         var cs = currentUser.current_streak || 0;
         var bs = currentUser.best_streak    || 0;
         var tm = currentUser.total_missions || 0;
-        document.getElementById('stat-current-streak').textContent  =
-            '🔥 ' + cs + (cs === 1 ? ' day' : ' days');
-        document.getElementById('stat-best-streak').textContent =
-            '🏅 Best: ' + bs + (bs === 1 ? ' day' : ' days');
-        document.getElementById('stat-total-missions').textContent =
-            '✓ ' + tm + (tm === 1 ? ' mission' : ' missions');
-        statsRow.hidden = false;
+        // Don't greet a brand-new user with a row of zeros — that reads as
+        // "you're behind" on a screen that should feel like a fresh start. The
+        // streak helper below the bar carries the message until there's real
+        // progress worth showing.
+        if (cs > 0 || bs > 0 || tm > 0) {
+            document.getElementById('stat-current-streak').textContent  =
+                '🔥 ' + cs + (cs === 1 ? ' day' : ' days');
+            document.getElementById('stat-best-streak').textContent =
+                '🏅 Best: ' + bs + (bs === 1 ? ' day' : ' days');
+            document.getElementById('stat-total-missions').textContent =
+                '✓ ' + tm + (tm === 1 ? ' mission' : ' missions');
+            statsRow.hidden = false;
+        } else {
+            statsRow.hidden = true;
+        }
     }
 
     renderJourneyCard();

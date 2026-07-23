@@ -13,9 +13,12 @@
     --gray-50:     #f9fafb;
     --gray-100:    #f3f4f6;
     --gray-200:    #e5e7eb;
+    --gray-300:    #d1d5db;
     --gray-400:    #9ca3af;
     --gray-500:    #6b7280;
+    --gray-600:    #4b5563;
     --gray-700:    #374151;
+    --gray-800:    #1f2937;
     --gray-900:    #111827;
     --radius:      12px;
     --shadow:      0 1px 3px rgba(0,0,0,.1), 0 1px 2px rgba(0,0,0,.06);
@@ -410,6 +413,105 @@ input:focus {
 }
 
 .skill-select option { background: #3730a3; color: #fff; }
+
+/* ── Settings menu (gear → dropdown that holds difficulty/Rickie/theme/logout) ── */
+.header-right { position: relative; }
+
+.settings-toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 38px;
+    height: 38px;
+    border-radius: 50%;
+    background: var(--t-select-bg);
+    color: var(--t-select-color);
+    border: 1.5px solid var(--t-select-border);
+    font-size: 1.05rem;
+    cursor: pointer;
+    transition: background .15s, transform .1s;
+    -webkit-tap-highlight-color: transparent;
+}
+.settings-toggle:hover  { background: var(--t-logout-hover-bg); }
+.settings-toggle:active { transform: scale(.92); }
+.settings-toggle.active { background: var(--t-logout-hover-bg); }
+.settings-toggle-icon { line-height: 1; }
+
+.settings-menu {
+    position: absolute;
+    top: calc(100% + .55rem);
+    right: 0;
+    width: 250px;
+    max-width: calc(100vw - 1.5rem);
+    background: #fff;
+    border: 1px solid var(--gray-200);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-md);
+    padding: .9rem;
+    z-index: 60;
+    display: flex;
+    flex-direction: column;
+    gap: .7rem;
+    animation: settings-menu-in .16s ease;
+}
+
+@keyframes settings-menu-in {
+    from { opacity: 0; transform: translateY(-6px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+@media (prefers-reduced-motion: reduce) {
+    .settings-menu { animation: none; }
+}
+
+.settings-menu-title {
+    font-size: .68rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: .07em;
+    color: var(--gray-400);
+    margin: 0;
+}
+
+.settings-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: .75rem;
+}
+
+.settings-label {
+    font-size: .88rem;
+    font-weight: 600;
+    color: var(--gray-700);
+}
+
+/* Selects live in a white panel now — override the header's white-on-gradient look. */
+.settings-menu .skill-select {
+    background: var(--gray-100);
+    color: var(--gray-900);
+    border: 1.5px solid var(--gray-200);
+    border-radius: 8px;
+    padding: .35rem .6rem;
+}
+.settings-menu .skill-select option { background: #fff; color: var(--gray-900); }
+
+/* Theme toggle: consistent light styling inside the panel regardless of active theme. */
+.settings-menu .theme-toggle { background: var(--gray-100); }
+.settings-menu .theme-btn:hover  { background: var(--gray-200); }
+.settings-menu .theme-btn.active { background: var(--indigo-pale); opacity: 1; }
+
+.settings-divider {
+    height: 1px;
+    background: var(--gray-200);
+    margin: .05rem 0;
+}
+
+.settings-logout {
+    width: 100%;
+    color: var(--gray-600);
+    border-color: var(--gray-300);
+}
+.settings-logout:hover { background: var(--gray-50); color: var(--gray-800); }
 
 /* ── Dashboard container ──────────────────────────────────────────────────── */
 .container {

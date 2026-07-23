@@ -86,25 +86,42 @@
                 <span class="header-brand">StreakFit</span>
             </div>
             <div class="header-right">
-                <select id="skill-level-select" class="skill-select"
-                        onchange="handleSkillLevelChange(this.value)">
-                    <option value="beginner">Beginner</option>
-                    <option value="intermediate">Intermediate</option>
-                    <option value="advanced">Advanced</option>
-                    <option value="custom" disabled>Custom</option>
-                </select>
-                <select id="rickie-mode-select" class="skill-select" title="How much of Rickie's personality you want"
-                        onchange="handleRickieModeChange(this.value)">
-                    <option value="full">🦝 Full Rickie</option>
-                    <option value="quiet">🦝 Quiet Rickie</option>
-                    <option value="minimal">🦝 Minimal Rickie</option>
-                </select>
-                <div class="theme-toggle" role="group" aria-label="Display mode">
-                    <button class="theme-btn" data-mode="classic" onclick="handleDisplayModeChange('classic')" title="Classic">📋</button>
-                    <button class="theme-btn" data-mode="bright"  onclick="handleDisplayModeChange('bright')"  title="Bright">✨</button>
-                    <button class="theme-btn" data-mode="game"    onclick="handleDisplayModeChange('game')"    title="Game">🎮</button>
+                <button id="settings-toggle" class="settings-toggle" aria-label="Settings"
+                        aria-haspopup="true" aria-expanded="false" onclick="toggleSettings()">
+                    <span class="settings-toggle-icon" aria-hidden="true">⚙️</span>
+                </button>
+                <div id="settings-menu" class="settings-menu" hidden>
+                    <p class="settings-menu-title">Settings</p>
+                    <div class="settings-row" id="settings-row-skill">
+                        <label class="settings-label" for="skill-level-select">Difficulty</label>
+                        <select id="skill-level-select" class="skill-select"
+                                onchange="handleSkillLevelChange(this.value)">
+                            <option value="beginner">Beginner</option>
+                            <option value="intermediate">Intermediate</option>
+                            <option value="advanced">Advanced</option>
+                            <option value="custom" disabled>Custom</option>
+                        </select>
+                    </div>
+                    <div class="settings-row" id="settings-row-rickie">
+                        <label class="settings-label" for="rickie-mode-select">Rickie</label>
+                        <select id="rickie-mode-select" class="skill-select" title="How much of Rickie's personality you want"
+                                onchange="handleRickieModeChange(this.value)">
+                            <option value="full">🦝 Full</option>
+                            <option value="quiet">🦝 Quiet</option>
+                            <option value="minimal">🦝 Minimal</option>
+                        </select>
+                    </div>
+                    <div class="settings-row">
+                        <span class="settings-label">Theme</span>
+                        <div class="theme-toggle" role="group" aria-label="Display mode">
+                            <button class="theme-btn" data-mode="classic" onclick="handleDisplayModeChange('classic')" title="Classic">📋</button>
+                            <button class="theme-btn" data-mode="bright"  onclick="handleDisplayModeChange('bright')"  title="Bright">✨</button>
+                            <button class="theme-btn" data-mode="game"    onclick="handleDisplayModeChange('game')"    title="Game">🎮</button>
+                        </div>
+                    </div>
+                    <div class="settings-divider"></div>
+                    <button id="btn-logout" class="btn-logout settings-logout" onclick="handleLogout()">Log Out</button>
                 </div>
-                <button id="btn-logout" class="btn-logout" onclick="handleLogout()">Log Out</button>
             </div>
         </header>
 
