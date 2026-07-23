@@ -1797,6 +1797,10 @@ def register():
         return jsonify({"error": "Username needs to be 2–80 characters."}), 400
     if len(password) < 8:
         return jsonify({"error": "Password needs to be at least 8 characters."}), 400
+    if len(password) > 128:
+        # Upper bound so a pathologically long password can't turn each hash
+        # into a slow-request DoS. 128 is far beyond any real passphrase.
+        return jsonify({"error": "Password can be at most 128 characters."}), 400
 
     if User.query.filter_by(username=username).first():
         return jsonify({"error": "That username is taken — try another."}), 400
