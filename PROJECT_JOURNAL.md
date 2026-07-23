@@ -84,3 +84,31 @@ they're worth celebrating.
 but never defined in `:root`, so six existing rules silently inherited the wrong colour (this is
 what made the relocated Log Out button render white-on-white at first). Defined all three with
 the standard grey ramp, repairing those existing usages too.
+
+## 3 — Celebration & visual polish (Priorities 4 & 5)
+
+**Celebration (Priority 4).** Completing a mission was informative but not *felt*. Added, all
+gated on `prefers-reduced-motion` and — for the confetti — on Rickie's mode (quiet/minimal Rickie
+stays quiet, same rule the toast already follows):
+
+- **Confetti burst** (dependency-free, ~26 brand-coloured pieces from the count badge) on the two
+  moments that earn it: a full 5/5 mission and a level-up. Short (~1.2s) and restrained.
+- **Count-badge pop** on the transition into 5/5 — a quick scale bounce, then it settles. Fires
+  only on the transition, never on every re-render.
+- **Progress-bar glow** — the completed green bar gets a soft green halo.
+- **Level-up toast halo** — the reaction toast gains a violet glow when a level-up is in it, so it
+  reads as a bigger beat than an ordinary completion.
+
+**Reasoning:** "Small celebrations. Not childish." Confetti is reserved for real milestones (not
+every single tap), uses the existing brand palette, and clears itself quickly. The badge pop and
+progress glow reward the eye without a modal or a full-screen takeover.
+
+**Visual polish (Priority 5).**
+
+- **Exercise-row actions** were dated underlined links ("How to do this" / "Exercise Tips") on
+  every row — the single most 1990s-looking element in the app. They're now quiet rounded chips
+  (indigo-tinted for the primary how-to, grey for tips), no underlines, better tap spacing.
+- **Daily card depth** — the mission card, as the heart of the app, now sits on a soft on-brand
+  (indigo-tinted) shadow so it reads as elevated above the rest of the page.
+
+All motion respects `prefers-reduced-motion`. No console errors introduced.

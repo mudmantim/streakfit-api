@@ -529,6 +529,9 @@ input:focus {
     background: var(--t-daily-card-bg);
     border: 1.5px solid var(--gray-200);
     padding: 1.25rem 1.25rem 1rem;
+    /* Soft, on-brand elevation — the mission is the centre of the app, so it
+       sits a touch above everything else on the page. */
+    box-shadow: 0 6px 20px rgba(67, 56, 202, .07), 0 1px 3px rgba(0, 0, 0, .05);
 }
 
 .daily-header-row {
@@ -600,6 +603,7 @@ input:focus {
 
 .daily-progress-fill.complete {
     background: linear-gradient(90deg, var(--green) 0%, #10b981 100%);
+    box-shadow: 0 0 10px rgba(16, 185, 129, .45);
 }
 
 /* ── Rise Again ceremony ──────────────────────────────────────────────────── */
@@ -1053,46 +1057,42 @@ input:focus {
     margin-top: .1rem;
 }
 
-/* How-to toggle button */
-.btn-how-to {
-    background: none;
+/* How-to / tips — quiet chips, not dated underlined links */
+.btn-how-to,
+.btn-coach-link {
     border: none;
-    padding: 0;
+    border-radius: 999px;
+    padding: .26rem .62rem;
     font-size: .72rem;
     font-weight: 600;
-    color: var(--indigo);
     cursor: pointer;
     font-family: inherit;
-    text-decoration: underline;
-    text-underline-offset: 2px;
+    text-decoration: none;
     white-space: nowrap;
+    line-height: 1;
+    transition: background .15s, color .15s;
     -webkit-tap-highlight-color: transparent;
 }
-.btn-how-to:hover { opacity: .75; }
+
+.btn-how-to {
+    background: var(--indigo-pale);
+    color: var(--indigo-dark);
+}
+.btn-how-to:hover { background: #e0e7ff; }
+
+.btn-coach-link {
+    background: var(--gray-100);
+    color: var(--gray-600);
+}
+.btn-coach-link:hover { background: var(--gray-200); color: var(--gray-800); }
 
 .exercise-link-row {
     display: flex;
     align-items: center;
     flex-wrap: wrap;
-    gap: .15rem .6rem;
-    margin-top: .25rem;
+    gap: .35rem .4rem;
+    margin-top: .4rem;
 }
-
-.btn-coach-link {
-    background: none;
-    border: none;
-    padding: 0;
-    font-size: .72rem;
-    font-weight: 600;
-    color: var(--gray-500);
-    cursor: pointer;
-    font-family: inherit;
-    text-decoration: underline;
-    text-underline-offset: 2px;
-    -webkit-tap-highlight-color: transparent;
-    white-space: nowrap;
-}
-.btn-coach-link:hover { color: var(--gray-700); }
 
 /* Expandable instructions panel — wraps to full width via flex-wrap on parent */
 .exercise-instructions {
@@ -1889,6 +1889,42 @@ input:focus {
     color: var(--amber);
 }
 
+/* ── Celebration: confetti, badge pop, progress glow ──────────────────────── */
+.confetti-layer {
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    z-index: 300;
+    overflow: hidden;
+}
+
+.confetti-piece {
+    position: fixed;
+    width: 9px;
+    height: 9px;
+    border-radius: 2px;
+    will-change: transform, opacity;
+    opacity: 0;
+    animation: confetti-burst var(--dur, 1.2s) cubic-bezier(.2, .7, .35, 1) forwards;
+}
+
+@keyframes confetti-burst {
+    0%   { transform: translate(-50%, -50%) rotate(0deg); opacity: 1; }
+    100% { transform: translate(var(--tx), var(--ty)) rotate(var(--rot)); opacity: 0; }
+}
+
+@keyframes badge-pop {
+    0%   { transform: scale(1); }
+    40%  { transform: scale(1.35); }
+    100% { transform: scale(1); }
+}
+.badge-pop { animation: badge-pop .5s cubic-bezier(.34, 1.56, .64, 1); }
+
+@media (prefers-reduced-motion: reduce) {
+    .confetti-piece { display: none; }
+    .badge-pop { animation: none; }
+}
+
 /* ── Animations ───────────────────────────────────────────────────────────── */
 @keyframes completePulse {
     0%   { background-color: transparent; }
@@ -2196,6 +2232,11 @@ body.theme-classic .theme-btn.active { background: rgba(79,70,229,.2); }
 
 .rickie-reaction.leaving {
     animation: rickie-reaction-out .3s ease-in forwards;
+}
+
+/* Level-up gets a soft violet halo so the toast reads as a bigger moment. */
+.rickie-reaction.celebrate {
+    box-shadow: var(--shadow-md), 0 0 0 1.5px rgba(124, 58, 237, .35), 0 8px 24px rgba(124, 58, 237, .18);
 }
 
 @keyframes rickie-reaction-in {

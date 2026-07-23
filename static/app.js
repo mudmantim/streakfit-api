@@ -1414,6 +1414,59 @@ function _summarizeProgress(data) {
     };
 }
 
+function _prefersReducedMotion() {
+    return window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+}
+
+// A small, dependency-free confetti burst for the moments that have earned it:
+// a full 5/5 mission and a level-up. Kept short and restrained — a little
+// celebration, never a party popper in your face. Skipped entirely when the
+// user prefers reduced motion (and, at the call sites, whenever Rickie is in a
+// quieter mode, so it stays consistent with the toast).
+var CONFETTI_COLORS = ['#4f46e5', '#7c3aed', '#f59e0b', '#059669', '#ec4899'];
+
+function fireConfetti(origin) {
+    if (_prefersReducedMotion()) return;
+
+    var ox = window.innerWidth / 2;
+    var oy = window.innerHeight * 0.32;
+    if (origin && origin.getBoundingClientRect) {
+        var r = origin.getBoundingClientRect();
+        if (r.width) { ox = r.left + r.width / 2; oy = r.top + r.height / 2; }
+    }
+
+    var layer = document.createElement('div');
+    layer.className = 'confetti-layer';
+    document.body.appendChild(layer);
+
+    var COUNT = 26;
+    var maxDur = 0;
+    for (var i = 0; i < COUNT; i++) {
+        var piece = document.createElement('span');
+        piece.className = 'confetti-piece';
+        var angle = (Math.PI * 2) * (i / COUNT) + (Math.random() - 0.5);
+        var spread = 70 + Math.random() * 90;
+        var tx = Math.cos(angle) * spread;
+        var ty = Math.sin(angle) * spread * 0.7 + 80 + Math.random() * 120; // downward bias
+        var rot = (Math.random() * 720 - 360) + 'deg';
+        var dur = 0.9 + Math.random() * 0.6;
+        maxDur = Math.max(maxDur, dur);
+        piece.style.left = ox + 'px';
+        piece.style.top = oy + 'px';
+        piece.style.setProperty('--tx', tx.toFixed(1) + 'px');
+        piece.style.setProperty('--ty', ty.toFixed(1) + 'px');
+        piece.style.setProperty('--rot', rot);
+        piece.style.setProperty('--dur', dur.toFixed(2) + 's');
+        piece.style.background = CONFETTI_COLORS[i % CONFETTI_COLORS.length];
+        if (i % 3 === 0) piece.style.borderRadius = '50%';
+        layer.appendChild(piece);
+    }
+
+    setTimeout(function () {
+        if (layer.parentNode) layer.parentNode.removeChild(layer);
+    }, maxDur * 1000 + 200);
+}
+
 var _rickieReactionHideTimer = null;
 var _rickieReactionRemoveTimer = null;
 
@@ -1444,6 +1497,8 @@ function showRickieReaction(line, summary) {
     } else {
         levelUpEl.hidden = true;
     }
+
+    toast.classList.toggle('celebrate', !!summary.leveledUp);
 
     if (_rickieReactionHideTimer) clearTimeout(_rickieReactionHideTimer);
     if (_rickieReactionRemoveTimer) clearTimeout(_rickieReactionRemoveTimer);
@@ -2241,8 +2296,19 @@ async function loadDailyExercises() {
     var badge = document.getElementById('daily-count-badge');
     if (badge) {
         badge.textContent = daily.completed_count + '/5';
-        if (daily.completed_count === 5) badge.classList.add('badge-complete');
-        else badge.classList.remove('badge-complete');
+        if (daily.completed_count === 5) {
+            // Pop only on the transition into 5/5, not on every re-render while
+            // already complete — a small "it's done!" beat, then it settles.
+            var wasComplete = badge.classList.contains('badge-complete');
+            badge.classList.add('badge-complete');
+            if (!wasComplete && !_prefersReducedMotion()) {
+                badge.classList.remove('badge-pop');
+                void badge.offsetWidth; // restart the animation
+                badge.classList.add('badge-pop');
+            }
+        } else {
+            badge.classList.remove('badge-complete', 'badge-pop');
+        }
     }
 
     // Update ARIA
@@ -4258,6 +4324,11 @@ async function handleCompleteExercise(key, btn, row) {
                     poolKey = 'perfectMission';
                 }
                 showRickieReaction(_pickRickieLine(poolKey), summary);
+                // Confetti only for the moments that have earned it: a full
+                // mission or a level-up. The badge is the natural origin point.
+                if (wasPerfectMission || summary.leveledUp) {
+                    fireConfetti(document.getElementById('daily-count-badge'));
+                }
                 currentRickieExpression = getRickieExpression({
                     type: 'mission_complete',
                     firstMissionEver: wasFirstMission,
