@@ -1820,11 +1820,13 @@ def register():
 def login():
     data = request.get_json()
     if not data or not data.get('username') or not data.get('password'):
-        return jsonify({"error": "Missing credentials"}), 400
+        return jsonify({"error": "Please enter your username and password."}), 400
 
     user = User.query.filter_by(username=data['username']).first()
+    # Deliberately ambiguous (never reveals whether the username exists) — but
+    # warmer and clearer than the old "Invalid credentials".
     if not user or not check_password_hash(user.password_hash, data['password']):
-        return jsonify({"error": "Invalid credentials"}), 401
+        return jsonify({"error": "That username and password don’t match."}), 401
 
     access_token = create_access_token(identity=str(user.id))
     return jsonify({"access_token": access_token}), 200
