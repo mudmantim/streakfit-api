@@ -4666,6 +4666,9 @@ var _coachPanel   = null;
 var _coachThread  = null;
 var _coachInput   = null;
 var _coachSendBtn = null;
+// In-session conversation memory for Rickie — only completed user+assistant
+// pairs are stored, so what we send back is always strictly alternating.
+var _coachHistory = [];
 
 // ── Rickie mood (UI-only — derived from existing currentUser data, never sent to the backend) ──
 
@@ -4798,7 +4801,9 @@ async function _sendCoachMessage(message, context) {
 
     var loadingEl = _appendCoachMsg('coach', '…');
 
-    var result = await api('/api/coach', 'POST', { message: message, context: context });
+    // Send the recent conversation so Rickie can follow up and stay consistent.
+    var historyToSend = _coachHistory.slice(-8);
+    var result = await api('/api/coach', 'POST', { message: message, context: context, history: historyToSend });
 
     _coachThread.removeChild(loadingEl);
     _coachInput.disabled   = false;
@@ -4812,6 +4817,11 @@ async function _sendCoachMessage(message, context) {
         _appendCoachMsg('coach', '🦝 Rickie stepped away from his burrow for a bit — try again in a little while.');
     } else {
         _appendCoachMsg('coach', result.data.reply);
+        // Only successful, complete turns become memory — keeps the stored
+        // history strictly alternating for coherent follow-ups.
+        _coachHistory.push({ role: 'user', content: message });
+        _coachHistory.push({ role: 'assistant', content: result.data.reply });
+        if (_coachHistory.length > 16) _coachHistory = _coachHistory.slice(-16);
     }
 
     _coachInput.focus();

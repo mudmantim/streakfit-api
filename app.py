@@ -3073,6 +3073,60 @@ message and nothing else: \
 """
 
 
+# Streak milestones Rickie can point toward. Day 1 is intentionally excluded —
+# it's not a "coming up" target once a user has any streak.
+_RICKIE_MILESTONES = (7, 14, 30, 100)
+
+
+def _build_rickie_context(user):
+    """A trustworthy, server-derived snapshot of the user for Rickie's system prompt.
+
+    Every number is computed here — never by the model — so Rickie is both
+    context-aware and arithmetically correct. Derived from the JWT-identified
+    user, never from client-supplied values.
+    """
+    stats = get_user_stats(user.id)
+    level_info = xp_to_level(user.xp_total)
+    cs = stats['current_streak']
+    bs = stats['best_streak']
+    tm = stats['total_missions']
+
+    # Pre-computed arithmetic (Rickie must never calculate these himself).
+    next_ms = next((m for m in _RICKIE_MILESTONES if m > cs), None)
+
+    lines = [
+        "What you know about this user right now. These numbers are exact — use "
+        "only them. Never calculate, estimate, or invent any number about the "
+        "user's progress; if the fact you need isn't here, say you're not sure.",
+        f"- Name: {user.username}",
+        f"- Current streak: {cs} day(s)",
+        f"- Best streak ever: {bs} day(s)",
+        f"- Total missions completed: {tm}",
+        f"- Level {level_info['level']} ({level_info['level_title']})",
+    ]
+    if next_ms is not None:
+        lines.append(
+            f"- Next streak milestone: Day {next_ms} — exactly {next_ms - cs} "
+            f"day(s) away"
+        )
+    else:
+        lines.append(
+            "- They are past every streak milestone (100+). Celebrate that; "
+            "don't invent a new target number."
+        )
+    if bs > cs > 0:
+        lines.append(
+            f"- To match their personal best they need exactly {bs - cs} more "
+            f"day(s)"
+        )
+    lines.append(
+        "Use their name occasionally, not every message. Any encouragement must "
+        "reference something real above — never generic praise. Never imply you "
+        "missed them or that they owe you anything."
+    )
+    return "\n".join(lines)
+
+
 @app.route('/api/coach', methods=['POST'])
 @jwt_required()
 @limiter.limit("10 per day")
@@ -3094,6 +3148,17 @@ def coach():
         return jsonify({"error": "coach_unavailable"}), 503
 
     system = _COACH_SYSTEM_PROMPT
+
+    # Context-awareness: give Rickie a trustworthy, server-derived snapshot of
+    # who he's talking to (name, streak, level, pre-computed milestone math).
+    # Wrapped so a stats hiccup can never take the Coach down.
+    user = db.session.get(User, int(get_jwt_identity()))
+    if user is not None:
+        try:
+            system += "\n\n" + _build_rickie_context(user)
+        except Exception:
+            app.logger.warning('rickie context build failed', exc_info=True)
+
     if ctx_type == 'insight':
         insight_text     = (context.get('insight_text') or '').strip()
         insight_category = (context.get('insight_category') or '').strip()
@@ -3112,13 +3177,37 @@ def coach():
             + "\n- ".join(sample)
         )
 
+    # In-session conversational memory: thread the recent turns the client sends
+    # so Rickie can actually follow up and stay consistent. Server validates and
+    # caps everything (roles, length, count) — client input is never trusted raw.
+    messages = []
+    history = data.get('history')
+    if isinstance(history, list):
+        for turn in history[-8:]:
+            if not isinstance(turn, dict):
+                continue
+            role = turn.get('role')
+            content = (turn.get('content') or '').strip()
+            if role not in ('user', 'assistant') or not content:
+                continue
+            # Enforce strict alternation (Anthropic requires it) — skip a turn
+            # that repeats the previous role rather than let the API reject it.
+            if messages and messages[-1]['role'] == role:
+                continue
+            messages.append({'role': role, 'content': content[:500]})
+    # Anthropic requires the sequence to start with a user turn and end with the
+    # current user message; drop any leading assistant turns and append the ask.
+    while messages and messages[0]['role'] != 'user':
+        messages.pop(0)
+    messages.append({'role': 'user', 'content': message})
+
     try:
         client   = _anthropic_lib.Anthropic(api_key=_anthropic_api_key)
         response = client.messages.create(
             model='claude-haiku-4-5-20251001',
             max_tokens=512,
             system=system,
-            messages=[{'role': 'user', 'content': message}]
+            messages=messages
         )
         reply = response.content[0].text
         return jsonify({"reply": reply}), 200
