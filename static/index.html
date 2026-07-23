@@ -26,17 +26,28 @@
     <!-- ── Auth View ──────────────────────────────────────────────────── -->
     <div id="auth-view">
         <div class="auth-card card">
-            <div class="auth-logo">
-                <span class="logo-flame">🔥</span>
-                <h1 class="logo">StreakFit</h1>
+            <div class="auth-hero">
+                <div class="auth-logo">
+                    <span class="logo-flame">🔥</span>
+                    <h1 class="logo">StreakFit</h1>
+                </div>
+                <p class="tagline">The game where winning means getting healthier.</p>
             </div>
-            <p class="tagline">The game where winning means getting healthier.</p>
-            <p class="tagline-sub">Tiny wins every day. Build healthy streaks together.</p>
 
-            <div class="auth-rickie-intro">
-                <img src="/static/rickie.svg" alt="Rickie" class="rickie-avatar-sm">
-                <span>Rickie's ready when you are.</span>
-            </div>
+            <ul class="auth-value-props">
+                <li class="auth-value">
+                    <span class="auth-value-icon" aria-hidden="true">🎯</span>
+                    <span class="auth-value-text"><b>Five tiny moves a day.</b> A mission you can actually finish — not a workout you'll dread.</span>
+                </li>
+                <li class="auth-value">
+                    <span class="auth-value-icon" aria-hidden="true">🔥</span>
+                    <span class="auth-value-text"><b>Build a streak that means something.</b> And if a day slips, Rickie helps you rise again — never a lecture.</span>
+                </li>
+                <li class="auth-value">
+                    <img src="/static/rickie.svg" alt="" class="auth-value-icon auth-value-rickie">
+                    <span class="auth-value-text"><b>Rickie's in your corner.</b> A companion who's genuinely glad every time you show up.</span>
+                </li>
+            </ul>
 
             <div class="tabs">
                 <button id="tab-login" class="tab" onclick="showTab('login')">Log In</button>
@@ -57,12 +68,12 @@
                        autocomplete="username" required maxlength="80">
                 <input id="reg-password" type="password" placeholder="Choose a password"
                        autocomplete="new-password" required>
-                <button type="submit" class="btn-primary btn-full">Start Playing</button>
+                <button type="submit" class="btn-primary btn-full">Start free — takes 10 seconds</button>
                 <p id="register-error" class="error" role="alert"></p>
             </form>
 
             <div class="auth-guest-divider"><span>or</span></div>
-            <button class="btn-guest" onclick="handleGuestMode()">Continue as Guest</button>
+            <button class="btn-guest" onclick="handleGuestMode()">Peek at today's mission first — no signup</button>
         </div>
     </div>
 
