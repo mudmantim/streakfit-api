@@ -8,6 +8,7 @@ import threading
 from datetime import datetime, date, timedelta
 from flask import Flask, request, jsonify, abort
 from flask_sqlalchemy import SQLAlchemy
+from sqlalchemy.exc import IntegrityError
 from flask_migrate import Migrate
 from werkzeug.security import generate_password_hash, check_password_hash
 from flask_jwt_extended import JWTManager, create_access_token, jwt_required, get_jwt_identity
@@ -1817,7 +1818,18 @@ def register():
     hashed_pw = generate_password_hash(password, method='pbkdf2:sha256')
     new_user = User(username=username, password_hash=hashed_pw)
     db.session.add(new_user)
-    db.session.commit()
+    try:
+        db.session.commit()
+    except IntegrityError:
+        # A concurrent signup claimed this username between the check above and
+        # this commit — the unique constraint is the real authority. Return the
+        # same friendly 400 as the fast-path check, never a raw 500.
+        db.session.rollback()
+        return jsonify({"error": "That username is taken — try another."}), 400
+    except Exception:
+        db.session.rollback()
+        app.logger.exception('registration commit failed')
+        return jsonify({"error": "Something went wrong creating your account. Please try again."}), 500
 
     try:
         db.session.add(AnalyticsEvent(event_name='account_created'))
