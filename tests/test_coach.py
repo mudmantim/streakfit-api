@@ -57,21 +57,28 @@ def test_context_days_to_beat_best(monkeypatch):
 # ── 2 & 3. History threading + context injection (monkeypatched model) ────────
 
 class _FakeResponse:
-    def __init__(self, text):
-        self.content = [types.SimpleNamespace(text=text)]
+    """Mimics an Anthropic response: content is a list of blocks, each with a
+    `.type` and (for text blocks) a `.text`. The endpoint extracts the first
+    text block, so blocks carry a real `.type` — this is also how we prove the
+    extraction ignores non-text blocks (e.g. a leading thinking/tool block)."""
+    def __init__(self, *blocks):
+        # blocks: (type, text) tuples; default to a single text block
+        if not blocks:
+            blocks = (("text", "Nice work, Sam. That counts."),)
+        self.content = [types.SimpleNamespace(type=t, text=tx) for (t, tx) in blocks]
 
 
 class _Capture(dict):
     pass
 
 
-def _install_fake_anthropic(monkeypatch):
+def _install_fake_anthropic(monkeypatch, response=None):
     cap = _Capture()
 
     class _FakeMessages:
         def create(self, **kwargs):
             cap.update(kwargs)
-            return _FakeResponse("Nice work, Sam. That counts.")
+            return response if response is not None else _FakeResponse()
 
     class _FakeAnthropic:
         def __init__(self, api_key=None):
@@ -141,3 +148,73 @@ def test_coach_unavailable_without_key(client, monkeypatch):
     }, headers=auth_headers(token))
     assert resp.status_code == 503
     assert resp.get_json()["error"] == "coach_unavailable"
+
+
+# ── Sonnet 5 upgrade: model + generation config ──────────────────────────────
+
+def test_coach_uses_sonnet_5_config(client, monkeypatch):
+    """Rickie runs on Sonnet 5 with thinking off and room to talk. Locking the
+    config here so a stray edit can't silently downgrade the model, re-enable
+    adaptive thinking (which would add latency and eat the small budget), or
+    starve the reply."""
+    cap = _install_fake_anthropic(monkeypatch)
+    token = register_and_login(client, "coach_cfg")
+    resp = client.post("/api/coach", json={
+        "message": "hey Rickie", "context": {"type": "general"},
+    }, headers=auth_headers(token))
+    assert resp.status_code == 200
+    assert cap["model"] == "claude-sonnet-5"
+    assert cap["max_tokens"] == 768
+    assert cap["thinking"] == {"type": "disabled"}
+
+
+def test_reply_extraction_skips_non_text_blocks(client, monkeypatch):
+    """The reply is the first text block, not content[0] blindly. Prove a
+    leading non-text block (e.g. a future thinking/tool block) is skipped rather
+    than crashing the endpoint into a 503."""
+    resp_obj = _FakeResponse(("thinking", ""), ("text", "Here's the real reply."))
+    cap = _install_fake_anthropic(monkeypatch, response=resp_obj)
+    token = register_and_login(client, "coach_extract")
+    resp = client.post("/api/coach", json={
+        "message": "hi", "context": {"type": "general"},
+    }, headers=auth_headers(token))
+    assert resp.status_code == 200
+    assert resp.get_json()["reply"] == "Here's the real reply."
+
+
+# ── Character: the prompt inherits the Character Bible, not the old help-bot ──
+
+def test_prompt_dropped_the_canned_refusal_and_topic_lockdown():
+    """The behavior change is intentional: Rickie can genuinely chat and declines
+    in character. The old canned refusal string and the 'only answer about
+    StreakFit' lockdown must be gone — this test fails if either creeps back."""
+    p = appmod._COACH_SYSTEM_PROMPT
+    assert "I'm focused on StreakFit and Today's Insight — I can't help with that one." not in p
+    assert "Only answer questions about StreakFit" not in p
+    assert "Do not answer questions about fitness training" not in p
+
+
+def test_prompt_carries_the_load_bearing_character():
+    """A few anchors from the Character Bible that must survive any prompt edit:
+    the north star, the anti-shame rule, the restraint principle, and the
+    in-character-decline stance. Not exhaustive — a tripwire against drift."""
+    p = appmod._COACH_SYSTEM_PROMPT.lower()
+    assert "enjoy" in p and "talk" in p          # north star: someone they enjoy talking to
+    assert "never shame" in p                    # load-bearing anti-shame
+    assert "you came back. that's what matters" in p
+    assert "never perform the personality" in p  # restraint
+    assert "raccoon pay grade" in p              # in-character decline, not a canned refusal
+
+
+def test_joke_request_injects_curated_jokes(client, monkeypatch):
+    """A joke ask still seeds Rickie from the curated list (a resource, not a
+    straitjacket) so jokes stay on-brand and family-friendly."""
+    cap = _install_fake_anthropic(monkeypatch)
+    token = register_and_login(client, "coach_joke")
+    resp = client.post("/api/coach", json={
+        "message": "tell me a joke", "context": {"type": "general"},
+    }, headers=auth_headers(token))
+    assert resp.status_code == 200
+    assert "want a joke or something silly" in cap["system"]
+    # a real joke from the curated library was injected verbatim (5 are sampled)
+    assert any(j in cap["system"] for j in appmod.RICKIE_JOKES)
