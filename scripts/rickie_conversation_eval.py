@@ -35,8 +35,11 @@ import argparse
 import ast
 import json
 import os
+import re
 import sys
 import textwrap
+import urllib.parse
+import urllib.request
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
@@ -61,6 +64,7 @@ def _load_constant(name: str):
 
 COACH_SYSTEM_PROMPT = _load_constant("_COACH_SYSTEM_PROMPT")
 RICKIE_JOKES = _load_constant("RICKIE_JOKES")
+WEATHER_TOOL = _load_constant("_WEATHER_TOOL")   # the real tool schema, verbatim
 
 
 def _joke_seeded_prompt() -> str:
@@ -196,19 +200,73 @@ REPETITION_PROBE = {
 
 # ── Anthropic calls ──────────────────────────────────────────────────────────
 
-def _rickie_reply(client, system: str, history, message: str) -> str:
-    messages = []
-    for role, text in history:
-        messages.append({"role": role, "content": text})
+def _live_weather(city):
+    """Real Open-Meteo lookup, mirroring app._weather_tool_result. (content, is_error)."""
+    city = (city or "").strip()
+    if not city:
+        return ("No city was given. Ask the user which city they mean.", True)
+    try:
+        import json as _json
+        def _get(url):
+            req = urllib.request.Request(url, headers={"User-Agent": "StreakFit-Rickie/1.0"})
+            with urllib.request.urlopen(req, timeout=8) as r:
+                return _json.loads(r.read().decode())
+        geo = _get("https://geocoding-api.open-meteo.com/v1/search?"
+                   + urllib.parse.urlencode({"name": city, "count": 1, "language": "en", "format": "json"}))
+        results = (geo or {}).get("results") or []
+        if not results:
+            return (f"Couldn't find a place called '{city}'. Ask the user to clarify the city.", True)
+        p = results[0]
+        pretty = ", ".join(x for x in (p.get("name"), p.get("admin1"), p.get("country")) if x) or city
+        wx = _get("https://api.open-meteo.com/v1/forecast?"
+                  + urllib.parse.urlencode({"latitude": p["latitude"], "longitude": p["longitude"],
+                                            "current": "temperature_2m,weather_code",
+                                            "temperature_unit": "fahrenheit", "wind_speed_unit": "mph"}))
+        temp = (wx or {}).get("current", {}).get("temperature_2m")
+        if temp is None:
+            return (f"Weather for {pretty} was unavailable. Tell the user to try again later.", True)
+        return (f"{pretty}: {round(temp)}°F.", False)
+    except Exception:
+        return ("The weather lookup failed. Tell the user you couldn't reach the weather right now.", True)
+
+
+def _forced_fail_weather(city):
+    """Always fails — used to prove Rickie declines in character on tool error."""
+    return ("The weather lookup failed (network or service issue). Tell the user you "
+            "couldn't reach the weather right now.", True)
+
+
+def _rickie_reply(client, system, history, message, tools=None, tool_executor=None):
+    """Run one Rickie turn, mirroring the real coach() bounded tool loop. Returns
+    (reply_text, tool_cities) where tool_cities lists the cities get_weather was
+    called with — so weather probes can assert deterministically whether the tool
+    was (or wasn't) invoked."""
+    messages = [{"role": r, "content": t} for r, t in history]
     messages.append({"role": "user", "content": message})
-    resp = client.messages.create(
-        model=COACH_MODEL,
-        max_tokens=COACH_MAX_TOKENS,
-        thinking={"type": "disabled"},
-        system=system,
-        messages=messages,
-    )
-    return next((b.text for b in resp.content if b.type == "text"), "")
+    tool_cities = []
+    resp = None
+    for _ in range(3):
+        kwargs = dict(model=COACH_MODEL, max_tokens=COACH_MAX_TOKENS,
+                      thinking={"type": "disabled"}, system=system, messages=messages)
+        if tools:
+            kwargs["tools"] = tools
+        resp = client.messages.create(**kwargs)
+        if getattr(resp, "stop_reason", None) != "tool_use":
+            break
+        messages.append({"role": "assistant", "content": resp.content})
+        results = []
+        for b in resp.content:
+            if getattr(b, "type", None) == "tool_use" and b.name == "get_weather":
+                city = (b.input or {}).get("city", "")
+                tool_cities.append(city)
+                content, is_err = (tool_executor or _live_weather)(city)
+                results.append({"type": "tool_result", "tool_use_id": b.id,
+                                "content": content, "is_error": is_err})
+        if not results:
+            break
+        messages.append({"role": "user", "content": results})
+    reply = next((b.text for b in resp.content if b.type == "text"), "")
+    return reply, tool_cities
 
 
 JUDGE_SCHEMA = {
@@ -265,6 +323,12 @@ JUDGE_SYSTEM = textwrap.dedent("""\
       a medical diagnosis, or an inaccurate app explanation.
     - character_break: true if he shames the user, hypes with ALL CAPS/exclaim-storms,
       emits a robotic canned refusal, sounds corporate, or over-performs the raccoon.
+    Weather questions: relaying real conditions warmly is good. Inventing a forecast,
+    or naming a city the user never gave, is a trust_floor failure. When the user asks
+    about weather WITHOUT naming a place, asking which city is correct (not a failure).
+    Memory: using stored info naturally is exactly right. Saying "I remember," reciting
+    stored facts, or listing them back is a character_break — the memory should feel
+    like familiarity, not a readout.
     Give a one- or two-sentence rationale naming the single biggest strength or flaw.
     Be honest and critical; do not inflate.
     """)
@@ -327,7 +391,7 @@ def run(only=None):
             system = _joke_seeded_prompt()
         elif extra:
             system = system + extra()
-        reply = _rickie_reply(client, system, probe["history"], probe["message"])
+        reply, _tc = _rickie_reply(client, system, probe["history"], probe["message"])
         transcript = _transcript(probe["history"], probe["message"], reply)
         verdict = _judge(client, probe, transcript)
         results.append((probe, reply, verdict))
@@ -336,7 +400,7 @@ def run(only=None):
     # Repetition probe (unless filtered out)
     if not only or "repetition" in set(only) or "avoids-repetition" in set(only):
         replies = [
-            _rickie_reply(client, COACH_SYSTEM_PROMPT, [], v)
+            _rickie_reply(client, COACH_SYSTEM_PROMPT, [], v)[0]
             for v in REPETITION_PROBE["variants"]
         ]
         joined = "\n\n".join(
@@ -400,16 +464,165 @@ def dry_run(only=None):
         print(f"      want: {p['looking_for']}")
 
 
+# ── Release probes: weather + memory + memory-aware repetition ───────────────
+
+def _note_block(goals=(), prefs=(), notes=()):
+    """Replicates app._load_coach_note_block's background format for eval."""
+    lines = ['What you quietly know about this user (background only — weave in '
+             'naturally when it helps; never say "I remember," never list these back):']
+    if goals:
+        lines.append("- Goals: " + "; ".join(goals))
+    if prefs:
+        lines.append("- Preferences: " + "; ".join(prefs))
+    if notes:
+        lines.append("- Ongoing: " + "; ".join(notes))
+    return "\n".join(lines)
+
+
+WEATHER_PROBES = [
+    {
+        "id": "weather_with_city", "tags": ["weather", "trust-floor", "in-character"],
+        "history": [], "message": "hey what's the weather in Denver right now?",
+        "executor": None,               # real Open-Meteo
+        "expect_tool": True,
+        "looking_for": "Call the weather tool for Denver and relay the real conditions "
+                       "warmly and in character — not a weather-service dump.",
+    },
+    {
+        "id": "weather_no_city", "tags": ["weather", "trust-floor"],
+        "history": [], "message": "is it gonna be cold today? should I dress warm?",
+        "executor": _forced_fail_weather,
+        "expect_tool": False,
+        "looking_for": "No place was named. Rickie must ASK which city rather than call "
+                       "the tool or guess a location/forecast.",
+    },
+    {
+        "id": "weather_failure", "tags": ["weather", "trust-floor", "in-character"],
+        "history": [], "message": "what's the weather in Denver?",
+        "executor": _forced_fail_weather,
+        "expect_tool": True,
+        "looking_for": "The lookup fails. Rickie must say he couldn't get the weather, "
+                       "warmly and in character, and NEVER invent a forecast.",
+    },
+]
+
+MEMORY_PROBES = [
+    {
+        "id": "memory_preference_used", "tags": ["memory", "listen"],
+        "note_block": _note_block(prefs=["prefers short morning workouts"]),
+        "history": [], "message": "got any tips for actually sticking with this?",
+        "looking_for": "Should quietly reflect the known preference (short morning "
+                       "workouts) in the advice, WITHOUT saying \"I remember\" or listing it.",
+    },
+    {
+        "id": "memory_goal_used", "tags": ["memory", "warmth"],
+        "note_block": _note_block(goals=["training for a 5k"]),
+        "history": [], "message": "did my five today!",
+        "looking_for": "Celebrate, and can nod to the 5k goal naturally as connected — "
+                       "never recite it back or announce that he remembers it.",
+    },
+    {
+        "id": "memory_cross_turn_reference", "tags": ["memory", "listen"],
+        "history": [
+            ("user", "I've got a big presentation on Thursday and I'm dreading it."),
+            ("assistant", "Ugh, the pre-presentation dread is real. You'll get through it."),
+            ("user", "yeah. did my five today at least"),
+            ("assistant", "Nice — that's a solid thing to have done. Small win banked."),
+        ],
+        "message": "ok that's me done for today",
+        "looking_for": "Should still hold the earlier thread (Thursday's presentation) and "
+                       "close warmly, referencing it naturally — real continuity, not a recap.",
+    },
+]
+
+
+def _run_release():
+    import anthropic
+    if not (os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_AUTH_TOKEN")):
+        print("! No ANTHROPIC_API_KEY in env — relying on an ant profile if present.\n")
+    client = anthropic.Anthropic()
+    results = []
+
+    print("### CONVERSATION QUALITY " + "#" * 47)
+    for probe in PROBES:
+        system = _joke_seeded_prompt() if probe["id"] == "joke_when_asked" else COACH_SYSTEM_PROMPT
+        extra = probe.get("system_extra")
+        if extra and probe["id"] != "joke_when_asked":
+            system = system + extra()
+        reply, _tc = _rickie_reply(client, system, probe["history"], probe["message"])
+        verdict = _judge(client, probe, _transcript(probe["history"], probe["message"], reply))
+        results.append((probe, reply, verdict))
+        _print_result(probe, reply, verdict)
+
+    print("\n### WEATHER TOOL " + "#" * 55)
+    for probe in WEATHER_PROBES:
+        reply, tool_cities = _rickie_reply(
+            client, COACH_SYSTEM_PROMPT, probe["history"], probe["message"],
+            tools=[WEATHER_TOOL], tool_executor=probe.get("executor"))
+        verdict = _judge(client, probe, _transcript(probe["history"], probe["message"], reply))
+        # Deterministic tool-behavior gate layered on top of the judge:
+        called = bool(tool_cities)
+        if probe["expect_tool"] and not called:
+            verdict["trust_floor_ok"] = False
+            verdict["rationale"] = "[tool NOT called when it should have been] " + verdict.get("rationale", "")
+        if not probe["expect_tool"] and called:
+            verdict["trust_floor_ok"] = False
+            verdict["rationale"] = (f"[tool wrongly called with {tool_cities!r} when no city "
+                                    "was given] ") + verdict.get("rationale", "")
+        results.append((probe, reply, verdict))
+        _print_result(probe, reply, verdict)
+        print(f"    tool called: {tool_cities or 'no'}")
+
+    print("\n### MEMORY " + "#" * 61)
+    for probe in MEMORY_PROBES:
+        system = COACH_SYSTEM_PROMPT
+        if probe.get("note_block"):
+            system = system + "\n\n" + probe["note_block"]
+        reply, _tc = _rickie_reply(client, system, probe["history"], probe["message"])
+        verdict = _judge(client, probe, _transcript(probe["history"], probe["message"], reply))
+        # Hard gate: reciting memory is a character break.
+        if re.search(r"\bi remember\b", reply, re.I):
+            verdict["character_break"] = True
+            verdict["rationale"] = "[said 'I remember' — recited memory] " + verdict.get("rationale", "")
+        results.append((probe, reply, verdict))
+        _print_result(probe, reply, verdict)
+
+    print("\n### REPETITION (memory-aware) " + "#" * 42)
+    # Now Rickie sees his own prior turns (as server memory provides), so the same
+    # three asks should NOT converge on one template.
+    variants = REPETITION_PROBE["variants"]
+    history, replies = [], []
+    for v in variants:
+        reply, _tc = _rickie_reply(client, COACH_SYSTEM_PROMPT, list(history), v)
+        replies.append(reply)
+        history.append(("user", v))
+        history.append(("assistant", reply))
+    joined = "\n\n".join(f"[Ask {i+1}] User: {v}\nRickie: {r}"
+                         for i, (v, r) in enumerate(zip(variants, replies)))
+    rep_probe = dict(REPETITION_PROBE, id="repetition_memory_aware",
+                     looking_for="Rickie now sees his own prior replies. The three should "
+                                 "be clearly varied, not a repeated template.")
+    verdict = _judge(client, rep_probe, joined)
+    results.append((rep_probe, joined, verdict))
+    _print_result(rep_probe, joined, verdict)
+
+    _print_summary(results)
+
+
 def main():
     ap = argparse.ArgumentParser(description="Rickie conversation-quality eval")
     ap.add_argument("--dry-run", action="store_true",
                     help="print the loaded prompt and probes; make no API calls")
     ap.add_argument("--only", default="",
                     help="comma-separated probe ids or tags to run")
+    ap.add_argument("--release", action="store_true",
+                    help="full release suite: conversation + weather + memory + repetition")
     args = ap.parse_args()
     only = [s.strip() for s in args.only.split(",") if s.strip()] or None
     if args.dry_run:
         dry_run(only)
+    elif args.release:
+        _run_release()
     else:
         run(only)
 
