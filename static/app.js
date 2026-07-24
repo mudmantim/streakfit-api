@@ -2014,6 +2014,10 @@ function setGuestUI(guest) {
     var rickieRow = document.getElementById('settings-row-rickie');
     if (rickieRow) rickieRow.hidden = guest;
 
+    // Coach memory is per-account server state — guests have none, so hide it.
+    var forgetRow = document.getElementById('settings-row-forget');
+    if (forgetRow) forgetRow.hidden = guest;
+
     var sideQuests = document.getElementById('side-quests-section');
     if (sideQuests) sideQuests.hidden = guest;
 
@@ -2025,6 +2029,28 @@ function setGuestUI(guest) {
         logoutBtn.textContent = guest ? 'Exit' : 'Log Out';
         logoutBtn.onclick = guest ? handleExitGuest : handleLogout;
     }
+}
+
+// "Forget our conversations" — permanently clear Rickie's memory of this user
+// (recent turns + Coach Notes). Guarded by a confirm; destructive and final.
+async function handleForgetCoach() {
+    if (!localStorage.getItem('streakfit_token')) return;
+    if (!window.confirm(
+        "Forget everything Rickie remembers about your conversations? This can't be undone."
+    )) return;
+
+    var btn = document.getElementById('btn-forget-coach');
+    if (btn) { btn.disabled = true; btn.textContent = 'Forgetting…'; }
+
+    var result = await api('/api/coach/memory', 'DELETE');
+    if (!btn) return;
+    btn.disabled = false;
+    if (result && result.status === 200) {
+        btn.textContent = 'Forgotten ✓';
+    } else {
+        btn.textContent = 'Try again';
+    }
+    setTimeout(function () { btn.textContent = 'Forget our conversations'; }, 2500);
 }
 
 // ── Auth ──────────────────────────────────────────────────────────────────────

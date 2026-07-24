@@ -532,6 +532,28 @@ input:focus {
 }
 .settings-logout:hover { background: var(--gray-50); color: var(--gray-800); }
 
+/* Forget-our-conversations: a quiet, low-emphasis control (memory is per-account
+   and rarely used) that reveals its destructive nature only on hover/focus. */
+.btn-forget-coach {
+    min-height: 44px;
+    padding: .35rem .7rem;
+    font-size: .82rem;
+    font-weight: 600;
+    color: var(--gray-600);
+    background: var(--gray-100);
+    border: 1.5px solid var(--gray-200);
+    border-radius: 8px;
+    cursor: pointer;
+    transition: background .15s ease, color .15s ease, border-color .15s ease;
+}
+.btn-forget-coach:hover,
+.btn-forget-coach:focus-visible {
+    background: #fdecec;
+    color: #b42318;
+    border-color: #f3b4ae;
+}
+.btn-forget-coach:disabled { opacity: .6; cursor: default; }
+
 /* ── Dashboard container ──────────────────────────────────────────────────── */
 .container {
     max-width: 680px;

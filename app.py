@@ -2,6 +2,7 @@ import os
 import hashlib
 import json
 import random
+import re
 import string
 import subprocess
 import threading
@@ -1233,6 +1234,37 @@ class VerificationRun(db.Model):
     passed = db.Column(db.Integer, nullable=False, default=0)
     failed = db.Column(db.Integer, nullable=False, default=0)
     results_json = db.Column(db.Text, nullable=True)
+
+
+class CoachTurn(db.Model):
+    """Cross-session memory for Rickie: a rolling window of the last few coach
+    conversation turns per user, so continuity survives across sessions and
+    devices (and so Rickie sees his own recent replies and doesn't repeat
+    himself). Pruned to the last 10 per user. Server-owned — the client never
+    supplies conversation history that reaches the model."""
+    __tablename__ = 'coach_turn'
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False, index=True)
+    role = db.Column(db.String(16), nullable=False)   # 'user' | 'assistant'
+    content = db.Column(db.Text, nullable=False)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+
+
+class CoachNote(db.Model):
+    """One small, server-maintained 'Coach Notes' record per user. Holds only
+    factual, structured information the user stated explicitly (goals,
+    preferences, ongoing context) — never emotional interpretations, diagnoses,
+    or speculation. Populated by deterministic server-side extraction, never by
+    Rickie. Each field is a JSON list of short strings (Text column, matching the
+    repo's existing Text-JSON convention)."""
+    __tablename__ = 'coach_note'
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False, unique=True)
+    goals = db.Column(db.Text, nullable=False, default='[]')
+    preferences = db.Column(db.Text, nullable=False, default='[]')
+    notes = db.Column(db.Text, nullable=False, default='[]')  # ongoing context
+    updated_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow,
+                           onupdate=datetime.utcnow)
 
 
 # --- Retention: XP / Acorns (helper layer only — nothing wired to routes yet) ---
@@ -3203,6 +3235,168 @@ def _build_rickie_context(user):
     return "\n".join(lines)
 
 
+# ── Cross-session memory (server-owned; Rickie never writes it) ──────────────
+# Two pieces, both maintained by deterministic server logic:
+#   • coach_turn — a rolling window of the last 10 conversation turns per user,
+#     so continuity survives across sessions/devices and Rickie sees his own
+#     recent replies (which is what actually stops repeated phrasing).
+#   • coach_note — one small record of FACTUAL, user-stated info (goals,
+#     preferences, ongoing context), extracted by high-precision regex on the
+#     user's own words only. No inference, no emotion, no diagnoses. Rickie is
+#     never allowed to update memory; it's injected as background context only.
+
+_COACH_MEMORY_WINDOW = 10       # max stored turns per user
+_COACH_TURN_MAX_LEN = 1000      # cap stored turn content
+_COACH_TURN_PROMPT_LEN = 600    # cap when threading into the model context
+_COACH_NOTE_MAX_ITEMS = 5       # per category (goals/preferences/notes)
+_COACH_NOTE_MAX_LEN = 140       # per fact
+_COACH_NOTE_MIN_LEN = 3
+
+# High-precision extraction — only explicit statements. Low recall on purpose:
+# better to store a few accurate facts than to speculate.
+_GOAL_PATTERNS = [
+    re.compile(r"\bmy goal is (?:to )?(.+)", re.I),
+    re.compile(r"\bi'?m training for (.+)", re.I),
+    re.compile(r"\bi want to be able to (.+)", re.I),
+    re.compile(r"\bi'?d like to be able to (.+)", re.I),
+]
+_PREFERENCE_PATTERNS = [
+    re.compile(r"\bi prefer (.+)", re.I),
+    re.compile(r"\bi'?d rather (.+)", re.I),
+]
+_NOTE_PATTERNS = [
+    re.compile(r"\bremember that (.+)", re.I),
+    re.compile(r"\bjust so you know,?\s*(.+)", re.I),
+]
+_COACH_NOTE_CATEGORIES = (
+    ("goals", _GOAL_PATTERNS),
+    ("preferences", _PREFERENCE_PATTERNS),
+    ("notes", _NOTE_PATTERNS),
+)
+
+
+def _json_list(raw):
+    """Parse a stored JSON list of strings; anything malformed becomes []."""
+    try:
+        val = json.loads(raw or "[]")
+        return [str(x) for x in val] if isinstance(val, list) else []
+    except (ValueError, TypeError):
+        return []
+
+
+def _clean_fact(text):
+    """First clause only, whitespace-collapsed, trimmed, length-capped."""
+    text = re.split(r"[.!?\n]", text, maxsplit=1)[0]
+    text = " ".join(text.split()).strip(" ,;:-")
+    return text[:_COACH_NOTE_MAX_LEN]
+
+
+def _coach_note_extract(message):
+    """Deterministic, high-precision extraction of factual statements from the
+    USER's message. Returns {goals, preferences, notes} lists (possibly empty).
+    Never called on Rickie's output."""
+    found = {"goals": [], "preferences": [], "notes": []}
+    for key, patterns in _COACH_NOTE_CATEGORIES:
+        for pat in patterns:
+            m = pat.search(message or "")
+            if m:
+                fact = _clean_fact(m.group(1))
+                if len(fact) >= _COACH_NOTE_MIN_LEN and fact not in found[key]:
+                    found[key].append(fact)
+    return found
+
+
+def _merge_note_list(existing, new):
+    """Append new facts, dedup case-insensitively, keep the most recent N."""
+    out = list(existing)
+    seen = {x.lower() for x in out}
+    for f in new:
+        if f.lower() not in seen:
+            out.append(f)
+            seen.add(f.lower())
+    return out[-_COACH_NOTE_MAX_ITEMS:]
+
+
+def _update_coach_note(user_id, message):
+    """Deterministically fold any explicit facts from the user's message into
+    their Coach Notes. No-op when nothing factual was stated."""
+    facts = _coach_note_extract(message)
+    if not any(facts.values()):
+        return
+    note = CoachNote.query.filter_by(user_id=user_id).first()
+    if note is None:
+        note = CoachNote(user_id=user_id, goals='[]', preferences='[]', notes='[]')
+        db.session.add(note)
+    for key, _patterns in _COACH_NOTE_CATEGORIES:
+        merged = _merge_note_list(_json_list(getattr(note, key)), facts[key])
+        setattr(note, key, json.dumps(merged))
+    db.session.commit()
+
+
+def _load_coach_note_block(user_id):
+    """Format Coach Notes as a background block for Rickie's context, or '' if
+    there's nothing stored. The non-recitation instruction lives here, not in the
+    frozen personality prompt."""
+    note = CoachNote.query.filter_by(user_id=user_id).first()
+    if note is None:
+        return ""
+    goals, prefs, ctx = _json_list(note.goals), _json_list(note.preferences), _json_list(note.notes)
+    if not (goals or prefs or ctx):
+        return ""
+    lines = [
+        "What you quietly know about this user (background only — weave in "
+        "naturally when it helps; never say \"I remember,\" never list these back):"
+    ]
+    if goals:
+        lines.append("- Goals: " + "; ".join(goals))
+    if prefs:
+        lines.append("- Preferences: " + "; ".join(prefs))
+    if ctx:
+        lines.append("- Ongoing: " + "; ".join(ctx))
+    return "\n".join(lines)
+
+
+def _load_coach_messages(user_id):
+    """Load the rolling window as an alternation-safe message list (server is the
+    single source of truth for conversation history — the client never supplies
+    history that reaches the model)."""
+    rows = (CoachTurn.query.filter_by(user_id=user_id)
+            .order_by(CoachTurn.id.asc()).all())
+    msgs = []
+    for r in rows[-_COACH_MEMORY_WINDOW:]:
+        if r.role not in ('user', 'assistant') or not r.content:
+            continue
+        if msgs and msgs[-1]['role'] == r.role:
+            continue
+        msgs.append({'role': r.role, 'content': r.content[:_COACH_TURN_PROMPT_LEN]})
+    while msgs and msgs[0]['role'] != 'user':
+        msgs.pop(0)
+    return msgs
+
+
+def _record_coach_exchange(user_id, user_msg, reply):
+    """Persist the human-facing exchange (not tool scaffolding) and prune the
+    window to the last 10 turns for this user."""
+    db.session.add(CoachTurn(user_id=user_id, role='user',
+                             content=(user_msg or '')[:_COACH_TURN_MAX_LEN]))
+    db.session.add(CoachTurn(user_id=user_id, role='assistant',
+                             content=(reply or '')[:_COACH_TURN_MAX_LEN]))
+    db.session.flush()
+    stale = (CoachTurn.query.filter_by(user_id=user_id)
+             .order_by(CoachTurn.id.desc())
+             .offset(_COACH_MEMORY_WINDOW).all())
+    for r in stale:
+        db.session.delete(r)
+    db.session.commit()
+
+
+def _forget_coach_memory(user_id):
+    """Permanently delete this user's recent turns AND Coach Notes."""
+    CoachTurn.query.filter_by(user_id=user_id).delete()
+    CoachNote.query.filter_by(user_id=user_id).delete()
+    db.session.commit()
+
+
 # ── Weather: Rickie's first and only tool ────────────────────────────────────
 # This exists so Rickie can stay in character when someone asks about the weather,
 # not to be a forecast service. Provider is Open-Meteo (free, no API key). There is
@@ -3343,6 +3537,14 @@ def coach():
             system += "\n\n" + _build_rickie_context(user)
         except Exception:
             app.logger.warning('rickie context build failed', exc_info=True)
+        # Coach Notes: injected as background only, never recited (instruction is
+        # inside the block). Wrapped so a memory hiccup can't take the Coach down.
+        try:
+            note_block = _load_coach_note_block(user.id)
+            if note_block:
+                system += "\n\n" + note_block
+        except Exception:
+            app.logger.warning('coach note load failed', exc_info=True)
 
     if ctx_type == 'insight':
         insight_text     = (context.get('insight_text') or '').strip()
@@ -3362,28 +3564,12 @@ def coach():
             + "\n- ".join(sample)
         )
 
-    # In-session conversational memory: thread the recent turns the client sends
-    # so Rickie can actually follow up and stay consistent. Server validates and
-    # caps everything (roles, length, count) — client input is never trusted raw.
-    messages = []
-    history = data.get('history')
-    if isinstance(history, list):
-        for turn in history[-8:]:
-            if not isinstance(turn, dict):
-                continue
-            role = turn.get('role')
-            content = (turn.get('content') or '').strip()
-            if role not in ('user', 'assistant') or not content:
-                continue
-            # Enforce strict alternation (Anthropic requires it) — skip a turn
-            # that repeats the previous role rather than let the API reject it.
-            if messages and messages[-1]['role'] == role:
-                continue
-            messages.append({'role': role, 'content': content[:500]})
-    # Anthropic requires the sequence to start with a user turn and end with the
-    # current user message; drop any leading assistant turns and append the ask.
-    while messages and messages[0]['role'] != 'user':
-        messages.pop(0)
+    # Conversation history is server-owned cross-session memory, not client input:
+    # load this user's rolling 10-turn window from the database. Any history the
+    # client sends is deliberately ignored — it can't be trusted, and the server
+    # is the single source of truth (this also lets Rickie see his own recent
+    # replies, which is what stops repeated phrasing across similar prompts).
+    messages = _load_coach_messages(user.id) if user is not None else []
     messages.append({'role': 'user', 'content': message})
 
     try:
@@ -3427,9 +3613,27 @@ def coach():
             messages.append({'role': 'user', 'content': tool_results})
 
         reply = next((b.text for b in response.content if b.type == 'text'), '')
+        # Persist the human-facing exchange and fold any explicit facts into Coach
+        # Notes. Wrapped so a memory hiccup can never take the reply down.
+        if user is not None and reply:
+            try:
+                _record_coach_exchange(user.id, message, reply)
+                _update_coach_note(user.id, message)
+            except Exception:
+                db.session.rollback()
+                app.logger.warning('coach memory persist failed', exc_info=True)
         return jsonify({"reply": reply}), 200
     except Exception:
         return jsonify({"error": "coach_unavailable"}), 503
+
+
+@app.route('/api/coach/memory', methods=['DELETE'])
+@jwt_required()
+def forget_coach_memory():
+    """'Forget our conversations' — permanently delete the caller's recent turns
+    and Coach Notes. Strictly scoped to the token's own user; idempotent."""
+    _forget_coach_memory(int(get_jwt_identity()))
+    return jsonify({"status": "forgotten"}), 200
 
 
 # --- JWT Error Handlers ---
