@@ -56,28 +56,49 @@ def test_context_days_to_beat_best(monkeypatch):
 
 # ── 2 & 3. History threading + context injection (monkeypatched model) ────────
 
+def _tool_use_block(block_id, name, tool_input):
+    return types.SimpleNamespace(type="tool_use", id=block_id, name=name, input=tool_input)
+
+
 class _FakeResponse:
-    """Mimics an Anthropic response: content is a list of blocks, each with a
-    `.type` and (for text blocks) a `.text`. The endpoint extracts the first
-    text block, so blocks carry a real `.type` — this is also how we prove the
-    extraction ignores non-text blocks (e.g. a leading thinking/tool block)."""
-    def __init__(self, *blocks):
-        # blocks: (type, text) tuples; default to a single text block
+    """Mimics an Anthropic response: `content` is a list of blocks (each with a
+    `.type`; text blocks add `.text`, tool_use blocks add `.name`/`.id`/`.input`)
+    and a `.stop_reason`. The endpoint extracts the first text block and drives a
+    tool loop off `stop_reason`, so both are modelled here."""
+    def __init__(self, *blocks, stop_reason="end_turn"):
+        # Each block is either a (type, text) tuple (text/thinking) or a prebuilt
+        # namespace (e.g. a tool_use block). Default: one text block, end_turn.
         if not blocks:
             blocks = (("text", "Nice work, Sam. That counts."),)
-        self.content = [types.SimpleNamespace(type=t, text=tx) for (t, tx) in blocks]
+        content = []
+        for b in blocks:
+            if isinstance(b, tuple):
+                content.append(types.SimpleNamespace(type=b[0], text=b[1]))
+            else:
+                content.append(b)
+        self.content = content
+        self.stop_reason = stop_reason
 
 
 class _Capture(dict):
     pass
 
 
-def _install_fake_anthropic(monkeypatch, response=None):
+def _install_fake_anthropic(monkeypatch, response=None, responses=None):
+    """Patch the Anthropic client. `responses` (a list) is returned one-per-create
+    for multi-call flows (e.g. the weather tool round-trip); otherwise `response`
+    or a default end_turn text reply is returned every call. `cap` captures the
+    last create() kwargs plus every call in cap['calls']."""
     cap = _Capture()
+    cap["calls"] = []
+    seq = list(responses) if responses is not None else None
 
     class _FakeMessages:
         def create(self, **kwargs):
             cap.update(kwargs)
+            cap["calls"].append(kwargs)
+            if seq:
+                return seq.pop(0)
             return response if response is not None else _FakeResponse()
 
     class _FakeAnthropic:
@@ -218,3 +239,84 @@ def test_joke_request_injects_curated_jokes(client, monkeypatch):
     assert "want a joke or something silly" in cap["system"]
     # a real joke from the curated library was injected verbatim (5 are sampled)
     assert any(j in cap["system"] for j in appmod.RICKIE_JOKES)
+
+
+# ── Weather: the first and only tool ─────────────────────────────────────────
+
+def test_weather_success(monkeypatch):
+    """Geocode + forecast resolve to a short, in-character-ready string. No
+    location is stored; the city is whatever was passed in."""
+    def fake_get(url, timeout=6):
+        if "geocoding-api" in url:
+            return {"results": [{"name": "Denver", "admin1": "Colorado",
+                                 "country": "United States",
+                                 "latitude": 39.7, "longitude": -105.0}]}
+        return {"current": {"temperature_2m": 71.6, "weather_code": 0}}
+    monkeypatch.setattr(appmod, "_http_get_json", fake_get)
+    content, is_err = appmod._weather_tool_result("Denver")
+    assert is_err is False
+    assert "Denver, Colorado, United States" in content
+    assert "72°F" in content            # rounded from 71.6
+    assert "clear skies" in content     # WMO code 0
+
+
+def test_weather_unknown_city_is_error(monkeypatch):
+    monkeypatch.setattr(appmod, "_http_get_json", lambda url, timeout=6: {"results": []})
+    content, is_err = appmod._weather_tool_result("Xyzzyville")
+    assert is_err is True
+    assert "Xyzzyville" in content       # so Rickie can ask them to clarify
+
+
+def test_weather_empty_city_is_error():
+    content, is_err = appmod._weather_tool_result("   ")
+    assert is_err is True
+    assert "which city" in content.lower()
+
+
+def test_weather_network_failure_is_error(monkeypatch):
+    def boom(url, timeout=6):
+        raise OSError("network down")
+    monkeypatch.setattr(appmod, "_http_get_json", boom)
+    content, is_err = appmod._weather_tool_result("Denver")
+    assert is_err is True
+    assert "couldn't reach the weather" in content.lower()
+
+
+def test_coach_runs_weather_tool_then_replies(client, monkeypatch):
+    """The bounded tool loop: model asks for get_weather, server runs it, feeds the
+    result back, model replies. Assert the tool was offered, the city was passed
+    through, and the final text reply comes back."""
+    first = _FakeResponse(_tool_use_block("toolu_1", "get_weather", {"city": "Denver"}),
+                          stop_reason="tool_use")
+    second = _FakeResponse(("text", "Denver's sitting at 72 and clear — good day to move."))
+    cap = _install_fake_anthropic(monkeypatch, responses=[first, second])
+
+    seen = {}
+    def fake_weather(city):
+        seen["city"] = city
+        return ("Denver, Colorado, United States: 72°F, clear skies.", False)
+    monkeypatch.setattr(appmod, "_weather_tool_result", fake_weather)
+
+    token = register_and_login(client, "coach_weather")
+    resp = client.post("/api/coach", json={
+        "message": "what's the weather in Denver?", "context": {"type": "general"},
+    }, headers=auth_headers(token))
+    assert resp.status_code == 200
+    assert seen["city"] == "Denver"
+    assert "Denver" in resp.get_json()["reply"]
+    # the weather tool was offered to the model, and two calls were made (ask + reply)
+    assert any(t.get("name") == "get_weather" for t in cap["tools"])
+    assert len(cap["calls"]) == 2
+
+
+def test_coach_offers_weather_tool_on_normal_turn(client, monkeypatch):
+    """Even a plain chat turn passes the tool (the model just won't call it),
+    and a single end_turn response returns without a tool round."""
+    cap = _install_fake_anthropic(monkeypatch)
+    token = register_and_login(client, "coach_notool")
+    resp = client.post("/api/coach", json={
+        "message": "hey Rickie", "context": {"type": "general"},
+    }, headers=auth_headers(token))
+    assert resp.status_code == 200
+    assert any(t.get("name") == "get_weather" for t in cap["tools"])
+    assert len(cap["calls"]) == 1

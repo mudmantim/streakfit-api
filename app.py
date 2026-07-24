@@ -5,6 +5,8 @@ import random
 import string
 import subprocess
 import threading
+import urllib.parse
+import urllib.request
 from datetime import datetime, date, timedelta
 from flask import Flask, request, jsonify, abort
 from flask_sqlalchemy import SQLAlchemy
@@ -3201,6 +3203,115 @@ def _build_rickie_context(user):
     return "\n".join(lines)
 
 
+# ── Weather: Rickie's first and only tool ────────────────────────────────────
+# This exists so Rickie can stay in character when someone asks about the weather,
+# not to be a forecast service. Provider is Open-Meteo (free, no API key). There is
+# NO stored user location — the city must come from the user; if they don't name one,
+# the tool description tells Rickie to ask rather than guess. Every failure path
+# returns is_error so Rickie relays the bad news warmly and never invents a forecast.
+
+_WEATHER_TOOL = {
+    "name": "get_weather",
+    "description": (
+        "Look up the CURRENT weather for a place the user names. Call this only when the "
+        "user asks about weather, temperature, or conditions AND has named a city or place. "
+        "If they ask about the weather without saying where, do NOT call this — ask them "
+        "which city first. There is no saved location; the city must come from the user. "
+        "If the result is an error, pass the bad news along warmly and in character — never "
+        "invent a forecast."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "city": {
+                "type": "string",
+                "description": "City or place the user named, e.g. 'Denver' or 'Paris, France'.",
+            }
+        },
+        "required": ["city"],
+        "additionalProperties": False,
+    },
+}
+
+# WMO weather-code → short human phrase (the common codes; anything else falls back).
+_WMO_WEATHER = {
+    0: "clear skies", 1: "mostly clear", 2: "partly cloudy", 3: "overcast",
+    45: "foggy", 48: "freezing fog",
+    51: "light drizzle", 53: "drizzle", 55: "heavy drizzle",
+    56: "freezing drizzle", 57: "freezing drizzle",
+    61: "light rain", 63: "rain", 65: "heavy rain",
+    66: "freezing rain", 67: "freezing rain",
+    71: "light snow", 73: "snow", 75: "heavy snow", 77: "snow grains",
+    80: "light showers", 81: "showers", 82: "heavy showers",
+    85: "snow showers", 86: "heavy snow showers",
+    95: "thunderstorms", 96: "thunderstorms with hail", 99: "thunderstorms with hail",
+}
+
+
+def _http_get_json(url, timeout=6):
+    """Small dependency-free JSON GET. Raises on network/parse error (caller catches)."""
+    req = urllib.request.Request(url, headers={"User-Agent": "StreakFit-Rickie/1.0"})
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        return json.loads(resp.read().decode("utf-8"))
+
+
+def _weather_tool_result(city):
+    """Resolve current weather for a user-named city via Open-Meteo.
+
+    Returns (content_str, is_error). NEVER raises — every failure becomes a
+    friendly error string Rickie can relay in character. No location is stored
+    or inferred; the city is whatever the user said.
+    """
+    city = (city or "").strip()
+    if not city:
+        return ("No city was given. Ask the user which city they mean.", True)
+    try:
+        geo = _http_get_json(
+            "https://geocoding-api.open-meteo.com/v1/search?"
+            + urllib.parse.urlencode(
+                {"name": city, "count": 1, "language": "en", "format": "json"}
+            )
+        )
+        results = (geo or {}).get("results") or []
+        if not results:
+            return (
+                f"Couldn't find a place called '{city}'. Ask the user to clarify the city.",
+                True,
+            )
+        place = results[0]
+        lat, lon = place.get("latitude"), place.get("longitude")
+        pretty = ", ".join(
+            x for x in (place.get("name"), place.get("admin1"), place.get("country")) if x
+        ) or city
+        wx = _http_get_json(
+            "https://api.open-meteo.com/v1/forecast?"
+            + urllib.parse.urlencode(
+                {
+                    "latitude": lat,
+                    "longitude": lon,
+                    "current": "temperature_2m,weather_code",
+                    "temperature_unit": "fahrenheit",
+                    "wind_speed_unit": "mph",
+                }
+            )
+        )
+        current = (wx or {}).get("current") or {}
+        temp = current.get("temperature_2m")
+        if temp is None:
+            return (
+                f"Weather for {pretty} was unavailable just now. Tell the user to try again later.",
+                True,
+            )
+        condition = _WMO_WEATHER.get(current.get("weather_code"), "unclear skies")
+        return (f"{pretty}: {round(temp)}°F, {condition}.", False)
+    except Exception:
+        return (
+            "The weather lookup failed (network or service issue). Tell the user you "
+            "couldn't reach the weather right now.",
+            True,
+        )
+
+
 @app.route('/api/coach', methods=['POST'])
 @jwt_required()
 @limiter.limit("10 per day")
@@ -3276,19 +3387,45 @@ def coach():
     messages.append({'role': 'user', 'content': message})
 
     try:
-        client   = _anthropic_lib.Anthropic(api_key=_anthropic_api_key)
-        response = client.messages.create(
-            model='claude-sonnet-5',
-            max_tokens=768,
-            # Thinking off on purpose: Rickie is a short, snappy chat coach, and
-            # Sonnet 5 runs adaptive thinking by default when the field is omitted —
-            # which would add latency and spend the small token budget on reasoning
-            # the character doesn't need. Disabling it also keeps content[0] a text
-            # block. If a future capability needs reasoning, turn it on per-path.
-            thinking={"type": "disabled"},
-            system=system,
-            messages=messages
-        )
+        client = _anthropic_lib.Anthropic(api_key=_anthropic_api_key)
+        # Bounded tool-use loop. Rickie has exactly one tool (weather). Almost every
+        # turn is a single call; a weather question adds one round. The cap (initial
+        # call + up to 2 tool rounds) is a hard backstop against any runaway.
+        response = None
+        for _ in range(3):
+            response = client.messages.create(
+                model='claude-sonnet-5',
+                max_tokens=768,
+                # Thinking off on purpose: Rickie is a short, snappy chat coach, and
+                # Sonnet 5 runs adaptive thinking by default when the field is omitted —
+                # which would add latency and spend the small token budget on reasoning
+                # the character doesn't need. If a future capability needs reasoning,
+                # turn it on per-path.
+                thinking={"type": "disabled"},
+                system=system,
+                messages=messages,
+                tools=[_WEATHER_TOOL],
+            )
+            if response.stop_reason != 'tool_use':
+                break
+            # Echo the assistant turn (incl. tool_use blocks), run the tool, feed the
+            # result back. Every failure returns is_error so Rickie declines in character.
+            messages.append({'role': 'assistant', 'content': response.content})
+            tool_results = []
+            for block in response.content:
+                if getattr(block, 'type', None) == 'tool_use' and block.name == 'get_weather':
+                    city = (block.input or {}).get('city', '')
+                    content, is_err = _weather_tool_result(city)
+                    tool_results.append({
+                        'type': 'tool_result',
+                        'tool_use_id': block.id,
+                        'content': content,
+                        'is_error': is_err,
+                    })
+            if not tool_results:
+                break
+            messages.append({'role': 'user', 'content': tool_results})
+
         reply = next((b.text for b in response.content if b.type == 'text'), '')
         return jsonify({"reply": reply}), 200
     except Exception:
