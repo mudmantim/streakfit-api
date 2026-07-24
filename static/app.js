@@ -53,7 +53,17 @@ function _getOrCreatePromptsContainer() {
         el = document.createElement('div');
         el.id = 'retention-prompts';
         var main = document.querySelector('#dashboard-view main');
-        if (main) main.insertBefore(el, main.firstChild);
+        // Place retention prompts BELOW Today's Mission — the mission should
+        // lead the screen; a permission ask never sits on top of it or pushes
+        // it down on load.
+        var missionSection = (document.getElementById('daily-exercises-list') || {}).closest
+            ? document.getElementById('daily-exercises-list').closest('section')
+            : null;
+        if (missionSection) {
+            missionSection.insertAdjacentElement('afterend', el);
+        } else if (main) {
+            main.appendChild(el);
+        }
     }
     return el;
 }
@@ -2453,6 +2463,13 @@ async function loadDailyExercises() {
         list.appendChild(renderDailyExercise(ex));
     });
 
+    // Before completion, tease what's coming so a first-timer knows Insight and
+    // Brain Boost exist — a quiet heads-up, not an unlock. (After 5/5 they're
+    // rendered in full above.)
+    if (daily.completed_count < 5 && (daily.insight || daily.brain_boost)) {
+        list.appendChild(renderNextUpTeaser(daily));
+    }
+
     // Progress text
     var progressText = document.getElementById('daily-progress-text');
     if (progressText) {
@@ -2547,6 +2564,20 @@ function renderGuestCompleteBanner() {
 }
 
 // ── Today's Insight card ──────────────────────────────────────────────────────
+
+// A quiet pre-completion teaser (not the content) so Insight + Brain Boost are
+// discoverable before the mission is finished.
+function renderNextUpTeaser(daily) {
+    var teaser = document.createElement('div');
+    teaser.className = 'next-up-teaser';
+    var bits = [];
+    if (daily.insight) bits.push('today’s Insight ✨');
+    if (daily.brain_boost) bits.push('a Brain Boost 🧠');
+    var p = document.createElement('p');
+    p.textContent = 'After your 5 — ' + bits.join(' and ') + '.';
+    teaser.appendChild(p);
+    return teaser;
+}
 
 function renderInsightCard(insight) {
     var card = document.createElement('div');

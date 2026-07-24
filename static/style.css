@@ -423,10 +423,12 @@ input:focus {
     transition: background .15s;
 }
 
-.skill-select:focus {
+/* Keyboard focus was only a faint opacity change — give the difficulty/Rickie
+   selects a real, visible ring (keyboard users only, via :focus-visible). */
+.skill-select:focus-visible {
     outline: none;
-    background: var(--t-select-bg);
-    opacity: .9;
+    box-shadow: 0 0 0 3px rgba(79, 70, 229, .45);
+    border-color: var(--indigo);
 }
 
 .skill-select option { background: #3730a3; color: #fff; }
@@ -1028,11 +1030,20 @@ input:focus {
     font-size: .78rem;
     color: var(--gray-500);
     cursor: pointer;
-    padding: 0;
+    /* 44px tap target without changing the link's visual weight */
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+    padding: 0 .25rem;
     -webkit-tap-highlight-color: transparent;
 }
 
 .coach-ask-btn:hover { color: var(--t-primary); }
+.coach-ask-btn:focus-visible {
+    outline: 2px solid var(--indigo);
+    outline-offset: 2px;
+    border-radius: 8px;
+}
 
 /* ── Daily exercise rows ──────────────────────────────────────────────────── */
 .daily-exercise-row {
@@ -1079,7 +1090,7 @@ input:focus {
 .btn-coach-link {
     border: none;
     border-radius: 999px;
-    padding: .26rem .62rem;
+    padding: .26rem .72rem;
     font-size: .72rem;
     font-weight: 600;
     cursor: pointer;
@@ -1087,9 +1098,27 @@ input:focus {
     text-decoration: none;
     white-space: nowrap;
     line-height: 1;
+    /* 44px tap target — fits within the 52px exercise row */
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
     transition: background .15s, color .15s;
     -webkit-tap-highlight-color: transparent;
 }
+.btn-how-to:focus-visible,
+.btn-coach-link:focus-visible {
+    outline: 2px solid var(--indigo);
+    outline-offset: 2px;
+}
+
+/* Pre-completion teaser (Insight + Brain Boost discoverability) — quiet. */
+.next-up-teaser {
+    text-align: center;
+    color: var(--gray-500);
+    font-size: .8rem;
+    margin: .9rem 0 .1rem;
+}
+.next-up-teaser p { margin: 0; }
 
 .btn-how-to {
     background: var(--indigo-pale);
