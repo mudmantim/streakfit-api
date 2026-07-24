@@ -3225,12 +3225,18 @@ def coach():
     try:
         client   = _anthropic_lib.Anthropic(api_key=_anthropic_api_key)
         response = client.messages.create(
-            model='claude-haiku-4-5-20251001',
-            max_tokens=512,
+            model='claude-sonnet-5',
+            max_tokens=768,
+            # Thinking off on purpose: Rickie is a short, snappy chat coach, and
+            # Sonnet 5 runs adaptive thinking by default when the field is omitted —
+            # which would add latency and spend the small token budget on reasoning
+            # the character doesn't need. Disabling it also keeps content[0] a text
+            # block. If a future capability needs reasoning, turn it on per-path.
+            thinking={"type": "disabled"},
             system=system,
             messages=messages
         )
-        reply = response.content[0].text
+        reply = next((b.text for b in response.content if b.type == 'text'), '')
         return jsonify({"reply": reply}), 200
     except Exception:
         return jsonify({"error": "coach_unavailable"}), 503
