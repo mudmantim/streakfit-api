@@ -213,13 +213,15 @@ def _rickie_reply(client, system: str, history, message: str) -> str:
 
 JUDGE_SCHEMA = {
     "type": "object",
+    # No minimum/maximum: structured outputs doesn't support numeric range
+    # constraints in json_schema (would 400). The judge instructions state 1-5.
     "properties": {
-        "enjoy_again":      {"type": "integer", "minimum": 1, "maximum": 5},
-        "sounds_like_himself": {"type": "integer", "minimum": 1, "maximum": 5},
-        "listens":          {"type": "integer", "minimum": 1, "maximum": 5},
-        "warm":             {"type": "integer", "minimum": 1, "maximum": 5},
-        "avoids_repetition":{"type": "integer", "minimum": 1, "maximum": 5},
-        "joke_judgment":    {"type": "integer", "minimum": 1, "maximum": 5},
+        "enjoy_again":      {"type": "integer"},
+        "sounds_like_himself": {"type": "integer"},
+        "listens":          {"type": "integer"},
+        "warm":             {"type": "integer"},
+        "avoids_repetition":{"type": "integer"},
+        "joke_judgment":    {"type": "integer"},
         "trust_floor_ok":   {"type": "boolean"},
         "character_break":  {"type": "boolean"},
         "rationale":        {"type": "string"},
