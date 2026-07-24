@@ -1083,6 +1083,15 @@ class AnalyticsEvent(db.Model):
     event_name = db.Column(db.String(64), nullable=False)
     created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
 
+    # This composite index already exists in production (migration
+    # h2j3k4l5m6n7 created it); the model just never declared it. Declaring it
+    # here keeps the model the honest source of truth and makes create_all-built
+    # databases (tests, fresh dev) match the migration chain. No new migration
+    # needed — prod already has it.
+    __table_args__ = (
+        db.Index('ix_analytics_event_name_date', 'event_name', 'created_at'),
+    )
+
 class Challenge(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     title = db.Column(db.String(100), nullable=False)
@@ -3250,18 +3259,50 @@ def internal_error(e):
     return jsonify({"error": "Internal server error"}), 500
 
 
-# --- Startup migration ---
-# Runs flask db upgrade on every startup so Render free tier (no shell access)
-# applies pending migrations automatically. Alembic is idempotent — already-applied
-# migrations are skipped. Safe with multiple gunicorn workers (Alembic uses a DB lock).
+# --- Startup: verify the database is at the expected migration, or refuse to start ---
+# Migrations are NOT run inside the app on every worker boot anymore (that was a
+# silent, error-swallowing auto-migrate that could boot a broken/missing schema
+# into runtime 500s, and raced across gunicorn workers). Instead, migrations run
+# as an explicit deploy step — the Render Start Command is:
+#
+#     flask db upgrade && STREAKFIT_ENFORCE_DB_HEAD=1 gunicorn app:app
+#
+# so the upgrade runs once per deploy and, if it fails, `&&` stops gunicorn from
+# starting (the deploy fails loudly). This block is the backstop: when enabled on
+# the serving process via STREAKFIT_ENFORCE_DB_HEAD=1, it verifies the database is
+# already stamped at the Alembic head and, if not (or the DB is unreachable), logs
+# a fatal message and exits non-zero so the process REFUSES TO START rather than
+# serving requests against a wrong or missing schema. The env-var gate keeps this
+# from firing during `flask db upgrade` itself and during tests/local dev.
 
-with app.app_context():
+def _assert_db_at_head():
+    import logging
+    from alembic.config import Config
+    from alembic.script import ScriptDirectory
+    from alembic.runtime.migration import MigrationContext
+    log = logging.getLogger(__name__)
     try:
-        from flask_migrate import upgrade as _db_upgrade
-        _db_upgrade()
-    except Exception as _e:
-        import logging
-        logging.getLogger(__name__).error('Startup migration failed: %s', _e)
+        cfg = Config()
+        cfg.set_main_option(
+            'script_location',
+            os.path.join(os.path.dirname(os.path.abspath(__file__)), 'migrations'))
+        head = ScriptDirectory.from_config(cfg).get_current_head()
+        with app.app_context():
+            with db.engine.connect() as conn:
+                current = MigrationContext.configure(conn).get_current_revision()
+    except Exception as exc:
+        log.critical('Refusing to start: could not verify database migration state '
+                     '(database unreachable?): %s', exc)
+        raise SystemExit(1)
+    if current != head:
+        log.critical('Refusing to start: database is at Alembic revision %r but the '
+                     'code expects head %r. Run `flask db upgrade`.', current, head)
+        raise SystemExit(1)
+    log.info('Database migration check passed (at head %s).', head)
+
+
+if os.environ.get('STREAKFIT_ENFORCE_DB_HEAD') == '1':
+    _assert_db_at_head()
 
 
 if __name__ == '__main__':
