@@ -2132,6 +2132,26 @@ async function handleRickieModeChange(mode) {
     _updateRickieMoodBadge();
 }
 
+// The mission is the heart of the app — never let it fail silently. Mirrors
+// the Teams error+retry pattern (shared classes, so no new CSS) so a failed or
+// dropped /api/daily shows a real message and a Retry, instead of a blank card
+// or a spinner that never resolves.
+function _renderMissionError(listEl) {
+    listEl.innerHTML = '';
+    var wrap = document.createElement('div');
+    wrap.className = 'teams-error-state mission-error-state';
+    var msg = document.createElement('p');
+    msg.className = 'error';
+    msg.textContent = "Couldn't load today's mission — try again in a moment.";
+    var retry = document.createElement('button');
+    retry.className = 'btn-primary teams-retry-btn';
+    retry.textContent = 'Retry';
+    retry.onclick = loadDailyExercises;
+    wrap.appendChild(msg);
+    wrap.appendChild(retry);
+    listEl.appendChild(wrap);
+}
+
 async function loadDailyExercises() {
     var list = document.getElementById('daily-exercises-list');
     list.innerHTML = '';
@@ -2149,10 +2169,10 @@ async function loadDailyExercises() {
         try {
             guestRes = await fetch('/api/demo/daily');
         } catch (e) {
-            list.innerHTML = '';
+            _renderMissionError(list);
             return;
         }
-        if (!guestRes.ok) { list.innerHTML = ''; return; }
+        if (!guestRes.ok) { _renderMissionError(list); return; }
         daily = await guestRes.json();
         daily.exercises = daily.exercises.map(function (ex) {
             return Object.assign({}, ex, { completed: guestCompleted.has(ex.key) });
@@ -2162,9 +2182,9 @@ async function loadDailyExercises() {
     } else {
         var [result, meResult] = await Promise.all([api('/api/daily'), api('/api/me')]);
         if (meResult && meResult.status === 200) currentUser = meResult.data;
-        if (!result) return;
+        if (!result) { _renderMissionError(list); return; }
         list.innerHTML = '';
-        if (result.status !== 200) return;
+        if (result.status !== 200) { _renderMissionError(list); return; }
         daily = result.data;
     }
 
