@@ -1,4 +1,4 @@
-# StreakFit Engine
+# StreakFit API
 
 A production-ready Flask API built to calculate and track streaks for fitness challenges with millisecond precision. Designed for deployment on Render paired with a PostgreSQL database.
 
@@ -19,3 +19,4 @@ python scripts/verify_all.py https://streakfit.pro
 ```
 
 To iterate on one subsystem while developing, run its module directly, e.g. `python scripts/verification/chat.py`. See `scripts/verification/README.md` for the full module list and what's covered.
+
