@@ -3498,7 +3498,11 @@ def _weather_tool_result(city):
             )
         condition = _WMO_WEATHER.get(current.get("weather_code"), "unclear skies")
         return (f"{pretty}: {round(temp)}°F, {condition}.", False)
-    except Exception:
+    except Exception as exc:
+        # Diagnostic only — behavior and the returned string are unchanged. Logs the
+        # real cause (type + message + traceback) so the prod failure is identifiable.
+        app.logger.warning("weather lookup failed for %r: %s: %s",
+                           city, type(exc).__name__, exc, exc_info=True)
         return (
             "The weather lookup failed (network or service issue). Tell the user you "
             "couldn't reach the weather right now.",
