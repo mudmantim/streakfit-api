@@ -2738,13 +2738,16 @@ def get_team(team_id):
     memberships = db.session.execute(
         db.select(TeamMembership).where(TeamMembership.team_id == team_id)
     ).scalars().all()
+    usernames = _usernames_for_ids(m.user_id for m in memberships)
     members = []
     for m in memberships:
-        member_user = db.session.get(User, m.user_id)
+        uname = usernames.get(m.user_id)
+        if uname is None:
+            continue   # defensive: orphaned membership (user row gone) — skip, don't 500
         members.append({
-            "user_id": member_user.id,
-            "username": member_user.username,
-            "is_creator": member_user.id == team.created_by_user_id,
+            "user_id": m.user_id,
+            "username": uname,
+            "is_creator": m.user_id == team.created_by_user_id,
         })
 
     invite = db.session.execute(
@@ -2954,12 +2957,10 @@ def get_team_moments(team_id):
         .order_by(TeamMoment.occurred_at.desc())
     ).scalars().all()
 
+    usernames = _usernames_for_ids([m.subject_user_id for m in moments])
     result = []
     for m in moments:
-        subject_username = None
-        if m.subject_user_id:
-            subject_user = db.session.get(User, m.subject_user_id)
-            subject_username = subject_user.username if subject_user else None
+        subject_username = usernames.get(m.subject_user_id) if m.subject_user_id else None
         metadata = json.loads(m.moment_metadata) if m.moment_metadata else None
         result.append({
             "moment_type": m.moment_type,
@@ -3010,11 +3011,28 @@ def create_rickie_team_message(team_id, trigger):
     return message
 
 
-def _serialize_team_message(m):
+def _usernames_for_ids(user_ids):
+    """Batch-resolve {user_id: username} in a single query — the fix for the
+    db.session.get(User, id)-in-a-loop N+1 in the team serializers."""
+    ids = {i for i in user_ids if i}
+    if not ids:
+        return {}
+    rows = db.session.execute(
+        db.select(User.id, User.username).where(User.id.in_(ids))
+    ).all()
+    return {rid: uname for rid, uname in rows}
+
+
+def _serialize_team_message(m, usernames=None):
+    """`usernames` is a pre-resolved {id: username} map (batch path, no per-row
+    query). When omitted, falls back to a single lookup for direct/one-off use."""
     sender_username = None
     if m.sender_type == 'user' and m.sender_user_id:
-        sender = db.session.get(User, m.sender_user_id)
-        sender_username = sender.username if sender else None
+        if usernames is not None:
+            sender_username = usernames.get(m.sender_user_id)
+        else:
+            sender = db.session.get(User, m.sender_user_id)
+            sender_username = sender.username if sender else None
     return {
         "sender_type": m.sender_type,
         "sender_username": sender_username,
@@ -3040,7 +3058,10 @@ def get_team_messages(team_id):
         .order_by(TeamMessage.created_at.asc())
     ).scalars().all()
 
-    return jsonify([_serialize_team_message(m) for m in messages]), 200
+    usernames = _usernames_for_ids(
+        m.sender_user_id for m in messages if m.sender_type == 'user'
+    )
+    return jsonify([_serialize_team_message(m, usernames) for m in messages]), 200
 
 
 @app.route('/api/teams/<int:team_id>/messages', methods=['POST'])
@@ -3425,10 +3446,13 @@ def _load_coach_messages(user_id):
     """Load the rolling window as an alternation-safe message list (server is the
     single source of truth for conversation history — the client never supplies
     history that reaches the model)."""
+    # Fetch only the last window (newest-first LIMIT), then restore chronological
+    # order — avoids scanning the user's whole turn history on every coach call.
     rows = (CoachTurn.query.filter_by(user_id=user_id)
-            .order_by(CoachTurn.id.asc()).all())
+            .order_by(CoachTurn.id.desc()).limit(_COACH_MEMORY_WINDOW).all())
+    rows.reverse()
     msgs = []
-    for r in rows[-_COACH_MEMORY_WINDOW:]:
+    for r in rows:
         if r.role not in ('user', 'assistant') or not r.content:
             continue
         if msgs and msgs[-1]['role'] == r.role:
