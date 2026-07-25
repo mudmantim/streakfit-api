@@ -5,8 +5,13 @@ Flask-Limiter==3.5.0
 Flask-Migrate==4.0.5
 SQLAlchemy==2.0.27
 psycopg2-binary==2.9.9
-gunicorn==21.2.0
-Werkzeug==3.0.1
+# gunicorn 23.0.0: fixes CVE-2024-6827 / CVE-2024-1135 (Transfer-Encoding request
+# smuggling) present in 21.2.0. 22.0.0+ is a stricter HTTP parser (rejects malformed
+# framing) — intended hardening; legit traffic unaffected. See docs/operations/reproducibility.md.
+gunicorn==23.0.0
+# Werkzeug 3.0.6: fixes CVE-2024-34069 (debugger RCE, dev-only) + max_form_memory_size
+# DoS + safe_join. Within the 3.0.x line Flask 3.0.2 requires — no API break.
+Werkzeug==3.0.6
 # anthropic: pinned exactly (was `>=0.40.0`, the only floating dep). 0.120.0 is
 # proven against the current code by the passing test suite. Talks to a paid,
 # changing API — a silent SDK bump must not reach prod. See docs/operations/reproducibility.md
