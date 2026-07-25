@@ -1,5 +1,6 @@
 import os
 import hashlib
+import hmac
 import json
 import logging
 import random
@@ -62,6 +63,26 @@ app.config['JWT_ACCESS_TOKEN_EXPIRES'] = timedelta(hours=1)
 # INFO stays quiet in practice; structured "event=... key=value" lines keep them
 # greppable without a logging dependency.
 app.logger.setLevel(logging.INFO)
+
+# Reject oversized request bodies before parsing (all real bodies are tiny — the
+# coach message caps at 500 chars) so a multi-MB POST can't exhaust worker memory.
+app.config['MAX_CONTENT_LENGTH'] = 256 * 1024   # 256 KB
+
+# Fixed dummy hash so login runs a password comparison even when the username
+# doesn't exist — equalizes response time so it can't reveal valid usernames.
+_DUMMY_PW_HASH = generate_password_hash('unused-timing-equalizer', method='pbkdf2:sha256')
+
+
+@app.after_request
+def _security_headers(resp):
+    """Defense-in-depth response headers (no behavior change for API clients)."""
+    resp.headers.setdefault('X-Content-Type-Options', 'nosniff')
+    resp.headers.setdefault('X-Frame-Options', 'DENY')
+    resp.headers.setdefault('Referrer-Policy', 'strict-origin-when-cross-origin')
+    resp.headers.setdefault('Content-Security-Policy', "frame-ancestors 'none'")
+    # Honored by browsers only over HTTPS (Render serves HTTPS); harmless elsewhere.
+    resp.headers.setdefault('Strict-Transport-Security', 'max-age=31536000; includeSubDomains')
+    return resp
 
 _anthropic_api_key = os.environ.get('ANTHROPIC_API_KEY')
 
@@ -1400,7 +1421,9 @@ def _require_admin_secret():
     StreakFit Control (R3.0) adds four more routes needing the same check."""
     secret = request.headers.get('X-Admin-Secret', '')
     env_secret = os.environ.get('ADMIN_SECRET', '')
-    if not env_secret or secret != env_secret:
+    # Constant-time compare so a byte-by-byte timing oracle can't recover the secret.
+    # Still fails closed when ADMIN_SECRET is unset/empty.
+    if not env_secret or not hmac.compare_digest(secret, env_secret):
         abort(403)
 
 
@@ -1889,9 +1912,12 @@ def login():
         return jsonify({"error": "Please enter your username and password."}), 400
 
     user = User.query.filter_by(username=data['username']).first()
-    # Deliberately ambiguous (never reveals whether the username exists) — but
-    # warmer and clearer than the old "Invalid credentials".
-    if not user or not check_password_hash(user.password_hash, data['password']):
+    # Always run a hash comparison — against a fixed dummy when the user doesn't
+    # exist — so response time doesn't reveal whether the username is valid. The
+    # error is deliberately ambiguous (never reveals whether the username exists).
+    pw_ok = check_password_hash(user.password_hash if user else _DUMMY_PW_HASH,
+                                data['password'])
+    if not user or not pw_ok:
         return jsonify({"error": "That username and password don’t match."}), 401
 
     access_token = create_access_token(identity=str(user.id))
