@@ -1,0 +1,11 @@
+# Development / CI dependencies.
+# Install with:  pip install -r requirements-dev.txt   (this pulls in the base set too)
+#
+# Note on current state (documented, not changed): `pytest` currently lives in the
+# base requirements.txt (so prod installs it). It logically belongs here. Moving it
+# would change the deployed image, so it's left in place for now — see
+# docs/operations/reproducibility.md ("deferred: dev/prod dependency split").
+-r requirements.txt
+
+# pytest is already provided by the base file above; listed here for intent only.
+pytest==9.1.1

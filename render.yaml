@@ -1,0 +1,51 @@
+# StreakFit — Render deployment, as code (Blueprint spec).
+#
+# ⚠️ STATUS: PROPOSED / RECONCILE BEFORE ADOPTING.
+# The LIVE production service is currently configured in the Render dashboard, which is the
+# real source of truth today. Committing this file does NOT change the running service —
+# Render only applies a render.yaml when the service is created from / linked to a Blueprint.
+# This file EXISTS so the deploy is reviewable and rebuildable from git; before making it
+# authoritative, diff every field below against the live dashboard and confirm they match.
+# See docs/operations/setup.md → "Production setup" and docs/operations/reproducibility.md.
+#
+# Two things to verify against the live dashboard specifically:
+#   1. Port binding — `gunicorn app:app` (as documented) binds gunicorn's default, not $PORT.
+#      Render web services must listen on $PORT. Confirm the live start command isn't actually
+#      `... gunicorn --bind 0.0.0.0:$PORT app:app`. Do NOT "fix" this here until confirmed —
+#      it would change deploy behavior. Logged in reproducibility.md as an open verification item.
+#   2. Service plan / region / scaling (below are placeholders to confirm).
+
+services:
+  - type: web
+    name: streakfit-api
+    runtime: python
+    region: oregon          # VERIFY against dashboard
+    plan: starter           # VERIFY against dashboard
+    branch: main            # git-linked auto-deploy on push to main
+    # Python version comes from runtime.txt (python-3.12.7) — the single source of truth.
+    # Not duplicated here to avoid drift.
+    buildCommand: pip install -r requirements.txt
+    # Migrations run first (a failure short-circuits via && and gunicorn never starts).
+    # STREAKFIT_ENFORCE_DB_HEAD=1 is set INLINE on gunicorn ONLY — it must NOT be a global
+    # env var, or the boot guard would fire during `flask db upgrade` and deadlock the deploy.
+    startCommand: flask db upgrade && STREAKFIT_ENFORCE_DB_HEAD=1 gunicorn app:app
+    healthCheckPath: /health
+    envVars:
+      # Secrets — set in the dashboard, never committed. `sync: false` = Render won't
+      # manage/overwrite these from the blueprint; they're entered by an operator.
+      - key: DATABASE_URL
+        sync: false
+      - key: SECRET_KEY
+        sync: false
+      - key: JWT_SECRET_KEY
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: ADMIN_SECRET
+        sync: false
+      # Optional: uncomment and point at a Redis instance to make rate limits shared
+      # across workers/instances instead of the per-worker `memory://` default.
+      # - key: RATELIMIT_STORAGE_URI
+      #   sync: false
+    # Single worker today. Scaling out requires shared rate-limit storage + weather-cache
+    # decision first — see docs/operations/production-readiness.md.

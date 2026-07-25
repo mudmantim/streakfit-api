@@ -1,0 +1,51 @@
+name: CI
+
+# Runs the test suite on the SAME Python + pinned dependency set that production uses
+# (runtime.txt = 3.12.7), so CI validates the real deployed stack — not a dev machine's.
+# CI does not touch production; it only gates correctness before a merge/deploy.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    env:
+      # Dummy values only — the app requires these at import; tests use a temp SQLite DB.
+      SECRET_KEY: ci-secret-not-for-production
+      JWT_SECRET_KEY: ci-jwt-secret-not-for-production
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12.7 (matches runtime.txt)
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12.7'
+          cache: pip
+
+      - name: Assert every runtime dependency is pinned (==)
+        run: |
+          unpinned=$(grep -vE '^\s*#|^\s*$' requirements.txt | grep -vE '==' || true)
+          if [ -n "$unpinned" ]; then
+            echo "::error::Unpinned dependency in requirements.txt — every line must use '==':"
+            echo "$unpinned"
+            exit 1
+          fi
+          echo "all runtime dependencies are pinned"
+
+      - name: Install dependencies (base + dev)
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      - name: Run test suite (155 tests, incl. migration-chain integrity)
+        run: pytest tests/ -q
+
+      - name: Verification suite is import-clean (stdlib-only smoke)
+        run: python -c "import scripts.verify_all"

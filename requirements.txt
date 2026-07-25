@@ -7,5 +7,14 @@ SQLAlchemy==2.0.27
 psycopg2-binary==2.9.9
 gunicorn==21.2.0
 Werkzeug==3.0.1
-anthropic>=0.40.0
+# anthropic: pinned exactly (was `>=0.40.0`, the only floating dep). 0.120.0 is
+# proven against the current code by the passing test suite. Talks to a paid,
+# changing API — a silent SDK bump must not reach prod. See docs/operations/reproducibility.md
+# for the one-time reconciliation with prod's actual installed version.
+anthropic==0.120.0
+# alembic: imported at boot by the migration guard; previously only pulled in
+# transitively (unpinned) via Flask-Migrate. Pinned here to make it explicit.
+alembic==1.18.5
+# pytest is a DEV/CI tool (see requirements-dev.txt) but is kept here because prod
+# already installs it; removing it would change the deployed image. Not required at runtime.
 pytest==9.1.1
