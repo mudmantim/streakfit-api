@@ -3445,9 +3445,6 @@ _WMO_WEATHER = {
 def _http_get_json(url, timeout=6):
     """Small dependency-free JSON GET. Raises on network/parse error (caller catches)."""
     req = urllib.request.Request(url, headers={"User-Agent": "StreakFit-Rickie/1.0"})
-    # TEMP [WX-DEBUG]: count/URL/timestamp of each outbound weather request. Remove after diagnosis.
-    app.logger.warning("[WX-DEBUG] outbound GET %s at %s",
-                       url, datetime.utcnow().isoformat() + "Z")
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         return json.loads(resp.read().decode("utf-8"))
 
