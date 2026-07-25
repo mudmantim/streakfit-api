@@ -2,56 +2,45 @@
 """Delete StreakFit smoke-test accounts (username prefix 'qa_smoke_') and their
 dependent rows. DRY RUN by default — pass --execute to actually delete.
 
-Safety guarantees:
-  * EXACT Python prefix match on 'qa_smoke_' — never a SQL LIKE (SQL '_' is a
-    single-char wildcard, which would be a substring match; explicitly avoided).
-  * Each matched username must parse as qa_smoke_<epoch>_<tag>; anything that does
-    not is treated as AMBIGUOUS and aborts the whole run (no partial deletes).
-  * Aborts if any matched account CREATED a Team — tearing a team down would touch
-    other users' data and is out of scope here.
-  * Aborts if the match count exceeds a sanity cap.
-  * Deletion runs in a single transaction (all-or-nothing), then re-queries to
-    confirm zero remain. Touches no migrations and no application behavior.
+Classification:
+  * Any username beginning with the EXACT prefix 'qa_smoke_' is a QA account.
+    (Exact Python prefix match — never a SQL LIKE, whose '_' is a wildcard.)
+  * SAFE to delete: a QA account that owns no team.
+  * BLOCKED (requires manual cleanup): a QA account that created a team — tearing a
+    team down would touch other users' data, so it's left untouched here.
+
+Behavior:
+  * Dry run lists both groups and changes nothing.
+  * --execute deletes ONLY the safe group, in a single all-or-nothing transaction,
+    then re-queries and reports both groups. Blocked accounts are left in place.
+  * Aborts entirely only if the match count exceeds a sanity cap (a matching bug
+    at scale would be dangerous). Touches no migrations and no app behavior.
 
 Run where the target DATABASE_URL is set (e.g. production):
   DATABASE_URL=... SECRET_KEY=... JWT_SECRET_KEY=... python scripts/cleanup_qa_smoke.py            # dry run
-  DATABASE_URL=... SECRET_KEY=... JWT_SECRET_KEY=... python scripts/cleanup_qa_smoke.py --execute  # delete
+  DATABASE_URL=... SECRET_KEY=... JWT_SECRET_KEY=... python scripts/cleanup_qa_smoke.py --execute  # delete safe
 """
 import argparse
-import datetime
 import sys
 
 import app as A
 
 PREFIX = "qa_smoke_"
-SANITY_CAP = 200   # refuse to run if more than this many match — a bug would be scary at scale
+SANITY_CAP = 1000   # refuse to run if more than this many match — a bug would be scary at scale
 
 # Every table that references user.id, as (label, model, fk-attribute).
 _DEPENDENTS = [
-    ("challenge",          A.Challenge,       "user_id"),
-    ("daily_completion",   A.DailyCompletion, "user_id"),
+    ("challenge",          A.Challenge,        "user_id"),
+    ("daily_completion",   A.DailyCompletion,  "user_id"),
     ("brain_boost_answer", A.BrainBoostAnswer, "user_id"),
-    ("progress_event",     A.ProgressEvent,   "user_id"),
-    ("team_membership",    A.TeamMembership,  "user_id"),
-    ("team_message",       A.TeamMessage,     "sender_user_id"),
-    ("team_moment",        A.TeamMoment,      "subject_user_id"),
-    ("coach_turn",         A.CoachTurn,       "user_id"),
-    ("coach_note",         A.CoachNote,       "user_id"),
+    ("progress_event",     A.ProgressEvent,    "user_id"),
+    ("team_membership",    A.TeamMembership,   "user_id"),
+    ("team_message",       A.TeamMessage,      "sender_user_id"),
+    ("team_moment",        A.TeamMoment,       "subject_user_id"),
+    ("coach_turn",         A.CoachTurn,        "user_id"),
+    ("coach_note",         A.CoachNote,        "user_id"),
 ]
-# team.created_by_user_id is handled separately as a HARD STOP (see below).
-
-
-def _created_from_username(username):
-    """qa_smoke_<epoch>_<tag> -> UTC datetime, or None if it doesn't parse (which
-    means the account is NOT a well-formed smoke account and we must not touch it)."""
-    rest = username[len(PREFIX):]
-    epoch = rest.split("_", 1)[0]
-    if not epoch.isdigit():
-        return None
-    try:
-        return datetime.datetime.utcfromtimestamp(int(epoch))
-    except (ValueError, OverflowError, OSError):
-        return None
+# team.created_by_user_id is the one BLOCKER — handled separately.
 
 
 def _matches():
@@ -69,49 +58,42 @@ def _counts(user):
 
 
 def survey():
-    """Return (users, counts_by_id, ok, reasons). ok=False means DO NOT DELETE."""
+    """Return (safe, blocked, counts_by_id). `blocked` is a list of (user, reason).
+    Returns None if the sanity cap is exceeded (hard abort)."""
     users = _matches()
-    reasons = []
-    if not users:
-        return users, {}, True, reasons
     if len(users) > SANITY_CAP:
-        reasons.append(f"{len(users)} matches exceeds sanity cap {SANITY_CAP}")
-        return users, {}, False, reasons
-
-    counts_by_id = {}
-    ok = True
+        return None
+    safe, blocked, counts_by_id = [], [], {}
     for u in users:
         # Belt-and-suspenders: never operate on anything not exactly prefixed.
         if not u.username.startswith(PREFIX):
-            reasons.append(f"id={u.id} '{u.username}' does not match exact prefix")
-            ok = False
             continue
-        counts_by_id[u.id] = _counts(u)
-        if _created_from_username(u.username) is None:
-            reasons.append(f"id={u.id} '{u.username}' has no parseable epoch (ambiguous)")
-            ok = False
-        if counts_by_id[u.id]["team_created"] > 0:
-            reasons.append(f"id={u.id} '{u.username}' created {counts_by_id[u.id]['team_created']} team(s)")
-            ok = False
-    return users, counts_by_id, ok, reasons
+        c = _counts(u)
+        counts_by_id[u.id] = c
+        if c["team_created"] > 0:
+            blocked.append((u, f"owns {c['team_created']} team(s)"))
+        else:
+            safe.append(u)
+    return safe, blocked, counts_by_id
 
 
-def print_survey(users, counts_by_id):
-    print(f"Matched {len(users)} account(s) with exact prefix '{PREFIX}':\n")
-    for u in sorted(users, key=lambda x: x.id):
-        created = _created_from_username(u.username)
-        created_s = (created.isoformat() + "Z") if created else "UNPARSEABLE"
+def _print_group(title, entries, counts_by_id, with_reason=False):
+    print(f"{title}: {len(entries)}")
+    for item in sorted(entries, key=lambda e: (e[0].id if with_reason else e.id)):
+        u = item[0] if with_reason else item
         c = counts_by_id.get(u.id, {})
         dep = ", ".join(f"{k}={v}" for k, v in c.items() if v) or "(no dependent rows)"
-        print(f"  id={u.id:<6} {u.username:<36} created={created_s}")
-        print(f"           dependents: {dep}")
+        line = f"  id={u.id:<6} {u.username:<40} {dep}"
+        if with_reason:
+            line += f"   ⚠ {item[1]}"
+        print(line)
 
 
-def execute(users, counts_by_id):
+def execute(safe, counts_by_id):
     total_dep = 0
     per_table = {label: 0 for label, _m, _a in _DEPENDENTS}
     try:
-        for u in users:
+        for u in safe:
             for label, model, attr in _DEPENDENTS:
                 n = model.query.filter(getattr(model, attr) == u.id).delete(synchronize_session=False)
                 per_table[label] += n
@@ -122,43 +104,56 @@ def execute(users, counts_by_id):
         A.db.session.rollback()
         print("ERROR during deletion — rolled back, nothing deleted.")
         raise
-
-    print(f"\nDELETED {len(users)} account(s) and {total_dep} dependent row(s).")
-    print("  by table: " + ", ".join(f"{k}={v}" for k, v in per_table.items() if v) or "  (none)")
-    remaining = _matches()
-    if remaining:
-        print(f"\n✗ {len(remaining)} qa_smoke_ account(s) STILL PRESENT: "
-              + ", ".join(x.username for x in remaining))
-        sys.exit(3)
-    print("\n✓ Re-query confirms zero qa_smoke_ accounts remain.")
+    print(f"\nDELETED {len(safe)} safe account(s) and {total_dep} dependent row(s).")
+    by = ", ".join(f"{k}={v}" for k, v in per_table.items() if v)
+    print("  by table: " + (by or "(none)"))
 
 
 def main():
-    ap = argparse.ArgumentParser(description="Delete qa_smoke_ smoke-test accounts")
+    ap = argparse.ArgumentParser(description="Delete safe qa_smoke_ smoke-test accounts")
     ap.add_argument("--execute", action="store_true",
-                    help="actually delete (default is a dry run that changes nothing)")
+                    help="actually delete the SAFE group (default is a dry run that changes nothing)")
     args = ap.parse_args()
 
     with A.app.app_context():
-        users, counts_by_id, ok, reasons = survey()
-        if not users:
-            print("No qa_smoke_ accounts found. Nothing to do.")
+        result = survey()
+        if result is None:
+            print(f"ABORT: more than {SANITY_CAP} '{PREFIX}' accounts matched. "
+                  "That's unexpected — investigate before running any deletion.")
+            sys.exit(2)
+        safe, blocked, counts_by_id = result
+
+        if not safe and not blocked:
+            print(f"No '{PREFIX}' accounts found. Nothing to do.")
             return
+
         mode = "EXECUTE" if args.execute else "DRY RUN (no changes)"
         print(f"=== {mode} ===\n")
-        print_survey(users, counts_by_id)
-        if not ok:
-            print("\nABORT — not safe to delete:")
-            for r in reasons:
-                print(f"  - {r}")
-            print("Resolve the flagged accounts manually; no deletion performed.")
-            sys.exit(2)
-        print(f"\nAll {len(users)} match the exact prefix, parse as synthetic "
-              f"qa_smoke_<epoch>_<tag>, and created no teams — clearly smoke accounts.")
-        if args.execute:
-            execute(users, counts_by_id)
+        _print_group("SAFE TO DELETE NOW", safe, counts_by_id)
+        print()
+        _print_group("REQUIRES MANUAL CLEANUP (team owners or other blockers)",
+                     blocked, counts_by_id, with_reason=True)
+
+        if not args.execute:
+            print(f"\nDry run only. {len(safe)} safe, {len(blocked)} blocked. "
+                  "Re-run with --execute to delete the safe group.")
+            return
+
+        if not safe:
+            print("\nNothing in the safe group to delete.")
         else:
-            print("\nDry run only. Re-run with --execute to delete.")
+            execute(safe, counts_by_id)
+
+        # Re-query: safe group should be gone; blocked accounts remain by design.
+        remaining = _matches()
+        blocked_ids = {u.id for u, _r in blocked}
+        stray = [u for u in remaining if u.id not in blocked_ids]
+        if stray:
+            print(f"\n✗ {len(stray)} supposedly-deleted account(s) STILL PRESENT: "
+                  + ", ".join(u.username for u in stray))
+            sys.exit(3)
+        print(f"\n✓ Re-query: 0 safe qa_smoke_ accounts remain. "
+              f"{len(remaining)} blocked account(s) left untouched (manual cleanup).")
 
 
 if __name__ == "__main__":
