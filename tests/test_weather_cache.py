@@ -82,3 +82,43 @@ def test_provider_failure_still_degrades_safely(monkeypatch):
     assert "couldn't reach the weather" in content.lower()
     # a failed lookup caches nothing
     assert not appmod._GEOCODE_CACHE and not appmod._FORECAST_CACHE
+
+
+# ── Bounded cache size + eviction ────────────────────────────────────────────
+
+def test_cache_size_is_capped_and_evicts_oldest(monkeypatch):
+    monkeypatch.setattr(appmod, "_CACHE_MAX_ENTRIES", 3)
+    c = {}
+    for i in range(3):
+        appmod._cache_put(c, f"k{i}", i, appmod._FORECAST_TTL)
+    assert len(c) == 3
+    # a 4th distinct entry (none expired) evicts the oldest-inserted (k0)
+    appmod._cache_put(c, "k3", 3, appmod._FORECAST_TTL)
+    assert len(c) == 3
+    assert "k0" not in c and "k3" in c
+
+
+def test_cache_evicts_expired_before_oldest(monkeypatch):
+    monkeypatch.setattr(appmod, "_CACHE_MAX_ENTRIES", 3)
+    c = {}
+    for i in range(3):
+        appmod._cache_put(c, f"k{i}", i, appmod._FORECAST_TTL)
+    # expire a MIDDLE entry (k1), not the oldest
+    v, _exp = c["k1"]
+    c["k1"] = (v, appmod.datetime.utcnow() - appmod.timedelta(seconds=1))
+    appmod._cache_put(c, "k3", 3, appmod._FORECAST_TTL)
+    assert len(c) == 3
+    assert "k1" not in c              # the expired entry is evicted first...
+    assert "k0" in c and "k3" in c    # ...so the oldest-but-valid entry survives
+
+
+def test_cache_put_refresh_does_not_evict(monkeypatch):
+    monkeypatch.setattr(appmod, "_CACHE_MAX_ENTRIES", 3)
+    c = {}
+    for i in range(3):
+        appmod._cache_put(c, f"k{i}", i, appmod._FORECAST_TTL)
+    # re-putting an existing key updates in place — no eviction, nothing dropped
+    appmod._cache_put(c, "k0", 99, appmod._FORECAST_TTL)
+    assert len(c) == 3
+    assert set(c) == {"k0", "k1", "k2"}
+    assert appmod._cache_get(c, "k0") == 99

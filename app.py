@@ -3451,6 +3451,7 @@ _GEOCODE_CACHE = {}    # normalized city name -> place dict
 _FORECAST_CACHE = {}   # (lat, lon) -> current-weather dict
 _GEOCODE_TTL = timedelta(days=30)
 _FORECAST_TTL = timedelta(minutes=10)
+_CACHE_MAX_ENTRIES = 512   # hard cap per cache — keeps memory bounded
 
 
 def _cache_get(cache, key):
@@ -3464,7 +3465,23 @@ def _cache_get(cache, key):
     return value
 
 
+def _cache_evict_one(cache):
+    """Make room for one new entry: drop the oldest EXPIRED entry if there is one
+    (dicts preserve insertion order, so the first expired entry is the oldest one),
+    otherwise drop the oldest entry outright."""
+    now = datetime.utcnow()
+    for k, (_value, expires_at) in cache.items():
+        if now >= expires_at:
+            del cache[k]
+            return
+    oldest = next(iter(cache), None)
+    if oldest is not None:
+        del cache[oldest]
+
+
 def _cache_put(cache, key, value, ttl):
+    if key not in cache and len(cache) >= _CACHE_MAX_ENTRIES:
+        _cache_evict_one(cache)
     cache[key] = (value, datetime.utcnow() + ttl)
 
 
