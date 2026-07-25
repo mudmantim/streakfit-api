@@ -44,11 +44,23 @@ table has `ON DELETE CASCADE` (see *Deletion* — cleanup is explicit).
    his own recent replies).
 4. **Call Sonnet 5** in a bounded tool-use loop (initial call + up to 2 tool
    rounds) with the single `get_weather` tool (see *Weather*).
-5. **Persist** (only on a non-empty reply; wrapped so a memory hiccup never takes
-   the reply down):
-   - `_record_coach_exchange(user_id, message, reply)` — store the user turn + the
-     final text reply (never tool scaffolding), then prune to the last 10.
-   - `_update_coach_note(user_id, message)` — deterministic extraction (below).
+5. **Persist** — one **atomic transaction** via
+   `_persist_coach_interaction(user_id, message, reply)` (only on a non-empty
+   reply; the whole call is wrapped so a memory hiccup never takes the reply down).
+   In a single `db.session.commit()` with `rollback()`+reraise on failure, it:
+   - stages the user turn + the final text reply (never tool scaffolding) and
+     prunes to the last 10 turns (`_stage_coach_exchange`, flush-only);
+   - runs deterministic Coach Notes extraction on the user message (below) and, if
+     any facts matched, stages them (`_stage_coach_note`).
+
+   Extraction failure is **swallowed** (the turns still save); a DB/commit failure
+   is **not** — it rolls back *both* the turns and the note, so no partial state is
+   ever left behind (no turns-without-note, no duplicate turns).
+
+   > The older `_record_coach_exchange` / `_update_coach_note` helpers still exist
+   > but are now **self-committing wrappers for CLI/test use only** — the request
+   > path uses the atomic `_persist_coach_interaction`. See
+   > [ADR-0004](adrs/0004-atomic-coach-persistence.md).
 
 ---
 
@@ -58,7 +70,7 @@ table has `ON DELETE CASCADE` (see *Deletion* — cleanup is explicit).
 only** — never on Rickie's output, never inferred. Patterns (see
 `_GOAL_PATTERNS` / `_PREFERENCE_PATTERNS` / `_NOTE_PATTERNS`):
 
-- **goals**: `my goal is …`, `I'm training for …`, `I want to be able to …`
+- **goals**: `my goal is …`, `I'm training for …`, `I want to be able to …`, `I'd like to be able to …`
 - **preferences**: `I prefer …`, `I'd rather …`
 - **notes**: `remember that …`, `just so you know …`
 
@@ -139,8 +151,10 @@ prefix match (never a SQL `LIKE`). Run where the target `DATABASE_URL` is set.
 
 | Concern | Functions (`app.py`) |
 |---|---|
-| History load / save / prune | `_load_coach_messages`, `_record_coach_exchange` |
-| Coach Notes | `_coach_note_extract`, `_merge_note_list`, `_update_coach_note`, `_load_coach_note_block` |
+| Atomic persist (request path) | `_persist_coach_interaction`, `_stage_coach_exchange`, `_stage_coach_note` |
+| History load / prune | `_load_coach_messages`, `_stage_coach_exchange` |
+| Coach Notes | `_coach_note_extract`, `_merge_note_list`, `_get_or_create_coach_note`, `_load_coach_note_block` |
+| CLI/test-only wrappers | `_record_coach_exchange`, `_update_coach_note` |
 | Deletion | `_forget_coach_memory`, route `forget_coach_memory` |
 | Weather | `_WEATHER_TOOL`, `_geocode_city`, `_forecast`, `_weather_tool_result`, `_http_get_json` |
 | Cache | `_cache_get`, `_cache_put`, `_cache_evict_one` |
