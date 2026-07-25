@@ -215,3 +215,37 @@ def test_load_coach_messages_is_alternation_safe_windowed_and_capped(app):
     for a, b in zip(msgs, msgs[1:]):
         assert a["role"] != b["role"]                      # strict alternation
     assert all(len(m["content"]) <= appmod._COACH_TURN_PROMPT_LEN for m in msgs)  # capped
+
+
+# ── WS2: CoachNote first-write concurrency ───────────────────────────────────
+
+def test_coach_note_first_write_race_recovers_no_duplicate(app, monkeypatch):
+    """Simulate the race: a concurrent request already inserted the first CoachNote,
+    but our existence check missed it. _get_or_create must hit the unique constraint,
+    recover the existing row via the savepoint + IntegrityError path, and NOT create a
+    duplicate or raise."""
+    u = _make_user("race_user")
+    db.session.add(CoachNote(user_id=u.id, goals='[]', preferences='[]', notes='[]'))
+    db.session.commit()
+
+    real_find = appmod._find_coach_note
+    missed = {"done": False}
+    def flaky_find(uid):
+        if not missed["done"]:          # first lookup "misses" (the race window)
+            missed["done"] = True
+            return None
+        return real_find(uid)
+    monkeypatch.setattr(appmod, "_find_coach_note", flaky_find)
+
+    note = appmod._get_or_create_coach_note(u.id)
+    assert note is not None                                       # recovered the row
+    assert CoachNote.query.filter_by(user_id=u.id).count() == 1   # no duplicate
+
+
+def test_get_or_create_returns_existing_without_savepoint(app):
+    u = _make_user("existing_note")
+    db.session.add(CoachNote(user_id=u.id, goals='["x"]', preferences='[]', notes='[]'))
+    db.session.commit()
+    note = appmod._get_or_create_coach_note(u.id)
+    assert json.loads(note.goals) == ["x"]
+    assert CoachNote.query.filter_by(user_id=u.id).count() == 1

@@ -3325,19 +3325,48 @@ def _merge_note_list(existing, new):
     return out[-_COACH_NOTE_MAX_ITEMS:]
 
 
-def _update_coach_note(user_id, message):
-    """Deterministically fold any explicit facts from the user's message into
-    their Coach Notes. No-op when nothing factual was stated."""
-    facts = _coach_note_extract(message)
-    if not any(facts.values()):
-        return
-    note = CoachNote.query.filter_by(user_id=user_id).first()
-    if note is None:
-        note = CoachNote(user_id=user_id, goals='[]', preferences='[]', notes='[]')
-        db.session.add(note)
+def _find_coach_note(user_id):
+    return CoachNote.query.filter_by(user_id=user_id).first()
+
+
+def _get_or_create_coach_note(user_id):
+    """Return the user's CoachNote, creating it if absent — concurrency-safe against
+    the first-write race. Two requests can both find no row and try to insert; the
+    unique(user_id) constraint lets exactly one win, and the loser recovers the
+    winner's row instead of failing. A SAVEPOINT (begin_nested) keeps the
+    IntegrityError from poisoning the surrounding transaction. Never duplicates."""
+    note = _find_coach_note(user_id)
+    if note is not None:
+        return note
+    try:
+        with db.session.begin_nested():   # SAVEPOINT — rolled back on conflict
+            note = CoachNote(user_id=user_id, goals='[]', preferences='[]', notes='[]')
+            db.session.add(note)
+        return note
+    except IntegrityError:
+        # A concurrent request created it first — recover their row, don't fail.
+        return _find_coach_note(user_id)
+
+
+def _stage_coach_note(user_id, facts):
+    """Merge pre-extracted facts into the user's Coach Notes. STAGES only (flush) —
+    the caller owns the commit."""
+    note = _get_or_create_coach_note(user_id)
     for key, _patterns in _COACH_NOTE_CATEGORIES:
         merged = _merge_note_list(_json_list(getattr(note, key)), facts[key])
         setattr(note, key, json.dumps(merged))
+    db.session.flush()
+
+
+def _update_coach_note(user_id, message):
+    """Extract explicit facts from the user's message and persist them. No-op when
+    nothing factual was stated. Self-committing convenience wrapper for direct/CLI/
+    test use; the coach request path uses _persist_coach_interaction for one atomic
+    transaction instead."""
+    facts = _coach_note_extract(message)
+    if not any(facts.values()):
+        return
+    _stage_coach_note(user_id, facts)
     db.session.commit()
     app.logger.info("event=coach_note_extract user_id=%s goals=%d prefs=%d notes=%d",
                     user_id, len(facts['goals']), len(facts['preferences']), len(facts['notes']))
