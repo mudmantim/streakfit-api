@@ -1377,9 +1377,7 @@ def service_worker():
 
 @app.route('/health', methods=['GET'])
 def health():
-    # TEMP: weather_provider_calls exposed for post-deploy cache verification (counts
-    # real outbound calls to Open-Meteo). Remove once prod cache counts are confirmed.
-    return jsonify({"status": "ok", "weather_provider_calls": _weather_provider_calls}), 200
+    return jsonify({"status": "ok"}), 200
 
 
 # --- Admin ---
@@ -3454,10 +3452,6 @@ _FORECAST_CACHE = {}   # (lat, lon) -> current-weather dict
 _GEOCODE_TTL = timedelta(days=30)
 _FORECAST_TTL = timedelta(minutes=10)
 
-# TEMP diagnostic: counts real outbound provider calls, exposed on /health for the
-# post-deploy cache verification. Remove once prod counts are confirmed.
-_weather_provider_calls = 0
-
 
 def _cache_get(cache, key):
     entry = cache.get(key)
@@ -3476,8 +3470,6 @@ def _cache_put(cache, key, value, ttl):
 
 def _http_get_json(url, timeout=6):
     """Small dependency-free JSON GET. Raises on network/parse error (caller catches)."""
-    global _weather_provider_calls
-    _weather_provider_calls += 1
     req = urllib.request.Request(url, headers={"User-Agent": "StreakFit-Rickie/1.0"})
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         return json.loads(resp.read().decode("utf-8"))

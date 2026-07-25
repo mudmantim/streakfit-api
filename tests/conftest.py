@@ -63,5 +63,4 @@ def _clear_weather_caches():
     import app as _app
     _app._GEOCODE_CACHE.clear()
     _app._FORECAST_CACHE.clear()
-    _app._weather_provider_calls = 0
     yield
