@@ -34,38 +34,17 @@ import app as A
 PREFIX = "qa_smoke_"
 SANITY_CAP = 1000   # refuse to run if more than this many match — a bug would be scary at scale
 
-# Every table that references user.id, as (label, model, fk-attribute).
-_DEPENDENTS = [
-    ("challenge",          A.Challenge,        "user_id"),
-    ("daily_completion",   A.DailyCompletion,  "user_id"),
-    ("brain_boost_answer", A.BrainBoostAnswer, "user_id"),
-    ("progress_event",     A.ProgressEvent,    "user_id"),
-    ("team_membership",    A.TeamMembership,   "user_id"),
-    ("team_message",       A.TeamMessage,      "sender_user_id"),
-    ("team_moment",        A.TeamMoment,       "subject_user_id"),
-    ("coach_turn",         A.CoachTurn,        "user_id"),
-    ("coach_note",         A.CoachNote,        "user_id"),
-]
-# team.created_by_user_id is the one BLOCKER — handled separately.
-
-
 def _matches():
     """Fetch ALL users and filter in Python with an exact prefix — deliberately no
     SQL LIKE, so there is zero chance of a wildcard/substring match."""
     return [u for u in A.User.query.all() if u.username.startswith(PREFIX)]
 
 
-def _counts(user):
-    counts = {}
-    for label, model, attr in _DEPENDENTS:
-        counts[label] = model.query.filter(getattr(model, attr) == user.id).count()
-    counts["team_created"] = A.Team.query.filter(A.Team.created_by_user_id == user.id).count()
-    return counts
-
-
 def survey():
     """Return (safe, blocked, counts_by_id). `blocked` is a list of (user, reason).
-    Returns None if the sanity cap is exceeded (hard abort)."""
+    Returns None if the sanity cap is exceeded (hard abort). Dependency counts and
+    the team-owner blocker come from the app's account-deletion service — this
+    script no longer maintains its own deletion/counting logic."""
     users = _matches()
     if len(users) > SANITY_CAP:
         return None
@@ -74,10 +53,10 @@ def survey():
         # Belt-and-suspenders: never operate on anything not exactly prefixed.
         if not u.username.startswith(PREFIX):
             continue
-        c = _counts(u)
+        c = A._account_dependent_counts(u.id)
         counts_by_id[u.id] = c
-        if c["team_created"] > 0:
-            blocked.append((u, f"owns {c['team_created']} team(s)"))
+        if c["team_owned"] > 0:
+            blocked.append((u, f"owns {c['team_owned']} team(s)"))
         else:
             safe.append(u)
     return safe, blocked, counts_by_id
@@ -96,23 +75,18 @@ def _print_group(title, entries, counts_by_id, with_reason=False):
 
 
 def execute(safe, counts_by_id):
-    total_dep = 0
-    per_table = {label: 0 for label, _m, _a in _DEPENDENTS}
-    try:
-        for u in safe:
-            for label, model, attr in _DEPENDENTS:
-                n = model.query.filter(getattr(model, attr) == u.id).delete(synchronize_session=False)
-                per_table[label] += n
-                total_dep += n
-            A.db.session.delete(u)
-        A.db.session.commit()
-    except Exception:
-        A.db.session.rollback()
-        print("ERROR during deletion — rolled back, nothing deleted.")
-        raise
-    print(f"\nDELETED {len(safe)} safe account(s) and {total_dep} dependent row(s).")
-    by = ", ".join(f"{k}={v}" for k, v in per_table.items() if v)
-    print("  by table: " + (by or "(none)"))
+    """Delete each safe account via the app's account-deletion service (one
+    transaction per account, shared team data preserved). Safe accounts own no
+    team, so none will be blocked."""
+    deleted = 0
+    for u in safe:
+        report = A.delete_user_account(u.id, dry_run=False)
+        if report.get("executed"):
+            deleted += 1
+        elif report.get("blocked"):
+            print(f"  SKIPPED id={u.id} {u.username}: {', '.join(report['blockers'])}")
+    print(f"\nDELETED {deleted} safe account(s) via delete_user_account "
+          f"(private data removed; shared team messages/moments preserved).")
 
 
 def main():

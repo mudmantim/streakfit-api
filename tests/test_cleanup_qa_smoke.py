@@ -33,7 +33,7 @@ def test_survey_splits_safe_and_blocked(app):
     safe, blocked, counts = C.survey()
     assert {u.username for u in safe} == {"qa_smoke_1_a"}
     assert [u.username for u, _r in blocked] == ["qa_smoke_owner_x"]
-    assert counts[owner.id]["team_created"] == 1
+    assert counts[owner.id]["team_owned"] == 1
 
 
 def test_survey_counts_dependents(app):

@@ -3527,6 +3527,89 @@ def _forget_coach_memory(user_id):
     db.session.commit()
 
 
+# ── Account deletion service ─────────────────────────────────────────────────
+# Reusable, transactional deletion of a user and their PRIVATE data. Shared team
+# data authored by / about the user (team messages, team moments) is preserved by
+# nulling the author/subject link, not deleted. Team OWNERSHIP is a hard blocker
+# (teams are shared; tearing one down affects other members) unless an explicit
+# policy is supplied. Reusable by scripts (cleanup_qa_smoke) and a future endpoint.
+
+# Private, user-owned rows — deleted outright when the account is deleted.
+_USER_PRIVATE_DELETES = [
+    ("challenge",          Challenge,        "user_id"),
+    ("daily_completion",   DailyCompletion,  "user_id"),
+    ("brain_boost_answer", BrainBoostAnswer, "user_id"),
+    ("progress_event",     ProgressEvent,    "user_id"),
+    ("team_membership",    TeamMembership,   "user_id"),
+    ("coach_turn",         CoachTurn,        "user_id"),
+    ("coach_note",         CoachNote,        "user_id"),
+]
+
+
+def _account_dependent_counts(user_id):
+    """Everything a deletion of this user would touch, by table (read-only)."""
+    counts = {}
+    for label, model, attr in _USER_PRIVATE_DELETES:
+        counts[label] = model.query.filter(getattr(model, attr) == user_id).count()
+    counts["team_message_authored"] = TeamMessage.query.filter(
+        TeamMessage.sender_user_id == user_id).count()
+    counts["team_moment_subject"] = TeamMoment.query.filter(
+        TeamMoment.subject_user_id == user_id).count()
+    counts["team_owned"] = Team.query.filter(Team.created_by_user_id == user_id).count()
+    return counts
+
+
+def delete_user_account(user_id, allow_team_owner=False, dry_run=True):
+    """Delete a user and their private data in ONE transaction, preserving shared
+    team data. Returns a report dict:
+        {user_id, found, username, counts, blocked, blockers, dry_run, executed}
+
+    - dry_run=True (default) changes nothing — just reports the plan.
+    - Team ownership BLOCKS deletion unless allow_team_owner=True is passed as an
+      explicit policy (and the caller has already dealt with the owned teams — this
+      service never tears down a shared team on its own).
+    - Private rows (challenges, completions, brain-boost, progress, memberships,
+      coach turns/notes) are deleted; team messages authored by / moments about the
+      user have their sender/subject link SET NULL so the shared record survives.
+    - Any DB failure rolls the whole thing back and re-raises (no partial state).
+    """
+    user = db.session.get(User, user_id)
+    if user is None:
+        return {"user_id": user_id, "found": False, "blocked": False,
+                "blockers": [], "dry_run": dry_run, "executed": False, "counts": {}}
+
+    counts = _account_dependent_counts(user_id)
+    blockers = []
+    if counts["team_owned"] > 0 and not allow_team_owner:
+        blockers.append(f"owns {counts['team_owned']} team(s) — supply an explicit "
+                        "team-owner policy to delete")
+
+    report = {"user_id": user_id, "found": True, "username": user.username,
+              "counts": counts, "blocked": bool(blockers), "blockers": blockers,
+              "dry_run": dry_run, "executed": False}
+    if dry_run or blockers:
+        return report
+
+    try:
+        # Preserve shared team data: keep the message/moment, drop the author link.
+        TeamMessage.query.filter(TeamMessage.sender_user_id == user_id).update(
+            {TeamMessage.sender_user_id: None}, synchronize_session=False)
+        TeamMoment.query.filter(TeamMoment.subject_user_id == user_id).update(
+            {TeamMoment.subject_user_id: None}, synchronize_session=False)
+        # Delete private data, then the user.
+        for _label, model, attr in _USER_PRIVATE_DELETES:
+            model.query.filter(getattr(model, attr) == user_id).delete(synchronize_session=False)
+        db.session.delete(user)
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+        raise
+
+    report["executed"] = True
+    app.logger.info("event=account_deleted user_id=%s", user_id)
+    return report
+
+
 # ── Weather: Rickie's first and only tool ────────────────────────────────────
 # This exists so Rickie can stay in character when someone asks about the weather,
 # not to be a forecast service. Provider is Open-Meteo (free, no API key). There is
