@@ -191,3 +191,27 @@ def test_coach_call_persists_exchange_and_extracts_note(client, monkeypatch):
     assert resp.status_code == 200
     assert CoachTurn.query.filter_by(user_id=uid).count() == 2   # user + assistant
     assert json.loads(CoachNote.query.filter_by(user_id=uid).first().goals) == ["run a 5k"]
+
+
+# ── Extraction across sentences + history loader shape ───────────────────────
+
+def test_extract_multiple_categories_across_sentences():
+    facts = appmod._coach_note_extract("My goal is to run a 5k. I prefer mornings.")
+    assert facts["goals"] == ["run a 5k"]         # stops at the sentence boundary
+    assert facts["preferences"] == ["mornings"]
+
+
+def test_load_coach_messages_is_alternation_safe_windowed_and_capped(app):
+    u = _make_user("history_shape")
+    db.session.add(CoachTurn(user_id=u.id, role="assistant", content="lead"))  # leading -> dropped
+    for i in range(11):   # 22 more turns, well over the 10 window
+        db.session.add(CoachTurn(user_id=u.id, role="user", content=f"u{i}"))
+        db.session.add(CoachTurn(user_id=u.id, role="assistant", content="x" * 900))  # long -> capped
+    db.session.commit()
+
+    msgs = appmod._load_coach_messages(u.id)
+    assert len(msgs) <= appmod._COACH_MEMORY_WINDOW
+    assert msgs[0]["role"] == "user"                       # leading assistant dropped
+    for a, b in zip(msgs, msgs[1:]):
+        assert a["role"] != b["role"]                      # strict alternation
+    assert all(len(m["content"]) <= appmod._COACH_TURN_PROMPT_LEN for m in msgs)  # capped

@@ -122,3 +122,19 @@ def test_cache_put_refresh_does_not_evict(monkeypatch):
     assert len(c) == 3
     assert set(c) == {"k0", "k1", "k2"}
     assert appmod._cache_get(c, "k0") == 99
+
+
+def test_cache_get_expired_returns_none_and_evicts():
+    c = {}
+    appmod._cache_put(c, "k", "v", appmod._FORECAST_TTL)
+    val, _exp = c["k"]
+    c["k"] = (val, appmod.datetime.utcnow() - appmod.timedelta(seconds=1))  # force-expire
+    assert appmod._cache_get(c, "k") is None   # miss on expiry...
+    assert "k" not in c                          # ...and the stale entry is dropped
+
+
+def test_geocode_cache_key_is_normalized(monkeypatch):
+    calls = _install_counting_http(monkeypatch)
+    appmod._weather_tool_result("  DENVER  ")   # spacing + casing
+    appmod._weather_tool_result("denver")       # normalizes to the same cache key
+    assert calls["geocode"] == 1                 # second lookup was a cache hit
