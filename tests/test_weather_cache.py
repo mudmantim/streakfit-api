@@ -138,3 +138,37 @@ def test_geocode_cache_key_is_normalized(monkeypatch):
     appmod._weather_tool_result("  DENVER  ")   # spacing + casing
     appmod._weather_tool_result("denver")       # normalizes to the same cache key
     assert calls["geocode"] == 1                 # second lookup was a cache hit
+
+
+def test_cache_thread_safe_under_simultaneous_misses(monkeypatch):
+    """10 threads all miss on the same city at once. The lock must keep the cache
+    consistent — no corruption, no duplicate entries — and every caller must get a
+    successful result."""
+    import threading
+    import time
+
+    def slow_http(url, timeout=6):
+        time.sleep(0.01)   # widen the race window
+        if "geocoding-api" in url:
+            return {"results": [{"name": "Denver", "admin1": "CO", "country": "US",
+                                 "latitude": 39.7, "longitude": -104.9}]}
+        return {"current": {"temperature_2m": 70, "weather_code": 0}}
+
+    monkeypatch.setattr(appmod, "_http_get_json", slow_http)
+    appmod._GEOCODE_CACHE.clear()
+    appmod._FORECAST_CACHE.clear()
+
+    results = []
+    def worker():
+        results.append(appmod._weather_tool_result("Denver"))
+
+    threads = [threading.Thread(target=worker) for _ in range(10)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert len(results) == 10
+    assert all(not is_err for _content, is_err in results)   # all succeeded
+    assert len(appmod._GEOCODE_CACHE) == 1                    # one entry, not corrupted/duplicated
+    assert len(appmod._FORECAST_CACHE) == 1

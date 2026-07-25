@@ -3582,23 +3582,25 @@ _FORECAST_CACHE = {}   # (lat, lon) -> current-weather dict
 _GEOCODE_TTL = timedelta(days=30)
 _FORECAST_TTL = timedelta(minutes=10)
 _CACHE_MAX_ENTRIES = 512   # hard cap per cache — keeps memory bounded
+_CACHE_LOCK = threading.Lock()   # guards all cache reads/writes (threaded-worker safe)
 
 
 def _cache_get(cache, key):
-    entry = cache.get(key)
-    if entry is None:
-        return None
-    value, expires_at = entry
-    if datetime.utcnow() >= expires_at:
-        cache.pop(key, None)
-        return None
-    return value
+    with _CACHE_LOCK:
+        entry = cache.get(key)
+        if entry is None:
+            return None
+        value, expires_at = entry
+        if datetime.utcnow() >= expires_at:
+            cache.pop(key, None)
+            return None
+        return value
 
 
 def _cache_evict_one(cache):
     """Make room for one new entry: drop the oldest EXPIRED entry if there is one
     (dicts preserve insertion order, so the first expired entry is the oldest one),
-    otherwise drop the oldest entry outright."""
+    otherwise drop the oldest entry outright. Caller holds _CACHE_LOCK."""
     now = datetime.utcnow()
     expired_key = None
     for k, (_value, expires_at) in cache.items():
@@ -3614,9 +3616,10 @@ def _cache_evict_one(cache):
 
 
 def _cache_put(cache, key, value, ttl):
-    if key not in cache and len(cache) >= _CACHE_MAX_ENTRIES:
-        _cache_evict_one(cache)
-    cache[key] = (value, datetime.utcnow() + ttl)
+    with _CACHE_LOCK:
+        if key not in cache and len(cache) >= _CACHE_MAX_ENTRIES:
+            _cache_evict_one(cache)
+        cache[key] = (value, datetime.utcnow() + ttl)
 
 
 def _http_get_json(url, timeout=6):
