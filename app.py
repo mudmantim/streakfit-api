@@ -1422,8 +1422,10 @@ def _require_admin_secret():
     secret = request.headers.get('X-Admin-Secret', '')
     env_secret = os.environ.get('ADMIN_SECRET', '')
     # Constant-time compare so a byte-by-byte timing oracle can't recover the secret.
-    # Still fails closed when ADMIN_SECRET is unset/empty.
-    if not env_secret or not hmac.compare_digest(secret, env_secret):
+    # Still fails closed when ADMIN_SECRET is unset/empty. Encode to bytes first:
+    # hmac.compare_digest rejects non-ASCII str with a TypeError, so a header value
+    # with high bytes would 500 instead of failing closed with a 403.
+    if not env_secret or not hmac.compare_digest(secret.encode('utf-8'), env_secret.encode('utf-8')):
         abort(403)
 
 

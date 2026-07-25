@@ -29,6 +29,15 @@ def test_admin_route_accepts_correct_secret(client, monkeypatch):
     assert r.status_code != 403   # gate passes (constant-time compare matched)
 
 
+def test_admin_route_non_ascii_secret_returns_403_not_500(client, monkeypatch):
+    # Regression: hmac.compare_digest raises TypeError on non-ASCII str, so a
+    # header value with high bytes used to crash the gate (500) instead of
+    # failing closed. The corrected gate encodes to bytes first and returns 403.
+    monkeypatch.setenv('ADMIN_SECRET', 's3cret-value')
+    r = client.get('/api/admin/stats', headers={'X-Admin-Secret': 'wröng-ø-sécret'})
+    assert r.status_code == 403
+
+
 def test_oversized_request_body_rejected(client):
     big = '{"username":"' + 'a' * 300000 + '"}'
     r = client.post('/api/login', data=big, content_type='application/json')
