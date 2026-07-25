@@ -3470,10 +3470,14 @@ def _cache_evict_one(cache):
     (dicts preserve insertion order, so the first expired entry is the oldest one),
     otherwise drop the oldest entry outright."""
     now = datetime.utcnow()
+    expired_key = None
     for k, (_value, expires_at) in cache.items():
         if now >= expires_at:
-            del cache[k]
-            return
+            expired_key = k
+            break
+    if expired_key is not None:
+        del cache[expired_key]
+        return
     oldest = next(iter(cache), None)
     if oldest is not None:
         del cache[oldest]
