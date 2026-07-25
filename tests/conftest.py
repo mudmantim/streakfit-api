@@ -54,3 +54,14 @@ def register_and_login(client, username, password='WalkTest123!'):
 
 def auth_headers(token):
     return {'Authorization': f'Bearer {token}'}
+
+
+@pytest.fixture(autouse=True)
+def _clear_weather_caches():
+    """Weather caches are module-level globals; clear them before each test so one
+    test's cached city can't leak into another."""
+    import app as _app
+    _app._GEOCODE_CACHE.clear()
+    _app._FORECAST_CACHE.clear()
+    _app._weather_provider_calls = 0
+    yield

@@ -1377,7 +1377,9 @@ def service_worker():
 
 @app.route('/health', methods=['GET'])
 def health():
-    return jsonify({"status": "ok"}), 200
+    # TEMP: weather_provider_calls exposed for post-deploy cache verification (counts
+    # real outbound calls to Open-Meteo). Remove once prod cache counts are confirmed.
+    return jsonify({"status": "ok", "weather_provider_calls": _weather_provider_calls}), 200
 
 
 # --- Admin ---
@@ -3441,66 +3443,121 @@ _WMO_WEATHER = {
     95: "thunderstorms", 96: "thunderstorms with hail", 99: "thunderstorms with hail",
 }
 
+# In-process weather caches — best-effort by design (per worker, cleared on restart;
+# no Redis, no new dependency). A city's coordinates don't move, so geocode results
+# are cached ~permanently; forecasts change slowly, so they're cached briefly. This
+# cuts StreakFit's OWN outbound volume to the provider — it cannot stop other tenants
+# on a shared egress IP from exhausting the per-IP quota, so it's a first step, not a
+# guaranteed cure for the intermittent 429s.
+_GEOCODE_CACHE = {}    # normalized city name -> place dict
+_FORECAST_CACHE = {}   # (lat, lon) -> current-weather dict
+_GEOCODE_TTL = timedelta(days=30)
+_FORECAST_TTL = timedelta(minutes=10)
+
+# TEMP diagnostic: counts real outbound provider calls, exposed on /health for the
+# post-deploy cache verification. Remove once prod counts are confirmed.
+_weather_provider_calls = 0
+
+
+def _cache_get(cache, key):
+    entry = cache.get(key)
+    if entry is None:
+        return None
+    value, expires_at = entry
+    if datetime.utcnow() >= expires_at:
+        cache.pop(key, None)
+        return None
+    return value
+
+
+def _cache_put(cache, key, value, ttl):
+    cache[key] = (value, datetime.utcnow() + ttl)
+
 
 def _http_get_json(url, timeout=6):
     """Small dependency-free JSON GET. Raises on network/parse error (caller catches)."""
+    global _weather_provider_calls
+    _weather_provider_calls += 1
     req = urllib.request.Request(url, headers={"User-Agent": "StreakFit-Rickie/1.0"})
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         return json.loads(resp.read().decode("utf-8"))
 
 
-def _weather_tool_result(city):
-    """Resolve current weather for a user-named city via Open-Meteo.
+def _geocode_city(city):
+    """City name -> place dict (name/admin1/country/lat/lon), cached ~permanently by
+    normalized city name. Returns None if the place can't be found. Misses are NOT
+    cached — a typo today shouldn't poison the cache."""
+    key = " ".join(city.lower().split())
+    cached = _cache_get(_GEOCODE_CACHE, key)
+    if cached is not None:
+        return cached
+    geo = _http_get_json(
+        "https://geocoding-api.open-meteo.com/v1/search?"
+        + urllib.parse.urlencode({"name": city, "count": 1, "language": "en", "format": "json"})
+    )
+    results = (geo or {}).get("results") or []
+    if not results:
+        return None
+    place = results[0]
+    _cache_put(_GEOCODE_CACHE, key, place, _GEOCODE_TTL)
+    return place
 
-    Returns (content_str, is_error). NEVER raises — every failure becomes a
-    friendly error string Rickie can relay in character. No location is stored
-    or inferred; the city is whatever the user said.
+
+def _forecast(lat, lon):
+    """Current weather for coordinates, cached for 10 minutes by (lat, lon). Returns
+    None if unavailable (not cached)."""
+    key = (round(lat, 4), round(lon, 4))
+    cached = _cache_get(_FORECAST_CACHE, key)
+    if cached is not None:
+        return cached
+    wx = _http_get_json(
+        "https://api.open-meteo.com/v1/forecast?"
+        + urllib.parse.urlencode({
+            "latitude": lat, "longitude": lon,
+            "current": "temperature_2m,weather_code",
+            "temperature_unit": "fahrenheit", "wind_speed_unit": "mph",
+        })
+    )
+    current = (wx or {}).get("current") or {}
+    if current.get("temperature_2m") is None:
+        return None
+    _cache_put(_FORECAST_CACHE, key, current, _FORECAST_TTL)
+    return current
+
+
+def _weather_tool_result(city):
+    """Resolve current weather for a user-named city via Open-Meteo, using the
+    in-process caches (geocode ~permanent, forecast 10 min).
+
+    Returns (content_str, is_error). NEVER raises — every failure becomes a friendly
+    error string Rickie can relay in character. No location is stored or inferred;
+    the city is whatever the user said.
     """
     city = (city or "").strip()
     if not city:
         return ("No city was given. Ask the user which city they mean.", True)
     try:
-        geo = _http_get_json(
-            "https://geocoding-api.open-meteo.com/v1/search?"
-            + urllib.parse.urlencode(
-                {"name": city, "count": 1, "language": "en", "format": "json"}
-            )
-        )
-        results = (geo or {}).get("results") or []
-        if not results:
+        place = _geocode_city(city)
+        if place is None:
             return (
                 f"Couldn't find a place called '{city}'. Ask the user to clarify the city.",
                 True,
             )
-        place = results[0]
         lat, lon = place.get("latitude"), place.get("longitude")
         pretty = ", ".join(
             x for x in (place.get("name"), place.get("admin1"), place.get("country")) if x
         ) or city
-        wx = _http_get_json(
-            "https://api.open-meteo.com/v1/forecast?"
-            + urllib.parse.urlencode(
-                {
-                    "latitude": lat,
-                    "longitude": lon,
-                    "current": "temperature_2m,weather_code",
-                    "temperature_unit": "fahrenheit",
-                    "wind_speed_unit": "mph",
-                }
-            )
-        )
-        current = (wx or {}).get("current") or {}
-        temp = current.get("temperature_2m")
-        if temp is None:
+        current = _forecast(lat, lon)
+        if current is None:
             return (
                 f"Weather for {pretty} was unavailable just now. Tell the user to try again later.",
                 True,
             )
         condition = _WMO_WEATHER.get(current.get("weather_code"), "unclear skies")
-        return (f"{pretty}: {round(temp)}°F, {condition}.", False)
+        return (f"{pretty}: {round(current['temperature_2m'])}°F, {condition}.", False)
     except Exception as exc:
-        # Diagnostic only — behavior and the returned string are unchanged. Logs the
-        # real cause (type + message + traceback) so the prod failure is identifiable.
+        # Graceful failure preserved. The warning log stays so intermittent provider
+        # failures (e.g. shared-IP 429s) remain visible for monitoring.
         app.logger.warning("weather lookup failed for %r: %s: %s",
                            city, type(exc).__name__, exc, exc_info=True)
         return (
