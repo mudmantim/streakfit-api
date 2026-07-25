@@ -53,7 +53,7 @@ The live service is git-linked to `main`: **`git push origin main` builds and de
 1. Create the Render web service, git-linked to `mudmantim/streakfit-api` `main`, Python (runtime.txt → 3.12.7).
 2. Provision managed Postgres; set `DATABASE_URL`.
 3. Set secrets in the dashboard: `SECRET_KEY`, `JWT_SECRET_KEY`, `ANTHROPIC_API_KEY`, `ADMIN_SECRET` (all `sync:false`).
-4. Set the Build and Start commands above. Confirm the start command binds gunicorn to `$PORT` if Render requires it (**open verification item** — see [reproducibility.md](reproducibility.md)).
+4. Set the Build and Start commands above. No `--bind` is needed: Render sets `$PORT` (default 10000) and gunicorn's default `bind` automatically becomes `0.0.0.0:$PORT` when `PORT` is present (verified — see [reproducibility.md](reproducibility.md) → Resolved findings).
 5. Set `healthCheckPath` = `/health`.
 6. Deploy. Watch the build log; the migration runs first, then the boot guard logs "migration check passed".
 7. Verify: `curl -s -o /dev/null -w '%{http_code}' https://streakfit.pro/health` → `200`, then a normal login.

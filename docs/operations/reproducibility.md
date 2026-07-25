@@ -37,13 +37,27 @@ Each of these is a real improvement that was **intentionally not made** because 
 | Item | Why not done | What's needed to do it safely |
 |---|---|---|
 | **Reconcile the `anthropic`/`alembic` pins with prod's actual versions** | The pin was set to the test-proven `0.120.0`/`1.18.5`, but prod's *currently installed* versions are unknown (last deploy resolved `>=0.40.0` to whatever was latest then). The next deploy will install the pinned versions — possibly different SDK behavior. | In a prod shell (Render): `pip freeze | grep -Ei 'anthropic|alembic'`. If they differ, decide whether to match prod or move to the pinned version *deliberately*, then deploy. |
-| **Gunicorn `$PORT` binding** | The documented start command is `gunicorn app:app` with no `--bind`. Gunicorn defaults to `127.0.0.1:8000`; Render web services must listen on `$PORT`. Either the live command actually includes `--bind 0.0.0.0:$PORT` (and the docs are incomplete) or Render injects it. "Fixing" it in `render.yaml` could change how prod binds. | Read the live Start Command in the Render dashboard; update `render.yaml`/docs to match reality. Do not change the running bind blindly. |
 | **Adopt `render.yaml` as authoritative (Blueprint deploy)** | Switching the live service to blueprint-managed changes how config is applied. | Diff every field against the dashboard, then create/link the Blueprint deliberately. |
 | **Bump `SQLAlchemy` to support Python 3.14** | ORM behavior can change across minor SQLAlchemy versions; the suite is validated on `2.0.27`. | Bump in a branch, run the full suite on 3.12 *and* 3.14, review ORM-behavior notes, then pin the new version. |
 | **Add a `gunicorn.conf.py`** (explicit workers/timeout) | `gunicorn.conf.py` is **auto-loaded** — it would change runtime settings (workers, timeout, bind) on the next deploy. | Capture the live gunicorn invocation first; encode current values exactly; verify workers=1 assumption. |
 | **Split dev vs prod deps** (move `pytest` out of `requirements.txt`) | Removing `pytest` changes the deployed image (prod currently installs it). | Confirm nothing in prod imports pytest at runtime (the in-app verifier uses `WsgiClient`, not pytest), then move it to `requirements-dev.txt` on a deploy you're watching. |
-| **Full transitive lockfile (`pip-compile`/hashes)** | Generating it here would resolve to *today's* latest transitives (newer than prod), i.e. a silent bump. Also can't build a 3.12 lock on this 3.14-only machine. | Run `pip-compile` (or `pip freeze`) inside a clean **3.12.7** env — ideally seeded from prod's actual versions — and commit `requirements.lock`. |
+| **Full transitive lockfile (`pip-compile`/hashes)** | Generating it here would resolve to *today's* latest transitives (newer than prod), i.e. a silent bump. A clean 3.12.7 env is obtainable via `uv python install 3.12.7` (used during the 2026-07-25 custodian pass). | Run `pip-compile` (or `pip freeze`) inside a clean **3.12.7** env — ideally seeded from prod's actual versions — and commit `requirements.lock`. |
 | **`Procfile`** | On some platforms a `Procfile` overrides the dashboard start command — could silently change what runs. `render.yaml` is the idiomatic Render mechanism and is already provided (inert). | Not needed if `render.yaml` is adopted. |
+
+## Resolved findings
+
+**Gunicorn `$PORT` binding — RESOLVED (2026-07-25), current command is correct; no change made.**
+The live Start Command `flask db upgrade && STREAKFIT_ENFORCE_DB_HEAD=1 gunicorn app:app` (confirmed
+in the Render dashboard: no `--bind`, no gunicorn config) binds correctly. Mechanism, verified three ways:
+- **Gunicorn docs:** the default `bind` is `['0.0.0.0:$PORT']` *when the `PORT` env var is set*, else `['127.0.0.1:8000']`. This feature exists specifically for PaaS platforms that inject `PORT`.
+- **Render docs:** Render sets `PORT` (default `10000`) and expects the server to bind `0.0.0.0` on it.
+- **Empirical:** bare `gunicorn app:app` with `PORT=9137` logged `Listening at: http://0.0.0.0:9137` and served `/health` 200; with `PORT` unset it fell back to `127.0.0.1:8000` (which is what my earlier local test mistakenly measured — `PORT` wasn't set).
+
+So gunicorn implicitly binds `0.0.0.0:$PORT` on Render. An explicit `--bind 0.0.0.0:$PORT` is **optional**
+(it would make the binding self-documenting and remove reliance on gunicorn's implicit-`PORT` feature — which
+the gunicorn maintainers themselves note is surprising) but is **not required** and would **not change behavior**.
+Per the "don't change the Start Command without cause" rule and to keep `render.yaml` matching the live
+dashboard, the command is left as-is.
 
 ## The one manual step that remains (and why)
 

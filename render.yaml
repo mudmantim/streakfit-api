@@ -9,10 +9,11 @@
 # See docs/operations/setup.md → "Production setup" and docs/operations/reproducibility.md.
 #
 # Two things to verify against the live dashboard specifically:
-#   1. Port binding — `gunicorn app:app` (as documented) binds gunicorn's default, not $PORT.
-#      Render web services must listen on $PORT. Confirm the live start command isn't actually
-#      `... gunicorn --bind 0.0.0.0:$PORT app:app`. Do NOT "fix" this here until confirmed —
-#      it would change deploy behavior. Logged in reproducibility.md as an open verification item.
+#   1. Port binding — RESOLVED 2026-07-25; the bare `gunicorn app:app` is CORRECT and needs no --bind.
+#      Render sets $PORT (default 10000); gunicorn's documented default `bind` becomes `0.0.0.0:$PORT`
+#      when PORT is in the environment (else 127.0.0.1:8000). Verified against gunicorn + Render docs
+#      and empirically. So this startCommand (matching the live dashboard) binds correctly; do NOT add
+#      --bind (optional explicitness only, no behavior change). See docs/operations/reproducibility.md.
 #   2. Service plan / region / scaling (below are placeholders to confirm).
 
 services:

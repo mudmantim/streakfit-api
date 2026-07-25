@@ -14,7 +14,7 @@ The complete, authoritative reference for everything the StreakFit process needs
 | `STREAKFIT_ENFORCE_DB_HEAD` | Prod: **`1`** | — | unset | Enables the boot guard. `== '1'` → process `SystemExit(1)` unless the DB is at the Alembic head. Must be set **inline on gunicorn only**, never globally (see below). |
 | `RATELIMIT_STORAGE_URI` | No | — | `memory://` | Flask-Limiter backend. Default is per-worker in-memory (resets every deploy). Point at `redis://…` for shared limits. |
 | `RENDER_GIT_COMMIT` | No | — | `git rev-parse HEAD` | Commit SHA shown in the admin dashboard. Render sets it automatically. |
-| `PORT` | No | — | `5000` | Dev-server port (`python app.py` only; gunicorn is used in prod). |
+| `PORT` | No | — | dev `5000` | Dev server (`python app.py`) uses it. **In prod Render sets `PORT` (default 10000) and gunicorn honors it** — its default `bind` becomes `0.0.0.0:$PORT`, which is why the start command needs no `--bind`. |
 
 🔒 = secret: never commit, never log, set via the Render dashboard (prod) or `.env` (local, git-ignored).
 

@@ -69,7 +69,7 @@ Reads the DB's stamped Alembic revision and compares to the chain head. On misma
 | `ADMIN_SECRET` | recommended | admin gate; unset → all admin routes 403 |
 | `RENDER_GIT_COMMIT` | no | commit SHA for admin display |
 | `STREAKFIT_ENFORCE_DB_HEAD` | prod: `1` | enables the boot guard |
-| `PORT` | no | dev server only |
+| `PORT` | no | dev server; in prod Render sets it (10000) and gunicorn binds `0.0.0.0:$PORT` automatically (no `--bind` needed) |
 
 ### Engine / pool config
 `SQLALCHEMY_ENGINE_OPTIONS`: `pool_pre_ping=True`, `pool_recycle=280`. No explicit `pool_size`/`max_overflow` (SQLAlchemy defaults). **Why these two:** Neon serverless Postgres auto-suspends and silently drops idle connections; pre-ping validates a connection before use and recycle retires it at 280 s (under Neon's idle window). This is the correct pairing for serverless PG — keep it. Connection-pool sizing becomes a real question at scale (roadmap).
