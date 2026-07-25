@@ -1,6 +1,7 @@
 import os
 import hashlib
 import json
+import logging
 import random
 import re
 import string
@@ -55,6 +56,12 @@ if not _jwt_secret_key:
     raise RuntimeError("JWT_SECRET_KEY environment variable is required but not set")
 app.config['JWT_SECRET_KEY'] = _jwt_secret_key
 app.config['JWT_ACCESS_TOKEN_EXPIRES'] = timedelta(hours=1)
+
+# Emit operational INFO logs (login, coach memory, weather cache) alongside the
+# existing warnings/errors. These sit on low-volume, rate-limited endpoints, so
+# INFO stays quiet in practice; structured "event=... key=value" lines keep them
+# greppable without a logging dependency.
+app.logger.setLevel(logging.INFO)
 
 _anthropic_api_key = os.environ.get('ANTHROPIC_API_KEY')
 
@@ -1888,6 +1895,7 @@ def login():
         return jsonify({"error": "That username and password don’t match."}), 401
 
     access_token = create_access_token(identity=str(user.id))
+    app.logger.info("event=login user_id=%s", user.id)
     return jsonify({"access_token": access_token}), 200
 
 @app.route('/api/me', methods=['GET'])
@@ -3331,6 +3339,8 @@ def _update_coach_note(user_id, message):
         merged = _merge_note_list(_json_list(getattr(note, key)), facts[key])
         setattr(note, key, json.dumps(merged))
     db.session.commit()
+    app.logger.info("event=coach_note_extract user_id=%s goals=%d prefs=%d notes=%d",
+                    user_id, len(facts['goals']), len(facts['preferences']), len(facts['notes']))
 
 
 def _load_coach_note_block(user_id):
@@ -3388,6 +3398,7 @@ def _record_coach_exchange(user_id, user_msg, reply):
     for r in stale:
         db.session.delete(r)
     db.session.commit()
+    app.logger.info("event=coach_turn_saved user_id=%s pruned=%d", user_id, len(stale))
 
 
 def _forget_coach_memory(user_id):
@@ -3503,7 +3514,9 @@ def _geocode_city(city):
     key = " ".join(city.lower().split())
     cached = _cache_get(_GEOCODE_CACHE, key)
     if cached is not None:
+        app.logger.info("event=weather_cache kind=geocode result=hit")
         return cached
+    app.logger.info("event=weather_cache kind=geocode result=miss")
     geo = _http_get_json(
         "https://geocoding-api.open-meteo.com/v1/search?"
         + urllib.parse.urlencode({"name": city, "count": 1, "language": "en", "format": "json"})
@@ -3522,7 +3535,9 @@ def _forecast(lat, lon):
     key = (round(lat, 4), round(lon, 4))
     cached = _cache_get(_FORECAST_CACHE, key)
     if cached is not None:
+        app.logger.info("event=weather_cache kind=forecast result=hit")
         return cached
+    app.logger.info("event=weather_cache kind=forecast result=miss")
     wx = _http_get_json(
         "https://api.open-meteo.com/v1/forecast?"
         + urllib.parse.urlencode({
@@ -3617,6 +3632,7 @@ def coach():
             note_block = _load_coach_note_block(user.id)
             if note_block:
                 system += "\n\n" + note_block
+                app.logger.info("event=coach_memory_inject user_id=%s", user.id)
         except Exception:
             app.logger.warning('coach note load failed', exc_info=True)
 
