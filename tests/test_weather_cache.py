@@ -140,35 +140,37 @@ def test_geocode_cache_key_is_normalized(monkeypatch):
     assert calls["geocode"] == 1                 # second lookup was a cache hit
 
 
-def test_cache_thread_safe_under_simultaneous_misses(monkeypatch):
-    """10 threads all miss on the same city at once. The lock must keep the cache
-    consistent — no corruption, no duplicate entries — and every caller must get a
-    successful result."""
+def test_cache_eviction_thread_safe_under_distinct_keys(monkeypatch):
+    """Stress the path the lock actually protects: eviction. Many threads insert
+    many DISTINCT keys into an over-capacity cache at once, so _cache_evict_one is
+    iterating the dict while other threads mutate it. Without _CACHE_LOCK this races
+    into 'dictionary changed size during iteration'; with it, every put succeeds and
+    the cache stays bounded at the cap."""
     import threading
-    import time
 
-    def slow_http(url, timeout=6):
-        time.sleep(0.01)   # widen the race window
-        if "geocoding-api" in url:
-            return {"results": [{"name": "Denver", "admin1": "CO", "country": "US",
-                                 "latitude": 39.7, "longitude": -104.9}]}
-        return {"current": {"temperature_2m": 70, "weather_code": 0}}
+    # A cap of 200 (not a handful) makes _cache_evict_one iterate ~200 entries on
+    # every over-cap put, widening the iterate-while-mutate window so a missing lock
+    # fails reliably rather than flakily. Well over the cap of distinct keys keeps
+    # eviction firing on essentially every put.
+    cap = 200
+    monkeypatch.setattr(appmod, "_CACHE_MAX_ENTRIES", cap)
+    cache = {}
+    errors = []
 
-    monkeypatch.setattr(appmod, "_http_get_json", slow_http)
-    appmod._GEOCODE_CACHE.clear()
-    appmod._FORECAST_CACHE.clear()
+    def worker(base):
+        try:
+            for i in range(800):
+                key = f"t{base}-{i}"               # every key distinct -> forces eviction, not refresh
+                appmod._cache_put(cache, key, i, appmod._FORECAST_TTL)
+                appmod._cache_get(cache, f"t{base}-{i % 13}")
+        except Exception as exc:                    # capture; threads swallow raises otherwise
+            errors.append(repr(exc))
 
-    results = []
-    def worker():
-        results.append(appmod._weather_tool_result("Denver"))
-
-    threads = [threading.Thread(target=worker) for _ in range(10)]
+    threads = [threading.Thread(target=worker, args=(b,)) for b in range(8)]
     for t in threads:
         t.start()
     for t in threads:
         t.join()
 
-    assert len(results) == 10
-    assert all(not is_err for _content, is_err in results)   # all succeeded
-    assert len(appmod._GEOCODE_CACHE) == 1                    # one entry, not corrupted/duplicated
-    assert len(appmod._FORECAST_CACHE) == 1
+    assert errors == [], f"concurrent eviction raised: {errors[:3]}"
+    assert len(cache) <= cap, "cache must stay bounded at the cap under concurrent puts"
