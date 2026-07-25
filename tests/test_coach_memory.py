@@ -243,6 +243,15 @@ def test_coach_note_first_write_race_recovers_no_duplicate(app, monkeypatch):
     assert note is not None                                       # recovered the row
     assert CoachNote.query.filter_by(user_id=u.id).count() == 1   # no duplicate
 
+    # The savepoint rollback must leave the session usable: writing to the
+    # recovered row and committing has to succeed cleanly (no leftover failed
+    # INSERT re-surfacing as an IntegrityError at commit) and still not duplicate.
+    note.goals = json.dumps(["run a 5k"])
+    db.session.commit()
+    survivors = CoachNote.query.filter_by(user_id=u.id).all()
+    assert len(survivors) == 1                                    # still exactly one row
+    assert json.loads(survivors[0].goals) == ["run a 5k"]         # the write persisted
+
 
 def test_get_or_create_returns_existing_without_savepoint(app):
     u = _make_user("existing_note")
