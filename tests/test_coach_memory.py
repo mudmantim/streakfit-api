@@ -9,6 +9,8 @@ context and carries the non-recitation instruction.
 """
 import json
 
+import pytest
+
 import app as appmod
 from app import db, User, CoachTurn, CoachNote
 from conftest import register_and_login, auth_headers
@@ -249,3 +251,60 @@ def test_get_or_create_returns_existing_without_savepoint(app):
     note = appmod._get_or_create_coach_note(u.id)
     assert json.loads(note.goals) == ["x"]
     assert CoachNote.query.filter_by(user_id=u.id).count() == 1
+
+
+# ── WS1: atomic coach persistence ────────────────────────────────────────────
+
+def test_persist_interaction_atomic_success(app):
+    u = _make_user("atomic_ok")
+    appmod._persist_coach_interaction(u.id, "my goal is to run a 5k", "nice, look at you")
+    assert CoachTurn.query.filter_by(user_id=u.id).count() == 2
+    assert json.loads(CoachNote.query.filter_by(user_id=u.id).first().goals) == ["run a 5k"]
+
+
+def test_persist_rolls_back_turns_on_note_failure(app, monkeypatch):
+    u = _make_user("atomic_fail")
+    monkeypatch.setattr(appmod, "_stage_coach_note",
+                        lambda uid, facts: (_ for _ in ()).throw(RuntimeError("note write failed")))
+    with pytest.raises(RuntimeError):
+        appmod._persist_coach_interaction(u.id, "my goal is to run a 5k", "reply")
+    # atomic: the turns were rolled back too — no partial state
+    assert CoachTurn.query.filter_by(user_id=u.id).count() == 0
+    assert CoachNote.query.filter_by(user_id=u.id).count() == 0
+
+
+def test_persist_no_duplicate_turns_after_failed_attempt(app, monkeypatch):
+    u = _make_user("nodup")
+    monkeypatch.setattr(appmod, "_stage_coach_note",
+                        lambda uid, facts: (_ for _ in ()).throw(RuntimeError("x")))
+    with pytest.raises(RuntimeError):
+        appmod._persist_coach_interaction(u.id, "I prefer mornings", "r1")
+    monkeypatch.undo()
+    appmod._persist_coach_interaction(u.id, "hello there", "r2")   # no facts extracted
+    assert CoachTurn.query.filter_by(user_id=u.id).count() == 2    # only the successful pair
+
+
+def test_persist_prunes_to_window(app):
+    u = _make_user("prune_persist")
+    for i in range(8):   # 16 turns -> pruned to 10
+        appmod._persist_coach_interaction(u.id, f"msg{i}", f"reply{i}")
+    assert CoachTurn.query.filter_by(user_id=u.id).count() == appmod._COACH_MEMORY_WINDOW
+
+
+def test_persist_survives_extraction_failure_keeping_turns(app, monkeypatch):
+    """Coach Notes extraction is best-effort — if the (pure-Python) extractor raises,
+    the turns still persist and no note is written."""
+    u = _make_user("extract_fail")
+    monkeypatch.setattr(appmod, "_coach_note_extract",
+                        lambda msg: (_ for _ in ()).throw(RuntimeError("regex boom")))
+    appmod._persist_coach_interaction(u.id, "anything", "reply")
+    assert CoachTurn.query.filter_by(user_id=u.id).count() == 2
+    assert CoachNote.query.filter_by(user_id=u.id).count() == 0
+
+
+def test_direct_helpers_still_self_commit(app):
+    u = _make_user("direct_helpers")
+    appmod._record_coach_exchange(u.id, "hi", "yo")
+    appmod._update_coach_note(u.id, "my goal is to run a 5k")
+    assert CoachTurn.query.filter_by(user_id=u.id).count() == 2
+    assert json.loads(CoachNote.query.filter_by(user_id=u.id).first().goals) == ["run a 5k"]

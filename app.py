@@ -3413,9 +3413,9 @@ def _load_coach_messages(user_id):
     return msgs
 
 
-def _record_coach_exchange(user_id, user_msg, reply):
-    """Persist the human-facing exchange (not tool scaffolding) and prune the
-    window to the last 10 turns for this user."""
+def _stage_coach_exchange(user_id, user_msg, reply):
+    """Stage the turn pair and prune the window to the last 10. STAGES only (flush) —
+    the caller owns the commit. Returns the number of pruned turns."""
     db.session.add(CoachTurn(user_id=user_id, role='user',
                              content=(user_msg or '')[:_COACH_TURN_MAX_LEN]))
     db.session.add(CoachTurn(user_id=user_id, role='assistant',
@@ -3426,8 +3426,45 @@ def _record_coach_exchange(user_id, user_msg, reply):
              .offset(_COACH_MEMORY_WINDOW).all())
     for r in stale:
         db.session.delete(r)
+    db.session.flush()
+    return len(stale)
+
+
+def _record_coach_exchange(user_id, user_msg, reply):
+    """Self-committing convenience wrapper for direct/CLI/test use; the coach request
+    path uses _persist_coach_interaction for one atomic transaction instead."""
+    pruned = _stage_coach_exchange(user_id, user_msg, reply)
     db.session.commit()
-    app.logger.info("event=coach_turn_saved user_id=%s pruned=%d", user_id, len(stale))
+    app.logger.info("event=coach_turn_saved user_id=%s pruned=%d", user_id, pruned)
+
+
+def _persist_coach_interaction(user_id, user_msg, reply):
+    """Persist a whole coach interaction — the turn pair, the prune, AND any Coach
+    Notes update — as ONE atomic transaction, so a failure never leaves partial
+    state (turns without their prune, or turns saved while the note write failed).
+
+    Coach Notes are best-effort *enrichment*: if the pure-Python extraction step
+    itself blows up, we log and persist the turns anyway. But a database failure at
+    commit rolls the whole thing back and re-raises — we never silently swallow a
+    DB/integrity error or leave a half-written state."""
+    try:
+        pruned = _stage_coach_exchange(user_id, user_msg, reply)
+        try:
+            facts = _coach_note_extract(user_msg)
+        except Exception:
+            app.logger.warning("coach note extraction failed", exc_info=True)
+            facts = None
+        noted = bool(facts and any(facts.values()))
+        if noted:
+            _stage_coach_note(user_id, facts)
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+        raise
+    app.logger.info("event=coach_turn_saved user_id=%s pruned=%d", user_id, pruned)
+    if noted:
+        app.logger.info("event=coach_note_extract user_id=%s goals=%d prefs=%d notes=%d",
+                        user_id, len(facts['goals']), len(facts['preferences']), len(facts['notes']))
 
 
 def _forget_coach_memory(user_id):
@@ -3736,10 +3773,10 @@ def coach():
         # Notes. Wrapped so a memory hiccup can never take the reply down.
         if user is not None and reply:
             try:
-                _record_coach_exchange(user.id, message, reply)
-                _update_coach_note(user.id, message)
+                _persist_coach_interaction(user.id, message, reply)
             except Exception:
-                db.session.rollback()
+                # Rollback already happened inside _persist_coach_interaction; the
+                # reply still returns. Logged, not silently swallowed.
                 app.logger.warning('coach memory persist failed', exc_info=True)
         return jsonify({"reply": reply}), 200
     except Exception:
