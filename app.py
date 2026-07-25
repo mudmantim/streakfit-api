@@ -1,6 +1,8 @@
 import os
 import hashlib
+import hmac
 import json
+import logging
 import random
 import re
 import string
@@ -19,9 +21,9 @@ from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 import anthropic as _anthropic_lib
 
-from scripts.verify_all import run_suite
-from scripts.verification._client import WsgiClient
-from scripts.verification import VERIFICATION_SUITE_VERSION
+# The verification suite (scripts.verify_all / scripts.verification) is admin-only
+# and is imported lazily inside the admin verify routes — the serving app must not
+# be coupled to test/verification code at import time.
 
 app = Flask(__name__)
 
@@ -55,6 +57,32 @@ if not _jwt_secret_key:
     raise RuntimeError("JWT_SECRET_KEY environment variable is required but not set")
 app.config['JWT_SECRET_KEY'] = _jwt_secret_key
 app.config['JWT_ACCESS_TOKEN_EXPIRES'] = timedelta(hours=1)
+
+# Emit operational INFO logs (login, coach memory, weather cache) alongside the
+# existing warnings/errors. These sit on low-volume, rate-limited endpoints, so
+# INFO stays quiet in practice; structured "event=... key=value" lines keep them
+# greppable without a logging dependency.
+app.logger.setLevel(logging.INFO)
+
+# Reject oversized request bodies before parsing (all real bodies are tiny — the
+# coach message caps at 500 chars) so a multi-MB POST can't exhaust worker memory.
+app.config['MAX_CONTENT_LENGTH'] = 256 * 1024   # 256 KB
+
+# Fixed dummy hash so login runs a password comparison even when the username
+# doesn't exist — equalizes response time so it can't reveal valid usernames.
+_DUMMY_PW_HASH = generate_password_hash('unused-timing-equalizer', method='pbkdf2:sha256')
+
+
+@app.after_request
+def _security_headers(resp):
+    """Defense-in-depth response headers (no behavior change for API clients)."""
+    resp.headers.setdefault('X-Content-Type-Options', 'nosniff')
+    resp.headers.setdefault('X-Frame-Options', 'DENY')
+    resp.headers.setdefault('Referrer-Policy', 'strict-origin-when-cross-origin')
+    resp.headers.setdefault('Content-Security-Policy', "frame-ancestors 'none'")
+    # Honored by browsers only over HTTPS (Render serves HTTPS); harmless elsewhere.
+    resp.headers.setdefault('Strict-Transport-Security', 'max-age=31536000; includeSubDomains')
+    return resp
 
 _anthropic_api_key = os.environ.get('ANTHROPIC_API_KEY')
 
@@ -1393,7 +1421,11 @@ def _require_admin_secret():
     StreakFit Control (R3.0) adds four more routes needing the same check."""
     secret = request.headers.get('X-Admin-Secret', '')
     env_secret = os.environ.get('ADMIN_SECRET', '')
-    if not env_secret or secret != env_secret:
+    # Constant-time compare so a byte-by-byte timing oracle can't recover the secret.
+    # Still fails closed when ADMIN_SECRET is unset/empty. Encode to bytes first:
+    # hmac.compare_digest rejects non-ASCII str with a TypeError, so a header value
+    # with high bytes would 500 instead of failing closed with a 403.
+    if not env_secret or not hmac.compare_digest(secret.encode('utf-8'), env_secret.encode('utf-8')):
         abort(403)
 
 
@@ -1631,6 +1663,8 @@ def _run_verification_background(run_id):
     real socket -- see scripts/verify_all.py's docstring for why that
     matters on a single-worker deployment) and writes the result to the
     VerificationRun row this thread owns exclusively."""
+    from scripts.verify_all import run_suite            # lazy: admin-only path
+    from scripts.verification._client import WsgiClient
     client = WsgiClient(app)
 
     def on_module_start(label):
@@ -1725,6 +1759,7 @@ def admin_verify_start():
     if _verification_state["running"]:
         return jsonify({"error": "verification_already_running"}), 409
 
+    from scripts.verification import VERIFICATION_SUITE_VERSION   # lazy: admin-only path
     run = VerificationRun(
         suite_version=VERIFICATION_SUITE_VERSION,
         commit_sha=_get_commit_sha(),
@@ -1882,12 +1917,16 @@ def login():
         return jsonify({"error": "Please enter your username and password."}), 400
 
     user = User.query.filter_by(username=data['username']).first()
-    # Deliberately ambiguous (never reveals whether the username exists) — but
-    # warmer and clearer than the old "Invalid credentials".
-    if not user or not check_password_hash(user.password_hash, data['password']):
+    # Always run a hash comparison — against a fixed dummy when the user doesn't
+    # exist — so response time doesn't reveal whether the username is valid. The
+    # error is deliberately ambiguous (never reveals whether the username exists).
+    pw_ok = check_password_hash(user.password_hash if user else _DUMMY_PW_HASH,
+                                data['password'])
+    if not user or not pw_ok:
         return jsonify({"error": "That username and password don’t match."}), 401
 
     access_token = create_access_token(identity=str(user.id))
+    app.logger.info("event=login user_id=%s", user.id)
     return jsonify({"access_token": access_token}), 200
 
 @app.route('/api/me', methods=['GET'])
@@ -2704,13 +2743,16 @@ def get_team(team_id):
     memberships = db.session.execute(
         db.select(TeamMembership).where(TeamMembership.team_id == team_id)
     ).scalars().all()
+    usernames = _usernames_for_ids(m.user_id for m in memberships)
     members = []
     for m in memberships:
-        member_user = db.session.get(User, m.user_id)
+        uname = usernames.get(m.user_id)
+        if uname is None:
+            continue   # defensive: orphaned membership (user row gone) — skip, don't 500
         members.append({
-            "user_id": member_user.id,
-            "username": member_user.username,
-            "is_creator": member_user.id == team.created_by_user_id,
+            "user_id": m.user_id,
+            "username": uname,
+            "is_creator": m.user_id == team.created_by_user_id,
         })
 
     invite = db.session.execute(
@@ -2920,12 +2962,10 @@ def get_team_moments(team_id):
         .order_by(TeamMoment.occurred_at.desc())
     ).scalars().all()
 
+    usernames = _usernames_for_ids([m.subject_user_id for m in moments])
     result = []
     for m in moments:
-        subject_username = None
-        if m.subject_user_id:
-            subject_user = db.session.get(User, m.subject_user_id)
-            subject_username = subject_user.username if subject_user else None
+        subject_username = usernames.get(m.subject_user_id) if m.subject_user_id else None
         metadata = json.loads(m.moment_metadata) if m.moment_metadata else None
         result.append({
             "moment_type": m.moment_type,
@@ -2976,11 +3016,28 @@ def create_rickie_team_message(team_id, trigger):
     return message
 
 
-def _serialize_team_message(m):
+def _usernames_for_ids(user_ids):
+    """Batch-resolve {user_id: username} in a single query — the fix for the
+    db.session.get(User, id)-in-a-loop N+1 in the team serializers."""
+    ids = {i for i in user_ids if i}
+    if not ids:
+        return {}
+    rows = db.session.execute(
+        db.select(User.id, User.username).where(User.id.in_(ids))
+    ).all()
+    return {rid: uname for rid, uname in rows}
+
+
+def _serialize_team_message(m, usernames=None):
+    """`usernames` is a pre-resolved {id: username} map (batch path, no per-row
+    query). When omitted, falls back to a single lookup for direct/one-off use."""
     sender_username = None
     if m.sender_type == 'user' and m.sender_user_id:
-        sender = db.session.get(User, m.sender_user_id)
-        sender_username = sender.username if sender else None
+        if usernames is not None:
+            sender_username = usernames.get(m.sender_user_id)
+        else:
+            sender = db.session.get(User, m.sender_user_id)
+            sender_username = sender.username if sender else None
     return {
         "sender_type": m.sender_type,
         "sender_username": sender_username,
@@ -3006,7 +3063,10 @@ def get_team_messages(team_id):
         .order_by(TeamMessage.created_at.asc())
     ).scalars().all()
 
-    return jsonify([_serialize_team_message(m) for m in messages]), 200
+    usernames = _usernames_for_ids(
+        m.sender_user_id for m in messages if m.sender_type == 'user'
+    )
+    return jsonify([_serialize_team_message(m, usernames) for m in messages]), 200
 
 
 @app.route('/api/teams/<int:team_id>/messages', methods=['POST'])
@@ -3317,20 +3377,51 @@ def _merge_note_list(existing, new):
     return out[-_COACH_NOTE_MAX_ITEMS:]
 
 
-def _update_coach_note(user_id, message):
-    """Deterministically fold any explicit facts from the user's message into
-    their Coach Notes. No-op when nothing factual was stated."""
-    facts = _coach_note_extract(message)
-    if not any(facts.values()):
-        return
-    note = CoachNote.query.filter_by(user_id=user_id).first()
-    if note is None:
-        note = CoachNote(user_id=user_id, goals='[]', preferences='[]', notes='[]')
-        db.session.add(note)
+def _find_coach_note(user_id):
+    return CoachNote.query.filter_by(user_id=user_id).first()
+
+
+def _get_or_create_coach_note(user_id):
+    """Return the user's CoachNote, creating it if absent — concurrency-safe against
+    the first-write race. Two requests can both find no row and try to insert; the
+    unique(user_id) constraint lets exactly one win, and the loser recovers the
+    winner's row instead of failing. A SAVEPOINT (begin_nested) keeps the
+    IntegrityError from poisoning the surrounding transaction. Never duplicates."""
+    note = _find_coach_note(user_id)
+    if note is not None:
+        return note
+    try:
+        with db.session.begin_nested():   # SAVEPOINT — rolled back on conflict
+            note = CoachNote(user_id=user_id, goals='[]', preferences='[]', notes='[]')
+            db.session.add(note)
+        return note
+    except IntegrityError:
+        # A concurrent request created it first — recover their row, don't fail.
+        return _find_coach_note(user_id)
+
+
+def _stage_coach_note(user_id, facts):
+    """Merge pre-extracted facts into the user's Coach Notes. STAGES only (flush) —
+    the caller owns the commit."""
+    note = _get_or_create_coach_note(user_id)
     for key, _patterns in _COACH_NOTE_CATEGORIES:
         merged = _merge_note_list(_json_list(getattr(note, key)), facts[key])
         setattr(note, key, json.dumps(merged))
+    db.session.flush()
+
+
+def _update_coach_note(user_id, message):
+    """Extract explicit facts from the user's message and persist them. No-op when
+    nothing factual was stated. Self-committing convenience wrapper for direct/CLI/
+    test use; the coach request path uses _persist_coach_interaction for one atomic
+    transaction instead."""
+    facts = _coach_note_extract(message)
+    if not any(facts.values()):
+        return
+    _stage_coach_note(user_id, facts)
     db.session.commit()
+    app.logger.info("event=coach_note_extract user_id=%s goals=%d prefs=%d notes=%d",
+                    user_id, len(facts['goals']), len(facts['preferences']), len(facts['notes']))
 
 
 def _load_coach_note_block(user_id):
@@ -3360,10 +3451,13 @@ def _load_coach_messages(user_id):
     """Load the rolling window as an alternation-safe message list (server is the
     single source of truth for conversation history — the client never supplies
     history that reaches the model)."""
+    # Fetch only the last window (newest-first LIMIT), then restore chronological
+    # order — avoids scanning the user's whole turn history on every coach call.
     rows = (CoachTurn.query.filter_by(user_id=user_id)
-            .order_by(CoachTurn.id.asc()).all())
+            .order_by(CoachTurn.id.desc()).limit(_COACH_MEMORY_WINDOW).all())
+    rows.reverse()
     msgs = []
-    for r in rows[-_COACH_MEMORY_WINDOW:]:
+    for r in rows:
         if r.role not in ('user', 'assistant') or not r.content:
             continue
         if msgs and msgs[-1]['role'] == r.role:
@@ -3374,9 +3468,9 @@ def _load_coach_messages(user_id):
     return msgs
 
 
-def _record_coach_exchange(user_id, user_msg, reply):
-    """Persist the human-facing exchange (not tool scaffolding) and prune the
-    window to the last 10 turns for this user."""
+def _stage_coach_exchange(user_id, user_msg, reply):
+    """Stage the turn pair and prune the window to the last 10. STAGES only (flush) —
+    the caller owns the commit. Returns the number of pruned turns."""
     db.session.add(CoachTurn(user_id=user_id, role='user',
                              content=(user_msg or '')[:_COACH_TURN_MAX_LEN]))
     db.session.add(CoachTurn(user_id=user_id, role='assistant',
@@ -3387,7 +3481,45 @@ def _record_coach_exchange(user_id, user_msg, reply):
              .offset(_COACH_MEMORY_WINDOW).all())
     for r in stale:
         db.session.delete(r)
+    db.session.flush()
+    return len(stale)
+
+
+def _record_coach_exchange(user_id, user_msg, reply):
+    """Self-committing convenience wrapper for direct/CLI/test use; the coach request
+    path uses _persist_coach_interaction for one atomic transaction instead."""
+    pruned = _stage_coach_exchange(user_id, user_msg, reply)
     db.session.commit()
+    app.logger.info("event=coach_turn_saved user_id=%s pruned=%d", user_id, pruned)
+
+
+def _persist_coach_interaction(user_id, user_msg, reply):
+    """Persist a whole coach interaction — the turn pair, the prune, AND any Coach
+    Notes update — as ONE atomic transaction, so a failure never leaves partial
+    state (turns without their prune, or turns saved while the note write failed).
+
+    Coach Notes are best-effort *enrichment*: if the pure-Python extraction step
+    itself blows up, we log and persist the turns anyway. But a database failure at
+    commit rolls the whole thing back and re-raises — we never silently swallow a
+    DB/integrity error or leave a half-written state."""
+    try:
+        pruned = _stage_coach_exchange(user_id, user_msg, reply)
+        try:
+            facts = _coach_note_extract(user_msg)
+        except Exception:
+            app.logger.warning("coach note extraction failed", exc_info=True)
+            facts = None
+        noted = bool(facts and any(facts.values()))
+        if noted:
+            _stage_coach_note(user_id, facts)
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+        raise
+    app.logger.info("event=coach_turn_saved user_id=%s pruned=%d", user_id, pruned)
+    if noted:
+        app.logger.info("event=coach_note_extract user_id=%s goals=%d prefs=%d notes=%d",
+                        user_id, len(facts['goals']), len(facts['preferences']), len(facts['notes']))
 
 
 def _forget_coach_memory(user_id):
@@ -3395,6 +3527,89 @@ def _forget_coach_memory(user_id):
     CoachTurn.query.filter_by(user_id=user_id).delete()
     CoachNote.query.filter_by(user_id=user_id).delete()
     db.session.commit()
+
+
+# ── Account deletion service ─────────────────────────────────────────────────
+# Reusable, transactional deletion of a user and their PRIVATE data. Shared team
+# data authored by / about the user (team messages, team moments) is preserved by
+# nulling the author/subject link, not deleted. Team OWNERSHIP is a hard blocker
+# (teams are shared; tearing one down affects other members) unless an explicit
+# policy is supplied. Reusable by scripts (cleanup_qa_smoke) and a future endpoint.
+
+# Private, user-owned rows — deleted outright when the account is deleted.
+_USER_PRIVATE_DELETES = [
+    ("challenge",          Challenge,        "user_id"),
+    ("daily_completion",   DailyCompletion,  "user_id"),
+    ("brain_boost_answer", BrainBoostAnswer, "user_id"),
+    ("progress_event",     ProgressEvent,    "user_id"),
+    ("team_membership",    TeamMembership,   "user_id"),
+    ("coach_turn",         CoachTurn,        "user_id"),
+    ("coach_note",         CoachNote,        "user_id"),
+]
+
+
+def _account_dependent_counts(user_id):
+    """Everything a deletion of this user would touch, by table (read-only)."""
+    counts = {}
+    for label, model, attr in _USER_PRIVATE_DELETES:
+        counts[label] = model.query.filter(getattr(model, attr) == user_id).count()
+    counts["team_message_authored"] = TeamMessage.query.filter(
+        TeamMessage.sender_user_id == user_id).count()
+    counts["team_moment_subject"] = TeamMoment.query.filter(
+        TeamMoment.subject_user_id == user_id).count()
+    counts["team_owned"] = Team.query.filter(Team.created_by_user_id == user_id).count()
+    return counts
+
+
+def delete_user_account(user_id, allow_team_owner=False, dry_run=True):
+    """Delete a user and their private data in ONE transaction, preserving shared
+    team data. Returns a report dict:
+        {user_id, found, username, counts, blocked, blockers, dry_run, executed}
+
+    - dry_run=True (default) changes nothing — just reports the plan.
+    - Team ownership BLOCKS deletion unless allow_team_owner=True is passed as an
+      explicit policy (and the caller has already dealt with the owned teams — this
+      service never tears down a shared team on its own).
+    - Private rows (challenges, completions, brain-boost, progress, memberships,
+      coach turns/notes) are deleted; team messages authored by / moments about the
+      user have their sender/subject link SET NULL so the shared record survives.
+    - Any DB failure rolls the whole thing back and re-raises (no partial state).
+    """
+    user = db.session.get(User, user_id)
+    if user is None:
+        return {"user_id": user_id, "found": False, "blocked": False,
+                "blockers": [], "dry_run": dry_run, "executed": False, "counts": {}}
+
+    counts = _account_dependent_counts(user_id)
+    blockers = []
+    if counts["team_owned"] > 0 and not allow_team_owner:
+        blockers.append(f"owns {counts['team_owned']} team(s) — supply an explicit "
+                        "team-owner policy to delete")
+
+    report = {"user_id": user_id, "found": True, "username": user.username,
+              "counts": counts, "blocked": bool(blockers), "blockers": blockers,
+              "dry_run": dry_run, "executed": False}
+    if dry_run or blockers:
+        return report
+
+    try:
+        # Preserve shared team data: keep the message/moment, drop the author link.
+        TeamMessage.query.filter(TeamMessage.sender_user_id == user_id).update(
+            {TeamMessage.sender_user_id: None}, synchronize_session=False)
+        TeamMoment.query.filter(TeamMoment.subject_user_id == user_id).update(
+            {TeamMoment.subject_user_id: None}, synchronize_session=False)
+        # Delete private data, then the user.
+        for _label, model, attr in _USER_PRIVATE_DELETES:
+            model.query.filter(getattr(model, attr) == user_id).delete(synchronize_session=False)
+        db.session.delete(user)
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+        raise
+
+    report["executed"] = True
+    app.logger.info("event=account_deleted user_id=%s", user_id)
+    return report
 
 
 # ── Weather: Rickie's first and only tool ────────────────────────────────────
@@ -3452,23 +3667,25 @@ _FORECAST_CACHE = {}   # (lat, lon) -> current-weather dict
 _GEOCODE_TTL = timedelta(days=30)
 _FORECAST_TTL = timedelta(minutes=10)
 _CACHE_MAX_ENTRIES = 512   # hard cap per cache — keeps memory bounded
+_CACHE_LOCK = threading.Lock()   # guards all cache reads/writes (threaded-worker safe)
 
 
 def _cache_get(cache, key):
-    entry = cache.get(key)
-    if entry is None:
-        return None
-    value, expires_at = entry
-    if datetime.utcnow() >= expires_at:
-        cache.pop(key, None)
-        return None
-    return value
+    with _CACHE_LOCK:
+        entry = cache.get(key)
+        if entry is None:
+            return None
+        value, expires_at = entry
+        if datetime.utcnow() >= expires_at:
+            cache.pop(key, None)
+            return None
+        return value
 
 
 def _cache_evict_one(cache):
     """Make room for one new entry: drop the oldest EXPIRED entry if there is one
     (dicts preserve insertion order, so the first expired entry is the oldest one),
-    otherwise drop the oldest entry outright."""
+    otherwise drop the oldest entry outright. Caller holds _CACHE_LOCK."""
     now = datetime.utcnow()
     expired_key = None
     for k, (_value, expires_at) in cache.items():
@@ -3484,9 +3701,10 @@ def _cache_evict_one(cache):
 
 
 def _cache_put(cache, key, value, ttl):
-    if key not in cache and len(cache) >= _CACHE_MAX_ENTRIES:
-        _cache_evict_one(cache)
-    cache[key] = (value, datetime.utcnow() + ttl)
+    with _CACHE_LOCK:
+        if key not in cache and len(cache) >= _CACHE_MAX_ENTRIES:
+            _cache_evict_one(cache)
+        cache[key] = (value, datetime.utcnow() + ttl)
 
 
 def _http_get_json(url, timeout=6):
@@ -3503,7 +3721,9 @@ def _geocode_city(city):
     key = " ".join(city.lower().split())
     cached = _cache_get(_GEOCODE_CACHE, key)
     if cached is not None:
+        app.logger.info("event=weather_cache kind=geocode result=hit")
         return cached
+    app.logger.info("event=weather_cache kind=geocode result=miss")
     geo = _http_get_json(
         "https://geocoding-api.open-meteo.com/v1/search?"
         + urllib.parse.urlencode({"name": city, "count": 1, "language": "en", "format": "json"})
@@ -3522,7 +3742,9 @@ def _forecast(lat, lon):
     key = (round(lat, 4), round(lon, 4))
     cached = _cache_get(_FORECAST_CACHE, key)
     if cached is not None:
+        app.logger.info("event=weather_cache kind=forecast result=hit")
         return cached
+    app.logger.info("event=weather_cache kind=forecast result=miss")
     wx = _http_get_json(
         "https://api.open-meteo.com/v1/forecast?"
         + urllib.parse.urlencode({
@@ -3617,6 +3839,7 @@ def coach():
             note_block = _load_coach_note_block(user.id)
             if note_block:
                 system += "\n\n" + note_block
+                app.logger.info("event=coach_memory_inject user_id=%s", user.id)
         except Exception:
             app.logger.warning('coach note load failed', exc_info=True)
 
@@ -3691,10 +3914,10 @@ def coach():
         # Notes. Wrapped so a memory hiccup can never take the reply down.
         if user is not None and reply:
             try:
-                _record_coach_exchange(user.id, message, reply)
-                _update_coach_note(user.id, message)
+                _persist_coach_interaction(user.id, message, reply)
             except Exception:
-                db.session.rollback()
+                # Rollback already happened inside _persist_coach_interaction; the
+                # reply still returns. Logged, not silently swallowed.
                 app.logger.warning('coach memory persist failed', exc_info=True)
         return jsonify({"reply": reply}), 200
     except Exception:

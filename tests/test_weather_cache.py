@@ -122,3 +122,55 @@ def test_cache_put_refresh_does_not_evict(monkeypatch):
     assert len(c) == 3
     assert set(c) == {"k0", "k1", "k2"}
     assert appmod._cache_get(c, "k0") == 99
+
+
+def test_cache_get_expired_returns_none_and_evicts():
+    c = {}
+    appmod._cache_put(c, "k", "v", appmod._FORECAST_TTL)
+    val, _exp = c["k"]
+    c["k"] = (val, appmod.datetime.utcnow() - appmod.timedelta(seconds=1))  # force-expire
+    assert appmod._cache_get(c, "k") is None   # miss on expiry...
+    assert "k" not in c                          # ...and the stale entry is dropped
+
+
+def test_geocode_cache_key_is_normalized(monkeypatch):
+    calls = _install_counting_http(monkeypatch)
+    appmod._weather_tool_result("  DENVER  ")   # spacing + casing
+    appmod._weather_tool_result("denver")       # normalizes to the same cache key
+    assert calls["geocode"] == 1                 # second lookup was a cache hit
+
+
+def test_cache_eviction_thread_safe_under_distinct_keys(monkeypatch):
+    """Stress the path the lock actually protects: eviction. Many threads insert
+    many DISTINCT keys into an over-capacity cache at once, so _cache_evict_one is
+    iterating the dict while other threads mutate it. Without _CACHE_LOCK this races
+    into 'dictionary changed size during iteration'; with it, every put succeeds and
+    the cache stays bounded at the cap."""
+    import threading
+
+    # A cap of 200 (not a handful) makes _cache_evict_one iterate ~200 entries on
+    # every over-cap put, widening the iterate-while-mutate window so a missing lock
+    # fails reliably rather than flakily. Well over the cap of distinct keys keeps
+    # eviction firing on essentially every put.
+    cap = 200
+    monkeypatch.setattr(appmod, "_CACHE_MAX_ENTRIES", cap)
+    cache = {}
+    errors = []
+
+    def worker(base):
+        try:
+            for i in range(800):
+                key = f"t{base}-{i}"               # every key distinct -> forces eviction, not refresh
+                appmod._cache_put(cache, key, i, appmod._FORECAST_TTL)
+                appmod._cache_get(cache, f"t{base}-{i % 13}")
+        except Exception as exc:                    # capture; threads swallow raises otherwise
+            errors.append(repr(exc))
+
+    threads = [threading.Thread(target=worker, args=(b,)) for b in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert errors == [], f"concurrent eviction raised: {errors[:3]}"
+    assert len(cache) <= cap, "cache must stay bounded at the cap under concurrent puts"
