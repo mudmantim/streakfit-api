@@ -1,0 +1,1847 @@
+openapi: 3.1.0
+info:
+  title: StreakFit Backend API
+  version: "1.0.0"
+  description: |
+    HTTP API for the StreakFit backend (a single Flask app, `app.py`). StreakFit is a
+    daily-health game: 5 exercises a day, a Brain Boost question, streaks, XP/Acorn
+    progression, teams with a shared "campfire", and Rickie — an AI coach.
+
+    ## Authentication
+    Most `/api/*` routes require a JWT **Bearer** token (`Authorization: Bearer <token>`).
+    Register (`POST /api/register`), then log in (`POST /api/login`) to receive an
+    `access_token`. Tokens expire **1 hour** after issue (`JWT_ACCESS_TOKEN_EXPIRES`).
+
+    JWT failure modes (all JSON `{"error": ...}`):
+    - **Missing / malformed** `Authorization` header → **401** `{"error":"Missing or invalid token"}`
+    - **Invalid** token (bad signature / not decodable) → **422** `{"error":"Invalid token"}`
+    - **Expired** token → **401** `{"error":"Token has expired"}`
+
+    Admin routes (`/api/admin/*`) are **not** JWT-protected. They are gated by a shared
+    secret sent in the `X-Admin-Secret` header (constant-time compared against the
+    `ADMIN_SECRET` env var; fails closed when the env var is unset).
+
+    ## Error model
+    The standard error body is JSON `{"error": "<message-or-code>"}`. Two deliberate
+    exceptions return Flask's **default (non-JSON, HTML)** response instead:
+    - **413 Payload Too Large** — any request body over `MAX_CONTENT_LENGTH` (256 KB) is
+      rejected by Werkzeug before the handler runs. Applies to every route that accepts a body.
+    - **403 Forbidden on `/api/admin/*`** — a missing/incorrect `X-Admin-Secret` triggers
+      `abort(403)`, which yields Flask's default 403 page, not the `{"error": ...}` shape.
+
+    The framework-level 400/404/429/500 handlers *do* return the JSON error shape
+    (`Bad request` / `Not found` / `Too many requests. Please try again later.` /
+    `Internal server error`).
+
+    ## Rate limiting
+    Per-route limits are enforced by Flask-Limiter (per client IP). Exceeding a limit
+    returns **429** with body `{"error":"Too many requests. Please try again later."}`.
+    Each operation notes its exact limit string in its description.
+
+    ## Conventions
+    - All timestamps are **UTC ISO-8601**. Some admin payloads append a literal `Z`
+      (documented per field); most model timestamps are naive UTC isoformat with no suffix.
+    - All resource IDs (user, team, challenge, run) are **integers**.
+    - Request bodies are JSON (`Content-Type: application/json`).
+
+servers:
+  - url: https://streakfit.pro
+    description: Production (Render)
+  - url: http://localhost:5000
+    description: Local development
+
+tags:
+  - name: Health & Static
+  - name: Analytics
+  - name: Auth & Profile
+  - name: Daily & Missions
+  - name: Challenges
+  - name: Teams
+  - name: Coach
+  - name: Admin
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: >
+        JWT access token from `POST /api/login`. Send as `Authorization: Bearer <token>`.
+        Expires 1 hour after issue.
+    adminSecret:
+      type: apiKey
+      in: header
+      name: X-Admin-Secret
+      description: >
+        Shared admin secret, compared (constant-time) against the `ADMIN_SECRET` env var.
+        Required by every `/api/admin/*` route. A wrong/absent value returns Flask's
+        default (non-JSON) 403 page.
+
+  responses:
+    UnauthorizedJWT:
+      description: >
+        Missing/malformed token, or an expired token. Body varies:
+        `Missing or invalid token` (no/blank header) or `Token has expired` (expired).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          examples:
+            missing:
+              value: {"error": "Missing or invalid token"}
+            expired:
+              value: {"error": "Token has expired"}
+    UnprocessableJWT:
+      description: Invalid token (bad signature or otherwise undecodable).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example: {"error": "Invalid token"}
+    TooManyRequests:
+      description: Rate limit exceeded for this route.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example: {"error": "Too many requests. Please try again later."}
+    PayloadTooLarge:
+      description: >
+        Request body exceeded `MAX_CONTENT_LENGTH` (256 KB). Returns Flask's **default
+        (non-JSON, HTML)** 413 response — NOT the `{"error": ...}` shape.
+      content:
+        text/html:
+          schema:
+            type: string
+    AdminForbidden:
+      description: >
+        Missing or incorrect `X-Admin-Secret`. Returns Flask's **default (non-JSON, HTML)**
+        403 page via `abort(403)` — NOT the `{"error": ...}` shape.
+      content:
+        text/html:
+          schema:
+            type: string
+    InternalError:
+      description: Unhandled server error.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example: {"error": "Internal server error"}
+
+  schemas:
+    Error:
+      type: object
+      description: Standard error envelope. `error` is a human message or a machine code.
+      properties:
+        error:
+          type: string
+      required: [error]
+      example: {"error": "Something went wrong."}
+
+    ProgressEvent:
+      type: object
+      description: One XP/Acorn award produced by `award_progress()`.
+      properties:
+        xp_awarded: {type: integer}
+        acorns_awarded: {type: integer}
+        old_level: {type: integer}
+        new_level: {type: integer}
+        leveled_up: {type: boolean}
+        level_title: {type: string}
+      example:
+        xp_awarded: 25
+        acorns_awarded: 3
+        old_level: 2
+        new_level: 2
+        leveled_up: false
+        level_title: "Sprout"
+
+    ProgressSummary:
+      type: object
+      description: Aggregate progression fields merged into completion responses.
+      properties:
+        xp_awarded: {type: integer}
+        acorns_awarded: {type: integer}
+        old_level: {type: integer}
+        new_level: {type: integer}
+        leveled_up: {type: boolean}
+        level_title: {type: string}
+        progress_events:
+          type: array
+          items: {$ref: '#/components/schemas/ProgressEvent'}
+
+    User:
+      type: object
+      description: The authenticated user's full profile + derived stats (`GET /api/me`).
+      properties:
+        id: {type: integer}
+        username: {type: string}
+        skill_level: {type: string, enum: [beginner, intermediate, advanced, custom]}
+        display_mode: {type: string, enum: [classic, bright, game]}
+        rickie_mode: {type: string, enum: [full, quiet, minimal]}
+        current_streak: {type: integer}
+        best_streak: {type: integer}
+        total_missions: {type: integer}
+        brain_boost_answers: {type: integer}
+        xp_total: {type: integer}
+        acorns_total: {type: integer}
+        level: {type: integer}
+        level_title: {type: string}
+        xp_into_level: {type: integer}
+        xp_required: {type: integer}
+        xp_to_next_level: {type: integer}
+      example:
+        id: 42
+        username: "rocky"
+        skill_level: "beginner"
+        display_mode: "game"
+        rickie_mode: "full"
+        current_streak: 3
+        best_streak: 9
+        total_missions: 14
+        brain_boost_answers: 12
+        xp_total: 320
+        acorns_total: 21
+        level: 3
+        level_title: "Sprout"
+        xp_into_level: 70
+        xp_required: 200
+        xp_to_next_level: 130
+
+    Challenge:
+      type: object
+      properties:
+        id: {type: integer}
+        title: {type: string}
+        current_streak: {type: integer}
+        longest_streak: {type: integer}
+        last_check_in: {type: [string, "null"], format: date, description: "ISO date or null"}
+        created_at: {type: string, format: date-time}
+      example:
+        id: 7
+        title: "Drink water"
+        current_streak: 4
+        longest_streak: 10
+        last_check_in: "2026-07-22"
+        created_at: "2026-07-01T08:12:00"
+
+    TeamSummary:
+      type: object
+      description: Team as it appears in the `GET /api/teams` list.
+      properties:
+        id: {type: integer}
+        name: {type: string}
+        member_count: {type: integer}
+        campfire_stage: {type: string, enum: [Kindling, "Small Flame", Campfire, Bonfire, Beacon]}
+        total_team_missions: {type: integer}
+
+    TeamMember:
+      type: object
+      properties:
+        user_id: {type: integer}
+        username: {type: string}
+        is_creator: {type: boolean}
+
+    TeamDetail:
+      type: object
+      properties:
+        id: {type: integer}
+        name: {type: string}
+        created_by_user_id: {type: integer}
+        is_creator: {type: boolean}
+        members:
+          type: array
+          items: {$ref: '#/components/schemas/TeamMember'}
+        member_count: {type: integer}
+        member_cap: {type: integer, description: "8 (free) or 25 (any Plus member)."}
+        invite_code: {type: [string, "null"]}
+        campfire:
+          type: object
+          properties:
+            total_team_missions: {type: integer}
+            stage: {type: string}
+
+    TeamMessage:
+      type: object
+      properties:
+        sender_type: {type: string, enum: [user, rickie]}
+        sender_username: {type: [string, "null"], description: "null for Rickie messages."}
+        body: {type: string}
+        created_at: {type: string, format: date-time}
+
+    TeamMoment:
+      type: object
+      properties:
+        moment_type:
+          type: string
+          enum: [team_created, member_joined, member_left, campfire_log_added, campfire_stage_reached]
+        subject_username: {type: [string, "null"]}
+        occurred_at: {type: string, format: date-time}
+        metadata: {type: [object, "null"], additionalProperties: true}
+        display_text: {type: [string, "null"]}
+
+security: []
+
+paths:
+  /:
+    get:
+      tags: [Health & Static]
+      summary: Serve the PWA front-end
+      description: Returns the static `index.html` (the StreakFit web app). Public; no side effects.
+      security: []
+      responses:
+        '200':
+          description: The app shell HTML.
+          content:
+            text/html:
+              schema: {type: string}
+
+  /sw.js:
+    get:
+      tags: [Health & Static]
+      summary: Serve the service worker
+      description: >
+        Returns the static `sw.js` at the site root (so its default scope covers `/`),
+        with header `Service-Worker-Allowed: /`. Public; no side effects.
+      security: []
+      responses:
+        '200':
+          description: Service worker script.
+          headers:
+            Service-Worker-Allowed:
+              schema: {type: string}
+              description: Always `/`.
+          content:
+            application/javascript:
+              schema: {type: string}
+
+  /health:
+    get:
+      tags: [Health & Static]
+      summary: Liveness check
+      description: Returns `{"status":"ok"}`. Public; no DB access, no side effects.
+      security: []
+      responses:
+        '200':
+          description: Service is up.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: {type: string}
+              example: {"status": "ok"}
+
+  /admin:
+    get:
+      tags: [Health & Static]
+      summary: Serve the admin dashboard page
+      description: >
+        Returns the static `admin.html`. The **page** is public; the admin **data**
+        endpoints it calls (`/api/admin/*`) each require the `X-Admin-Secret` header.
+        No side effects.
+      security: []
+      responses:
+        '200':
+          description: Admin dashboard HTML.
+          content:
+            text/html:
+              schema: {type: string}
+
+  /api/events:
+    post:
+      tags: [Analytics]
+      summary: Record an anonymous analytics event
+      description: |
+        Records one allowlisted analytics event. **Side effect:** on success, inserts an
+        `AnalyticsEvent` row (a DB write failure is swallowed/logged, still returning 204).
+        Public (no auth). **Rate limit: 30 per minute.**
+
+        Allowed `event` values: `guest_start`, `guest_complete`, `guest_create_account_click`,
+        `notification_permission_granted`, `notification_permission_denied`,
+        `notification_sent_daily`, `notification_sent_completion`, `install_prompt_shown`,
+        `install_prompt_accepted`, `install_prompt_dismissed`.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                event: {type: string}
+              required: [event]
+            example: {"event": "guest_start"}
+      responses:
+        '204':
+          description: Event accepted (no body).
+        '400':
+          description: Unknown / disallowed event name.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+              example: {"error": "unknown event"}
+        '413': {$ref: '#/components/responses/PayloadTooLarge'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+
+  /api/register:
+    post:
+      tags: [Auth & Profile]
+      summary: Create an account
+      description: |
+        Registers a new user. **Side effects:** inserts a `User` row (pbkdf2 password hash)
+        and, on success, an `AnalyticsEvent('account_created')` row. Public.
+        **Rate limit: 5 per minute.**
+
+        Validation: username 2–80 chars; password 8–128 chars; username must be unique
+        (a concurrent duplicate is caught via the unique constraint and returns the same 400).
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                username: {type: string, minLength: 2, maxLength: 80}
+                password: {type: string, minLength: 8, maxLength: 128}
+              required: [username, password]
+            example: {"username": "rocky", "password": "trailmix123"}
+      responses:
+        '201':
+          description: Account created.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message: {type: string}
+              example: {"message": "User registered successfully"}
+        '400':
+          description: >
+            Missing fields, username/password length out of range, or username taken.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+              examples:
+                missing: {value: {"error": "Please choose a username and password."}}
+                username_len: {value: {"error": "Username needs to be 2–80 characters."}}
+                password_short: {value: {"error": "Password needs to be at least 8 characters."}}
+                password_long: {value: {"error": "Password can be at most 128 characters."}}
+                taken: {value: {"error": "That username is taken — try another."}}
+        '413': {$ref: '#/components/responses/PayloadTooLarge'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+        '500':
+          description: Account-creation commit failed.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+              example: {"error": "Something went wrong creating your account. Please try again."}
+
+  /api/login:
+    post:
+      tags: [Auth & Profile]
+      summary: Log in and get a JWT
+      description: |
+        Authenticates a username/password and returns a 1-hour JWT access token. Runs a
+        constant-time-ish password comparison even for unknown usernames (timing
+        equalization). **Side effect:** logs an `event=login` line; no DB writes. Public.
+        **Rate limit: 10 per minute.**
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                username: {type: string}
+                password: {type: string}
+              required: [username, password]
+            example: {"username": "rocky", "password": "trailmix123"}
+      responses:
+        '200':
+          description: Authenticated.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  access_token: {type: string}
+              example: {"access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."}
+        '400':
+          description: Missing username or password.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+              example: {"error": "Please enter your username and password."}
+        '401':
+          description: Username/password do not match (deliberately ambiguous).
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+              example: {"error": "That username and password don’t match."}
+        '413': {$ref: '#/components/responses/PayloadTooLarge'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+
+  /api/me:
+    get:
+      tags: [Auth & Profile]
+      summary: Get the current user's profile & stats
+      description: >
+        Returns the authenticated user's profile plus derived streak/XP/level stats.
+        No side effects.
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: The user profile.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/User'}
+        '401': {$ref: '#/components/responses/UnauthorizedJWT'}
+        '404':
+          description: Token identity no longer maps to a user.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+              example: {"error": "Not found"}
+        '422': {$ref: '#/components/responses/UnprocessableJWT'}
+    patch:
+      tags: [Auth & Profile]
+      summary: Update profile preferences
+      description: >
+        Updates any of `skill_level`, `display_mode`, `rickie_mode`. At least one must be
+        present. **Side effect:** updates the `User` row. Returns the updated profile
+        (a stats subset — no XP/level fields).
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              minProperties: 1
+              properties:
+                skill_level: {type: string, enum: [beginner, intermediate, advanced, custom]}
+                display_mode: {type: string, enum: [classic, bright, game]}
+                rickie_mode: {type: string, enum: [full, quiet, minimal]}
+            example: {"skill_level": "intermediate", "display_mode": "bright"}
+      responses:
+        '200':
+          description: Updated profile subset.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id: {type: integer}
+                  username: {type: string}
+                  skill_level: {type: string}
+                  display_mode: {type: string}
+                  rickie_mode: {type: string}
+                  current_streak: {type: integer}
+                  best_streak: {type: integer}
+                  total_missions: {type: integer}
+                  brain_boost_answers: {type: integer}
+              example:
+                id: 42
+                username: "rocky"
+                skill_level: "intermediate"
+                display_mode: "bright"
+                rickie_mode: "full"
+                current_streak: 3
+                best_streak: 9
+                total_missions: 14
+                brain_boost_answers: 12
+        '400':
+          description: No recognized field, or an invalid enum value.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+              examples:
+                none: {value: {"error": "Provide skill_level, display_mode, and/or rickie_mode"}}
+                bad_skill: {value: {"error": "Invalid skill_level. Must be one of: beginner, intermediate, advanced, custom"}}
+                bad_display: {value: {"error": "Invalid display_mode. Must be one of: classic, bright, game"}}
+                bad_rickie: {value: {"error": "Invalid rickie_mode. Must be one of: full, quiet, minimal"}}
+        '401': {$ref: '#/components/responses/UnauthorizedJWT'}
+        '404':
+          description: Token identity no longer maps to a user.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+              example: {"error": "Not found"}
+        '413': {$ref: '#/components/responses/PayloadTooLarge'}
+        '422': {$ref: '#/components/responses/UnprocessableJWT'}
+
+  /api/memory-book:
+    get:
+      tags: [Auth & Profile]
+      summary: Get the user's Memory Book
+      description: >
+        Aggregated lifetime stats, milestone progress, favorite exercise/category, and a
+        timeline of the **last 30** `ProgressEvent`s (newest first). No side effects.
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Memory Book payload.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  version: {type: integer}
+                  lifetime:
+                    type: object
+                    properties:
+                      xp_total: {type: integer}
+                      acorns_total: {type: integer}
+                      missions_completed: {type: integer}
+                      brain_boosts_answered: {type: integer}
+                      correct_answers: {type: integer}
+                      exercises_completed: {type: integer}
+                      days_active: {type: integer}
+                  milestones:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        key: {type: string}
+                        label: {type: string}
+                        target: {type: integer}
+                        progress: {type: integer}
+                        unlocked: {type: boolean}
+                  favorites:
+                    type: object
+                    properties:
+                      favorite_exercise: {type: [string, "null"]}
+                      favorite_category: {type: [string, "null"]}
+                  timeline:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        event_type: {type: string}
+                        xp_delta: {type: integer}
+                        acorn_delta: {type: integer}
+                        created_at: {type: string, format: date-time}
+              example:
+                version: 1
+                lifetime:
+                  xp_total: 320
+                  acorns_total: 21
+                  missions_completed: 14
+                  brain_boosts_answered: 12
+                  correct_answers: 9
+                  exercises_completed: 78
+                  days_active: 16
+                milestones:
+                  - {key: "first_mission", label: "First Mission", target: 1, progress: 1, unlocked: true}
+                  - {key: "exercises_100", label: "100 Exercises", target: 100, progress: 78, unlocked: false}
+                favorites: {favorite_exercise: "Wall Push-Up", favorite_category: "upper_body"}
+                timeline:
+                  - {event_type: "mission_complete", xp_delta: 25, acorn_delta: 3, created_at: "2026-07-22T09:01:00"}
+        '401': {$ref: '#/components/responses/UnauthorizedJWT'}
+        '404':
+          description: Token identity no longer maps to a user.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+              example: {"error": "Not found"}
+        '422': {$ref: '#/components/responses/UnprocessableJWT'}
+
+  /api/daily:
+    get:
+      tags: [Daily & Missions]
+      summary: Get today's mission for the current user
+      description: >
+        Returns today's 5 exercises (deterministic per user/date/skill), today's insight,
+        the Brain Boost question (with answer state), completion count, and a `rise_again`
+        flag. No side effects.
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Today's mission.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  date: {type: string, format: date}
+                  skill_level: {type: string}
+                  completed_count: {type: integer}
+                  rise_again: {type: boolean}
+                  insight:
+                    type: object
+                    properties:
+                      category: {type: string}
+                      text: {type: string}
+                  brain_boost:
+                    type: object
+                    description: >
+                      `correct`/`points_earned`/`correct_index`/`explanation` are present
+                      only once the user has answered today.
+                    properties:
+                      question: {type: string}
+                      options: {type: array, items: {type: string}}
+                      answered: {type: boolean}
+                      correct: {type: boolean}
+                      points_earned: {type: integer}
+                      correct_index: {type: integer}
+                      explanation: {type: string}
+                  exercises:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        key: {type: string}
+                        name: {type: string}
+                        category: {type: string}
+                        difficulty: {type: string}
+                        reps_or_duration: {type: string}
+                        instructions: {type: string}
+                        completed: {type: boolean}
+                        image_url: {type: string}
+              example:
+                date: "2026-07-23"
+                skill_level: "beginner"
+                completed_count: 2
+                rise_again: false
+                insight: {category: "MOVEMENT", text: "A ten-minute walk can lift your mood for the rest of the day."}
+                brain_boost:
+                  question: "About how long should you hold a stretch for it to actually help?"
+                  options: ["2-3 seconds", "20-30 seconds", "5 minutes", "It doesn't matter"]
+                  answered: false
+                exercises:
+                  - {key: "wall_push_up", name: "Wall Push-Up", category: "upper_body", difficulty: "beginner", reps_or_duration: "3 sets of 12 reps", instructions: "Stand arm's length from a wall...", completed: true, image_url: "/static/exercises/wall_push_up.svg"}
+        '401': {$ref: '#/components/responses/UnauthorizedJWT'}
+        '404':
+          description: Token identity no longer maps to a user.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+              example: {"error": "Not found"}
+        '422': {$ref: '#/components/responses/UnprocessableJWT'}
+
+  /api/demo/daily:
+    get:
+      tags: [Daily & Missions]
+      summary: Get a demo (guest) mission
+      description: >
+        Public, unauthenticated version of the daily mission for guest mode: fixed
+        `beginner` skill, no Brain Boost, everything uncompleted. No side effects.
+      security: []
+      responses:
+        '200':
+          description: Demo mission (no `brain_boost` key; all exercises `completed:false`).
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  date: {type: string, format: date}
+                  skill_level: {type: string}
+                  completed_count: {type: integer}
+                  rise_again: {type: boolean}
+                  insight:
+                    type: object
+                    properties:
+                      category: {type: string}
+                      text: {type: string}
+                  exercises:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        key: {type: string}
+                        name: {type: string}
+                        category: {type: string}
+                        difficulty: {type: string}
+                        reps_or_duration: {type: string}
+                        instructions: {type: string}
+                        completed: {type: boolean}
+                        image_url: {type: string}
+              example:
+                date: "2026-07-23"
+                skill_level: "beginner"
+                completed_count: 0
+                rise_again: false
+                insight: {category: "MOVEMENT", text: "A ten-minute walk can lift your mood for the rest of the day."}
+                exercises:
+                  - {key: "wall_push_up", name: "Wall Push-Up", category: "upper_body", difficulty: "beginner", reps_or_duration: "3 sets of 12 reps", instructions: "Stand arm's length from a wall...", completed: false, image_url: "/static/exercises/wall_push_up.svg"}
+
+  /api/daily/{exercise_key}/complete:
+    post:
+      tags: [Daily & Missions]
+      summary: Mark a daily exercise complete
+      description: |
+        Marks one of today's exercises complete and awards XP/Acorns. Idempotent per
+        exercise per day (re-completing returns the current count with no new awards).
+
+        **Side effects:** inserts a `DailyCompletion`; may insert `ProgressEvent`s (via
+        `award_progress`, which also increments `User.xp_total`/`acorns_total`) for
+        `new_exercise`, and — when the 5th exercise of the day lands — `mission_complete`
+        and `perfect_mission`. On a completed mission it also increments each of the
+        user's team `TeamCampfire.total_team_missions`, writes `TeamMoment` rows
+        (`campfire_log_added`, and `campfire_stage_reached` on a threshold crossing), and
+        `TeamMessage` rows from Rickie (first-ever team log, and stage-reached).
+        The `exercise_key` must be in today's generated list for this user.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: exercise_key
+          in: path
+          required: true
+          schema: {type: string}
+          description: Exercise key, e.g. `wall_push_up`.
+      responses:
+        '200':
+          description: Exercise recorded (or already recorded).
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - type: object
+                    properties:
+                      message: {type: string}
+                      exercise_key: {type: string}
+                      completed_count: {type: integer}
+                      team_campfire_updates:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            team_id: {type: integer}
+                            total_team_missions: {type: integer}
+                            stage: {type: string}
+                  - $ref: '#/components/schemas/ProgressSummary'
+              example:
+                message: "Exercise completed"
+                exercise_key: "wall_push_up"
+                completed_count: 5
+                team_campfire_updates:
+                  - {team_id: 3, total_team_missions: 101, stage: "Small Flame"}
+                xp_awarded: 40
+                acorns_awarded: 5
+                old_level: 2
+                new_level: 3
+                leveled_up: true
+                level_title: "Sprout"
+                progress_events:
+                  - {xp_awarded: 25, acorns_awarded: 3, old_level: 2, new_level: 2, leveled_up: false, level_title: "Sprout"}
+        '400':
+          description: The key is not in today's daily list for this user.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+              example: {"error": "Exercise not in today's daily list"}
+        '401': {$ref: '#/components/responses/UnauthorizedJWT'}
+        '404':
+          description: Token identity no longer maps to a user.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+              example: {"error": "Not found"}
+        '422': {$ref: '#/components/responses/UnprocessableJWT'}
+
+  /api/brain-boost/answer:
+    post:
+      tags: [Daily & Missions]
+      summary: Answer today's Brain Boost
+      description: |
+        Submits an answer to today's Brain Boost question. One answer per user per day;
+        a repeat submission returns the stored result without new awards.
+
+        **Side effects:** inserts a `BrainBoostAnswer`; awards `brain_boost_attempt` and
+        (if correct) `brain_boost_correct` via `award_progress` (inserts `ProgressEvent`s,
+        increments the user's XP/Acorns).
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                selected_index:
+                  type: integer
+                  description: Index into today's options array. Must be a real int (booleans rejected).
+              required: [selected_index]
+            example: {"selected_index": 1}
+      responses:
+        '200':
+          description: Answer recorded (or previously recorded).
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - type: object
+                    properties:
+                      correct: {type: boolean}
+                      points_earned: {type: integer}
+                      correct_index: {type: integer}
+                      explanation: {type: string}
+                  - $ref: '#/components/schemas/ProgressSummary'
+              example:
+                correct: true
+                points_earned: 10
+                correct_index: 1
+                explanation: "Holding a stretch for 20 to 30 seconds gives your muscles enough time..."
+                xp_awarded: 13
+                acorns_awarded: 1
+                old_level: 3
+                new_level: 3
+                leveled_up: false
+                level_title: "Sprout"
+                progress_events: []
+        '400':
+          description: Missing/non-integer `selected_index`, or index out of range.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+              examples:
+                required: {value: {"error": "selected_index_required"}}
+                invalid: {value: {"error": "invalid_selected_index"}}
+        '401': {$ref: '#/components/responses/UnauthorizedJWT'}
+        '404':
+          description: Token identity no longer maps to a user.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+              example: {"error": "Not found"}
+        '413': {$ref: '#/components/responses/PayloadTooLarge'}
+        '422': {$ref: '#/components/responses/UnprocessableJWT'}
+        '500': {$ref: '#/components/responses/InternalError'}
+
+  /api/challenges:
+    post:
+      tags: [Challenges]
+      summary: Create a personal challenge
+      description: 'Creates a habit-style challenge owned by the user. **Side effect:** inserts a `Challenge` row.'
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                title: {type: string}
+              required: [title]
+            example: {"title": "Drink water"}
+      responses:
+        '201':
+          description: Challenge created.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message: {type: string}
+                  challenge_id: {type: integer}
+              example: {"message": "Challenge created", "challenge_id": 7}
+        '400':
+          description: Missing title.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+              example: {"error": "Invalid data"}
+        '401': {$ref: '#/components/responses/UnauthorizedJWT'}
+        '413': {$ref: '#/components/responses/PayloadTooLarge'}
+        '422': {$ref: '#/components/responses/UnprocessableJWT'}
+    get:
+      tags: [Challenges]
+      summary: List the user's challenges
+      description: Returns all challenges owned by the authenticated user. No side effects.
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Challenge list.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/Challenge'}
+        '401': {$ref: '#/components/responses/UnauthorizedJWT'}
+        '422': {$ref: '#/components/responses/UnprocessableJWT'}
+
+  /api/challenges/{challenge_id}:
+    get:
+      tags: [Challenges]
+      summary: Get one challenge
+      description: Returns a single challenge the user owns. No side effects.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: challenge_id
+          in: path
+          required: true
+          schema: {type: integer}
+      responses:
+        '200':
+          description: The challenge.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Challenge'}
+        '401': {$ref: '#/components/responses/UnauthorizedJWT'}
+        '404':
+          description: No such challenge owned by this user.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+              example: {"error": "Not found"}
+        '422': {$ref: '#/components/responses/UnprocessableJWT'}
+
+  /api/challenges/{challenge_id}/checkin:
+    post:
+      tags: [Challenges]
+      summary: Check in to a challenge
+      description: |
+        Records a daily check-in, advancing/resetting the streak. Idempotent for the same
+        day. Uses `SELECT ... FOR UPDATE` row locking. **Side effect:** updates the
+        `Challenge` row (`current_streak`, `longest_streak`, `last_check_in`).
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: challenge_id
+          in: path
+          required: true
+          schema: {type: integer}
+      responses:
+        '200':
+          description: Checked in (or already checked in today).
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message: {type: string}
+                  current_streak: {type: integer}
+                  longest_streak: {type: integer}
+                  new_record: {type: boolean}
+                  streak: {type: integer, description: "Only present on the 'already checked in' path."}
+              examples:
+                success:
+                  value: {"message": "Check-in successful", "current_streak": 5, "longest_streak": 10, "new_record": false}
+                already:
+                  value: {"message": "Already checked in today", "streak": 5}
+        '401': {$ref: '#/components/responses/UnauthorizedJWT'}
+        '403':
+          description: Challenge exists but is owned by another user.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+              example: {"error": "Forbidden"}
+        '404':
+          description: No such challenge.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+              example: {"error": "Not found"}
+        '422': {$ref: '#/components/responses/UnprocessableJWT'}
+
+  /api/teams:
+    post:
+      tags: [Teams]
+      summary: Create a team
+      description: |
+        Creates a team, makes the caller its creator/first member, and provisions a
+        campfire and a 6-char invite code. **Side effects:** inserts `Team`,
+        `TeamMembership`, `TeamCampfire`, `TeamInviteCode`, and a `team_created`
+        `TeamMoment`. Free users are capped at 10 teams (Plus: unlimited).
+        **Rate limit: 10 per minute.**
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: {type: string, description: "Trimmed, truncated to 100 chars."}
+              required: [name]
+            example: {"name": "Trail Blazers"}
+      responses:
+        '201':
+          description: Team created.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message: {type: string}
+                  team:
+                    type: object
+                    properties:
+                      id: {type: integer}
+                      name: {type: string}
+                      invite_code: {type: string}
+              example: {"message": "Team created", "team": {"id": 3, "name": "Trail Blazers", "invite_code": "A1B2C3"}}
+        '400':
+          description: Missing/blank team name.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+              example: {"error": "Team name is required"}
+        '401': {$ref: '#/components/responses/UnauthorizedJWT'}
+        '403':
+          description: Free-plan team-count cap reached.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+              example: {"error": "You've reached the 10-team limit for your plan"}
+        '413': {$ref: '#/components/responses/PayloadTooLarge'}
+        '422': {$ref: '#/components/responses/UnprocessableJWT'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+    get:
+      tags: [Teams]
+      summary: List the user's teams
+      description: Returns every team the caller belongs to, with member count and campfire stage. No side effects.
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Team list.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/TeamSummary'}
+              example:
+                - {id: 3, name: "Trail Blazers", member_count: 4, campfire_stage: "Small Flame", total_team_missions: 120}
+        '401': {$ref: '#/components/responses/UnauthorizedJWT'}
+        '422': {$ref: '#/components/responses/UnprocessableJWT'}
+
+  /api/teams/lookup/{code}:
+    get:
+      tags: [Teams]
+      summary: Look up a team by invite code
+      description: >
+        Resolves an invite code (trimmed/upper-cased) to a public team preview. Does NOT
+        join. No side effects.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: code
+          in: path
+          required: true
+          schema: {type: string}
+          description: 6-character invite code.
+      responses:
+        '200':
+          description: Team preview.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  team_id: {type: integer}
+                  name: {type: string}
+                  member_count: {type: integer}
+                  campfire_stage: {type: string}
+              example: {"team_id": 3, "name": "Trail Blazers", "member_count": 4, "campfire_stage": "Small Flame"}
+        '401': {$ref: '#/components/responses/UnauthorizedJWT'}
+        '404':
+          description: Unknown invite code.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+              example: {"error": "Invalid invite code"}
+        '422': {$ref: '#/components/responses/UnprocessableJWT'}
+
+  /api/teams/{team_id}:
+    get:
+      tags: [Teams]
+      summary: Get team detail
+      description: >
+        Full team view (members, invite code, campfire). Caller must be a member.
+        No side effects.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: team_id
+          in: path
+          required: true
+          schema: {type: integer}
+      responses:
+        '200':
+          description: Team detail.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/TeamDetail'}
+              example:
+                id: 3
+                name: "Trail Blazers"
+                created_by_user_id: 42
+                is_creator: true
+                members:
+                  - {user_id: 42, username: "rocky", is_creator: true}
+                  - {user_id: 51, username: "pip", is_creator: false}
+                member_count: 2
+                member_cap: 8
+                invite_code: "A1B2C3"
+                campfire: {total_team_missions: 120, stage: "Small Flame"}
+        '401': {$ref: '#/components/responses/UnauthorizedJWT'}
+        '403':
+          description: Caller is not a member of this team.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+              example: {"error": "Forbidden"}
+        '404':
+          description: Membership exists but the team row is gone (defensive).
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+              example: {"error": "Not found"}
+        '422': {$ref: '#/components/responses/UnprocessableJWT'}
+
+  /api/teams/{team_id}/join:
+    post:
+      tags: [Teams]
+      summary: Join a team by invite code
+      description: |
+        Joins the given team if the supplied invite code matches. **Side effects:** inserts
+        a `TeamMembership`, a `member_joined` `TeamMoment`, and a Rickie `TeamMessage`.
+        Enforces both the joiner's team-count cap and the team's member cap.
+        **Rate limit: 10 per minute.**
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: team_id
+          in: path
+          required: true
+          schema: {type: integer}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                code: {type: string}
+              required: [code]
+            example: {"code": "A1B2C3"}
+      responses:
+        '200':
+          description: Joined.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message: {type: string}
+                  team_id: {type: integer}
+              example: {"message": "Joined team", "team_id": 3}
+        '400':
+          description: Missing code, or already a member.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+              examples:
+                missing: {value: {"error": "Invite code is required"}}
+                already: {value: {"error": "Already a member of this team"}}
+        '401': {$ref: '#/components/responses/UnauthorizedJWT'}
+        '403':
+          description: Wrong invite code, joiner's team-count cap reached, or team at member cap.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+              examples:
+                bad_code: {value: {"error": "Invalid invite code"}}
+                count_cap: {value: {"error": "You've reached the 10-team limit for your plan"}}
+                member_cap: {value: {"error": "This team is at its 8-member limit"}}
+        '404':
+          description: No such team.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+              example: {"error": "Not found"}
+        '413': {$ref: '#/components/responses/PayloadTooLarge'}
+        '422': {$ref: '#/components/responses/UnprocessableJWT'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+
+  /api/teams/{team_id}/leave:
+    post:
+      tags: [Teams]
+      summary: Leave a team
+      description: >
+        Removes the caller's membership. **Side effects:** deletes the `TeamMembership`
+        and writes a `member_left` `TeamMoment`.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: team_id
+          in: path
+          required: true
+          schema: {type: integer}
+      responses:
+        '200':
+          description: Left the team.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message: {type: string}
+              example: {"message": "Left team"}
+        '401': {$ref: '#/components/responses/UnauthorizedJWT'}
+        '404':
+          description: Caller is not a member of this team.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+              example: {"error": "Not a member of this team"}
+        '422': {$ref: '#/components/responses/UnprocessableJWT'}
+
+  /api/teams/{team_id}/members/{member_user_id}:
+    delete:
+      tags: [Teams]
+      summary: Remove a member (creator only)
+      description: >
+        Creator-only safety power to remove another member. Silent by design (no moment,
+        no chat, no Rickie). **Side effect:** deletes the target `TeamMembership`.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: team_id
+          in: path
+          required: true
+          schema: {type: integer}
+        - name: member_user_id
+          in: path
+          required: true
+          schema: {type: integer}
+      responses:
+        '200':
+          description: Member removed.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message: {type: string}
+              example: {"message": "Member removed"}
+        '400':
+          description: Attempted to remove self (use Leave Team instead).
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+              example: {"error": "Use Leave Team to remove yourself"}
+        '401': {$ref: '#/components/responses/UnauthorizedJWT'}
+        '403':
+          description: Caller is not the team creator.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+              example: {"error": "Forbidden"}
+        '404':
+          description: No such team, or target user is not a member.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+              examples:
+                no_team: {value: {"error": "Not found"}}
+                not_member: {value: {"error": "Not a member of this team"}}
+        '422': {$ref: '#/components/responses/UnprocessableJWT'}
+
+  /api/teams/{team_id}/rotate-invite:
+    post:
+      tags: [Teams]
+      summary: Rotate the invite code (creator only)
+      description: >
+        Creator-only. Generates a fresh invite code, invalidating the old one.
+        **Side effect:** updates the `TeamInviteCode` row (`code`, `rotated_at`).
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: team_id
+          in: path
+          required: true
+          schema: {type: integer}
+      responses:
+        '200':
+          description: New invite code.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message: {type: string}
+                  invite_code: {type: string}
+              example: {"message": "Invite code rotated", "invite_code": "X9Y8Z7"}
+        '401': {$ref: '#/components/responses/UnauthorizedJWT'}
+        '403':
+          description: Caller is not the team creator.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+              example: {"error": "Forbidden"}
+        '404':
+          description: No such team, or no invite-code row.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+              example: {"error": "Not found"}
+        '422': {$ref: '#/components/responses/UnprocessableJWT'}
+
+  /api/teams/{team_id}/campfire:
+    get:
+      tags: [Teams]
+      summary: Get team campfire state
+      description: Returns the team's campfire mission total and stage. Caller must be a member. No side effects.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: team_id
+          in: path
+          required: true
+          schema: {type: integer}
+      responses:
+        '200':
+          description: Campfire state.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  team_id: {type: integer}
+                  total_team_missions: {type: integer}
+                  stage: {type: string}
+              example: {"team_id": 3, "total_team_missions": 120, "stage": "Small Flame"}
+        '401': {$ref: '#/components/responses/UnauthorizedJWT'}
+        '403':
+          description: Caller is not a member of this team.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+              example: {"error": "Forbidden"}
+        '404':
+          description: No campfire row for this team.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+              example: {"error": "Not found"}
+        '422': {$ref: '#/components/responses/UnprocessableJWT'}
+
+  /api/teams/{team_id}/moments:
+    get:
+      tags: [Teams]
+      summary: Get team moments (history)
+      description: >
+        Returns the team's moment history **newest first** (ordered by `occurred_at`
+        descending). Caller must be a member. No side effects.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: team_id
+          in: path
+          required: true
+          schema: {type: integer}
+      responses:
+        '200':
+          description: Moments (descending by occurred_at).
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/TeamMoment'}
+              example:
+                - {moment_type: "member_joined", subject_username: "pip", occurred_at: "2026-07-22T10:00:00", metadata: null, display_text: "pip joined the team"}
+                - {moment_type: "team_created", subject_username: "rocky", occurred_at: "2026-07-01T09:00:00", metadata: null, display_text: "rocky created the team"}
+        '401': {$ref: '#/components/responses/UnauthorizedJWT'}
+        '403':
+          description: Caller is not a member of this team.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+              example: {"error": "Forbidden"}
+        '422': {$ref: '#/components/responses/UnprocessableJWT'}
+
+  /api/teams/{team_id}/messages:
+    get:
+      tags: [Teams]
+      summary: Get team chat messages
+      description: >
+        Returns the team's messages **oldest first** (ordered by `created_at` ascending).
+        Caller must be a member. No side effects.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: team_id
+          in: path
+          required: true
+          schema: {type: integer}
+      responses:
+        '200':
+          description: Messages (ascending by created_at).
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/TeamMessage'}
+              example:
+                - {sender_type: "rickie", sender_username: null, body: "Welcome to the campfire.", created_at: "2026-07-22T10:00:01"}
+                - {sender_type: "user", sender_username: "rocky", body: "Nice, glad to be here.", created_at: "2026-07-22T10:05:00"}
+        '401': {$ref: '#/components/responses/UnauthorizedJWT'}
+        '403':
+          description: Caller is not a member of this team.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+              example: {"error": "Forbidden"}
+        '422': {$ref: '#/components/responses/UnprocessableJWT'}
+    post:
+      tags: [Teams]
+      summary: Post a team chat message
+      description: >
+        Posts a message to the team chat as the caller. Body trimmed; max 240 chars.
+        **Side effect:** inserts a `TeamMessage`. **Rate limit: 30 per minute.**
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: team_id
+          in: path
+          required: true
+          schema: {type: integer}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                body: {type: string, maxLength: 240}
+              required: [body]
+            example: {"body": "Nice work today, everyone."}
+      responses:
+        '201':
+          description: Message posted.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/TeamMessage'}
+              example: {sender_type: "user", sender_username: "rocky", body: "Nice work today, everyone.", created_at: "2026-07-23T12:00:00"}
+        '400':
+          description: Empty message, or over 240 chars.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+              examples:
+                required: {value: {"error": "message_required"}}
+                too_long: {value: {"error": "message_too_long"}}
+        '401': {$ref: '#/components/responses/UnauthorizedJWT'}
+        '403':
+          description: Caller is not a member of this team.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+              example: {"error": "Forbidden"}
+        '413': {$ref: '#/components/responses/PayloadTooLarge'}
+        '422': {$ref: '#/components/responses/UnprocessableJWT'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+
+  /api/coach:
+    post:
+      tags: [Coach]
+      summary: Chat with Rickie (AI coach)
+      description: |
+        Sends a message to Rickie and returns his reply. **External calls:** invokes the
+        **Anthropic** Messages API (`claude-sonnet-5`); Rickie may use a single `get_weather`
+        tool that calls **Open-Meteo** (geocode + forecast, with in-process caching).
+        **Side effects:** loads/writes server-owned conversation memory — persists the
+        exchange as `CoachTurn` rows (rolling 10-turn window) and may fold explicit facts
+        into a `CoachNote` row. Requires `ANTHROPIC_API_KEY` to be configured (else 503).
+        Message max 500 chars. **Rate limit: 10 per day AND 3 per minute.**
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                message: {type: string, maxLength: 500}
+                context:
+                  type: object
+                  description: Optional. `type` is `general` (default) or `insight`.
+                  properties:
+                    type: {type: string, enum: [general, insight]}
+                    insight_text: {type: string}
+                    insight_category: {type: string}
+              required: [message]
+            example:
+              message: "I missed a couple days, feeling kind of behind."
+              context: {type: "general"}
+      responses:
+        '200':
+          description: Rickie's reply.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  reply: {type: string}
+              example: {"reply": "You came back. That's what matters. Want to do just one exercise with me?"}
+        '400':
+          description: Empty message, message over 500 chars, or invalid context type.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+              examples:
+                required: {value: {"error": "message_required"}}
+                too_long: {value: {"error": "message_too_long"}}
+                bad_context: {value: {"error": "invalid_context_type"}}
+        '401': {$ref: '#/components/responses/UnauthorizedJWT'}
+        '413': {$ref: '#/components/responses/PayloadTooLarge'}
+        '422': {$ref: '#/components/responses/UnprocessableJWT'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+        '503':
+          description: Coach is unavailable — no API key configured, or the Anthropic call failed.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+              example: {"error": "coach_unavailable"}
+
+  /api/coach/memory:
+    delete:
+      tags: [Coach]
+      summary: Forget coach memory
+      description: >
+        Permanently deletes the caller's stored coach conversation turns and Coach Notes.
+        Strictly scoped to the token's own user; idempotent. **Side effects:** deletes the
+        caller's `CoachTurn` and `CoachNote` rows.
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Memory cleared.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: {type: string}
+              example: {"status": "forgotten"}
+        '401': {$ref: '#/components/responses/UnauthorizedJWT'}
+        '422': {$ref: '#/components/responses/UnprocessableJWT'}
+
+  /api/admin/stats:
+    get:
+      tags: [Admin]
+      summary: Aggregate product metrics
+      description: >
+        Returns registration/activity/completion counts, recent users, retention proxies,
+        and per-metric honesty notes. Requires `X-Admin-Secret`. Read-only.
+        **Rate limit: 120 per minute.**
+      security:
+        - adminSecret: []
+      responses:
+        '200':
+          description: Stats payload. `generated_at` is ISO with a trailing `Z`.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+              example:
+                generated_at: "2026-07-23T12:00:00Z"
+                users: {total_registered: 1284}
+                active_users: {today_by_completion: 73}
+                mission_completions: {today: 61, week: 402, all_time: 9130}
+                events:
+                  guest_start: {today: 12, week: 88, month: 310, all_time: 5021}
+                recent_users:
+                  - {id: 1284, username: "rocky", missions_completed: 14, current_streak: 3, last_active: "2026-07-23"}
+                users_with_completion: {count: 640}
+                returned_next_day: {returned: 40, active_yesterday: 70}
+                metric_notes: {"users.total_registered": "exact"}
+        '403': {$ref: '#/components/responses/AdminForbidden'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+        '503':
+          description: Stats query failed (DB error) — this route returns the JSON error shape.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+              example: {"error": "stats_unavailable"}
+
+  /api/admin/project-status:
+    get:
+      tags: [Admin]
+      summary: Rolled-up project/deploy health
+      description: >
+        Returns production health, commit SHA, last-deploy time, latest verification run,
+        and an overall red/yellow/green. Requires `X-Admin-Secret`. Read-only.
+        **Rate limit: 60 per minute.** (May shell out to `git rev-parse` for the commit SHA.)
+      security:
+        - adminSecret: []
+      responses:
+        '200':
+          description: Project status. Timestamps carry a trailing `Z`.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  production_health: {type: string}
+                  commit_sha: {type: [string, "null"]}
+                  current_version: {type: string}
+                  last_deployment_at: {type: string}
+                  last_verification: {type: [object, "null"]}
+                  overall_health: {type: string, enum: [red, yellow, green]}
+              example:
+                production_health: "healthy"
+                commit_sha: "a1b2c3d4e5f6"
+                current_version: "a1b2c3d4e5f6"
+                last_deployment_at: "2026-07-23T06:00:00Z"
+                last_verification: {run_id: 12, status: "passed", suite_version: 3, total: 40, passed: 40, failed: 0, finished_at: "2026-07-23T06:05:00Z"}
+                overall_health: "green"
+        '403': {$ref: '#/components/responses/AdminForbidden'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+
+  /api/admin/system-health:
+    get:
+      tags: [Admin]
+      summary: Live subsystem health checks
+      description: >
+        Returns real, honestly-labeled health for API, database, service worker cache
+        version, PWA manifest/icons, and (not-applicable/unavailable) notifications/Render.
+        Requires `X-Admin-Secret`. Read-only (runs a `SELECT 1` DB ping).
+        **Rate limit: 60 per minute.**
+      security:
+        - adminSecret: []
+      responses:
+        '200':
+          description: System health.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+              example:
+                api: "healthy"
+                database: "healthy"
+                service_worker: {cache_version: "streakfit-v42"}
+                pwa: {manifest_present: true, icons_present: true}
+                notifications: {status: "not_applicable", note: "Client-side only feature..."}
+                render: {status: "unavailable", note: "No Render API key configured in this environment."}
+        '403': {$ref: '#/components/responses/AdminForbidden'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+
+  /api/admin/verify:
+    post:
+      tags: [Admin]
+      summary: Start a verification run
+      description: >
+        Kicks off the end-to-end verification suite in a background thread (one run at a
+        time per process). Requires `X-Admin-Secret`. **Side effects:** inserts a
+        `VerificationRun` row (status `running`) and spawns a daemon thread that runs the
+        suite in-process and later updates the row. Takes no request body.
+        **Rate limit: 6 per minute.**
+      security:
+        - adminSecret: []
+      responses:
+        '202':
+          description: Run started.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  run_id: {type: integer}
+                  status: {type: string}
+              example: {"run_id": 13, "status": "started"}
+        '403': {$ref: '#/components/responses/AdminForbidden'}
+        '409':
+          description: A verification run is already in flight (returns the JSON error shape).
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+              example: {"error": "verification_already_running"}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+
+  /api/admin/verify/status:
+    get:
+      tags: [Admin]
+      summary: Current / latest verification run status
+      description: >
+        Returns live progress for the in-flight run, or the latest completed run.
+        Requires `X-Admin-Secret`. Read-only. **Rate limit: 120 per minute.**
+      security:
+        - adminSecret: []
+      responses:
+        '200':
+          description: >
+            Run status. When no run has ever happened, returns
+            `{"status":"never_run","running":false}`. Timestamps carry a trailing `Z`.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+              examples:
+                running:
+                  value:
+                    run_id: 13
+                    status: "running"
+                    running: true
+                    current_module: "teams"
+                    suite_version: 3
+                    commit_sha: "a1b2c3d4e5f6"
+                    started_at: "2026-07-23T12:00:00Z"
+                    finished_at: null
+                    total: 0
+                    passed: 0
+                    failed: 0
+                    checks: []
+                never_run:
+                  value: {status: "never_run", running: false}
+        '403': {$ref: '#/components/responses/AdminForbidden'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+
+  /api/admin/verify/history:
+    get:
+      tags: [Admin]
+      summary: Recent verification runs
+      description: >
+        Returns the 20 most recent verification runs (newest first). Requires
+        `X-Admin-Secret`. Read-only. **Rate limit: 60 per minute.**
+      security:
+        - adminSecret: []
+      responses:
+        '200':
+          description: Run history. Timestamps carry a trailing `Z`.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  runs:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        run_id: {type: integer}
+                        started_at: {type: string}
+                        finished_at: {type: [string, "null"]}
+                        suite_version: {type: integer}
+                        commit_sha: {type: [string, "null"]}
+                        status: {type: string, enum: [running, passed, failed, error]}
+                        total: {type: integer}
+                        passed: {type: integer}
+                        failed: {type: integer}
+                        duration_seconds: {type: [number, "null"]}
+              example:
+                runs:
+                  - {run_id: 13, started_at: "2026-07-23T12:00:00Z", finished_at: "2026-07-23T12:04:30Z", suite_version: 3, commit_sha: "a1b2c3d4e5f6", status: "passed", total: 40, passed: 40, failed: 0, duration_seconds: 270.0}
+        '403': {$ref: '#/components/responses/AdminForbidden'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}

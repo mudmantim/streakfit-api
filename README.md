@@ -2,6 +2,21 @@
 
 A production-ready Flask API built to calculate and track streaks for fitness challenges with millisecond precision. Designed for deployment on Render paired with a PostgreSQL database.
 
+## Quickstart (local)
+
+Requires **Python 3.12.7** (see `runtime.txt`; the pinned SQLAlchemy does not run on 3.14). Then:
+
+```bash
+git clone https://github.com/mudmantim/streakfit-api.git && cd streakfit-api
+make setup     # venv + deps + .env (generated dev secrets) + local SQLite DB
+make run       # http://localhost:5000    |    make test    |    make help
+```
+
+Full instructions, production setup, and CI: **[`docs/operations/setup.md`](docs/operations/setup.md)**.
+Every environment variable, secret, and startup prerequisite: **[`docs/operations/environment.md`](docs/operations/environment.md)**.
+What's reproducible vs. still manual (and why): **[`docs/operations/reproducibility.md`](docs/operations/reproducibility.md)**.
+Architecture, ADRs, API spec, roadmaps: **[`docs/architecture/README.md`](docs/architecture/README.md)**.
+
 ## Deployment Details
 
 - **Runtime:** Python (Render, PostgreSQL)
