@@ -21,7 +21,13 @@ Run where the target DATABASE_URL is set (e.g. production):
   DATABASE_URL=... SECRET_KEY=... JWT_SECRET_KEY=... python scripts/cleanup_qa_smoke.py --execute  # delete safe
 """
 import argparse
+import os
 import sys
+
+# Run naturally from the repo root: `python scripts/cleanup_qa_smoke.py`
+# (python only puts scripts/ on sys.path, not the repo root, so add it here
+# instead of requiring a PYTHONPATH=. prefix).
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import app as A
 

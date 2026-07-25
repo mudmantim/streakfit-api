@@ -21,9 +21,9 @@ from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 import anthropic as _anthropic_lib
 
-from scripts.verify_all import run_suite
-from scripts.verification._client import WsgiClient
-from scripts.verification import VERIFICATION_SUITE_VERSION
+# The verification suite (scripts.verify_all / scripts.verification) is admin-only
+# and is imported lazily inside the admin verify routes — the serving app must not
+# be coupled to test/verification code at import time.
 
 app = Flask(__name__)
 
@@ -1661,6 +1661,8 @@ def _run_verification_background(run_id):
     real socket -- see scripts/verify_all.py's docstring for why that
     matters on a single-worker deployment) and writes the result to the
     VerificationRun row this thread owns exclusively."""
+    from scripts.verify_all import run_suite            # lazy: admin-only path
+    from scripts.verification._client import WsgiClient
     client = WsgiClient(app)
 
     def on_module_start(label):
@@ -1755,6 +1757,7 @@ def admin_verify_start():
     if _verification_state["running"]:
         return jsonify({"error": "verification_already_running"}), 409
 
+    from scripts.verification import VERIFICATION_SUITE_VERSION   # lazy: admin-only path
     run = VerificationRun(
         suite_version=VERIFICATION_SUITE_VERSION,
         commit_sha=_get_commit_sha(),
