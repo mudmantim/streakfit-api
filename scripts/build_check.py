@@ -17,6 +17,11 @@ What it checks (all offline, no network, no database):
      Skipped with a warning if node is unavailable.
   4. manifest.json and every shipped JSON data file parse.
   5. app.py imports cleanly under production-shaped env vars.
+  6. Every exercise in EXERCISE_LIBRARY has the illustration the API promises.
+     The mission API hands the client `/static/exercises/{key}.svg`, so these
+     references live in Python and are invisible to the static-file scan above —
+     a renamed or missing SVG would reach a user as a broken image in the
+     exercise modal.
 
 Run:  make build-check     (or: python scripts/build_check.py)
 Exit 0 = shippable, 1 = do not deploy.
@@ -189,6 +194,56 @@ def check_app_imports() -> None:
     (ROOT / "instance" / "build_check_import_only.db").unlink(missing_ok=True)
 
 
+# ── 6. Server-generated exercise illustrations exist ─────────────────────────
+def check_exercise_illustrations() -> None:
+    """The API promises /static/exercises/{key}.svg for every exercise it serves.
+
+    Run in a subprocess so importing app.py cannot leave state behind in this
+    process, and so a missing dependency shows up as one clear failure.
+    """
+    global checks_run
+    checks_run += 1
+    probe = (
+        "import json, os, sys;"
+        "import app;"
+        "keys=sorted({e['key'] for pools in app.EXERCISE_LIBRARY.values()"
+        " for exs in pools.values() for e in exs});"
+        "print(json.dumps(keys))"
+    )
+    env = dict(os.environ)
+    env.update(
+        SECRET_KEY="build-check-not-for-production",
+        JWT_SECRET_KEY="build-check-not-for-production",
+        DATABASE_URL="sqlite:///build_check_exercises_only.db",
+    )
+    env.pop("STREAKFIT_ENFORCE_DB_HEAD", None)
+    proc = subprocess.run(
+        [sys.executable, "-c", probe],
+        cwd=ROOT, env=env, capture_output=True, text=True, timeout=180, check=False,
+    )
+    (ROOT / "build_check_exercises_only.db").unlink(missing_ok=True)
+    (ROOT / "instance" / "build_check_exercises_only.db").unlink(missing_ok=True)
+    if proc.returncode != 0:
+        tail = (proc.stderr or proc.stdout).strip().splitlines()[-4:]
+        fail("could not read EXERCISE_LIBRARY:\n    " + "\n    ".join(tail))
+        return
+    try:
+        keys = json.loads(proc.stdout.strip().splitlines()[-1])
+    except (json.JSONDecodeError, IndexError) as exc:
+        fail(f"could not parse exercise keys from probe output — {exc}")
+        return
+    if not keys:
+        fail("EXERCISE_LIBRARY yielded zero exercise keys — the check would pass vacuously")
+        return
+    missing = [k for k in keys if not (STATIC / "exercises" / f"{k}.svg").exists()]
+    if missing:
+        shown = ", ".join(missing[:10]) + (f" (+{len(missing) - 10} more)" if len(missing) > 10 else "")
+        fail(
+            f"{len(missing)} of {len(keys)} exercises have no illustration at "
+            f"static/exercises/<key>.svg — the exercise modal would show a broken image: {shown}"
+        )
+
+
 def main() -> int:
     for check in (
         check_asset_references,
@@ -196,6 +251,7 @@ def main() -> int:
         check_js_syntax,
         check_json_files,
         check_app_imports,
+        check_exercise_illustrations,
     ):
         try:
             check()

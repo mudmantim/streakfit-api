@@ -2120,6 +2120,7 @@ body.theme-classic .theme-btn.active { background: rgba(79,70,229,.2); }
     .skill-select { padding: .3rem .6rem; font-size: .75rem; }
 }
 
+
 /* ── Retention prompts (install + notification ask) ───────────────────────── */
 #retention-prompts {
     display: flex;
@@ -2580,4 +2581,66 @@ body.theme-classic .theme-btn.active { background: rgba(79,70,229,.2); }
 @media (max-width: 400px) {
     .mb-book { padding: 1.2rem 1.1rem 1rem; max-height: 92vh; }
     .mb-avatar { width: 48px; height: 48px; }
+}
+
+
+/* ── Phone-width corrections (must stay last) ─────────────────────────────────
+   These blocks intentionally live at the end of the file. Several of the base
+   rules they override (.mb-close, .mb-nav-btn) are defined hundreds of lines
+   below where a "mobile responsive" section would naturally sit, and a media
+   query adds no specificity — so an earlier override silently loses to the
+   later base rule. Appending is what makes these actually take effect.
+   Everything here is scoped to <=539.98px, the complement of this stylesheet's
+   `min-width: 540px` desktop breakpoint, so no desktop rendering changes. */
+
+/* Today's Mission rows on phones.
+   The row is [info | pill | button] on one flex line. The pill (78px) and button
+   (86px) are flex-shrink:0, so on a 390px screen .daily-exercise-info was left
+   with ~141px — not enough for "How to do this" and "Exercise Tips" side by
+   side, so the two chips stacked into a lopsided 162px-tall column beside a
+   vertically-centred pill and button, and the reps line wrapped mid-phrase.
+   Giving info its own full-width line lets the chips sit inline and the reps
+   line fit, then the pill and button share the line below — pill left, button
+   right. Measured at 390px: row height 185px -> 169px, so the mission also gets
+   shorter, not taller.
+   Bounded by 539.98px because 540px is where this stylesheet's `min-width: 540px`
+   desktop rules take over and the single-line layout has room again. */
+@media (max-width: 539.98px) {
+    .daily-exercise-row  { justify-content: space-between; row-gap: .5rem; }
+    .daily-exercise-info { flex: 1 1 100%; }
+}
+
+/* Tap targets: 44px is this stylesheet's established minimum (see .btn-how-to,
+   .btn-daily-complete et al). A mobile-width audit of the logged-in dashboard
+   found seven interactive controls still below it — the header settings gear at
+   38x38, Memory Book at 38px tall, both team empty-state buttons at 33px, Add
+   to Home Screen at 39px, and the notification prompt's Yes / Not now pair at
+   31px (those two only render once the mission is complete, which is why they
+   needed a second pass to catch). Each is raised here rather than by editing
+   the base rules, so the desktop look is unchanged. */
+@media (max-width: 539.98px) {
+    .settings-toggle          { width: 44px; height: 44px; }
+    .journey-memory-book-btn  { min-height: 44px; }
+    .team-card-open-btn       { min-height: 44px; }
+    .install-card-btn         { min-height: 44px; }
+    .retention-btn            { min-height: 44px; }
+
+    /* Settings panel: the difficulty and Rickie-mode selects were 27px tall,
+       the three theme buttons 28x25, and Log Out 30px. The panel is 250px wide,
+       so three 44px theme buttons still fit its ~221px content box. */
+    .skill-select             { min-height: 44px; }
+    .settings-menu .theme-btn { min-width: 44px; min-height: 44px;
+                                display: inline-flex; align-items: center; justify-content: center; }
+    .settings-logout          { min-height: 44px; }
+
+    /* Dialog dismiss and paging controls: the exercise modal's ✕ was 26x24 and
+       is the only way to dismiss it; Memory Book's ✕ was 32px and its page
+       arrows 36px. The title clearances below are widened in step so a long
+       exercise name cannot run underneath the now-larger ✕. */
+    .ex-modal-close  { min-width: 44px; min-height: 44px;
+                       display: inline-flex; align-items: center; justify-content: center; }
+    .ex-modal-name   { padding-right: 2.75rem; }
+    .mb-close        { width: 44px; height: 44px; }
+    .mb-header       { padding-right: 2.75rem; }
+    .mb-nav-btn      { width: 44px; height: 44px; }
 }
