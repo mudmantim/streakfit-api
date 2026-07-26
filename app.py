@@ -31,39 +31,18 @@ import anthropic as _anthropic_lib
 app = Flask(__name__)
 
 # ── Real client IP behind Render's edge ───────────────────────────────────────
-# Without this, `request.remote_addr` is gunicorn's TCP peer — measured in
-# production as 10.26.173.131, a Render-internal address — so every per-IP rate
-# limit was keyed on infrastructure rather than on the caller. Measured effect:
-# 12 POSTs over one keep-alive connection hit /api/register's 5/min exactly,
-# while spreading across connections allowed 30 of 50 and 37 of 60, i.e. ~6-7x
-# every configured limit, one bucket per internal address the app happened to see.
+# Without this, request.remote_addr is gunicorn's TCP peer (a Render-internal
+# address), so every per-IP rate limit is keyed on infrastructure, not the caller.
 #
-# Why x_for=2 specifically. The path is client -> Cloudflare -> Render internal
-# -> gunicorn, and exactly two trusted proxies append: Cloudflare adds the IP
-# that connected to it, then Render's layer adds Cloudflare's. Production
-# confirmed the shape — X-Forwarded-For was "74.220.50.219, 104.23.243.118",
-# the second entry inside Cloudflare's published 104.16.0.0/13.
+# x_for=2 matches Render's documented proxy chain — client -> Cloudflare ->
+# Render internal -> gunicorn — where exactly two trusted proxies append to
+# X-Forwarded-For. ProxyFix counts from the RIGHT, so a forged header only lands
+# further left; do NOT switch this to the leftmost entry, which is
+# attacker-controlled.
 #
-# x_for counts from the RIGHT, which is what makes this safe rather than merely
-# correct. Cloudflare documents that it appends the connecting IP to any
-# existing X-Forwarded-For, so a caller who forges the header only pushes its
-# value further left:
+# Full rationale, measurements, citations and rejected alternatives:
+# docs/operations/rate-limiting-client-ip.md
 #
-#     client sends nothing      ->  "<client>, <CF>"            -> [-2] = client
-#     client sends "1.2.3.4"    ->  "1.2.3.4, <client>, <CF>"   -> [-2] = client
-#
-# Do NOT switch this to the leftmost entry. Render's own guidance says they "set
-# the first IP in the list to the real client IP", but per the append behaviour
-# above the first entry is attacker-controlled — trusting it would let any
-# caller choose its own rate-limit bucket and evade limits entirely.
-#
-# Failure mode is safe: ProxyFix leaves REMOTE_ADDR untouched when the header
-# has fewer than two entries, so an unexpected topology degrades to the old
-# over-permissive behaviour rather than to a spoofable one. Local dev and the
-# test suite send no X-Forwarded-For and are unaffected.
-#
-# Evidence, citations and the rejected alternatives (CF-Connecting-IP, shared
-# storage first): docs/operations/rate-limiting-client-ip.md
 # The ignore below is needed because reassigning wsgi_app is Flask's documented
 # way to install WSGI middleware; mypy only sees a method being overwritten.
 app.wsgi_app = ProxyFix(app.wsgi_app, x_for=2)  # type: ignore[method-assign]
@@ -141,28 +120,17 @@ limiter = Limiter(
 def user_or_ip_key():
     """Limiter key for AUTHENTICATED routes: the user, falling back to the IP.
 
-    Why this exists. Every limit used to be keyed per IP, which looked fine only
-    because the key was a rotating Render-internal address and therefore never
-    really bound (see docs/operations/rate-limiting-client-ip.md). Once
-    ProxyFix(x_for=2) made per-IP limits real, a latent design error became a
-    user-visible one: a household behind one router is ONE IP but several
-    people, so a family of four would have shared /api/coach's 10-per-DAY quota
-    and one person's use would starve the others. StreakFit is a family fitness
-    app, so that is precisely the wrong population to throttle.
+    Keyed per user because a household behind one router is one IP but several
+    people — per-IP, a family would share /api/coach's 10-per-day quota. Anonymous
+    routes keep the default per-IP key; there is no identity to key on yet.
 
-    The coach limit was always documented as 10/day *per user*; keying on the
-    JWT subject is what that actually means.
+    verify_jwt_in_request is required because flask-limiter evaluates key
+    functions in a before_request hook, which runs before the view's
+    @jwt_required(), so get_jwt_identity() alone would always be None here. It
+    raises on a malformed token rather than returning None, hence the broad
+    except — a bad token gets IP-based limiting, never no limiting.
 
-    Per-IP remains correct for anonymous routes (register, login, events) —
-    there is no identity to key on yet, and the IP is the thing being protected
-    against.
-
-    Note on ordering: flask-limiter evaluates key functions in a before_request
-    hook, which runs BEFORE the view's @jwt_required() has verified anything, so
-    get_jwt_identity() alone would always be None here. verify_jwt_in_request
-    (optional=True) populates the context first. It raises on a malformed or
-    expired token rather than returning None, hence the broad except — a caller
-    presenting a bad token gets IP-based limiting, never no limiting.
+    Full rationale: docs/operations/rate-limiting-client-ip.md
     """
     try:
         verify_jwt_in_request(optional=True)
