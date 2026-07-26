@@ -12,6 +12,42 @@ decisions lives in `PROJECT_JOURNAL.md`.
 
 ---
 
+## v0748 (2) — Rate limits keyed on the real client (`d262336`, deployed 2026-07-26)
+
+**Deployed and verified.** Pushed `6a6eedf..d262336` at 21:15:13Z; `/health` returned 200 on every
+poll through the restart (zero downtime). No static assets changed, so the service-worker version
+stays `v0748` and the deploy signal was behavioural instead: `/api/register` capacity dropped from
+~35/min to **exactly 5/min**. No migration, no new environment variable — rollback is code-only.
+
+Closes the finding recorded in the entry below, which that deploy's new post-deploy protocol had
+surfaced.
+
+- **`ProxyFix(x_for=2)`** — `request.remote_addr` was gunicorn's TCP peer (a Render-internal
+  address), so every per-IP limit was keyed on infrastructure and effective capacity was ~6-7×
+  configured. `x_for=2` matches the documented chain (client → Cloudflare → Render internal →
+  gunicorn), and counting from the right is what makes it unspoofable: Cloudflare appends the
+  connecting IP, so a forged header only lands further left. Render's own "first IP in the list"
+  guidance would have been **spoofable**.
+- **Per-route limiter keys.** Making per-IP limits bind exposed a latent design error: five
+  *authenticated* routes were keyed per IP, including `/api/coach` at 10 per **day** — a household
+  behind one router is one IP but several people, so a family would have shared one coach quota.
+  Authenticated routes now key on the JWT subject; anonymous routes (`register`, `login`, `events`,
+  `admin/*`) stay per IP, where the IP is what is being protected against.
+- **Regression gates.** `post_deploy_check.py` asserts `/api/register` admits exactly 5/min,
+  two-sided so both a partitioned key and an over-coarse one fail. 12 new unit tests, every one
+  fault-injected to confirm it fails (removing ProxyFix, `x_for=1`, `x_for=3`, coach reverted to
+  per-IP, register switched to per-user).
+- Full evidence: `docs/operations/rate-limiting-client-ip.md`. Roadmap **M1a resolved**, **M1b**
+  (`memory://` storage) re-scoped and explicitly marked *do not do before M1a*.
+
+**Production results:** 38 of 39 checks passed; `verify_all` **81/81**; `/api/register` exactly
+5 allowed / 5 limited; mission flow 0/5 → 5/5 with Day-1 streak; coach 200 and in character. The one
+failure was a single health poll returning a **connection error** (`HTTP 0`, not an application
+status) out of 40. It did not recur across **80 further samples over 20 minutes**, latency around it
+was normal (avg 0.16s, max 0.28s), and 15 independent samples were clean — transient network, not
+attributable to this deploy. Per-user bucketing is proven by automated tests; the production
+verification directly proves the per-client IP limit.
+
 ## v0748 — Release-candidate hardening (`995f178`, deployed 2026-07-26)
 
 **Deployed and verified.** Pushed `56444f9..995f178` at 15:47:53Z; the service worker flipped
