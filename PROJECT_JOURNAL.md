@@ -345,15 +345,19 @@ localStorage key. None of it is StreakFit's. Browser audits of this app need to 
 
 ## Honest limitations of this pass
 
-- **Nothing is deployed.** Production still serves SW `v0747`; `main` is 10 commits ahead. The
-  standing rule on this project is explicit per-action authorization for production pushes, and
-  a general goal statement is not that authorization. So "deployment verified" is true only of
-  the *current* production build, not of this work. What is needed from Tim is named in the
-  handoff.
-- **The prod-side verification suite was not run.** It is prod-safe by design, but a previous
-  run left a synthetic `qa_smoke_*` account owning a team that no API route can delete, so it
-  needs manual cleanup afterward. Creating fresh production residue without asking wasn't mine
-  to choose. It remains the right first check *after* a deploy.
+- **Nothing is deployed — blocked on one action only.** Production still serves SW `v0747`;
+  `main` is 12 commits ahead at `9959dad`. Tim authorized the deploy but required a Render
+  database backup first. **I cannot take that backup:** there is no `render` CLI on this
+  machine, no `RENDER_API_KEY` or `~/.render` credentials, no `psql`/`pg_dump` installed, and
+  the local `.env` has no production `DATABASE_URL` (local runs on the SQLite fallback) — all
+  four checked, not assumed. It needs Tim in the Render dashboard: Postgres instance → Backups →
+  take a manual backup, then confirm. On confirmation the push and the full post-deploy protocol
+  run immediately; everything for both is prepared and dry-run.
+- **The prod-side verification suite has not been run yet.** It will be, as part of the
+  post-deploy protocol Tim asked for (he approved the residue report). It is prod-safe by
+  design, but note it leaves a synthetic `qa_smoke_*` account owning a team that no API route
+  can delete — `scripts/post_deploy_check.py` names that residue explicitly at the end rather
+  than leaving it silent.
 - **The 390px pass was a layout-width simulation, not a real device.** Media queries were
   activated by rewriting their conditions, which is faithful for layout, overflow, and geometry,
   but it is not a physical phone: no touch input, no real device pixel ratio, no iOS/Android
