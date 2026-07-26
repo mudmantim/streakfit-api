@@ -2643,4 +2643,9 @@ body.theme-classic .theme-btn.active { background: rgba(79,70,229,.2); }
     .mb-close        { width: 44px; height: 44px; }
     .mb-header       { padding-right: 2.75rem; }
     .mb-nav-btn      { width: 44px; height: 44px; }
+
+    /* The Log In / Register tabs were 35px tall — on the first screen a new
+       user ever touches, which makes them the highest-traffic undersized
+       target in the app. Centred so the label stays put as the box grows. */
+    .tab { min-height: 44px; display: inline-flex; align-items: center; justify-content: center; }
 }
