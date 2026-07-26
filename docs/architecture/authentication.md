@@ -22,7 +22,7 @@ graph LR
 - **Timing-equalized:** `check_password_hash` always runs — against the real hash if the user exists, else against a module-level `_DUMMY_PW_HASH` computed once at import. An attacker can't distinguish "no such user" from "wrong password" by response time. ([ADR-0008](../adrs/0008-security-headers-and-login-timing.md))
 - Success → `{access_token}`. Failure → uniform `401`.
 - **Cost floor ≈ 81 ms** (pbkdf2). This is the dominant latency of login and is deliberate — do not "optimize" it away.
-- Rate limit: **10/min per IP** — genuinely per client since `ProxyFix(x_for=2)` (see [deployment.md](deployment.md#proxy-chain-and-the-real-client-ip)). Before that fix the key was a Render-internal address, so the effective ceiling was ~6-7× higher.
+- Rate limit: **10/min per IP** — genuinely per client since `ProxyFix(x_for=2)` (see [deployment.md](deployment.md#proxy-chain-and-the-real-client-ip)). Before that fix the key was a Render-internal address, so the effective ceiling was ~6-7× higher. Login/register stay **per IP** deliberately: there is no identity to key on before authentication. Authenticated routes are keyed per user instead — see [Which limits are keyed on what](deployment.md#which-limits-are-keyed-on-what).
 
 ### Token properties
 | Property | Value | Source |

@@ -7,6 +7,7 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 from werkzeug.test import EnvironBuilder
 
 import app as appmod
+from conftest import register_and_login
 
 
 def test_security_headers_present(client):
@@ -141,3 +142,89 @@ def test_limiter_key_follows_the_client_not_the_edge(client):
         "/", environ_overrides={"REMOTE_ADDR": "198.51.100.22"}
     ):
         assert get_remote_address() == "198.51.100.22"
+
+
+# ── Limiter keys: per user when authenticated, per IP when anonymous ───────────
+# Once ProxyFix made per-IP limits actually bind, keying AUTHENTICATED routes on
+# the IP became a real problem: a household behind one router is one IP but
+# several people, so a family would have shared /api/coach's 10-per-DAY quota and
+# one member could starve the others. conftest disables the limiter itself, so
+# these assert on the key function — the thing that decides which bucket a
+# request lands in — rather than trying to exhaust real limits.
+
+
+def _key_for(token=None, remote_addr="203.0.113.7"):
+    """The bucket key `user_or_ip_key` produces for a given request."""
+    headers = {"Authorization": f"Bearer {token}"} if token else {}
+    with appmod.app.test_request_context(
+        "/", headers=headers, environ_overrides={"REMOTE_ADDR": remote_addr}
+    ):
+        return appmod.user_or_ip_key()
+
+
+def test_two_users_behind_one_ip_get_independent_quotas(client):
+    """The family case, and the reason this key function exists."""
+    token_a = register_and_login(client, "ratekey_a")
+    token_b = register_and_login(client, "ratekey_b")
+    shared_ip = "198.51.100.50"                      # one household, one router
+
+    key_a = _key_for(token_a, shared_ip)
+    key_b = _key_for(token_b, shared_ip)
+
+    assert key_a.startswith("user:"), key_a
+    assert key_b.startswith("user:"), key_b
+    assert key_a != key_b, (
+        "two authenticated users behind one IP landed in the same rate-limit "
+        "bucket — one family member could exhaust another's coach quota"
+    )
+    assert shared_ip not in key_a and shared_ip not in key_b
+
+
+def test_same_user_from_two_ips_shares_one_quota(client):
+    """The converse: the quota follows the user, so moving from WiFi to cellular
+    must not hand out a second allowance."""
+    token = register_and_login(client, "ratekey_roam")
+    assert _key_for(token, "198.51.100.50") == _key_for(token, "203.0.113.99")
+
+
+def test_anonymous_requests_are_keyed_per_ip():
+    """Register and login have no identity yet, so the IP is the correct key —
+    and it is the real client IP, because ProxyFix already corrected REMOTE_ADDR."""
+    assert _key_for(None, "198.51.100.50") == "198.51.100.50"
+    assert _key_for(None, "203.0.113.7") == "203.0.113.7"
+
+
+def test_malformed_token_falls_back_to_ip_never_to_no_limit():
+    """verify_jwt_in_request raises on a malformed token rather than returning
+    None. A caller presenting rubbish must get IP-based limiting — never a key of
+    None, which would bucket every such request together."""
+    assert _key_for("not-a-real-jwt", "198.51.100.50") == "198.51.100.50"
+    assert _key_for("", "198.51.100.50") == "198.51.100.50"
+
+
+def test_the_authenticated_and_anonymous_split_is_what_we_intend():
+    """Guard the split itself, read off flask-limiter's registered limits rather
+    than the source. Moving a route to the wrong bucket then fails here instead
+    of in production — a per-IP coach limit would silently re-introduce the
+    shared-household quota, and a per-user limit on register/login would be
+    worse than useless, since an unauthenticated attacker has no identity and
+    would fall back to one shared bucket."""
+    per_user, per_ip = set(), set()
+    for endpoint, groups in appmod.limiter.limit_manager._decorated_limits.items():
+        view_name = endpoint.rsplit(".", 1)[-1]
+        for group in groups:
+            target = per_user if group.key_function is appmod.user_or_ip_key else per_ip
+            target.add(view_name)
+
+    # Authenticated endpoints: keyed per user, so one household shares nothing.
+    assert {"coach", "create_team", "join_team", "post_team_message"} <= per_user, (
+        f"expected these to be per-user, got per_user={sorted(per_user)}"
+    )
+    # Anonymous endpoints: no identity exists yet, so per IP is correct.
+    assert {"register", "login", "record_event"} <= per_ip, (
+        f"expected these to be per-IP, got per_ip={sorted(per_ip)}"
+    )
+    # Every admin route stays per IP too.
+    assert all(v in per_ip for v in per_ip if v.startswith("admin_"))
+    # Nothing may be classified both ways.
+    assert not (per_user & per_ip), per_user & per_ip

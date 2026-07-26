@@ -18,7 +18,8 @@ from sqlalchemy.exc import IntegrityError
 from flask_migrate import Migrate
 from werkzeug.middleware.proxy_fix import ProxyFix
 from werkzeug.security import generate_password_hash, check_password_hash
-from flask_jwt_extended import JWTManager, create_access_token, jwt_required, get_jwt_identity
+from flask_jwt_extended import (JWTManager, create_access_token, jwt_required,
+                               get_jwt_identity, verify_jwt_in_request)
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 import anthropic as _anthropic_lib
@@ -135,6 +136,42 @@ limiter = Limiter(
     default_limits=[],
     storage_uri=os.environ.get("RATELIMIT_STORAGE_URI", "memory://"),
 )
+
+
+def user_or_ip_key():
+    """Limiter key for AUTHENTICATED routes: the user, falling back to the IP.
+
+    Why this exists. Every limit used to be keyed per IP, which looked fine only
+    because the key was a rotating Render-internal address and therefore never
+    really bound (see docs/operations/rate-limiting-client-ip.md). Once
+    ProxyFix(x_for=2) made per-IP limits real, a latent design error became a
+    user-visible one: a household behind one router is ONE IP but several
+    people, so a family of four would have shared /api/coach's 10-per-DAY quota
+    and one person's use would starve the others. StreakFit is a family fitness
+    app, so that is precisely the wrong population to throttle.
+
+    The coach limit was always documented as 10/day *per user*; keying on the
+    JWT subject is what that actually means.
+
+    Per-IP remains correct for anonymous routes (register, login, events) —
+    there is no identity to key on yet, and the IP is the thing being protected
+    against.
+
+    Note on ordering: flask-limiter evaluates key functions in a before_request
+    hook, which runs BEFORE the view's @jwt_required() has verified anything, so
+    get_jwt_identity() alone would always be None here. verify_jwt_in_request
+    (optional=True) populates the context first. It raises on a malformed or
+    expired token rather than returning None, hence the broad except — a caller
+    presenting a bad token gets IP-based limiting, never no limiting.
+    """
+    try:
+        verify_jwt_in_request(optional=True)
+        identity = get_jwt_identity()
+        if identity:
+            return f"user:{identity}"
+    except Exception:
+        pass
+    return get_remote_address()
 
 # --- Exercise Library ---
 
@@ -2682,7 +2719,7 @@ def _user_team_count_cap(user):
 
 @app.route('/api/teams', methods=['POST'])
 @jwt_required()
-@limiter.limit("10 per minute")
+@limiter.limit("10 per minute", key_func=user_or_ip_key)
 def create_team():
     data = request.get_json()
     if not data or not data.get('name') or not data['name'].strip():
@@ -2829,7 +2866,7 @@ def get_team(team_id):
 
 @app.route('/api/teams/<int:team_id>/join', methods=['POST'])
 @jwt_required()
-@limiter.limit("10 per minute")
+@limiter.limit("10 per minute", key_func=user_or_ip_key)
 def join_team(team_id):
     data = request.get_json()
     code = (data or {}).get('code', '').strip().upper()
@@ -3118,7 +3155,7 @@ def get_team_messages(team_id):
 
 @app.route('/api/teams/<int:team_id>/messages', methods=['POST'])
 @jwt_required()
-@limiter.limit("30 per minute")
+@limiter.limit("30 per minute", key_func=user_or_ip_key)
 def post_team_message(team_id):
     user_id = int(get_jwt_identity())
 
@@ -3853,8 +3890,8 @@ def _weather_tool_result(city):
 
 @app.route('/api/coach', methods=['POST'])
 @jwt_required()
-@limiter.limit("10 per day")
-@limiter.limit("3 per minute")
+@limiter.limit("10 per day", key_func=user_or_ip_key)
+@limiter.limit("3 per minute", key_func=user_or_ip_key)
 def coach():
     data = request.get_json(silent=True) or {}
     message = (data.get('message') or '').strip()

@@ -53,6 +53,25 @@ front of Render — `x_for` must change with it. That failure is silent, so
 client; a hop-count change fails that on the next deploy. Full evidence:
 [../operations/rate-limiting-client-ip.md](../operations/rate-limiting-client-ip.md).
 
+### Which limits are keyed on what
+
+Making per-IP limits actually bind exposed a latent design error, so the key is now chosen per
+route:
+
+| Routes | Key | Why |
+|---|---|---|
+| `/api/register`, `/api/login`, `/api/events`, `/api/admin/*` | **client IP** (`get_remote_address`, corrected by ProxyFix) | No identity exists yet, and the IP is the thing being protected against |
+| `/api/coach`, `/api/teams`, team join, team messages | **JWT subject** (`user_or_ip_key`) | These are authenticated. A household behind one router is **one IP but several people** — keyed on IP, a family of four would have shared the coach's 10-per-**day** quota and one member could starve the others. StreakFit is a family fitness app, so that is exactly the wrong population to throttle; 10/day *per user* is also what the coach was always documented to mean |
+
+`user_or_ip_key` calls `verify_jwt_in_request(optional=True)` first, because flask-limiter evaluates
+key functions in a `before_request` hook that runs *before* the view's `@jwt_required()` — so
+`get_jwt_identity()` alone would always be `None` there. A malformed or expired token makes it fall
+back to the IP, never to an unlimited or shared-`None` bucket.
+
+The split is pinned by `test_the_authenticated_and_anonymous_split_is_what_we_intend`, which reads
+the key function off flask-limiter's registered limits. Moving a route to the wrong bucket fails
+there rather than in production.
+
 ## ⚠️ Deploy artifacts are NOT in the repo
 
 There is **no `Procfile`, no `render.yaml`, no `wsgi.py`, no gunicorn config file.** The Start Command exists only as a comment in `app.py` and in `CLAUDE.md`. **The source of truth for how production actually starts is the Render dashboard**, which is not version-controlled here. This is a real risk — a new owner cannot reconstruct the deploy from the repo alone. Making the deploy declarative (`render.yaml`) is a recommended immediate item (roadmap).

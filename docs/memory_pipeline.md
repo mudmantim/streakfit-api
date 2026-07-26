@@ -6,7 +6,7 @@ follow the whole flow. All code is in `app.py`; the character is defined in
 `docs/rickie_character_bible.md` (the prompt derives from it and is frozen).
 
 Model: **Claude Sonnet 5** (`claude-sonnet-5`), `max_tokens=768`, thinking disabled,
-rate-limited **10/day + 3/min** per user, graceful `503` when no API key.
+rate-limited **10/day + 3/min** per user (keyed on the JWT subject via `user_or_ip_key`, so a household sharing one IP does not share one quota), graceful `503` when no API key.
 
 ---
 

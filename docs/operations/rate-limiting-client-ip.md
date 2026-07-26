@@ -156,12 +156,34 @@ all about it; that one could not have produced a 429 under any hypothesis. The s
 connection test — 5 then 429 — is what actually isolated the mechanism, by holding the key constant
 instead of varying it unknowingly.
 
-## Recommendation (not yet implemented)
+## What was implemented
 
-1. `app.wsgi_app = ProxyFix(app.wsgi_app, x_for=2, x_proto=1)` — zero cost, no new service.
-2. Add the exactly-5 capacity assertion to `post_deploy_check.py`.
-3. Consider a DB-backed daily cap on `/api/coach` as defence in depth, since spend is the exposure.
-4. Defer Redis until scaling past one worker, or until the per-deploy reset becomes unacceptable.
+1. ✅ `app.wsgi_app = ProxyFix(app.wsgi_app, x_for=2)` — zero cost, no new service. (`x_proto` was
+   *not* set: it would change `wsgi.url_scheme` and therefore URL generation and redirects, which is
+   unrelated to rate limiting and not worth bundling into a security fix.)
+2. ✅ The capacity assertion in `post_deploy_check.py`: `/api/register` must admit **exactly 5**
+   requests per minute from one client. Two-sided — `allowed > 5` means the key is partitioned
+   again; `allowed == 0` on a quiet deploy suggests a key too coarse to be per-client.
+3. ✅ Seven unit tests pinning hop selection against the *actual configured middleware instance*,
+   including that a forged leading entry is ignored and the leftmost entry is never trusted.
+   Fault-injected to confirm they fail: removing ProxyFix breaks 4, `x_for=1` breaks 5, and
+   `x_for=3` breaks 5 including the leftmost-entry test — so the dangerous over-trusting
+   misconfiguration is specifically caught.
+4. ✅ **Per-route key functions.** ProxyFix made per-IP limits bind, which exposed a latent design
+   error: five *authenticated* routes were keyed per IP, including `/api/coach` at 10 per **day**.
+   A household behind one router is one IP but several people, so a family of four would have
+   shared a single coach quota and one member could starve the others. Authenticated routes now key
+   on the JWT subject (`user_or_ip_key`); anonymous routes (`register`, `login`, `events`,
+   `admin/*`) stay per IP, where the IP *is* what is being protected against. Five further tests
+   cover the family case, the roaming converse (one user on two networks shares one quota),
+   anonymous-stays-per-IP, malformed-token fallback, and a guard that reads the key function off
+   flask-limiter's registered limits — fault-injected both ways (coach reverted to per-IP, register
+   switched to per-user) to confirm it fails.
 
-Also observed: `render.yaml` says `region: oregon`, but the egress resolves to **Ohio**. The file
-already flags the region as unverified; this is evidence it is wrong.
+Still open, deliberately:
+
+- **`memory://` storage** — roadmap **M1b**. Fixing it *first* would have been harmful.
+- **No application-level cap on `/api/coach`** — defence in depth for a paid API, worth doing since
+  spend is the exposure. Not part of this change.
+- `render.yaml` says `region: oregon`; the egress resolves to **Ohio**. Already flagged unverified
+  in that file — this is the evidence it is wrong.
