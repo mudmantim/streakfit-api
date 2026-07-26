@@ -44,6 +44,17 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements-dev.txt
 
+      - name: Lint (ruff — see ruff.toml for the enabled set and exclusions)
+        run: ruff check .
+
+      - name: Type-check (mypy — see mypy.ini for scope)
+        run: mypy
+
+      # No bundler means nothing else would catch a renamed icon or a typo'd
+      # asset path before a user sees a broken image. This is that gate.
+      - name: Production build gate (asset refs, service worker, JS syntax, app import)
+        run: python scripts/build_check.py
+
       - name: Run test suite (155 tests, incl. migration-chain integrity)
         run: pytest tests/ -q
 

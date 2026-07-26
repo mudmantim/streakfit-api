@@ -11,6 +11,7 @@ import threading
 import urllib.parse
 import urllib.request
 from datetime import datetime, date, timedelta
+from typing import Any
 from flask import Flask, request, jsonify, abort
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy.exc import IntegrityError
@@ -2041,7 +2042,10 @@ def get_memory_book():
 
     correct_answers = db.session.execute(
         db.select(db.func.count(BrainBoostAnswer.id)).where(
-            BrainBoostAnswer.user_id == user_id, BrainBoostAnswer.correct == True
+            # noqa E712: inside a SQLAlchemy filter, `== True` builds the SQL
+            # predicate. A truthiness check would evaluate the *column object*
+            # (always true) and silently drop the filter.
+            BrainBoostAnswer.user_id == user_id, BrainBoostAnswer.correct == True  # noqa: E712
         )
     ).scalar() or 0
 
@@ -2086,9 +2090,12 @@ def get_memory_book():
     ).first()
 
     if favorite_row:
-        fav_name, fav_category = _resolve_exercise_meta(favorite_row.exercise_key)
+        # Only the name is used here; the favourite *category* is computed
+        # separately below (category_row), by tallying every completion rather
+        # than reading it off the single most-completed exercise.
+        fav_name, _ = _resolve_exercise_meta(favorite_row.exercise_key)
     else:
-        fav_name, fav_category = None, None
+        fav_name = None
 
     category_row = None
     if favorite_row:
@@ -2624,7 +2631,8 @@ def _team_member_cap(team_id):
     has_plus_member = db.session.execute(
         db.select(TeamMembership.id)
         .join(User, User.id == TeamMembership.user_id)
-        .where(TeamMembership.team_id == team_id, User.is_plus == True)
+        # noqa E712: SQLAlchemy filter — see the note on BrainBoostAnswer.correct.
+        .where(TeamMembership.team_id == team_id, User.is_plus == True)  # noqa: E712
         .limit(1)
     ).scalar_one_or_none()
     return TEAM_PLUS_MEMBER_CAP if has_plus_member else TEAM_FREE_MEMBER_CAP
@@ -3662,8 +3670,10 @@ _WMO_WEATHER = {
 # cuts StreakFit's OWN outbound volume to the provider — it cannot stop other tenants
 # on a shared egress IP from exhausting the per-IP quota, so it's a first step, not a
 # guaranteed cure for the intermittent 429s.
-_GEOCODE_CACHE = {}    # normalized city name -> place dict
-_FORECAST_CACHE = {}   # (lat, lon) -> current-weather dict
+# Both map a key to (value, stored_at) — see _cache_get/_cache_put, which read the
+# timestamp to expire entries. Annotated so the empty literals stay checkable.
+_GEOCODE_CACHE: dict[str, tuple[Any, datetime]] = {}                    # normalized city name -> place dict
+_FORECAST_CACHE: dict[tuple[float, float], tuple[Any, datetime]] = {}   # (lat, lon) -> current-weather dict
 _GEOCODE_TTL = timedelta(days=30)
 _FORECAST_TTL = timedelta(minutes=10)
 _CACHE_MAX_ENTRIES = 512   # hard cap per cache — keeps memory bounded
@@ -4002,7 +4012,7 @@ def _assert_db_at_head():
     except Exception as exc:
         log.critical('Refusing to start: could not verify database migration state '
                      '(database unreachable?): %s', exc)
-        raise SystemExit(1)
+        raise SystemExit(1) from exc
     if current != head:
         log.critical('Refusing to start: database is at Alembic revision %r but the '
                      'code expects head %r. Run `flask db upgrade`.', current, head)
@@ -4015,4 +4025,4 @@ if os.environ.get('STREAKFIT_ENFORCE_DB_HEAD') == '1':
 
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)))
+    app.run(host='0.0.0.0', port=int(os.environ.get('PORT', '5000')))

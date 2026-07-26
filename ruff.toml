@@ -1,0 +1,59 @@
+# StreakFit lint configuration.
+#
+# Goal: a gate that catches real defects and stays green, NOT a formatter that
+# rewrites a 4000-line production monolith. Style-only rules that would produce
+# a large mechanical diff are deliberately left out and listed at the bottom, so
+# the omission is a recorded decision rather than an accident.
+#
+# Run:  make lint       (and `make lint-fix` for the auto-fixable subset)
+#
+# In ruff.toml rather than pyproject.toml on purpose: Render's Python build
+# inspects a repo-root pyproject.toml and can bypass the requirements.txt
+# install path. A tool-specific config file cannot affect the production build.
+
+target-version = "py312"
+line-length = 120
+
+exclude = [".venv", "migrations/versions", "__pycache__"]
+
+[lint]
+# pycodestyle errors (E4/E7/E9), pyflakes (F), and bugbear (B) — the set whose
+# findings are overwhelmingly real bugs rather than taste.
+select = ["E4", "E7", "E9", "F", "B"]
+
+ignore = [
+    # zip() without strict=. Several call sites zip deliberately-unequal
+    # sequences — `zip(msgs, msgs[1:])` to walk adjacent pairs is the clearest
+    # example. Adding strict=True there would raise at runtime, so this rule
+    # cannot be applied mechanically and the pairwise idiom is intentional.
+    "B905",
+]
+
+[lint.per-file-ignores]
+# migrations/ is Alembic-generated boilerplate; not hand-maintained style.
+"migrations/env.py" = ["F401", "E402"]
+
+# ── Deliberately NOT enabled (recorded decisions, revisit post-release) ──────
+#
+#   I001  unsorted-imports        35 findings. Auto-fixable, but reordering the
+#                                 import block of the production monolith right
+#                                 before a release is churn with no defect
+#                                 behind it.
+#   DTZ   naive datetimes         20 findings. app.py stores naive UTC
+#                                 throughout, and the DB columns match. Moving
+#                                 to aware datetimes is a real semantic change
+#                                 to streak arithmetic — it needs its own
+#                                 change with its own tests, not a lint sweep.
+#   BLE001 blind-except           13 findings. Each is a deliberate
+#                                 never-break-the-request guard around an
+#                                 optional side effect (analytics, coach
+#                                 persistence, weather). They log and continue
+#                                 by design.
+#   ISC004 implicit concatenation  5 findings. All are intentional multi-line
+#                                 prompt/copy strings inside list literals,
+#                                 verified by reading each one — none is a
+#                                 missing comma.
+#   S     bandit                 394 findings, dominated by assert-in-tests and
+#                                 similar. docs/security_review.md already
+#                                 covers this ground with human judgement.
+#   PL    pylint                 227 findings, mostly magic-value/too-many-args.

@@ -62,7 +62,7 @@ def _generate(user_id, date_str, skill_level):
     )
 
     candidate = None
-    for attempt in range(_MAX_RETRIES):
+    for _ in range(_MAX_RETRIES):
         candidate = [rng.choice(pool[cat]) for cat in _CATEGORIES]
         impacts   = [ex['impact'] for ex in candidate]
         fun_ok    = any(ex['fun_score'] == 'high' for ex in candidate) or not level_has_high_fun
@@ -125,7 +125,7 @@ for level in SKILL_LEVELS:
 # ---------------------------------------------------------------------------
 # Report
 # ---------------------------------------------------------------------------
-print(f"\nDaily 5 Generator Validation")
+print("\nDaily 5 Generator Validation")
 print(f"MAX_RETRIES = {_MAX_RETRIES}")
 print(f"Sample: {len(USER_IDS)} users × {len(DATE_RANGE)} dates × {len(SKILL_LEVELS)} levels")
 print(f"Total missions: {total:,}  ({n_per_level:,} per level)\n")
@@ -135,7 +135,8 @@ FAIL = "\033[31m✗\033[0m"
 
 for level in SKILL_LEVELS:
     n  = n_per_level
-    pct = lambda k: f"{100 * k / n:.3f}%"
+    def pct(k, n=n):        # n bound at definition time, not late-bound to the loop
+        return f"{100 * k / n:.3f}%"
 
     nhf  = no_high_fun_count[level]
     ast_ = all_static_count[level]
@@ -161,8 +162,8 @@ for level in SKILL_LEVELS:
     print()
 
 any_failure = any(
-    no_high_fun_count[l] or all_static_count[l] or over_cap_count[l]
-    for l in SKILL_LEVELS
+    no_high_fun_count[lvl] or all_static_count[lvl] or over_cap_count[lvl]
+    for lvl in SKILL_LEVELS
 )
 if any_failure:
     print("RESULT: Some constraint violations remain (see above).\n")

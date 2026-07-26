@@ -18,9 +18,11 @@ os.environ.setdefault('JWT_SECRET_KEY', 'test-jwt-secret-key-not-for-production'
 _db_fd, _db_path = tempfile.mkstemp(suffix='.db')
 os.environ['DATABASE_URL'] = f'sqlite:///{_db_path}'
 
-import pytest
+# E402: these imports must run AFTER the os.environ setup above — importing app
+# reads SECRET_KEY/DATABASE_URL at module scope, so hoisting them breaks the suite.
+import pytest  # noqa: E402
 
-from app import app as flask_app, db as _db, limiter as _limiter
+from app import app as flask_app, db as _db, limiter as _limiter  # noqa: E402
 
 # app.config['RATELIMIT_ENABLED'] = False alone doesn't work here: Flask-Limiter
 # reads it once at Limiter(app=app, ...) init time, which already happened at

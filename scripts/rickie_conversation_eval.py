@@ -36,7 +36,6 @@ import ast
 import json
 import os
 import re
-import sys
 import textwrap
 import urllib.parse
 import urllib.request
@@ -372,7 +371,7 @@ def run(only=None):
     try:
         import anthropic
     except ImportError:
-        raise SystemExit("pip install anthropic")
+        raise SystemExit("pip install anthropic") from None
     if not (os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_AUTH_TOKEN")):
         # bare Anthropic() also resolves an `ant auth login` profile; warn but try.
         print("! No ANTHROPIC_API_KEY in env — relying on an ant profile if present.\n")

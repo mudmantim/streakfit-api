@@ -5,7 +5,7 @@ doesn't create a duplicate stage moment.
 """
 from conftest import register_and_login, auth_headers
 
-from app import app as flask_app, db, TeamCampfire
+from app import db, TeamCampfire
 
 
 def create_team(client, token, name):

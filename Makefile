@@ -13,7 +13,7 @@ BIN    := $(VENV)/bin
 LOAD_ENV := set -a; [ -f .env ] && . ./.env; set +a
 export FLASK_APP := app
 
-.PHONY: help setup check-python venv install env db migrate revision run test check verify freeze clean
+.PHONY: help setup check-python venv install env db migrate revision run test lint lint-fix typecheck build-check check verify freeze clean
 
 help: ## Show this help
 	@echo "StreakFit — make targets:"
@@ -95,7 +95,19 @@ run: ## Run the dev server (http://localhost:5000)
 test: ## Run the full pytest suite
 	@$(BIN)/pytest tests/
 
-check: install test ## What CI runs: install + full suite
+lint: ## Lint (ruff — config and deliberate exclusions in ruff.toml)
+	@$(BIN)/ruff check .
+
+lint-fix: ## Apply the auto-fixable subset of lint findings
+	@$(BIN)/ruff check . --fix
+
+typecheck: ## Type-check app.py (mypy — scope and rationale in mypy.ini)
+	@$(BIN)/mypy
+
+build-check: ## Production build gate: asset refs, service worker, JS syntax, app import
+	@$(BIN)/python scripts/build_check.py
+
+check: install lint typecheck build-check test ## What CI runs: lint + types + build + full suite
 	@echo "✅ check passed"
 
 verify: ## Run the end-to-end verification suite against a running local server

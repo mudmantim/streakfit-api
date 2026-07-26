@@ -187,7 +187,7 @@ def test_reply_extraction_skips_non_text_blocks(client, monkeypatch):
     leading non-text block (e.g. a future thinking/tool block) is skipped rather
     than crashing the endpoint into a 503."""
     resp_obj = _FakeResponse(("thinking", ""), ("text", "Here's the real reply."))
-    cap = _install_fake_anthropic(monkeypatch, response=resp_obj)
+    _install_fake_anthropic(monkeypatch, response=resp_obj)  # installed for the side effect
     token = register_and_login(client, "coach_extract")
     resp = client.post("/api/coach", json={
         "message": "hi", "context": {"type": "general"},

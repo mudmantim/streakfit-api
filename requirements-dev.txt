@@ -9,3 +9,9 @@
 
 # pytest is already provided by the base file above; listed here for intent only.
 pytest==9.1.1
+
+# Quality gates. Dev/CI only — deliberately NOT in requirements.txt, so none of
+# this is installed into the production image. See ruff.toml / mypy.ini for the
+# scope of each and the rules deliberately left out.
+ruff==0.16.0
+mypy==2.3.0

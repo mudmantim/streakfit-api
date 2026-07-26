@@ -5,7 +5,7 @@ emoji reactions are just short messages (no separate reaction table).
 """
 from conftest import register_and_login, auth_headers
 
-from app import app as flask_app, db, TEAM_MESSAGE_MAX_LENGTH
+from app import TEAM_MESSAGE_MAX_LENGTH
 
 
 def create_team(client, token, name):
