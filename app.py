@@ -1833,6 +1833,72 @@ def admin_verify_history():
     }), 200
 
 
+@app.route('/api/admin/forwarded-chain')
+@limiter.limit("30 per minute")
+def admin_forwarded_chain():
+    """Diagnostic: report exactly what proxy chain reaches this process.
+
+    Why this exists: the rate limiter keys on `get_remote_address()`, i.e.
+    `request.remote_addr`, which is the TCP peer of gunicorn -- on Render that
+    is an internal edge address, not the client. Measured effect in production:
+    a single keep-alive connection gets exactly the configured limit (5/min on
+    /api/register) while spreading requests across connections yields ~6-7x
+    that, because each distinct edge address is its own limiter bucket.
+
+    Choosing the fix requires knowing the real chain, and guessing is unsafe:
+    ProxyFix(x_for=N) trusts the Nth value from the RIGHT of X-Forwarded-For.
+    Set N too high and a client can prepend a forged entry and pick its own
+    limiter key (evading limits entirely); too low and the key stays a proxy.
+
+    So this reports the raw headers and, for N = 1..4, the value ProxyFix would
+    select -- so the correct N is read off real traffic rather than assumed.
+    Admin-gated (never public: the chain exposes internal edge addressing) and
+    strictly read-only. It changes no limiting behaviour.
+    """
+    _require_admin_secret()
+
+    xff_raw = request.headers.get('X-Forwarded-For', '')
+    hops = [h.strip() for h in xff_raw.split(',') if h.strip()]
+
+    # Mirrors werkzeug ProxyFix's selection: trust the Nth entry from the right.
+    proxyfix_would_pick = {}
+    for n in range(1, 5):
+        proxyfix_would_pick[f"x_for={n}"] = hops[-n] if len(hops) >= n else None
+
+    return jsonify({
+        # What the limiter keys on TODAY.
+        "remote_addr": request.remote_addr,
+        "limiter_key_today": request.remote_addr or "127.0.0.1",
+
+        "x_forwarded_for_raw": xff_raw or None,
+        "x_forwarded_for_hops": hops,
+        "x_forwarded_for_hop_count": len(hops),
+        "proxyfix_would_pick": proxyfix_would_pick,
+
+        # Single-valued candidates that need no hop counting. CF-Connecting-IP is
+        # set (and any client-supplied copy overwritten) by the Cloudflare edge
+        # Render fronts services with; if it is present and correct it is the
+        # safer key, since there is no leftmost entry for a client to forge.
+        "cf_connecting_ip": request.headers.get('CF-Connecting-IP'),
+        "true_client_ip": request.headers.get('True-Client-IP'),
+        "x_real_ip": request.headers.get('X-Real-IP'),
+        "forwarded_rfc7239": request.headers.get('Forwarded'),
+
+        "x_forwarded_proto": request.headers.get('X-Forwarded-Proto'),
+        "cf_ray": request.headers.get('CF-Ray'),
+        "cf_ipcountry": request.headers.get('CF-IPCountry'),
+
+        # Echoed back so a spoof probe is unambiguous: call this once normally,
+        # then again sending your own X-Forwarded-For, and compare. If the forged
+        # value shows up in the hop list, the edge APPENDS rather than overwrites
+        # -- which is exactly why N must be counted from the right.
+        "note": (
+            "Compare a plain call with one sending 'X-Forwarded-For: 203.0.113.99'. "
+            "The hop matching your real public IP identifies the correct x_for value."
+        ),
+    }), 200
+
+
 # --- Analytics ---
 
 _ALLOWED_EVENTS = {
