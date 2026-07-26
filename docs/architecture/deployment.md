@@ -20,6 +20,39 @@ graph LR
 - **Migrations run in the deploy step, never on boot.** The `&&` means a failed `flask db upgrade` stops gunicorn from starting — a bad migration fails the deploy instead of half-migrating a live process.
 - **Single gunicorn worker**, bare `gunicorn app:app` (no `WEB_CONCURRENCY`, no config file). Consequence: in-process caches and `memory://` rate-limit storage are effectively global today — and become per-worker the moment you scale out (see [../operations/production-readiness.md](../operations/production-readiness.md)).
 
+### Proxy chain and the real client IP
+
+Requests reach the app as **client → Cloudflare → Render internal → gunicorn**. Cloudflare is
+Render's own edge, not a customer-configured layer: `streakfit.pro` resolves to a Render address
+(`216.24.57.1`), responses carry `server: cloudflare` plus `rndr-id` and `x-render-origin-server:
+gunicorn`, and `streakfit-api.onrender.com` answers through the same edge. **There is no public
+ingress that reaches gunicorn without traversing it.**
+
+Consequently `REMOTE_ADDR` as gunicorn sees it is a Render-internal address (measured:
+`10.26.173.131`), *not* the caller. The app therefore installs:
+
+```python
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=2)
+```
+
+`x_for=2` because exactly two trusted proxies append to `X-Forwarded-For` — Cloudflare adds the IP
+that connected to it, then Render's layer adds Cloudflare's. Measured in production:
+`X-Forwarded-For: 74.220.50.219, 104.23.243.118`, the second entry inside Cloudflare's published
+`104.16.0.0/13`.
+
+**ProxyFix counts from the right, and that is a security property, not a detail.** Cloudflare
+appends to any `X-Forwarded-For` a caller supplies, so a forged entry lands further left and hop
+`-2` is always infrastructure-written. **Do not change this to the leftmost entry** — Render's own
+guidance says they "set the first IP in the list to the real client IP", but under that append
+behaviour the first entry is attacker-controlled, and trusting it would let any caller choose its
+own rate-limit bucket. Pinned by `test_proxyfix_never_trusts_the_leftmost_entry`.
+
+If the chain ever gains or loses a hop — most likely if a customer-owned Cloudflare zone is put in
+front of Render — `x_for` must change with it. That failure is silent, so
+`scripts/post_deploy_check.py` asserts `/api/register` admits exactly its configured 5/min from one
+client; a hop-count change fails that on the next deploy. Full evidence:
+[../operations/rate-limiting-client-ip.md](../operations/rate-limiting-client-ip.md).
+
 ## ⚠️ Deploy artifacts are NOT in the repo
 
 There is **no `Procfile`, no `render.yaml`, no `wsgi.py`, no gunicorn config file.** The Start Command exists only as a comment in `app.py` and in `CLAUDE.md`. **The source of truth for how production actually starts is the Render dashboard**, which is not version-controlled here. This is a real risk — a new owner cannot reconstruct the deploy from the repo alone. Making the deploy declarative (`render.yaml`) is a recommended immediate item (roadmap).

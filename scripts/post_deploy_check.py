@@ -222,31 +222,85 @@ def check_coach(api: ApiClient, token: str) -> None:
     check("coach reply is not an error string", "error" not in reply.lower()[:40], reply[:70])
 
 
-# ── 7. Rate limiting still behaves ───────────────────────────────────────────
-def check_rate_limiting(api: ApiClient, token: str) -> None:
-    print("\n[Rate limiting]")
-    # The coach limit is the tightest documented one (3/min). Probe it rather
-    # than a login limit, so a failure cannot lock a real user's path.
-    saw_429 = False
-    codes = []
-    for _ in range(6):
+# ── 7. Rate limits are actually enforced, per client ─────────────────────────
+REGISTER_LIMIT_PER_MIN = 5          # must match @limiter.limit on /api/register
+
+
+def check_rate_limiting(api: ApiClient, base: str, cooldown: float = 65) -> None:
+    """Prove the configured per-IP limit is the limit a real client actually gets.
+
+    This is the regression gate for the ProxyFix(x_for=2) fix. Before it, the
+    limiter keyed on `request.remote_addr` — gunicorn's TCP peer, a
+    Render-internal address — so requests fanned across ~6-7 buckets and
+    /api/register admitted ~35/min instead of 5: 12 POSTs over one keep-alive
+    connection hit the limit exactly, while 50 fresh connections allowed 30 and
+    60 allowed 37.
+
+    Probes /api/register with a payload rejected at validation, so nothing
+    touches the database and no account is created.
+
+    The assertion is two-sided on purpose, because BOTH directions are bugs:
+
+      allowed > 5  -> the key is too granular (partitioned across proxy hops or
+                      worker processes); limits are looser than configured.
+      allowed = 0  -> this client's allowance was already gone before we started,
+                      which on a quiet deploy points at a key too coarse to be
+                      per-client (e.g. one bucket shared by every user). This is
+                      a smoke signal, not a proof of granularity: a single prober
+                      against an idle service cannot distinguish a correct key
+                      from a shared one. Granularity is proven by the ProxyFix
+                      unit tests, which pin that hop -2 is what gets selected.
+
+    It also catches the one real fragility of a hop count: if Render changes its
+    topology, or a customer-owned Cloudflare zone is ever put in front and adds
+    a third hop, x_for=2 silently resolves to the wrong entry — and this fails
+    on the next deploy instead of going unnoticed.
+
+    Note on how this was validated: the assertions and their mechanics were
+    exercised against a local server, but the loose-key failure cannot be
+    reproduced locally — a single machine presents one bucket either way. The
+    evidence that this gate discriminates is the production measurement taken
+    before the fix, where /api/register admitted 30 of 50 and 37 of 60 requests;
+    `allowed <= 5` would have failed on both.
+    """
+    print("\n[Rate limits enforced per client]")
+
+    # The window is per-minute, and earlier checks in this run have already made
+    # requests. Start from a clean window or the count means nothing.
+    if cooldown > 0:
+        print(f"  waiting {cooldown:g}s for a clean rate-limit window...")
+        time.sleep(cooldown)
+
+    probes = REGISTER_LIMIT_PER_MIN * 2      # enough to cross the limit, cheap
+    allowed, limited, codes = 0, 0, []
+    for _ in range(probes):
         status, _ = api.request(
-            "POST", "/api/coach", token=token,
-            body={"message": "ping", "context": {"type": "general"}},
+            "POST", "/api/register",
+            body={"username": "x", "password": "1"},   # rejected before any DB access
         )
         codes.append(status)
-        if status == 429:
-            saw_429 = True
-            break
-    if saw_429:
-        check("coach rate limit engages", True, f"429 after {len(codes)} calls: {codes}")
-    else:
-        # Not a hard failure: storage is memory:// per worker, and a 503 (no key)
-        # path may short-circuit before the limiter. Report honestly.
-        warn(f"no 429 observed in {len(codes)} rapid coach calls (codes: {codes}) — "
-             "rate limiting not demonstrated; note limiter storage is memory:// per worker")
-        check("rate limiting probe completed without a 5xx",
-              all(c < 500 for c in codes), f"codes {codes}")
+        if status == 400:
+            allowed += 1
+        elif status == 429:
+            limited += 1
+
+    detail = f"{allowed} allowed, {limited} limited in {probes} calls; codes={codes}"
+
+    check("rate limiting engages at all", limited > 0, detail)
+    check(
+        f"limit is not looser than the configured {REGISTER_LIMIT_PER_MIN}/min",
+        allowed <= REGISTER_LIMIT_PER_MIN,
+        f"{allowed} allowed (expected <= {REGISTER_LIMIT_PER_MIN}) — "
+        "more means the limiter key is partitioned, not per client",
+    )
+    check(
+        "this client's own allowance was available",
+        allowed >= 1,
+        f"{allowed} allowed (expected >= 1) — zero on a quiet deploy suggests a "
+        "key too coarse to be per-client",
+    )
+    unexpected = [c for c in codes if c not in (400, 429)]
+    check("no unexpected status codes while probing", not unexpected, str(unexpected) or "none")
 
 
 # ── 8. Sustained health watch ────────────────────────────────────────────────
@@ -337,7 +391,7 @@ def main() -> int:
     # them first made the suite's own duplicate-username check see a 429 instead of
     # the 400 it expects — a self-inflicted failure caught on the local dry run.
     if token:
-        check_rate_limiting(api, token)
+        check_rate_limiting(api, base, cooldown=args.cooldown)
 
     check_watch(base, args.watch_minutes)
 

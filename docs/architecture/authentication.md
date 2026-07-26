@@ -22,7 +22,7 @@ graph LR
 - **Timing-equalized:** `check_password_hash` always runs — against the real hash if the user exists, else against a module-level `_DUMMY_PW_HASH` computed once at import. An attacker can't distinguish "no such user" from "wrong password" by response time. ([ADR-0008](../adrs/0008-security-headers-and-login-timing.md))
 - Success → `{access_token}`. Failure → uniform `401`.
 - **Cost floor ≈ 81 ms** (pbkdf2). This is the dominant latency of login and is deliberate — do not "optimize" it away.
-- Rate limit: **10/min per IP**.
+- Rate limit: **10/min per IP** — genuinely per client since `ProxyFix(x_for=2)` (see [deployment.md](deployment.md#proxy-chain-and-the-real-client-ip)). Before that fix the key was a Render-internal address, so the effective ceiling was ~6-7× higher.
 
 ### Token properties
 | Property | Value | Source |
@@ -65,5 +65,5 @@ if not env_secret or not hmac.compare_digest(secret.encode('utf-8'), env_secret.
 
 ## Threat notes (see also `docs/security_review.md`)
 - Password hashing: pbkdf2:sha256 (Werkzeug default). Adequate; argon2 is a possible future upgrade.
-- No account lockout / brute-force throttle beyond the 10/min IP limit — and that limit is `memory://` (per-worker, resets on deploy). Real brute-force protection needs shared rate-limit storage (roadmap).
+- No account lockout / brute-force throttle beyond the 10/min IP limit. That limit is now correctly keyed per client (`ProxyFix(x_for=2)`), but its storage is still `memory://` — process-local and reset on every deploy — so a determined attacker can retry across deploys, and it will partition if a second worker is ever added. Shared storage (roadmap **M1**) remains the next step. Note NAT/office/carrier clients share a bucket by nature; that is inherent to per-IP limiting, not a defect.
 - No email/recovery flow exists — there is no password reset. Username + password is the whole identity model.

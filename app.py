@@ -16,6 +16,7 @@ from flask import Flask, request, jsonify, abort
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy.exc import IntegrityError
 from flask_migrate import Migrate
+from werkzeug.middleware.proxy_fix import ProxyFix
 from werkzeug.security import generate_password_hash, check_password_hash
 from flask_jwt_extended import JWTManager, create_access_token, jwt_required, get_jwt_identity
 from flask_limiter import Limiter
@@ -27,6 +28,44 @@ import anthropic as _anthropic_lib
 # be coupled to test/verification code at import time.
 
 app = Flask(__name__)
+
+# ── Real client IP behind Render's edge ───────────────────────────────────────
+# Without this, `request.remote_addr` is gunicorn's TCP peer — measured in
+# production as 10.26.173.131, a Render-internal address — so every per-IP rate
+# limit was keyed on infrastructure rather than on the caller. Measured effect:
+# 12 POSTs over one keep-alive connection hit /api/register's 5/min exactly,
+# while spreading across connections allowed 30 of 50 and 37 of 60, i.e. ~6-7x
+# every configured limit, one bucket per internal address the app happened to see.
+#
+# Why x_for=2 specifically. The path is client -> Cloudflare -> Render internal
+# -> gunicorn, and exactly two trusted proxies append: Cloudflare adds the IP
+# that connected to it, then Render's layer adds Cloudflare's. Production
+# confirmed the shape — X-Forwarded-For was "74.220.50.219, 104.23.243.118",
+# the second entry inside Cloudflare's published 104.16.0.0/13.
+#
+# x_for counts from the RIGHT, which is what makes this safe rather than merely
+# correct. Cloudflare documents that it appends the connecting IP to any
+# existing X-Forwarded-For, so a caller who forges the header only pushes its
+# value further left:
+#
+#     client sends nothing      ->  "<client>, <CF>"            -> [-2] = client
+#     client sends "1.2.3.4"    ->  "1.2.3.4, <client>, <CF>"   -> [-2] = client
+#
+# Do NOT switch this to the leftmost entry. Render's own guidance says they "set
+# the first IP in the list to the real client IP", but per the append behaviour
+# above the first entry is attacker-controlled — trusting it would let any
+# caller choose its own rate-limit bucket and evade limits entirely.
+#
+# Failure mode is safe: ProxyFix leaves REMOTE_ADDR untouched when the header
+# has fewer than two entries, so an unexpected topology degrades to the old
+# over-permissive behaviour rather than to a spoofable one. Local dev and the
+# test suite send no X-Forwarded-For and are unaffected.
+#
+# Evidence, citations and the rejected alternatives (CF-Connecting-IP, shared
+# storage first): docs/operations/rate-limiting-client-ip.md
+# The ignore below is needed because reassigning wsgi_app is Flask's documented
+# way to install WSGI middleware; mypy only sees a method being overwritten.
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=2)  # type: ignore[method-assign]
 
 # StreakFit Control / Mission Control (R3.0): a real proxy for "last
 # deployment" -- each Render deploy starts a fresh process, so this

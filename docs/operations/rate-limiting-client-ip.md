@@ -1,18 +1,19 @@
 # Rate limiting: the client IP problem
 
-**Status:** investigation complete, fix **not yet implemented** (awaiting authorization).
+**Status:** **implemented** — `ProxyFix(x_for=2)` in `app.py`, regression-gated by
+`scripts/post_deploy_check.py`. Storage (`memory://`) deliberately unchanged; see roadmap **M1b**.
 **Date:** 2026-07-26. **Measured against:** production, commit `8da9053`.
 
 ## Summary
 
-Rate limits are enforced correctly *per bucket*, but the bucket is keyed on a Render-internal
-address rather than the client, so **effective capacity is ~6–7× every configured limit.** The
-limiter code is right; the key is wrong.
+Rate limits were enforced correctly *per bucket*, but the bucket was keyed on a Render-internal
+address rather than the client, so **effective capacity was ~6–7× every configured limit.** The
+limiter code was right; the key was wrong. Fixed by `ProxyFix(x_for=2)`.
 
 An earlier note claimed limiting was "not enforced at all." That was wrong — see
 [Why the first conclusion was wrong](#why-the-first-conclusion-was-wrong).
 
-## What the limiter keys on today
+## What the limiter keyed on before the fix
 
 `app.py` constructs the limiter as:
 
@@ -21,8 +22,8 @@ limiter = Limiter(get_remote_address, app=app, default_limits=[],
                   storage_uri=os.environ.get("RATELIMIT_STORAGE_URI", "memory://"))
 ```
 
-`get_remote_address()` in Flask-Limiter 3.5.0 is literally `return request.remote_addr or "127.0.0.1"`,
-and **there is no `ProxyFix`** in the app. So the key is gunicorn's TCP peer.
+`get_remote_address()` in Flask-Limiter 3.5.0 is literally `return request.remote_addr or "127.0.0.1"`.
+Before this change there was **no `ProxyFix`**, so the key was gunicorn's TCP peer.
 
 ## Measured evidence
 
@@ -32,7 +33,7 @@ From the (now removed) `/api/admin/forwarded-chain` diagnostic:
 
 | Header | Observed value | Attribution |
 |---|---|---|
-| `remote_addr` | `10.26.173.131` | RFC1918 — Render internal. **This is the limiter key today.** |
+| `remote_addr` | `10.26.173.131` | RFC1918 — Render internal. **This was the limiter key.** |
 | `X-Forwarded-For` | `74.220.50.219, 104.23.243.118` | `[client, Cloudflare]` |
 | `CF-Connecting-IP` | `74.220.50.219` | client |
 | `True-Client-IP` | `74.220.50.219` | client |
@@ -132,9 +133,9 @@ about `CF-Connecting-IP`, so a CDN change would remove it silently. `ProxyFix` a
 customer-owned Cloudflare zone is ever put in front of Render, which would insert a third entry.
 That failure is silent by nature, so it should be caught by a gate rather than by hope:
 
-**`scripts/post_deploy_check.py` should assert that `/api/register` allows exactly 5 requests per
-minute from one client.** Today that probe yields ~35. After the fix it must yield exactly 5, and
-any future topology drift makes it fail on the next deploy. This is also why the fix needs **no
+**`scripts/post_deploy_check.py` asserts that `/api/register` allows exactly 5 requests per minute
+from one client.** Before the fix that probe yielded ~35; it must now yield exactly 5, so any future
+topology drift fails on the next deploy. This is also why the fix needs **no
 diagnostic endpoint to verify** — the capacity probe is the end-to-end proof, requires no admin
 secret, and is stronger than echoing headers.
 

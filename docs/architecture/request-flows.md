@@ -62,7 +62,7 @@ sequenceDiagram
 
 - Token: HS256 JWT, identity = `str(user.id)`, **1-hour expiry**, sent as `Authorization: Bearer`.
 - Cost: ~**81 ms median** locally — pbkdf2 hashing dominates (measured). This is intentional and is the login latency floor.
-- Rate limit: **10/min per IP**. (Profiling tripped this immediately — relevant for shared-IP/NAT clients; see [../engineering-roadmap.md](../engineering-roadmap.md).)
+- Rate limit: **10/min per IP**, keyed on the real client since `ProxyFix(x_for=2)` (see [deployment.md](deployment.md#proxy-chain-and-the-real-client-ip)). (Profiling tripped this immediately — relevant for shared-IP/NAT clients, who share a bucket by nature; see [../engineering-roadmap.md](../engineering-roadmap.md).)
 
 ## Flow 2 — Complete a daily exercise
 
