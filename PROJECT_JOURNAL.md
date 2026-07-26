@@ -376,3 +376,75 @@ localStorage key. None of it is StreakFit's. Browser audits of this app need to 
 - **No new automated check covers mobile geometry.** The tap-target and layout findings were
   caught by ad-hoc browser scanning, so a regression could reintroduce them silently. A
   headless-browser geometry check would close that, and it does not exist yet.
+
+---
+
+# Session 4 close-out (2026-07-26) — shipped, verified, maintenance mode
+
+The release candidate went to production, and a follow-up investigation closed the one real defect
+its new tooling found.
+
+## Two deploys
+
+**`995f178` (SW v0748)** — the release-candidate pass. Live in 62s, zero downtime, 36/36 post-deploy
+checks, `verify_all` 81/81, 40-poll health watch clean.
+
+**`d262336`** — rate-limiting correctness. Live with zero downtime. No static assets changed, so the
+service-worker version could not be the deploy signal; the signal was behavioural instead —
+`/api/register` capacity dropping from ~35/min to exactly 5/min. 38 of 39 checks passed,
+`verify_all` 81/81. The one failure was a single health poll returning a *connection* error (`HTTP 0`,
+never an application status) out of 40; it did not recur across 80 further samples over 20 minutes,
+so the deploy was closed as verified on 135 cumulative samples with one transport-layer blip.
+
+## What the investigation actually found
+
+The post-deploy protocol added in the first deploy immediately earned itself by surfacing that rate
+limits were being enforced against a **Render-internal address** rather than the client, making
+every configured limit ~6-7× looser. Root cause was the **key, not the storage** — which matters,
+because the pre-existing backlog item had it backwards and recommended shared storage first. Doing
+that first would have collapsed every user onto one proxy-keyed bucket and been *worse* than the
+bug.
+
+Fixed with `ProxyFix(x_for=2)`, chosen on documented behaviour rather than guesswork: Cloudflare
+appends the connecting IP, so counting from the right is unspoofable. Worth recording that Render's
+own guidance — "we set the first IP in the list to the real client IP" — would be **spoofable** if
+implemented literally.
+
+Making per-IP limits bind then exposed a *latent* design error rather than creating one: five
+authenticated routes were keyed per IP, including `/api/coach` at 10 per **day**. A household behind
+one router is one IP but several people, so a family of four would have shared one coach quota. That
+is exactly the population a family fitness app must not throttle. Authenticated routes now key on
+the JWT subject; anonymous routes stay per IP, where the IP is what is being protected.
+
+## Methodology lessons worth keeping
+
+- **My first conclusion was wrong, and the error was methodological.** An 8-request probe against a
+  limit whose effective ceiling was ~35 concluded "rate limiting is not enforced." It could not have
+  produced a 429 under any hypothesis. A probe must exceed the ceiling it is testing. What actually
+  isolated the mechanism was a single keep-alive connection — 5 then 429 — because it held the key
+  constant instead of varying it unknowingly.
+- **Every new test was fault-injected.** Removing ProxyFix, `x_for=1`, `x_for=3`, coach reverted to
+  per-IP, register switched to per-user — each breaks a specific test. A gate nobody has watched fail
+  is not yet a gate.
+- **Documentation closed the last gap, not more production probing.** Cloudflare's published append
+  behaviour made a further external spoof test unnecessary, and the diagnostic endpoint added to
+  measure the chain was removed the same day it answered its question.
+
+## QA residue
+
+Cleaned up from a Render shell on 2026-07-26: **8 safe accounts deleted**, re-query confirmed none
+remaining, no partial failures, every deletion through `delete_user_account`. **12 team-owning
+accounts intentionally retained** — `cleanup_qa_smoke.py` refuses team owners by design
+([ADR-0007](docs/adrs/0007-qa-cleanup-safe-vs-blocked.md)), and direct SQL and `allow_team_owner=True`
+were both ruled out pending a reviewed approach. Tracked as roadmap **M9**; the durable fix is
+upstream — have the verification suite tear down the team it creates.
+
+## Maintenance mode
+
+StreakFit is in maintenance mode as of 2026-07-26. **No further production action is required.**
+Future work should come from real bugs, user feedback, feature requests, or an explicit engineering
+request — not from proactively hunting for improvements. Carried-forward items live in
+`docs/engineering-roadmap.md`; the ones most likely to matter first are **M1b** (`memory://`
+rate-limit storage resets each deploy), **no application-level cap on `/api/coach`** as defence in
+depth for a paid API, and **M9** above. One local docs-only commit is deliberately unpushed, to be
+bundled with the next functional change rather than triggering a deploy on its own.

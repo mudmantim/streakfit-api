@@ -80,3 +80,18 @@ shared-data-preserving guarantees instead of reinventing them.
   gate, re-query verification that strays fail loudly.
 - Tests: `tests/test_cleanup_qa_smoke.py`. See
   [`../architecture/verification-suite.md`](../architecture/verification-suite.md).
+
+## Follow-up: measured consequence (2026-07-26)
+
+The "blocked" group is no longer hypothetical. Two production deploys plus their
+`verify_all` runs left residue that was cleaned up on 2026-07-26: **8 safe accounts
+deleted** (re-query confirmed 0 remaining, no partial failures, every deletion through
+`delete_user_account`), and **12 team-owning accounts intentionally retained** — each owns a
+`Smoke Test <tag>` team, and this ADR's decision is precisely that the tool must not tear
+those down.
+
+That confirms the decision held under real use, and also shows its cost: the blocked group
+**grows by one per production suite run**. Tim ruled out direct SQL and
+`allow_team_owner=True` until a dedicated, reviewed approach exists, so this is tracked as
+roadmap **M9** — the durable fix is upstream (have the suite delete the team it created)
+rather than a stronger deletion tool.
