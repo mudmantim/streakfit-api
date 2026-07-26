@@ -20,15 +20,29 @@ downtime). Post-deploy protocol: **36/36 checks passed**, `verify_all` **81/81**
 health watch **40/40 polls green** (avg 0.16s, max 0.37s). No migration and no new environment
 variable, so rollback is code-only.
 
-One finding, pre-existing rather than introduced here: **rate limiting is not enforced in
-production.** Eight rapid requests against `/api/register`'s documented 5/minute cap all returned
-400 with no 429, and six rapid `/api/coach` calls all returned 200 against a documented 3/minute
-cap. The limiter code is correct and demonstrably works locally; the cause is `memory://` storage
-being per-process (see `render.yaml`, which already anticipates `RATELIMIT_STORAGE_URI`). Nothing
-in this deploy touches the limiter, its storage, or the worker count — this deploy's new
-post-deploy protocol is simply the first thing that ever probed it. `/api/coach` has no
-application-level cap behind flask-limiter, so this is live spend exposure on a paid API and is
-the top-priority follow-up.
+One finding, pre-existing rather than introduced here: **rate limits are enforced, but per
+proxy-hop rather than per user, so effective capacity is ~6-7x the configured value.** A follow-up
+investigation established this precisely — an earlier note in this file claimed limiting was "not
+enforced at all", which was wrong: that conclusion rested on an 8-request probe, far too small to
+reveal a limit whose effective ceiling is ~35.
+
+Measured: 12 POSTs over a **single keep-alive TCP connection** gave exactly `400 x5` then `429` —
+the configured 5/min, enforced precisely. Across many connections, capacity multiplies: 50
+sequential calls -> 30 allowed / 20 limited; 60 calls -> 37 allowed / 23 limited, first 429 at
+request 21. Consistent with ~6-7 independent buckets.
+
+Cause: `Limiter(get_remote_address, ...)` keys on `request.remote_addr`, and there is **no
+`ProxyFix`** — production is Cloudflare -> Render router -> gunicorn, so `remote_addr` is an
+internal proxy address, not the client. Partitioning across those addresses (and across processes,
+since storage is `memory://`) is what multiplies the ceiling. `docs/security_review.md` #15
+already documented both gaps.
+
+Nothing in this deploy touches the limiter, its storage, or the worker count; the new post-deploy
+protocol is simply the first thing that ever probed it. `/api/coach` has no application-level cap
+behind flask-limiter, so its 3/min + 10/day are effectively ~20/min + ~70/day per client — real
+spend exposure on a paid API, and the top-priority follow-up. Note the fix is the **key**, not the
+storage: shared storage alone would collapse all users onto one proxy-keyed bucket and cause
+collateral limiting.
 
 Two groups of work shipped in this deploy:
 
