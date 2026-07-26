@@ -12,9 +12,25 @@ decisions lives in `PROJECT_JOURNAL.md`.
 
 ---
 
-## Pending deploy — SW `v0748` (10 commits on `main`, not yet pushed)
+## v0748 — Release-candidate hardening (`995f178`, deployed 2026-07-26)
 
-Prepared 2026-07-25. Production is still serving `v0747`. Two groups of work:
+**Deployed and verified.** Pushed `56444f9..995f178` at 15:47:53Z; the service worker flipped
+`v0747` → `v0748` 62s later with `/health` returning 200 on every poll throughout (zero
+downtime). Post-deploy protocol: **36/36 checks passed**, `verify_all` **81/81**, 20-minute
+health watch **40/40 polls green** (avg 0.16s, max 0.37s). No migration and no new environment
+variable, so rollback is code-only.
+
+One finding, pre-existing rather than introduced here: **rate limiting is not enforced in
+production.** Eight rapid requests against `/api/register`'s documented 5/minute cap all returned
+400 with no 429, and six rapid `/api/coach` calls all returned 200 against a documented 3/minute
+cap. The limiter code is correct and demonstrably works locally; the cause is `memory://` storage
+being per-process (see `render.yaml`, which already anticipates `RATELIMIT_STORAGE_URI`). Nothing
+in this deploy touches the limiter, its storage, or the worker count — this deploy's new
+post-deploy protocol is simply the first thing that ever probed it. `/api/coach` has no
+application-level cap behind flask-limiter, so this is live spend exposure on a paid API and is
+the top-priority follow-up.
+
+Two groups of work shipped in this deploy:
 
 ### Release-candidate hardening (2026-07-25, this pass)
 
