@@ -785,6 +785,11 @@ var _teamPanelOverlay  = null;
 var _teamPanelThread   = null;
 var _teamPanelInput    = null;
 var _teamPanelSendBtn  = null;
+// Mirrors data.is_creator for the open panel: the creator may remove any
+// photo, the same narrow safety exception they already have for members and
+// the invite code. Reset on close so it can't leak into the next team.
+var _teamPanelIsCreator = false;
+var _teamPanelChatPane = null;
 var _teamPanelTeamId   = null;
 var _teamPanelInfo     = null;
 var _teamPanelMeta     = null;
@@ -838,13 +843,55 @@ function openTeamPanel(team) {
         team.total_team_missions + (team.total_team_missions === 1 ? ' log' : ' logs');
     panel.appendChild(_teamPanelStats);
 
+    // Two panes rather than one long scroll. With photos in the thread, the
+    // single-column panel left the thread a 160px window at the bottom of an
+    // 877px sheet -- too small to actually look at a picture in. This is the
+    // Campfire / Team Chat split the UI baseline already described, done with
+    // the least machinery that works.
+    var tabs = document.createElement('div');
+    tabs.className = 'team-panel-tabs';
+    tabs.setAttribute('role', 'tablist');
+    panel.appendChild(tabs);
+
     _teamPanelInfo = document.createElement('div');
-    _teamPanelInfo.className = 'team-panel-info';
+    _teamPanelInfo.className = 'team-panel-info team-panel-pane';
     panel.appendChild(_teamPanelInfo);
+
+    var chatPane = document.createElement('div');
+    chatPane.className = 'team-panel-pane team-panel-chat-pane';
+    chatPane.hidden = true;
+    panel.appendChild(chatPane);
 
     _teamPanelThread = document.createElement('div');
     _teamPanelThread.className = 'team-panel-thread';
-    panel.appendChild(_teamPanelThread);
+    chatPane.appendChild(_teamPanelThread);
+
+    var paneTabs = [
+        { label: '\uD83D\uDD25 Campfire', pane: _teamPanelInfo },
+        { label: '\uD83D\uDCF7 Photos & Chat', pane: chatPane },
+    ];
+    paneTabs.forEach(function (t, i) {
+        var btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'team-panel-tab' + (i === 0 ? ' is-active' : '');
+        btn.setAttribute('role', 'tab');
+        btn.setAttribute('aria-selected', String(i === 0));
+        btn.textContent = t.label;
+        btn.addEventListener('click', function () {
+            paneTabs.forEach(function (other, j) {
+                other.pane.hidden = j !== i;
+                var b = tabs.children[j];
+                b.classList.toggle('is-active', j === i);
+                b.setAttribute('aria-selected', String(j === i));
+            });
+            if (i === 1 && _teamPanelThread) {
+                _teamPanelThread.scrollTop = _teamPanelThread.scrollHeight;
+            }
+        });
+        tabs.appendChild(btn);
+        t.pane.setAttribute('role', 'tabpanel');
+    });
+    _teamPanelChatPane = chatPane;
 
     var reactionRow = document.createElement('div');
     reactionRow.className = 'team-panel-reaction-row';
@@ -856,7 +903,7 @@ function openTeamPanel(team) {
         btn.addEventListener('click', function () { _sendTeamMessage(emoji); });
         reactionRow.appendChild(btn);
     });
-    panel.appendChild(reactionRow);
+    chatPane.appendChild(reactionRow);
 
     var inputRow = document.createElement('div');
     inputRow.className = 'team-panel-input-row';
@@ -876,9 +923,32 @@ function openTeamPanel(team) {
     _teamPanelSendBtn.textContent = 'Send';
     _teamPanelSendBtn.addEventListener('click', _submitTeamMessage);
 
+    // Camera first. `capture="environment"` makes a phone open the camera
+    // straight away instead of a file browser, and accept="image/*" still
+    // leaves "choose an existing one" available underneath it.
+    var photoBtn = document.createElement('button');
+    photoBtn.type = 'button';
+    photoBtn.className = 'team-panel-photo-btn';
+    photoBtn.setAttribute('aria-label', 'Share a photo with your team');
+    photoBtn.textContent = '\uD83D\uDCF7';
+    photoBtn.addEventListener('click', function () { _photoInput.click(); });
+
+    var _photoInput = document.createElement('input');
+    _photoInput.type = 'file';
+    _photoInput.accept = 'image/*';
+    _photoInput.setAttribute('capture', 'environment');
+    _photoInput.className = 'visually-hidden';
+    _photoInput.addEventListener('change', function () {
+        var file = _photoInput.files && _photoInput.files[0];
+        _photoInput.value = '';        // so picking the same file twice re-fires
+        if (file) openPhotoComposer(file);
+    });
+
+    inputRow.appendChild(photoBtn);
+    inputRow.appendChild(_photoInput);
     inputRow.appendChild(_teamPanelInput);
     inputRow.appendChild(_teamPanelSendBtn);
-    panel.appendChild(inputRow);
+    chatPane.appendChild(inputRow);
 
     _teamPanelOverlay.appendChild(panel);
     _teamPanelOverlay.classList.add('open');
@@ -889,6 +959,7 @@ function openTeamPanel(team) {
 }
 
 function closeTeamPanel() {
+    _teamPanelIsCreator = false;
     if (_teamPanelOverlay) {
         _teamPanelOverlay.classList.remove('open');
         document.body.style.overflow = '';
@@ -948,6 +1019,9 @@ async function _loadTeamInfo(teamId) {
             _teamPanelStats.textContent = '\u2713 ' + movedToday + ' of ' + totalMembers + ' moved today';
         }
     }
+
+    _teamPanelIsCreator = !!data.is_creator;
+    _refreshPhotoDeletePermissions();
 
     _teamPanelInfo.appendChild(_buildCampfireSection(data));
     _teamPanelInfo.appendChild(_buildRosterSection(data));
@@ -1369,14 +1443,156 @@ function _appendTeamMsg(m) {
         wrap.appendChild(sender);
     }
 
-    var body = document.createElement('p');
-    body.className = 'team-msg-body';
-    body.textContent = m.body; // textContent — never innerHTML
-    wrap.appendChild(body);
+    if (m.photo) {
+        wrap.appendChild(_buildPhotoBubble(m.photo));
+    } else {
+        var body = document.createElement('p');
+        body.className = 'team-msg-body';
+        body.textContent = m.body; // textContent — never innerHTML
+        wrap.appendChild(body);
+    }
 
     _teamPanelThread.appendChild(wrap);
     _teamPanelThread.scrollTop = _teamPanelThread.scrollHeight;
     return wrap;
+}
+
+function _photoUrl(publicId) {
+    // Built here rather than taken from the response's `url`. The server sends
+    // one, but a client that follows a server-supplied path would fetch
+    // wherever a tampered response pointed it; deriving it from the open team
+    // and the photo's own id can only ever address this team's photos.
+    return '/api/teams/' + _teamPanelTeamId + '/photos/' + encodeURIComponent(publicId);
+}
+
+function _buildPhotoBubble(photo) {
+    var box = document.createElement('div');
+    box.className = 'team-photo';
+
+    if (photo.removed) {
+        var removed = document.createElement('p');
+        removed.className = 'team-photo-gone';
+        removed.textContent = 'Photo removed';
+        box.appendChild(removed);
+        return box;
+    }
+    if (!photo.available) {
+        var expired = document.createElement('p');
+        expired.className = 'team-photo-gone';
+        expired.textContent = 'This photo has expired';
+        box.appendChild(expired);
+        return box;
+    }
+
+    var frame = document.createElement('div');
+    frame.className = 'team-photo-frame';
+    if (photo.width && photo.height) {
+        // Reserve the space before the bytes arrive so the thread doesn't jump.
+        frame.style.aspectRatio = photo.width + ' / ' + photo.height;
+    }
+    var img = document.createElement('img');
+    img.className = 'team-photo-img';
+    img.alt = photo.caption || 'A photo shared with your team';
+    // No loading="lazy" here: the bytes are fetched by _loadAuthedImage and
+    // handed over as a blob that is already in memory, so deferring the decode
+    // buys nothing -- and inside the hidden Photos tab it left an <img> with a
+    // src that never painted.
+    frame.appendChild(img);
+    box.appendChild(frame);
+
+    // The photo URL is not a public link: it needs the Authorization header, so
+    // it is fetched and handed to the page as a blob. That is the whole reason
+    // there is no signed-URL or token-in-query path -- a leaked URL is useless.
+    _loadAuthedImage(_photoUrl(photo.public_id), img, frame);
+
+    if (photo.caption) {
+        var cap = document.createElement('p');
+        cap.className = 'team-photo-caption';
+        cap.textContent = photo.caption;
+        box.appendChild(cap);
+    }
+
+    // Kept on the node so permissions can be re-applied later: the thread and
+    // the team info load concurrently, and until the info lands we do not yet
+    // know whether this viewer is the team's creator.
+    box._photo = photo;
+    _applyPhotoDeletePermission(box);
+
+    return box;
+}
+
+function _mayDeletePhoto(photo) {
+    return !!(currentUser && (photo.sender_user_id === currentUser.id || _teamPanelIsCreator));
+}
+
+function _applyPhotoDeletePermission(box) {
+    var photo = box._photo;
+    if (!photo || photo.removed || !photo.available) return;
+
+    var existing = box.querySelector('.team-photo-delete');
+    if (!_mayDeletePhoto(photo)) {
+        if (existing) existing.remove();
+        return;
+    }
+    if (existing) return;
+
+    var del = document.createElement('button');
+    del.type = 'button';
+    del.className = 'team-photo-delete';
+    del.textContent = 'Delete';
+    // Two taps, never a window.confirm: a modal dialog freezes the PWA.
+    del.addEventListener('click', function () {
+        if (del.dataset.confirming) {
+            _deleteTeamPhoto(photo, box);
+            return;
+        }
+        del.dataset.confirming = '1';
+        del.textContent = 'Really delete?';
+        setTimeout(function () {
+            delete del.dataset.confirming;
+            del.textContent = 'Delete';
+        }, 4000);
+    });
+    box.appendChild(del);
+}
+
+// Called once the team info arrives, because the creator's right to remove any
+// photo is only known then -- and a photo bubble rendered before that would
+// otherwise never grow its Delete control.
+function _refreshPhotoDeletePermissions() {
+    if (!_teamPanelThread) return;
+    var boxes = _teamPanelThread.querySelectorAll('.team-photo');
+    for (var i = 0; i < boxes.length; i++) _applyPhotoDeletePermission(boxes[i]);
+}
+
+async function _loadAuthedImage(url, img, frame) {
+    var token = localStorage.getItem('streakfit_token');
+    try {
+        var resp = await fetch(url, { headers: { 'Authorization': 'Bearer ' + token } });
+        if (!resp.ok) throw new Error(String(resp.status));
+        var blob = await resp.blob();
+        var objectUrl = URL.createObjectURL(blob);
+        img.src = objectUrl;
+        // Released once painted: a long thread of blobs would otherwise pin
+        // every photo in memory for the life of the session.
+        img.addEventListener('load', function () { URL.revokeObjectURL(objectUrl); }, { once: true });
+    } catch (e) {
+        frame.classList.add('is-failed');
+        var msg = document.createElement('p');
+        msg.className = 'team-photo-gone';
+        msg.textContent = "Couldn't load this photo";
+        frame.appendChild(msg);
+    }
+}
+
+async function _deleteTeamPhoto(photo, box) {
+    var result = await api(_photoUrl(photo.public_id), 'DELETE');
+    if (!result || result.status !== 200) return;
+    box.innerHTML = '';
+    var gone = document.createElement('p');
+    gone.className = 'team-photo-gone';
+    gone.textContent = 'Photo removed';
+    box.appendChild(gone);
 }
 
 function _submitTeamMessage() {
@@ -1415,6 +1631,421 @@ async function _sendTeamMessage(body) {
     _appendTeamMsg(result.data);
     _teamPanelInput.focus();
 }
+
+// ── StreakFit photo filters ────────────────────────────────────────────────────
+//
+// Composition happens here, in the browser, for three reasons: the server never
+// pays to process an image, the upload is one small finished JPEG instead of a
+// full-resolution original, and drawing through a canvas drops EXIF as a side
+// effect (the server strips it again anyway -- a client is not a safety layer).
+//
+// The catalog, including each filter's render spec, comes from the server. This
+// file implements PRIMITIVES, not filters: adding "Rickie in a party hat" is a
+// dict in app.py, and only a genuinely new kind of effect needs code here.
+
+var PHOTO_MAX_EDGE = 1080;      // plenty for a phone screen, ~200 KB as JPEG
+var PHOTO_JPEG_QUALITY = 0.82;
+
+var _photoFilters = [];         // as served, including lock state
+var _photoAcorns = 0;
+var _composerFilterKey = 'none';
+var _composerImage = null;
+var _composerOverlay = null;
+var _overlayImageCache = {};
+
+function _loadOverlayImage(src) {
+    if (_overlayImageCache[src]) return _overlayImageCache[src];
+    var p = new Promise(function (resolve) {
+        var img = new Image();
+        // Same-origin SVGs, so the canvas stays untainted and toBlob works.
+        img.onload = function () { resolve(img); };
+        img.onerror = function () { resolve(null); };   // a missing overlay must not break the photo
+        img.src = src;
+    });
+    _overlayImageCache[src] = p;
+    return p;
+}
+
+function _anchorPosition(anchor, cw, ch, w, h) {
+    var pad = Math.round(cw * 0.03);
+    var x = pad, y = pad;
+    if (anchor.indexOf('right') !== -1) x = cw - w - pad;
+    if (anchor.indexOf('bottom') !== -1) y = ch - h - pad;
+    if (anchor.indexOf('center') !== -1) { x = (cw - w) / 2; y = (ch - h) / 2; }
+    return { x: x, y: y };
+}
+
+// Deterministic scatter: the same photo and filter always land the glyphs in
+// the same places, so a preview is honest about what gets sent. Nothing in
+// StreakFit should be a surprise draw.
+function _scatterSeed(i, salt) {
+    var x = Math.sin((i + 1) * 12.9898 + salt * 78.233) * 43758.5453;
+    return x - Math.floor(x);
+}
+
+async function renderPhotoToCanvas(canvas, img, spec) {
+    spec = spec || {};
+    var scale = Math.min(1, PHOTO_MAX_EDGE / Math.max(img.naturalWidth, img.naturalHeight));
+    var w = Math.max(1, Math.round(img.naturalWidth * scale));
+    var h = Math.max(1, Math.round(img.naturalHeight * scale));
+    canvas.width = w;
+    canvas.height = h;
+
+    var ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, w, h);
+
+    ctx.save();
+    if (spec.tint) ctx.filter = spec.tint;
+    ctx.drawImage(img, 0, 0, w, h);
+    ctx.restore();
+
+    if (spec.confetti) {
+        var c = spec.confetti;
+        var size = Math.round(Math.min(w, h) * (c.size || 0.07));
+        ctx.save();
+        ctx.font = size + 'px serif';
+        ctx.textBaseline = 'middle';
+        ctx.textAlign = 'center';
+        for (var i = 0; i < (c.count || 12); i++) {
+            var gx = _scatterSeed(i, 1) * w;
+            var gy = _scatterSeed(i, 2) * h;
+            ctx.save();
+            ctx.translate(gx, gy);
+            ctx.rotate((_scatterSeed(i, 3) - 0.5) * 0.9);
+            ctx.globalAlpha = 0.75 + _scatterSeed(i, 4) * 0.25;
+            ctx.fillText(c.glyph, 0, 0);
+            ctx.restore();
+        }
+        ctx.restore();
+    }
+
+    if (spec.overlays) {
+        for (var j = 0; j < spec.overlays.length; j++) {
+            var o = spec.overlays[j];
+            var oimg = await _loadOverlayImage(o.src);
+            if (!oimg) continue;
+            var ow = Math.round(Math.min(w, h) * (o.scale || 0.3));
+            var oh = Math.round(ow * (oimg.naturalHeight / oimg.naturalWidth || 1));
+            var pos = _anchorPosition(o.anchor || 'bottom-right', w, h, ow, oh);
+            ctx.save();
+            ctx.globalAlpha = o.opacity === undefined ? 1 : o.opacity;
+            ctx.translate(pos.x + ow / 2, pos.y + oh / 2);
+            ctx.rotate(((o.rotate || 0) * Math.PI) / 180);
+            ctx.drawImage(oimg, -ow / 2, -oh / 2, ow, oh);
+            ctx.restore();
+        }
+    }
+
+    if (spec.frame) {
+        var fw = Math.max(3, Math.round(Math.min(w, h) * (spec.frame.width || 0.03)));
+        var grad = ctx.createLinearGradient(0, 0, w, h);
+        grad.addColorStop(0, spec.frame.from || '#f59e0b');
+        grad.addColorStop(1, spec.frame.to || '#ef4444');
+        ctx.save();
+        ctx.strokeStyle = grad;
+        ctx.lineWidth = fw;
+        ctx.strokeRect(fw / 2, fw / 2, w - fw, h - fw);
+        ctx.restore();
+    }
+
+    if (spec.ribbon) {
+        var r = spec.ribbon;
+        var bandH = Math.round(h * 0.11);
+        var bandY = r.position === 'top' ? 0 : h - bandH;
+        var rg = ctx.createLinearGradient(0, bandY, w, bandY + bandH);
+        rg.addColorStop(0, r.from || '#4338ca');
+        rg.addColorStop(1, r.to || '#7c3aed');
+        ctx.save();
+        ctx.globalAlpha = 0.92;
+        ctx.fillStyle = rg;
+        ctx.fillRect(0, bandY, w, bandH);
+        ctx.globalAlpha = 1;
+        ctx.fillStyle = '#fff';
+        ctx.font = '700 ' + Math.round(bandH * 0.46) + 'px system-ui, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.letterSpacing = '2px';
+        ctx.fillText(r.text || '', w / 2, bandY + bandH / 2);
+        ctx.restore();
+    }
+
+    return canvas;
+}
+
+function _specForKey(key) {
+    var f = _photoFilters.find(function (x) { return x.key === key; });
+    return f ? f.render : {};
+}
+
+async function _refreshPhotoFilters() {
+    var result = await api('/api/photo-filters');
+    if (result && result.status === 200) {
+        _photoFilters = result.data.filters || [];
+        _photoAcorns = result.data.acorns_available || 0;
+    }
+    return _photoFilters;
+}
+
+
+// ── The composer: take a photo -> preview -> filter -> caption -> send ────────
+
+async function openPhotoComposer(file) {
+    var teamId = _teamPanelTeamId;
+    if (!teamId) return;
+
+    var img = new Image();
+    var objectUrl = URL.createObjectURL(file);
+    var loaded = await new Promise(function (resolve) {
+        img.onload = function () { resolve(true); };
+        img.onerror = function () { resolve(false); };
+        img.src = objectUrl;
+    });
+    if (!loaded) {
+        URL.revokeObjectURL(objectUrl);
+        alertlessPhotoError("That file didn't look like a photo Rickie can use.");
+        return;
+    }
+    _composerImage = img;
+    _composerFilterKey = 'none';
+
+    await _refreshPhotoFilters();
+    _buildPhotoComposer(teamId, objectUrl);
+}
+
+// Deliberately not window.alert: a modal dialog would freeze the PWA and is a
+// jarring way to tell a child their photo didn't work.
+function alertlessPhotoError(message) {
+    if (!_teamPanelThread) return;
+    var el = document.createElement('p');
+    el.className = 'team-msg-send-error';
+    el.textContent = message;
+    _teamPanelThread.appendChild(el);
+    _teamPanelThread.scrollTop = _teamPanelThread.scrollHeight;
+}
+
+function _buildPhotoComposer(teamId, objectUrl) {
+    // Drop a previous sheet without going through _closePhotoComposer(), which
+    // also clears _composerImage -- the image this one is about to draw.
+    if (_composerOverlay) {
+        _composerOverlay.remove();
+        _composerOverlay = null;
+    }
+
+    var overlay = document.createElement('div');
+    overlay.className = 'photo-composer-overlay';
+    _composerOverlay = overlay;
+
+    var sheet = document.createElement('div');
+    sheet.className = 'photo-composer';
+
+    var head = document.createElement('div');
+    head.className = 'photo-composer-head';
+    var title = document.createElement('p');
+    title.className = 'photo-composer-title';
+    title.textContent = 'Share with your team';
+    var closeBtn = document.createElement('button');
+    closeBtn.type = 'button';
+    closeBtn.className = 'photo-composer-close';
+    closeBtn.setAttribute('aria-label', 'Cancel');
+    closeBtn.textContent = '✕';
+    closeBtn.addEventListener('click', _closePhotoComposer);
+    head.appendChild(title);
+    head.appendChild(closeBtn);
+    sheet.appendChild(head);
+
+    var canvas = document.createElement('canvas');
+    canvas.className = 'photo-composer-canvas';
+    sheet.appendChild(canvas);
+
+    var strip = document.createElement('div');
+    strip.className = 'photo-filter-strip';
+    sheet.appendChild(strip);
+
+    var note = document.createElement('p');
+    note.className = 'photo-filter-note';
+    sheet.appendChild(note);
+
+    var captionRow = document.createElement('div');
+    captionRow.className = 'photo-caption-row';
+    var caption = document.createElement('input');
+    caption.type = 'text';
+    caption.className = 'photo-caption-input';
+    caption.placeholder = 'Say something (optional)';
+    caption.maxLength = 140;
+    captionRow.appendChild(caption);
+    sheet.appendChild(captionRow);
+
+    var privacy = document.createElement('p');
+    privacy.className = 'photo-privacy-note';
+    // Honest, not reassuring-sounding: the one promise never made here is that
+    // a photo cannot be screenshotted, because it can.
+    privacy.textContent = 'Only your team can open this. It disappears from the '
+        + 'app after 30 days, and you can delete it sooner — but anyone who can '
+        + 'see it can screenshot it.';
+    sheet.appendChild(privacy);
+
+    var actions = document.createElement('div');
+    actions.className = 'photo-composer-actions';
+    var sendBtn = document.createElement('button');
+    sendBtn.type = 'button';
+    sendBtn.className = 'btn-primary photo-send-btn';
+    sendBtn.textContent = 'Send to team';
+    actions.appendChild(sendBtn);
+    sheet.appendChild(actions);
+
+    overlay.appendChild(sheet);
+    document.body.appendChild(overlay);
+    document.body.style.overflow = 'hidden';
+
+    function repaint() {
+        renderPhotoToCanvas(canvas, _composerImage, _specForKey(_composerFilterKey));
+    }
+
+    function paintStrip() {
+        strip.innerHTML = '';
+        _photoFilters.forEach(function (f) {
+            var chip = document.createElement('button');
+            chip.type = 'button';
+            chip.className = 'photo-filter-chip'
+                + (f.key === _composerFilterKey ? ' is-active' : '')
+                + (f.unlocked ? '' : ' is-locked');
+            chip.setAttribute('aria-pressed', String(f.key === _composerFilterKey));
+
+            var label = document.createElement('span');
+            label.className = 'photo-filter-chip-name';
+            label.textContent = f.name;
+            chip.appendChild(label);
+
+            if (!f.unlocked) {
+                var lock = document.createElement('span');
+                lock.className = 'photo-filter-chip-lock';
+                lock.textContent = f.unlock_type === 'acorns'
+                    ? f.cost + ' 🌰'
+                    : '🔒';
+                chip.appendChild(lock);
+            }
+
+            chip.addEventListener('click', function () {
+                if (f.unlocked) {
+                    _composerFilterKey = f.key;
+                    note.textContent = f.blurb;
+                    note.className = 'photo-filter-note';
+                    paintStrip();
+                    repaint();
+                    return;
+                }
+                if (f.unlock_type === 'acorns') {
+                    _offerFilterPurchase(f, note, paintStrip, repaint);
+                } else {
+                    note.textContent = f.requirement + ' to unlock this one.';
+                    note.className = 'photo-filter-note is-locked';
+                }
+            });
+            strip.appendChild(chip);
+        });
+    }
+
+    sendBtn.addEventListener('click', function () {
+        _sendPhoto(teamId, canvas, caption.value.trim(), sendBtn, objectUrl);
+    });
+
+    paintStrip();
+    repaint();
+    note.textContent = 'Pick a look. Rickie has opinions.';
+}
+
+async function _offerFilterPurchase(filter, note, paintStrip, repaint) {
+    if (_photoAcorns < filter.cost) {
+        note.className = 'photo-filter-note is-locked';
+        note.textContent = 'That one costs ' + filter.cost + ' acorns — you have '
+            + _photoAcorns + '. Acorns come from showing up.';
+        return;
+    }
+    note.className = 'photo-filter-note';
+    note.textContent = 'Unlocking ' + filter.name + '…';
+
+    var result = await api('/api/photo-filters/' + filter.key + '/unlock', 'POST');
+    if (!result || result.status !== 200) {
+        note.className = 'photo-filter-note is-locked';
+        note.textContent = "Couldn't unlock that one just now.";
+        return;
+    }
+    _photoAcorns = result.data.acorns_available;
+    filter.unlocked = true;
+    _composerFilterKey = filter.key;
+    note.textContent = filter.name + ' unlocked. ' + _photoAcorns + ' acorns left.';
+    paintStrip();
+    repaint();
+    if (currentUser) loadUserPreferences();
+}
+
+function _closePhotoComposer() {
+    if (_composerOverlay) {
+        _composerOverlay.remove();
+        _composerOverlay = null;
+    }
+    _composerImage = null;
+    document.body.style.overflow = _teamPanelOverlay && _teamPanelOverlay.classList.contains('open')
+        ? 'hidden' : '';
+}
+
+async function _sendPhoto(teamId, canvas, caption, sendBtn, objectUrl) {
+    sendBtn.disabled = true;
+    sendBtn.textContent = 'Sending…';
+
+    var blob = await new Promise(function (resolve) {
+        canvas.toBlob(resolve, 'image/jpeg', PHOTO_JPEG_QUALITY);
+    });
+    if (!blob) {
+        sendBtn.disabled = false;
+        sendBtn.textContent = 'Send to team';
+        return;
+    }
+
+    var form = new FormData();
+    form.append('photo', blob, 'streakfit.jpg');
+    if (caption) form.append('caption', caption);
+    if (_composerFilterKey && _composerFilterKey !== 'none') {
+        form.append('filter_key', _composerFilterKey);
+    }
+
+    var token = localStorage.getItem('streakfit_token');
+    var resp;
+    try {
+        resp = await fetch('/api/teams/' + teamId + '/photos', {
+            method: 'POST',
+            headers: { 'Authorization': 'Bearer ' + token },   // no Content-Type: the browser sets the boundary
+            body: form,
+        });
+    } catch (e) {
+        sendBtn.disabled = false;
+        sendBtn.textContent = 'Send to team';
+        return;
+    }
+
+    if (objectUrl) URL.revokeObjectURL(objectUrl);
+
+    if (!resp.ok) {
+        var problem = await resp.json().catch(function () { return {}; });
+        sendBtn.disabled = false;
+        sendBtn.textContent = 'Send to team';
+        var msg = problem.message
+            || (problem.error === 'team_photo_quota_reached' ? "This team's album is full." : null)
+            || (resp.status === 429 ? "That's a lot of photos at once — try again in a minute." : null)
+            || "Couldn't send that photo — try again.";
+        alertlessPhotoError(msg);
+        _closePhotoComposer();
+        return;
+    }
+
+    var message = await resp.json();
+    _closePhotoComposer();
+
+    var empty = _teamPanelThread && _teamPanelThread.querySelector('.team-panel-empty');
+    if (empty) empty.remove();
+    if (_teamPanelTeamId === teamId) _appendTeamMsg(message);
+}
+
 
 // ── Rickie's voice ──────────────────────────────────────────────────────────────
 // Every line in here follows the same rules, everywhere Rickie speaks:

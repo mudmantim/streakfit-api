@@ -42,7 +42,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from verification._client import ApiClient, Results, resolve_base_url
 from verification._fixtures import Scenario, new_run_tag, register_and_login_users, create_and_join_team
-from verification import auth, teams, mission, campfire, moments, chat, rickie, security, admin, VERIFICATION_SUITE_VERSION
+from verification import auth, teams, mission, campfire, moments, chat, rickie, photos, security, admin, VERIFICATION_SUITE_VERSION
 
 # Order matters: security.py mutates membership state (removes a member,
 # leaves a member) and must run last among the team-scenario modules --
@@ -57,6 +57,7 @@ MODULES = [
     ("Moments", moments),
     ("Chat", chat),
     ("Rickie", rickie),
+    ("Photos", photos),
     ("Security", security),
     ("Admin", admin),
 ]

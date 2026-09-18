@@ -403,6 +403,108 @@ def check_team_witness(b: Browser, base: str, app) -> None:
           f"campfire was {campfire[:120]!r}")
 
 
+def check_photo_sharing(b: Browser, base: str, app) -> None:
+    """The Olivia test: take a photo, filter it, send it, family sees it."""
+    print("\nTeam photos — can Olivia send her family a goofy picture?")
+    parent, parent_token = make_user(app, "pphoto_parent")
+    kid, kid_token = make_user(app, "pphoto_kid")
+
+    created = _api(base, "/api/teams", "POST", parent_token, {"name": "UICheck Photos"})
+    team = created.get("team")
+    if not team:
+        bad(f"could not create a team to check photos ({created})")
+        return
+    _api(base, f"/api/teams/{team['id']}/join", "POST", kid_token,
+         {"code": team["invite_code"]})
+
+    def open_team(token):
+        b.goto(base + "/", wait=1.0)
+        b.js(f"localStorage.setItem('streakfit_token', {json.dumps(token)})")
+        b.goto(base + "/", wait=3.0)
+        b.js("(()=>{const x=[...document.querySelectorAll('button')]"
+             ".find(e=>e.textContent.trim()==='Open'); if(x) x.click(); return 1;})()")
+        time.sleep(2.5)
+
+    open_team(kid_token)
+    check(bool(b.js("!!document.querySelector('.team-panel-photo-btn')")),
+          "there is a camera button in the team panel")
+    capture = b.js("(()=>{const i=document.querySelector('.team-panel-input-row input[type=file]');"
+                   " return i ? (i.getAttribute('capture')||'') + '|' + (i.accept||'') : '';})()")
+    check("environment" in (capture or "") and "image" in (capture or ""),
+          "the camera opens directly on a phone rather than a file browser",
+          f"input attrs: {capture!r}")
+
+    # Hand the composer a file the way the picker would.
+    b.js("""window.__f = (async () => {
+        const cv = document.createElement('canvas'); cv.width = 320; cv.height = 240;
+        const x = cv.getContext('2d'); x.fillStyle = '#4338ca'; x.fillRect(0,0,320,240);
+        const blob = await new Promise(r => cv.toBlob(r, 'image/jpeg', 0.85));
+        return new File([blob], 'shot.jpg', {type: 'image/jpeg'});
+    })()""")
+    time.sleep(0.5)
+    b.js("window.__f.then(f => openPhotoComposer(f))")
+    time.sleep(3.0)
+
+    check(bool(b.js("!!document.querySelector('.photo-composer')")),
+          "choosing a photo opens the composer")
+
+    painted = b.js("""(() => {const cv = document.querySelector('.photo-composer-canvas');
+        if (!cv || !cv.width) return 0;
+        const d = cv.getContext('2d').getImageData(0,0,cv.width,cv.height).data;
+        let n = 0; for (let i=0;i<d.length;i+=400) if (d[i+3] > 0) n++;
+        return n;})()""")
+    check((painted or 0) > 0, "the composer previews the actual photo",
+          "the preview canvas is blank")
+
+    chips = json.loads(b.js("JSON.stringify([...document.querySelectorAll('.photo-filter-chip')]"
+                            ".map(e => e.innerText.trim()))") or "[]")
+    check(len(chips) >= 5, f"filters are offered ({len(chips)} of them)")
+    check(any("\U0001F512" in c or "\U0001F330" in c for c in chips),
+          "locked filters are shown with what they cost, not hidden",
+          f"chips: {chips}")
+
+    before = b.js("""(() => {const cv = document.querySelector('.photo-composer-canvas');
+        return cv.toDataURL('image/jpeg', 0.5).length;})()""")
+    b.js("(()=>{const c=[...document.querySelectorAll('.photo-filter-chip')]"
+         ".find(e=>e.innerText.trim().startsWith('Rickie Photobomb')); if(c) c.click(); return 1;})()")
+    time.sleep(1.8)
+    after = b.js("""(() => {const cv = document.querySelector('.photo-composer-canvas');
+        return cv.toDataURL('image/jpeg', 0.5).length;})()""")
+    check(before != after, "picking a filter visibly changes the photo",
+          "the preview is identical before and after applying a filter")
+
+    b.js("(()=>{const i=document.querySelector('.photo-caption-input');"
+         " i.value='look what I did'; return 1;})()")
+    b.js("(()=>{const s=document.querySelector('.photo-send-btn'); if(s) s.click(); return 1;})()")
+    time.sleep(4.5)
+
+    check(not b.js("!!document.querySelector('.photo-composer')"),
+          "the composer closes once the photo is sent")
+
+    open_team(parent_token)
+    # A real viewer taps through to the photos; the pane is a tab now.
+    b.js("(()=>{const t=[...document.querySelectorAll('.team-panel-tab')]"
+         ".find(e=>e.textContent.indexOf('Photos') !== -1); if(t) t.click(); return 1;})()")
+    for _ in range(12):
+        time.sleep(0.5)
+        if b.js("[...document.querySelectorAll('.team-photo-img')]"
+                ".filter(i => i.complete && i.naturalWidth > 0).length"):
+            break
+    seen = json.loads(b.js("""(() => {const imgs = [...document.querySelectorAll('.team-photo-img')];
+        return JSON.stringify({count: imgs.length,
+            loaded: imgs.filter(i => i.complete && i.naturalWidth > 0).length,
+            blob: imgs.length ? imgs[0].src.startsWith('blob:') : false,
+            caption: (document.querySelector('.team-photo-caption') || {}).textContent || ''});})()""")
+        or "{}")
+    check(seen.get("count", 0) >= 1, "the rest of the family can see the photo")
+    check(seen.get("loaded", 0) >= 1, "the photo actually renders for them",
+          f"{seen}")
+    check(seen.get("blob") is True,
+          "photos load through an authorized fetch, not a public URL",
+          "image src is not a blob: URL, so it was fetched without the token")
+    check(seen.get("caption") == "look what I did", "the caption arrives with it")
+
+
 def check_page_is_clean(b: Browser, base: str, app) -> None:
     print("\nThe page itself, at phone width")
     _, token = make_user(app, "clean")
@@ -491,6 +593,7 @@ def main() -> int:
         check_returning_user_is_acknowledged(browser, base, flask_app)
         check_guest_gets_the_celebration(browser, base)
         check_team_witness(browser, base, flask_app)
+        check_photo_sharing(browser, base, flask_app)
         check_page_is_clean(browser, base, flask_app)
     except Exception as exc:  # a crash must never read as a pass
         bad(f"check run crashed: {type(exc).__name__}: {exc}")

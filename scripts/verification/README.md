@@ -33,6 +33,7 @@ Exit codes: `0` all passed, `1` at least one check failed, `2` a setup step (e.g
 | `moments.py` | Team Moments history (`team_created`, `member_joined`, `campfire_log_added`, ordering) |
 | `chat.py` | Team Chat post/read, empty/over-length rejection, emoji reactions as plain messages |
 | `rickie.py` | Rickie's team reactions (welcome, first-log) — fixed templates, `sender_user_id` null |
+| `photos.py` | Private team photos: filter catalog and lock state, upload, who can read the bytes (member 200 / non-member 403 / anonymous 401), non-JPEG and locked-filter rejection, the thread entry and history moment. Deletes what it uploads. |
 | `security.py` | Invite rotation, remove member, leave team, unauthorized access — mutates membership |
 | `admin.py` | StreakFit Control's own routes (R3.0) are reachable and reject unauthenticated requests. Independent of the team scenario; runs last. Never triggers `POST /api/admin/verify` itself — that would recurse |
 

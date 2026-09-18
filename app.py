@@ -8,11 +8,12 @@ import re
 import string
 import subprocess
 import threading
+import uuid
 import urllib.parse
 import urllib.request
 from datetime import datetime, date, timedelta
 from typing import Any
-from flask import Flask, request, jsonify, abort
+from flask import Flask, request, jsonify, abort, make_response
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy.exc import IntegrityError
 from flask_migrate import Migrate
@@ -86,7 +87,14 @@ app.logger.setLevel(logging.INFO)
 
 # Reject oversized request bodies before parsing (all real bodies are tiny — the
 # coach message caps at 500 chars) so a multi-MB POST can't exhaust worker memory.
-app.config['MAX_CONTENT_LENGTH'] = 256 * 1024   # 256 KB
+# Werkzeug enforces MAX_CONTENT_LENGTH globally, before any view runs, and Flask
+# 3.0 has no per-request override. So the ceiling is set to the largest body any
+# route accepts (a photo) and `_enforce_route_body_limit` below puts every OTHER
+# route back to the original 256 KB. Raising the limit for one route must not
+# quietly raise it for the JSON API.
+DEFAULT_MAX_BODY_BYTES = 256 * 1024          # 256 KB — every route except photo upload
+PHOTO_MAX_UPLOAD_BYTES = 2 * 1024 * 1024     # 2 MB — a composited, resized JPEG is ~200 KB
+app.config['MAX_CONTENT_LENGTH'] = PHOTO_MAX_UPLOAD_BYTES
 
 # Fixed dummy hash so login runs a password comparison even when the username
 # doesn't exist — equalizes response time so it can't reveal valid usernames.
@@ -103,6 +111,24 @@ def _security_headers(resp):
     # Honored by browsers only over HTTPS (Render serves HTTPS); harmless elsewhere.
     resp.headers.setdefault('Strict-Transport-Security', 'max-age=31536000; includeSubDomains')
     return resp
+
+@app.before_request
+def _enforce_route_body_limit():
+    """Put every route back to the original 256 KB ceiling except photo upload.
+
+    MAX_CONTENT_LENGTH had to be raised to the largest body any route accepts,
+    because Werkzeug applies it globally before a view runs and Flask 3.0 has no
+    per-request override. Without this, raising the limit for one upload route
+    would have quietly raised it for the entire JSON API.
+    """
+    if request.content_length is None:
+        return None
+    limit = (PHOTO_MAX_UPLOAD_BYTES if request.endpoint == 'upload_team_photo'
+             else DEFAULT_MAX_BODY_BYTES)
+    if request.content_length > limit:
+        return jsonify({"error": "payload_too_large"}), 413
+    return None
+
 
 _anthropic_api_key = os.environ.get('ANTHROPIC_API_KEY')
 
@@ -1170,6 +1196,10 @@ class User(db.Model):
     rickie_mode  = db.Column(db.String(20), nullable=False, default='full')
     xp_total = db.Column(db.Integer, nullable=False, default=0)
     acorns_total = db.Column(db.Integer, nullable=False, default=0)
+    # Lifetime EARNED acorns never decrease (award_progress owns that invariant and
+    # the acorns_100 milestone depends on it). Spending is tracked separately, so a
+    # balance is earned - spent. See _acorns_available().
+    acorns_spent = db.Column(db.Integer, nullable=False, default=0)
     is_plus = db.Column(db.Boolean, nullable=False, default=False)
     challenges = db.relationship('Challenge', backref='owner', lazy=True)
 
@@ -1276,6 +1306,10 @@ class TeamMessage(db.Model):
     sender_type = db.Column(db.String(10), nullable=False)  # 'user' | 'rickie'
     sender_user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True)
     body = db.Column(db.Text, nullable=False)
+    # A photo rides the existing thread rather than forming a second feed: one
+    # table, one query, one chronological order, and the emoji reactions that
+    # already exist (plain short messages) work on it with no new schema.
+    photo_id = db.Column(db.Integer, db.ForeignKey('team_photo.id'), nullable=True)
     created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
 
     __table_args__ = (
@@ -1304,6 +1338,61 @@ class TeamCampfire(db.Model):
 
     __table_args__ = (
         db.UniqueConstraint('team_id', name='uq_team_campfire_team'),
+    )
+
+
+class TeamPhoto(db.Model):
+    """A photo shared privately into one team.
+
+    The bytes live in the database. That is not where image bytes belong at
+    scale, and it is the right call here: Render's web filesystem is wiped on
+    every deploy so disk is not an option at all, and object storage would mean
+    a new paid service. The client composites and resizes before upload, so a
+    row is ~200 KB; with a family-sized team and PHOTO_RETENTION_DAYS expiry the
+    working set stays in the tens of megabytes. `_photo_bytes()` is the single
+    read path, so moving to object storage later changes one function.
+
+    Deletion is soft (`deleted_at`) but `image_data` is cleared at the same
+    moment -- the row survives so the thread can say a photo was removed,
+    while the pixels genuinely stop being served.
+    """
+    __tablename__ = 'team_photo'
+    id = db.Column(db.Integer, primary_key=True)
+    # Opaque id used in URLs. The integer primary key would let anyone holding a
+    # valid team token count how many photos the whole product has, and probe
+    # neighbours; a random id says nothing.
+    public_id = db.Column(db.String(32), nullable=False, unique=True, index=True)
+    team_id = db.Column(db.Integer, db.ForeignKey('team.id'), nullable=False, index=True)
+    sender_user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    caption = db.Column(db.String(140), nullable=True)
+    filter_key = db.Column(db.String(40), nullable=True)
+    image_data = db.Column(db.LargeBinary, nullable=True)
+    content_type = db.Column(db.String(32), nullable=False, default='image/jpeg')
+    byte_size = db.Column(db.Integer, nullable=False, default=0)
+    width = db.Column(db.Integer, nullable=True)
+    height = db.Column(db.Integer, nullable=True)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, index=True)
+    expires_at = db.Column(db.DateTime, nullable=True)
+    deleted_at = db.Column(db.DateTime, nullable=True)
+
+
+class UserFilterUnlock(db.Model):
+    """A filter this user has unlocked by spending acorns.
+
+    Only purchases are stored. Filters earned by level, streak, missions or a
+    milestone are evaluated live from the user's own stats, so they can never
+    drift out of sync with the thing that earned them -- and nothing has to be
+    back-filled when a new earned filter is added.
+    """
+    __tablename__ = 'user_filter_unlock'
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False, index=True)
+    filter_key = db.Column(db.String(40), nullable=False)
+    acorns_spent = db.Column(db.Integer, nullable=False, default=0)
+    unlocked_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+
+    __table_args__ = (
+        db.UniqueConstraint('user_id', 'filter_key', name='uq_user_filter_unlock'),
     )
 
 
@@ -2734,6 +2823,350 @@ def answer_brain_boost():
     return jsonify(response), 200
 
 
+# --- Team photos: validation, metadata stripping, storage ---------------------
+#
+# Photos are shared into a private team by children and families, so the rule is
+# that nothing the camera recorded about WHERE or WHEN a picture was taken ever
+# reaches the database. The client composites through a canvas, which already
+# drops EXIF -- but the client is not trustworthy, so the server rebuilds every
+# JPEG from its own parse and keeps only the segments needed to decode it.
+
+PHOTO_MAX_DIMENSION = 4096          # a composited upload is 1080; this is the absurdity guard
+PHOTO_MIN_DIMENSION = 32
+PHOTO_RETENTION_DAYS = 30
+PHOTO_CAPTION_MAX = 140
+# Rate limits bound how FAST photos arrive; only a quota bounds how MUCH is
+# stored. With bytes in Postgres that distinction matters -- sustained uploads
+# at the rate limit would otherwise reach gigabytes. A real family will never
+# approach this; an abusive account hits a clear wall instead of a bill.
+PHOTO_TEAM_QUOTA_BYTES = 150 * 1024 * 1024      # 150 MB of live photos per team
+
+# JPEG markers that carry no pixel data. APP1 is EXIF (GPS, timestamps, device,
+# and on some phones a thumbnail of the ORIGINAL unfiltered frame), APP2 is ICC,
+# APP13 is Photoshop/IPTC, and COM is a free-text comment. All go.
+_JPEG_DROP_MARKERS = set(range(0xE0, 0xF0)) | {0xFE}
+# Start-of-frame markers carry the dimensions. DHT/JPG/DAC are not SOF despite
+# sitting in the same numeric range.
+_JPEG_SOF_MARKERS = {0xC0, 0xC1, 0xC2, 0xC3, 0xC5, 0xC6, 0xC7,
+                     0xC9, 0xCA, 0xCB, 0xCD, 0xCE, 0xCF}
+
+
+class PhotoRejected(Exception):
+    """Raised with a short, non-leaky reason the client can show."""
+
+
+def sanitize_jpeg(raw):
+    """Validate a JPEG and return (clean_bytes, width, height).
+
+    Rebuilds the file: every segment is re-emitted except the metadata ones, so
+    anything the parser does not understand cannot survive by being copied
+    verbatim. Raises PhotoRejected on anything that is not a decodable JPEG --
+    including a file that merely starts with the right two bytes.
+    """
+    if len(raw) < 4:
+        raise PhotoRejected("that file is too small to be a photo")
+    if raw[0] != 0xFF or raw[1] != 0xD8:
+        raise PhotoRejected("photos need to be JPEG images")
+
+    out = bytearray(b"\xff\xd8")
+    width = height = None
+    i = 2
+    n = len(raw)
+
+    while i < n:
+        # Markers may be preceded by fill bytes (0xFF padding).
+        if raw[i] != 0xFF:
+            raise PhotoRejected("that image is damaged or not a JPEG")
+        while i < n and raw[i] == 0xFF:
+            i += 1
+        if i >= n:
+            raise PhotoRejected("that image ends unexpectedly")
+        marker = raw[i]
+        i += 1
+
+        if marker == 0xD9:                      # EOI
+            out += b"\xff\xd9"
+            break
+        if 0xD0 <= marker <= 0xD7:              # RSTn: standalone, no length
+            out += bytes((0xFF, marker))
+            continue
+
+        if i + 2 > n:
+            raise PhotoRejected("that image ends unexpectedly")
+        seg_len = (raw[i] << 8) | raw[i + 1]
+        if seg_len < 2 or i + seg_len > n:
+            raise PhotoRejected("that image is damaged or not a JPEG")
+        payload = raw[i + 2: i + seg_len]
+
+        if marker in _JPEG_SOF_MARKERS:
+            if len(payload) < 5:
+                raise PhotoRejected("that image is damaged or not a JPEG")
+            height = (payload[1] << 8) | payload[2]
+            width = (payload[3] << 8) | payload[4]
+
+        if marker not in _JPEG_DROP_MARKERS:
+            out += bytes((0xFF, marker, raw[i], raw[i + 1])) + payload
+
+        i += seg_len
+
+        if marker == 0xDA:                      # SOS: entropy data runs to EOI
+            rest = raw[i:]
+            end = rest.rfind(b"\xff\xd9")
+            out += rest[:end + 2] if end != -1 else rest + b"\xff\xd9"
+            break
+
+    if width is None or height is None:
+        raise PhotoRejected("that file isn't a readable photo")
+    if width > PHOTO_MAX_DIMENSION or height > PHOTO_MAX_DIMENSION:
+        raise PhotoRejected("that photo is too large — try taking it again")
+    if width < PHOTO_MIN_DIMENSION or height < PHOTO_MIN_DIMENSION:
+        raise PhotoRejected("that photo is too small")
+
+    return bytes(out), width, height
+
+
+def _new_photo_public_id():
+    return uuid.uuid4().hex
+
+
+def _photo_bytes(photo):
+    """The single read path for image data.
+
+    Everything that serves a photo goes through here, so moving storage out of
+    Postgres later is a change to this function and the write beside it, not a
+    hunt through the routes.
+    """
+    return photo.image_data
+
+
+# --- StreakFit photo filters ---------------------------------------------------
+#
+# The catalog lives on the server and carries its own RENDER SPEC, so the client
+# is a generic renderer rather than a second copy of the list. Adding a filter is
+# adding a dict here; only a genuinely new *primitive* (a new kind of frame, say)
+# needs client code. The client cannot be trusted with what is unlocked, so the
+# server decides that too and the upload re-checks it.
+#
+# Primitives the client implements:
+#   tint     - a CSS filter string applied while drawing the photo
+#   overlays - images placed by anchor/scale/rotation/opacity
+#   frame    - an inset border drawn as a two-stop gradient
+#   ribbon   - a text banner across a corner or edge
+#   confetti - scattered glyphs, deterministic per photo (never random rewards)
+#
+# Unlock kinds: free | missions | streak | level | milestone | acorns.
+# `acorns` is a straight purchase of a NAMED filter at a FIXED price -- no
+# randomised or chance-based unlocks anywhere, by design.
+
+PHOTO_FILTERS = [
+    {
+        'key': 'none', 'name': 'No filter',
+        'blurb': 'Just the photo.',
+        'unlock': {'type': 'free'},
+        'render': {},
+    },
+    {
+        'key': 'rickie_peek', 'name': 'Rickie Photobomb',
+        'blurb': 'He got in the shot. He is not sorry.',
+        'unlock': {'type': 'free'},
+        'render': {
+            'overlays': [{'src': '/static/rickie.svg', 'anchor': 'bottom-right',
+                          'scale': 0.34, 'rotate': -8}],
+        },
+    },
+    {
+        'key': 'campfire_frame', 'name': 'Campfire',
+        'blurb': 'Warm light around the edges.',
+        'unlock': {'type': 'free'},
+        'render': {
+            'tint': 'saturate(1.12) contrast(1.04)',
+            'frame': {'from': '#f59e0b', 'to': '#ef4444', 'width': 0.035},
+        },
+    },
+    {
+        'key': 'mission_complete', 'name': 'Mission Complete',
+        'blurb': 'For the photo you take right after the fifth one.',
+        'unlock': {'type': 'missions', 'value': 1},
+        'render': {
+            'ribbon': {'text': 'MISSION COMPLETE', 'position': 'bottom',
+                       'from': '#059669', 'to': '#10b981'},
+            'overlays': [{'src': '/static/rickie_proud.svg', 'anchor': 'bottom-left',
+                          'scale': 0.28, 'rotate': 6}],
+        },
+    },
+    {
+        'key': 'streak_fire', 'name': 'On Fire',
+        'blurb': 'Three days in a row will do that.',
+        'unlock': {'type': 'streak', 'value': 3},
+        'render': {
+            'tint': 'saturate(1.2) brightness(1.03)',
+            'confetti': {'glyph': '\U0001F525', 'count': 14, 'size': 0.075},
+            'frame': {'from': '#ef4444', 'to': '#f59e0b', 'width': 0.03},
+        },
+    },
+    {
+        'key': 'acorn_shower', 'name': 'Acorn Shower',
+        'blurb': 'It is raining acorns. Rickie is thrilled.',
+        'unlock': {'type': 'level', 'value': 3},
+        'render': {
+            'confetti': {'glyph': '\U0001F330', 'count': 18, 'size': 0.07},
+        },
+    },
+    {
+        'key': 'rickie_proud', 'name': "Rickie's Proud",
+        'blurb': 'He wanted to be in this one properly.',
+        'unlock': {'type': 'level', 'value': 5},
+        'render': {
+            'overlays': [{'src': '/static/rickie_proud.svg', 'anchor': 'bottom-right',
+                          'scale': 0.44, 'rotate': 0}],
+            'tint': 'saturate(1.08)',
+        },
+    },
+    {
+        'key': 'team_challenge', 'name': 'Team Challenge',
+        'blurb': 'For the ones you did together.',
+        'unlock': {'type': 'missions', 'value': 5},
+        'render': {
+            'ribbon': {'text': 'TEAM CHALLENGE', 'position': 'top',
+                       'from': '#4338ca', 'to': '#7c3aed'},
+            'frame': {'from': '#4338ca', 'to': '#7c3aed', 'width': 0.028},
+        },
+    },
+    {
+        'key': 'first_mission_gold', 'name': 'First Mission',
+        'blurb': 'Only for the day it actually happened.',
+        'unlock': {'type': 'milestone', 'key': 'first_mission'},
+        'render': {
+            'tint': 'sepia(0.25) saturate(1.3) brightness(1.05)',
+            'frame': {'from': '#fbbf24', 'to': '#f59e0b', 'width': 0.04},
+            'overlays': [{'src': '/static/rickie_happy.svg', 'anchor': 'top-right',
+                          'scale': 0.26, 'rotate': 10}],
+        },
+    },
+    {
+        'key': 'golden_hour', 'name': 'Golden Hour',
+        'blurb': 'Warm and a little bit nostalgic.',
+        'unlock': {'type': 'acorns', 'cost': 20},
+        'render': {'tint': 'sepia(0.35) saturate(1.25) contrast(1.05) brightness(1.04)'},
+    },
+    {
+        'key': 'frosty', 'name': 'Frosty',
+        'blurb': 'For cold mornings you went anyway.',
+        'unlock': {'type': 'acorns', 'cost': 30},
+        'render': {
+            'tint': 'saturate(0.9) brightness(1.06) hue-rotate(-12deg)',
+            'confetti': {'glyph': '\u2744\uFE0F', 'count': 20, 'size': 0.055},
+            'frame': {'from': '#bfdbfe', 'to': '#60a5fa', 'width': 0.03},
+        },
+    },
+    {
+        'key': 'goofy_specs', 'name': 'Goofy Specs',
+        'blurb': "Rickie's spare glasses. Somehow always slightly crooked.",
+        'unlock': {'type': 'acorns', 'cost': 15},
+        'render': {
+            'overlays': [{'src': '/static/rickie_curious.svg', 'anchor': 'top-left',
+                          'scale': 0.3, 'rotate': -12}],
+            'tint': 'contrast(1.06)',
+        },
+    },
+]
+
+PHOTO_FILTERS_BY_KEY = {f['key']: f for f in PHOTO_FILTERS}
+
+
+def _acorns_available(user):
+    """Spendable balance. `acorns_total` stays lifetime-earned so the
+    acorns_100 milestone keeps meaning 'earned 100', never 'is holding 100'."""
+    return max(0, (user.acorns_total or 0) - (user.acorns_spent or 0))
+
+
+def _filter_unlock_state(user, stats, purchased_keys):
+    """Resolve every filter's availability for this user.
+
+    Earned unlocks are evaluated live from the user's own stats rather than
+    stored, so they can never drift from the thing that earned them and a new
+    earned filter needs no backfill.
+    """
+    level = xp_to_level(user.xp_total)['level']
+    out = []
+    for spec in PHOTO_FILTERS:
+        rule = spec['unlock']
+        kind = rule['type']
+        unlocked, progress, requirement = False, None, None
+
+        if kind == 'free':
+            unlocked, requirement = True, 'Always yours'
+        elif kind == 'missions':
+            progress = stats['total_missions']
+            unlocked = progress >= rule['value']
+            requirement = f"Finish {rule['value']} mission{'s' if rule['value'] != 1 else ''}"
+        elif kind == 'streak':
+            progress = stats['current_streak']
+            unlocked = max(progress, stats['best_streak']) >= rule['value']
+            requirement = f"Reach a {rule['value']}-day streak"
+        elif kind == 'level':
+            progress = level
+            unlocked = level >= rule['value']
+            requirement = f"Reach level {rule['value']}"
+        elif kind == 'milestone':
+            unlocked = _milestone_is_unlocked(user, stats, rule['key'])
+            requirement = 'Unlock the ' + rule['key'].replace('_', ' ').title() + ' milestone'
+        elif kind == 'acorns':
+            unlocked = spec['key'] in purchased_keys
+            requirement = f"{rule['cost']} acorns"
+
+        out.append({
+            'key': spec['key'],
+            'name': spec['name'],
+            'blurb': spec['blurb'],
+            'render': spec['render'],
+            'unlock_type': kind,
+            'unlocked': unlocked,
+            'requirement': requirement,
+            'progress': progress,
+            'target': rule.get('value'),
+            'cost': rule.get('cost'),
+        })
+    return out
+
+
+def _milestone_is_unlocked(user, stats, milestone_key):
+    spec = next((m for m in _MILESTONE_DEFINITIONS if m['key'] == milestone_key), None)
+    if spec is None:
+        return False
+    values = {
+        'missions_completed': stats['total_missions'],
+        'brain_boosts_answered': stats['brain_boost_answers'],
+        'xp_total': user.xp_total,
+        'acorns_total': user.acorns_total,
+        'level': xp_to_level(user.xp_total)['level'],
+    }
+    current = values.get(spec['metric'])
+    if current is None:
+        return False
+    return current >= spec['target']
+
+
+def _purchased_filter_keys(user_id):
+    return {
+        row.filter_key for row in db.session.execute(
+            db.select(UserFilterUnlock).where(UserFilterUnlock.user_id == user_id)
+        ).scalars().all()
+    }
+
+
+def _filter_is_usable(user, user_id, filter_key):
+    """Server-side re-check at upload time: a filter the client offered is not
+    a filter the user has."""
+    if not filter_key or filter_key == 'none':
+        return True
+    if filter_key not in PHOTO_FILTERS_BY_KEY:
+        return False
+    stats = get_user_stats(user_id)
+    state = _filter_unlock_state(user, stats, _purchased_filter_keys(user_id))
+    return any(f['key'] == filter_key and f['unlocked'] for f in state)
+
+
 # --- Teams (R2.1 Team Foundations) ---
 # Schema-and-plumbing sprint only: no chat routes, no moments routes, no
 # Rickie behavior, no UI. team_message and team_moment tables exist (see
@@ -3176,6 +3609,8 @@ def _moment_display_text(moment_type, subject_username, metadata):
         return f"{subject_username} left the team" if subject_username else "A member left"
     if moment_type == 'campfire_log_added':
         return f"{subject_username} added a log to the campfire" if subject_username else "A log was added to the campfire"
+    if moment_type == 'photo_shared':
+        return f"{subject_username} shared a photo" if subject_username else "A photo was shared"
     if moment_type == 'campfire_stage_reached':
         stage = (metadata or {}).get('stage')
         return f"The campfire reached {stage}" if stage else "The campfire reached a new stage"
@@ -3323,7 +3758,7 @@ def _witness_for_ids(user_ids):
     return witness
 
 
-def _serialize_team_message(m, usernames=None):
+def _serialize_team_message(m, usernames=None, photos=None):
     """`usernames` is a pre-resolved {id: username} map (batch path, no per-row
     query). When omitted, falls back to a single lookup for direct/one-off use."""
     sender_username = None
@@ -3333,12 +3768,32 @@ def _serialize_team_message(m, usernames=None):
         else:
             sender = db.session.get(User, m.sender_user_id)
             sender_username = sender.username if sender else None
-    return {
+    out = {
         "sender_type": m.sender_type,
         "sender_username": sender_username,
         "body": m.body,
         "created_at": m.created_at.isoformat(),
     }
+    if getattr(m, 'photo_id', None):
+        photo = photos.get(m.photo_id) if photos is not None else db.session.get(TeamPhoto, m.photo_id)
+        if photo is not None:
+            gone = photo.deleted_at is not None or (
+                photo.expires_at is not None and photo.expires_at <= datetime.utcnow())
+            out["photo"] = {
+                "public_id": photo.public_id,
+                "caption": photo.caption,
+                "filter_key": photo.filter_key,
+                "width": photo.width,
+                "height": photo.height,
+                # The URL still needs an Authorization header -- it is not a
+                # public link, and nothing here is fetchable without one.
+                "url": f"/api/teams/{photo.team_id}/photos/{photo.public_id}",
+                "expires_at": photo.expires_at.isoformat() if photo.expires_at else None,
+                "available": not gone,
+                "removed": photo.deleted_at is not None,
+                "sender_user_id": photo.sender_user_id,
+            }
+    return out
 
 
 @app.route('/api/teams/<int:team_id>/messages', methods=['GET'])
@@ -3361,7 +3816,23 @@ def get_team_messages(team_id):
     usernames = _usernames_for_ids(
         m.sender_user_id for m in messages if m.sender_type == 'user'
     )
-    return jsonify([_serialize_team_message(m, usernames) for m in messages]), 200
+    # Batch the photo rows, and load only the metadata columns -- selecting the
+    # whole model here would drag every image blob in the thread through memory
+    # to render a list that shows none of them.
+    photo_ids = {m.photo_id for m in messages if m.photo_id}
+    photos = {}
+    if photo_ids:
+        rows = db.session.execute(
+            db.select(
+                TeamPhoto.id, TeamPhoto.public_id, TeamPhoto.team_id,
+                TeamPhoto.caption, TeamPhoto.filter_key, TeamPhoto.width,
+                TeamPhoto.height, TeamPhoto.expires_at, TeamPhoto.deleted_at,
+                TeamPhoto.sender_user_id,
+            ).where(TeamPhoto.id.in_(photo_ids))
+        ).all()
+        photos = {r.id: r for r in rows}
+
+    return jsonify([_serialize_team_message(m, usernames, photos) for m in messages]), 200
 
 
 @app.route('/api/teams/<int:team_id>/messages', methods=['POST'])
@@ -3393,6 +3864,266 @@ def post_team_message(team_id):
     db.session.commit()
 
     return jsonify(_serialize_team_message(message)), 201
+
+
+# --- Team photos (private to the team, never discoverable) ---------------------
+
+@app.route('/api/photo-filters', methods=['GET'])
+@jwt_required()
+@limiter.limit("60 per minute", key_func=user_or_ip_key)
+def list_photo_filters():
+    user_id = int(get_jwt_identity())
+    user = db.session.get(User, user_id)
+    if user is None:
+        return jsonify({"error": "User not found"}), 404
+
+    stats = get_user_stats(user_id)
+    return jsonify({
+        "acorns_available": _acorns_available(user),
+        "filters": _filter_unlock_state(user, stats, _purchased_filter_keys(user_id)),
+    }), 200
+
+
+@app.route('/api/photo-filters/<string:filter_key>/unlock', methods=['POST'])
+@jwt_required()
+@limiter.limit("20 per minute", key_func=user_or_ip_key)
+def unlock_photo_filter(filter_key):
+    """Buy one NAMED filter at a FIXED price with acorns already earned.
+
+    Deliberately not a chance mechanic: you choose the filter, you know the
+    price, and you get exactly that filter. No bundles, no randomisation, and
+    no way to buy acorns -- the only source of acorns is showing up.
+    """
+    user_id = int(get_jwt_identity())
+    user = db.session.get(User, user_id)
+    if user is None:
+        return jsonify({"error": "User not found"}), 404
+
+    spec = PHOTO_FILTERS_BY_KEY.get(filter_key)
+    if spec is None:
+        return jsonify({"error": "unknown_filter"}), 404
+    if spec['unlock']['type'] != 'acorns':
+        return jsonify({"error": "not_purchasable"}), 400
+
+    cost = spec['unlock']['cost']
+    already = db.session.execute(
+        db.select(UserFilterUnlock).where(
+            UserFilterUnlock.user_id == user_id,
+            UserFilterUnlock.filter_key == filter_key,
+        )
+    ).scalar_one_or_none()
+    if already:
+        return jsonify({"error": "already_unlocked"}), 409
+
+    if _acorns_available(user) < cost:
+        return jsonify({
+            "error": "not_enough_acorns",
+            "needed": cost,
+            "available": _acorns_available(user),
+        }), 400
+
+    user.acorns_spent = (user.acorns_spent or 0) + cost
+    db.session.add(UserFilterUnlock(user_id=user_id, filter_key=filter_key, acorns_spent=cost))
+    try:
+        db.session.commit()
+    except IntegrityError:
+        # Two taps in flight at once: the unique constraint is the real guard,
+        # and the loser must not be charged.
+        db.session.rollback()
+        return jsonify({"error": "already_unlocked"}), 409
+
+    return jsonify({
+        "unlocked": filter_key,
+        "acorns_spent": cost,
+        "acorns_available": _acorns_available(user),
+    }), 200
+
+
+@app.route('/api/teams/<int:team_id>/photos', methods=['POST'])
+@jwt_required()
+@limiter.limit("40 per hour", key_func=user_or_ip_key)
+@limiter.limit("8 per minute", key_func=user_or_ip_key)
+def upload_team_photo(team_id):
+    """Share a photo into one team the caller is a member of.
+
+    Every guard that matters is here rather than in the client: membership,
+    file type, size, dimensions, caption length, and whether the filter claimed
+    is one this user has actually unlocked.
+    """
+    user_id = int(get_jwt_identity())
+
+    membership = db.session.execute(
+        db.select(TeamMembership).where(
+            TeamMembership.team_id == team_id, TeamMembership.user_id == user_id)
+    ).scalar_one_or_none()
+    if not membership:
+        return jsonify({"error": "Forbidden"}), 403
+
+    upload = request.files.get('photo')
+    if upload is None:
+        return jsonify({"error": "photo_required"}), 400
+
+    raw = upload.read(PHOTO_MAX_UPLOAD_BYTES + 1)
+    if len(raw) > PHOTO_MAX_UPLOAD_BYTES:
+        return jsonify({"error": "photo_too_large"}), 413
+
+    try:
+        clean, width, height = sanitize_jpeg(raw)
+    except PhotoRejected as exc:
+        return jsonify({"error": "photo_rejected", "message": str(exc)}), 400
+
+    caption = (request.form.get('caption') or '').strip()
+    if len(caption) > PHOTO_CAPTION_MAX:
+        return jsonify({"error": "caption_too_long"}), 400
+
+    filter_key = (request.form.get('filter_key') or '').strip() or None
+    user = db.session.get(User, user_id)
+    if filter_key and not _filter_is_usable(user, user_id, filter_key):
+        return jsonify({"error": "filter_not_unlocked"}), 403
+
+    live_bytes = db.session.execute(
+        db.select(db.func.coalesce(db.func.sum(TeamPhoto.byte_size), 0))
+        .where(TeamPhoto.team_id == team_id, TeamPhoto.deleted_at.is_(None))
+    ).scalar() or 0
+    if live_bytes + len(clean) > PHOTO_TEAM_QUOTA_BYTES:
+        return jsonify({
+            "error": "team_photo_quota_reached",
+            "message": "This team's photo album is full. Older photos free up space as they expire.",
+        }), 507
+
+    now = datetime.utcnow()
+    photo = TeamPhoto(
+        public_id=_new_photo_public_id(),
+        team_id=team_id,
+        sender_user_id=user_id,
+        caption=caption or None,
+        filter_key=filter_key,
+        image_data=clean,
+        content_type='image/jpeg',
+        byte_size=len(clean),
+        width=width,
+        height=height,
+        created_at=now,
+        expires_at=now + timedelta(days=PHOTO_RETENTION_DAYS),
+    )
+    db.session.add(photo)
+    db.session.flush()          # need photo.id for the message row
+
+    message = TeamMessage(
+        team_id=team_id,
+        sender_type='user',
+        sender_user_id=user_id,
+        body=caption or '',
+        photo_id=photo.id,
+        created_at=now,
+    )
+    db.session.add(message)
+
+    # History keeps the fact permanently; the pixels expire. A team's shared
+    # story should not develop holes just because storage has a budget.
+    #
+    # Staged BEFORE the commit, not after: create_team_moment only adds to the
+    # session and leaves committing to its caller. Calling it afterwards left
+    # the moment sitting uncommitted -- invisible over HTTP, yet still visible
+    # to a pytest that shares one session, so the unit test passed while team
+    # history silently recorded nothing. verify_all caught it.
+    create_team_moment(team_id, 'photo_shared', subject_user_id=user_id,
+                       metadata={"caption": caption[:60]} if caption else None)
+
+    db.session.commit()
+
+    app.logger.info("event=team_photo_shared team_id=%s user_id=%s bytes=%s filter=%s",
+                    team_id, user_id, len(clean), filter_key or 'none')
+
+    return jsonify(_serialize_team_message(message)), 201
+
+
+@app.route('/api/teams/<int:team_id>/photos/<string:public_id>', methods=['GET'])
+@jwt_required()
+@limiter.limit("240 per minute", key_func=user_or_ip_key)
+def get_team_photo(team_id, public_id):
+    """Serve the bytes. Membership is checked on every single read.
+
+    There is no signed-URL or token-in-query path on purpose: the image is
+    fetched with the normal Authorization header and handed to the page as a
+    blob, so a photo URL that leaks into a log, a referrer or someone's history
+    is worth nothing on its own.
+    """
+    user_id = int(get_jwt_identity())
+
+    membership = db.session.execute(
+        db.select(TeamMembership).where(
+            TeamMembership.team_id == team_id, TeamMembership.user_id == user_id)
+    ).scalar_one_or_none()
+    if not membership:
+        return jsonify({"error": "Forbidden"}), 403
+
+    photo = db.session.execute(
+        db.select(TeamPhoto).where(TeamPhoto.public_id == public_id)
+    ).scalar_one_or_none()
+    # Same 404 whether it never existed, belongs to another team, or is gone --
+    # an id should not be able to confirm that a photo exists somewhere else.
+    if photo is None or photo.team_id != team_id or photo.deleted_at is not None:
+        return jsonify({"error": "not_found"}), 404
+    if photo.expires_at and photo.expires_at <= datetime.utcnow():
+        return jsonify({"error": "expired"}), 410
+
+    data = _photo_bytes(photo)
+    if not data:
+        return jsonify({"error": "not_found"}), 404
+
+    resp = make_response(data)
+    resp.headers['Content-Type'] = photo.content_type or 'image/jpeg'
+    resp.headers['Content-Length'] = str(len(data))
+    # private: a shared cache must never hold a team's photo. no-store because
+    # the next person on a shared family tablet is a different user.
+    resp.headers['Cache-Control'] = 'private, no-store, max-age=0'
+    resp.headers['X-Content-Type-Options'] = 'nosniff'
+    resp.headers['Content-Disposition'] = f'inline; filename="streakfit-{public_id}.jpg"'
+    return resp
+
+
+@app.route('/api/teams/<int:team_id>/photos/<string:public_id>', methods=['DELETE'])
+@jwt_required()
+@limiter.limit("30 per minute", key_func=user_or_ip_key)
+def delete_team_photo(team_id, public_id):
+    """The sender can remove their own photo; the team creator can remove any.
+
+    That mirrors the existing creator safety exception (remove member, rotate
+    code) rather than inventing a broader moderator role: someone has to be
+    able to take a picture down from a family's thread without waiting.
+    """
+    user_id = int(get_jwt_identity())
+
+    membership = db.session.execute(
+        db.select(TeamMembership).where(
+            TeamMembership.team_id == team_id, TeamMembership.user_id == user_id)
+    ).scalar_one_or_none()
+    if not membership:
+        return jsonify({"error": "Forbidden"}), 403
+
+    photo = db.session.execute(
+        db.select(TeamPhoto).where(TeamPhoto.public_id == public_id)
+    ).scalar_one_or_none()
+    if photo is None or photo.team_id != team_id:
+        return jsonify({"error": "not_found"}), 404
+    if photo.deleted_at is not None:
+        return jsonify({"deleted": public_id}), 200      # idempotent
+
+    team = db.session.get(Team, team_id)
+    is_creator = team is not None and team.created_by_user_id == user_id
+    if photo.sender_user_id != user_id and not is_creator:
+        return jsonify({"error": "Forbidden"}), 403
+
+    photo.deleted_at = datetime.utcnow()
+    photo.image_data = None          # the bytes go now, not on a sweep later
+    photo.byte_size = 0
+    db.session.commit()
+
+    app.logger.info("event=team_photo_deleted team_id=%s photo=%s by_user=%s creator_action=%s",
+                    team_id, public_id, user_id, is_creator and photo.sender_user_id != user_id)
+
+    return jsonify({"deleted": public_id}), 200
 
 
 # --- Coach v1 ---

@@ -19,12 +19,17 @@ class ApiClient:
     def __init__(self, base_url):
         self.base_url = base_url.rstrip("/")
 
-    def request(self, method, path, token=None, body=None):
+    def request(self, method, path, token=None, body=None, raw_body=None, content_type=None):
+        """`raw_body` + `content_type` send bytes as-is (multipart photo upload).
+        Without them the call is JSON, exactly as every existing module uses it."""
         url = self.base_url + path
-        headers = {"Content-Type": "application/json"}
+        headers = {"Content-Type": content_type or "application/json"}
         if token:
             headers["Authorization"] = "Bearer " + token
-        data = json.dumps(body).encode() if body is not None else None
+        if raw_body is not None:
+            data = raw_body
+        else:
+            data = json.dumps(body).encode() if body is not None else None
         req = urllib.request.Request(url, data=data, headers=headers, method=method)
         try:
             with urllib.request.urlopen(req, timeout=15) as resp:
@@ -40,8 +45,13 @@ class ApiClient:
             return status, {}
         try:
             return status, json.loads(raw)
-        except json.JSONDecodeError:
-            return status, {"_raw": raw.decode(errors="replace")}
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            # Not every response is JSON -- a photo comes back as JPEG bytes,
+            # whose first byte (0xFF) is not valid UTF-8 and raises
+            # UnicodeDecodeError rather than JSONDecodeError. Callers checking
+            # a binary endpoint only need the status and the size.
+            return status, {"_raw_bytes": len(raw),
+                            "_raw": raw[:200].decode(errors="replace")}
 
 
 class WsgiClient:
@@ -56,10 +66,16 @@ class WsgiClient:
         self._test_client = flask_app.test_client()
         self.base_url = "wsgi://in-process"
 
-    def request(self, method, path, token=None, body=None):
+    def request(self, method, path, token=None, body=None, raw_body=None, content_type=None):
         headers = {}
         if token:
             headers["Authorization"] = "Bearer " + token
+        if raw_body is not None:
+            response = self._test_client.open(
+                path, method=method, data=raw_body, headers=headers,
+                content_type=content_type or "application/octet-stream")
+            data = response.get_json(silent=True)
+            return response.status_code, (data if data is not None else {})
         response = self._test_client.open(path, method=method, json=body, headers=headers)
         data = response.get_json(silent=True)
         return response.status_code, (data if data is not None else {})
