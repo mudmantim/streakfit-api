@@ -4390,33 +4390,38 @@ async function handleCompleteExercise(key, btn, row) {
         var summary = _summarizeProgress(result.data);
         var isMilestoneMoment = result.data.completed_count === 5 || summary.leveledUp;
         var allowsReaction = _rickieAllowsReaction(isMilestoneMoment);
-        if (summary.xp > 0 || summary.acorns > 0) {
-            if (allowsReaction) {
-                var poolKey = 'missionComplete';
-                var wasFirstMission = result.data.completed_count === 5 && wasFirstMissionEver;
-                var wasPerfectMission = result.data.completed_count === 5;
-                if (wasFirstMission) {
-                    poolKey = 'firstMission';
-                } else if (wasPerfectMission) {
-                    poolKey = 'perfectMission';
-                }
-                showRickieReaction(_pickRickieLine(poolKey), summary);
-                // Confetti only for the moments that have earned it: a full
-                // mission or a level-up. The badge is the natural origin point.
-                if (wasPerfectMission || summary.leveledUp) {
-                    fireConfetti(document.getElementById('daily-count-badge'));
-                }
-                currentRickieExpression = getRickieExpression({
-                    type: 'mission_complete',
-                    firstMissionEver: wasFirstMission,
-                    leveledUp: summary.leveledUp,
-                    perfectMission: wasPerfectMission
-                });
-            } else {
-                currentRickieExpression = 'neutral';
+        // Whether Rickie reacts is decided by Rickie's mode alone -- never by
+        // whether the completion happened to pay XP. `new_exercise` only pays
+        // the first time ever, so from day 2 on a returning user earns 0 XP on
+        // taps 1-4; gating the reaction on XP made Rickie silent for four of
+        // every five taps, which is the opposite of a companion who is glad you
+        // showed up. showRickieReaction() already hides the "+XP" line when
+        // there is nothing to report, so a zero-XP completion still gets a line.
+        if (allowsReaction) {
+            var poolKey = 'missionComplete';
+            var wasFirstMission = result.data.completed_count === 5 && wasFirstMissionEver;
+            var wasPerfectMission = result.data.completed_count === 5;
+            if (wasFirstMission) {
+                poolKey = 'firstMission';
+            } else if (wasPerfectMission) {
+                poolKey = 'perfectMission';
             }
-            _applyRickieExpression();
+            showRickieReaction(_pickRickieLine(poolKey), summary);
+            // Confetti only for the moments that have earned it: a full
+            // mission or a level-up. The badge is the natural origin point.
+            if (wasPerfectMission || summary.leveledUp) {
+                fireConfetti(document.getElementById('daily-count-badge'));
+            }
+            currentRickieExpression = getRickieExpression({
+                type: 'mission_complete',
+                firstMissionEver: wasFirstMission,
+                leveledUp: summary.leveledUp,
+                perfectMission: wasPerfectMission
+            });
+        } else {
+            currentRickieExpression = 'neutral';
         }
+        _applyRickieExpression();
         _applyCampfireUpdates(result.data.team_campfire_updates);
         // Let the flash animation play, then reload
         setTimeout(function () { loadDailyExercises(); }, 480);

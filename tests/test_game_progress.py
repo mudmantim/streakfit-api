@@ -1,0 +1,146 @@
+"""The reward economy: what a completion actually pays, on day 1 and after.
+
+The roadmap named this the highest-value missing test file — the award and
+threshold logic was only ever exercised indirectly, by the campfire tests and
+the end-to-end suite. It is also the logic that produced the day-2 silence bug,
+so the day-2 shape is pinned here deliberately rather than left implicit.
+"""
+import datetime
+
+from app import DailyCompletion, User, db
+from conftest import auth_headers, register_and_login
+
+
+def _daily_keys(client, token):
+    daily = client.get('/api/daily', headers=auth_headers(token)).get_json()
+    return [ex['key'] for ex in daily['exercises']]
+
+
+def _complete(client, token, key):
+    return client.post(f'/api/daily/{key}/complete', headers=auth_headers(token)).get_json()
+
+
+def _seed_prior_day(username, keys, days_ago=1):
+    """Give this user a history in which they have already done these exercises.
+
+    This is what makes a user a *returning* one: `new_exercise` pays once ever,
+    so yesterday's completions are precisely what stops today's from paying.
+    """
+    user = db.session.execute(db.select(User).where(User.username == username)).scalar_one()
+    when = datetime.date.today() - datetime.timedelta(days=days_ago)
+    for key in keys:
+        db.session.add(DailyCompletion(user_id=user.id, date=when, exercise_key=key))
+    db.session.commit()
+    return user
+
+
+# ── Day 1: every completion is a first-ever completion ──────────────────────
+
+def test_first_ever_completion_pays_the_new_exercise_bonus(client):
+    token = register_and_login(client, 'day1_newbie')
+    keys = _daily_keys(client, token)
+
+    first = _complete(client, token, keys[0])
+
+    assert first['xp_awarded'] == 20
+    assert first['acorns_awarded'] == 5
+    assert first['completed_count'] == 1
+
+
+def test_fifth_completion_adds_the_mission_bonuses(client):
+    token = register_and_login(client, 'day1_finisher')
+    keys = _daily_keys(client, token)
+    for key in keys[:4]:
+        _complete(client, token, key)
+
+    fifth = _complete(client, token, keys[4])
+
+    # 20 new-exercise + 25 mission_complete + 15 perfect_mission
+    assert fifth['xp_awarded'] == 60
+    assert fifth['acorns_awarded'] == 10
+    assert fifth['completed_count'] == 5
+    assert fifth['leveled_up'] is True
+    assert fifth['new_level'] == 2
+    assert fifth['level_title'] == 'Adventurer'
+
+
+def test_repeating_the_same_key_today_is_idempotent(client):
+    token = register_and_login(client, 'double_tapper')
+    keys = _daily_keys(client, token)
+    _complete(client, token, keys[0])
+
+    again = _complete(client, token, keys[0])
+
+    assert again['xp_awarded'] == 0
+    assert again['acorns_awarded'] == 0
+    assert again['completed_count'] == 1
+    assert again['progress_events'] == []
+
+
+# ── Day 2 onward: the shape that drove the reaction fix ─────────────────────
+
+def test_returning_user_earns_nothing_on_the_first_four_taps(client):
+    """Pins the behaviour the frontend has to cope with.
+
+    This is not an endorsement of the economy — it is the reason `app.js` must
+    NOT gate Rickie's acknowledgement on XP. If this test starts failing because
+    repeat completions began paying, that is a deliberate economy change and the
+    reaction logic should be re-reviewed alongside it.
+    """
+    token = register_and_login(client, 'day2_returner')
+    keys = _daily_keys(client, token)
+    _seed_prior_day('day2_returner', keys)
+
+    awards = [_complete(client, token, key) for key in keys]
+
+    assert [a['xp_awarded'] for a in awards[:4]] == [0, 0, 0, 0]
+    assert [a['acorns_awarded'] for a in awards[:4]] == [0, 0, 0, 0]
+    # Only finishing the mission pays: 25 mission_complete + 15 perfect_mission.
+    assert awards[4]['xp_awarded'] == 40
+    assert awards[4]['acorns_awarded'] == 5
+
+
+def test_returning_user_still_builds_a_streak(client):
+    token = register_and_login(client, 'day2_streaker')
+    keys = _daily_keys(client, token)
+    _seed_prior_day('day2_streaker', keys)
+
+    for key in keys:
+        _complete(client, token, key)
+
+    me = client.get('/api/me', headers=auth_headers(token)).get_json()
+    assert me['current_streak'] == 2
+    assert me['best_streak'] == 2
+    assert me['total_missions'] == 2
+
+
+def test_a_genuinely_new_exercise_still_pays_for_a_returning_user(client):
+    """Only the keys they have actually done before stop paying."""
+    token = register_and_login(client, 'day2_explorer')
+    keys = _daily_keys(client, token)
+    _seed_prior_day('day2_explorer', keys[:4])  # 5th is still new to them
+
+    awards = [_complete(client, token, key) for key in keys]
+
+    assert [a['xp_awarded'] for a in awards[:4]] == [0, 0, 0, 0]
+    assert awards[4]['xp_awarded'] == 60  # 20 new-exercise + 40 mission bonuses
+
+
+# ── Level curve ────────────────────────────────────────────────────────────
+
+def test_level_thresholds_follow_the_documented_curve(client):
+    """25*(n-1)^2 + 75*(n-1): L1=0, L2=100, L3=250, L4=450, L5=700."""
+    import app as appmod
+
+    assert [appmod._level_threshold(n) for n in range(1, 6)] == [0, 100, 250, 450, 700]
+
+
+def test_level_titles_top_out_at_legend(client):
+    import app as appmod
+
+    assert appmod.xp_to_level(0)['level_title'] == 'Explorer'
+    assert appmod.xp_to_level(100)['level_title'] == 'Adventurer'
+    # Anything past the named ceiling keeps the last title rather than going blank.
+    top = appmod.xp_to_level(1_000_000)
+    assert top['level_title'] == 'Legend'
+    assert top['level'] > 8  # the number keeps climbing even though the title stops
