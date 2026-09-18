@@ -12,6 +12,39 @@ decisions lives in `PROJECT_JOURNAL.md`.
 
 ---
 
+## v0761 — Team photos with StreakFit filters (branch `product-completion`, NOT deployed)
+
+**Not deployed.** Adds a migration (`r2s3t4u5v6w7`), so unlike the rest of this branch
+a deploy here is *not* code-only — it runs DDL and the rollback is correspondingly less
+trivial. Service worker `v0756` → `v0761`.
+
+Private photo sharing into an existing team, asked for by the target user: take or
+choose a photo, preview, apply a StreakFit filter, caption, send. Twelve filters across
+free / missions / streak / level / milestone / acorns, with Rickie in several of them.
+
+- **Storage is Postgres, deliberately.** Render's web filesystem is wiped every deploy so
+  disk is not an option; object storage is a new paid service and has not been enabled.
+  Bounded by a 2 MB upload cap, a 150 MB per-team quota (clear `507`) and 30-day
+  retention. `docs/team-photos.md` has the migration path and costs when it outgrows this.
+- **Filters are data.** One catalog in `app.py` carrying its own render spec; the client
+  implements five primitives and is otherwise generic. Adding a filter is a dict.
+- **Acorns have a sink at last.** `acorns_total` stays lifetime-earned so `acorns_100`
+  still means earned; `acorns_spent` is new. Named filters at visible fixed prices — no
+  randomised unlocks, no bundles, no buying acorns with money.
+- **Safety:** membership re-checked on every read; no signed-URL or token-in-query path,
+  so a leaked photo URL is useless; opaque random ids; cross-team reads are 404 not 403;
+  server-side EXIF/GPS/comment stripping by rebuilding the JPEG; JPEG-only by parsing;
+  `private, no-store`; deletion nulls the bytes. Users are told plainly that anyone who
+  can see a photo can screenshot it.
+- **Mobile:** `capture="environment"` opens the camera directly. Team panel split into
+  Campfire / Photos & Chat tabs — the thread was a 160px window, now ~464px.
+- Raises `MAX_CONTENT_LENGTH` to the photo ceiling with a `before_request` guard holding
+  every other route at the original 256 KB.
+
+**Results:** 242 pytest (was 199), `verify_all` **108/108** (was 88), `uicheck` 30/30.
+Suite version 3 → 4. `verify_all` caught a bug pytest could not: a team-history moment
+staged after the commit, invisible over HTTP but visible to a session-sharing unit test.
+
 ## v0756 — Product completion: the day-2 experience (branch `product-completion`, NOT deployed)
 
 **Not deployed.** Sits on the `product-completion` branch; production still serves the

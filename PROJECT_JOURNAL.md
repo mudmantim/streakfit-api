@@ -562,3 +562,86 @@ number climbs and buys nothing; Brain Boost holds 40 questions shown to every
 user on the same date, so a daily user repeats them every 40 days; and Side
 Quests award no XP at all, running a reward loop entirely parallel to the game's.
 Each is a product decision rather than a defect, and each is Tim's call.
+
+---
+
+# Session 5b (2026-09-18) — team photos, because the user asked for them
+
+Olivia named a missing feature: send pictures to her family team, with filters.
+That arrived mid-completion-push and was treated as a completion requirement
+rather than backlog, but folded in after the day-2 and witness work rather than
+displacing it.
+
+## The decision that shaped everything: where bytes live
+
+Render's web filesystem is wiped on every deploy, so writing photos to disk is
+not a trade-off, it is simply broken. Object storage would be a new paid
+service — an owner decision. So the bytes went into Postgres, which is not where
+images belong at scale and is the right call at this one, provided the growth is
+genuinely bounded.
+
+Rate limits alone would not have bounded it: sustained uploads at 40/hour reach
+gigabytes. The per-team quota is what actually caps storage, and it was added
+only after working that arithmetic out rather than assuming a rate limit was a
+storage control. Three limits now hold it: 2 MB per upload, 150 MB per team,
+30-day retention.
+
+Client-side composition falls out of the same constraint and pays for itself
+three times: the server never processes an image, the upload is one small
+finished JPEG instead of a full-resolution original, and a canvas round-trip
+drops EXIF on the way. The server strips EXIF again regardless — a client is a
+convenience, never a safety layer.
+
+## Filters as data
+
+The catalog carries its own render spec, so `app.py` is the only place a filter
+exists and the client implements five primitives rather than twelve filters.
+Adding one is a dict. A test fails if a filter uses a primitive the client does
+not implement, because the failure mode otherwise is a filter that renders as
+nothing at all and nobody notices.
+
+Acorns got their first sink here. `acorns_total` stays lifetime-earned, because
+the `acorns_100` milestone means "earned 100" and would quietly break if
+spending decremented it; `acorns_spent` is separate and the balance is derived.
+
+## What verify_all caught that pytest could not
+
+`create_team_moment` only stages a row and leaves committing to its caller. I
+called it after the commit, so every photo's history moment was staged and
+discarded. **The pytest passed** — tests share one session with the app, so the
+uncommitted row was visible to the very next query. Over HTTP, with separate
+requests, team history recorded nothing.
+
+The end-to-end suite failed on it immediately. The unit test now rolls back
+before asserting, so a staged-but-uncommitted row can no longer masquerade as a
+saved one, and it is fault-injected to prove it fails.
+
+That is the second time today a test passed while the product was broken. The
+first was Rickie's silence. Both had the same shape: the thing being verified
+was not the thing a user experiences.
+
+## Two real UI bugs, found only by driving it
+
+- **The composer previewed nothing.** `_buildPhotoComposer` opened by calling
+  `_closePhotoComposer()`, which nulls `_composerImage` — the image it was about
+  to draw. Every assertion about the API passed; the preview was a grey box.
+- **The creator's Delete never appeared.** The thread and the team info load
+  concurrently, and the thread finished first, so photo bubbles were built while
+  `_teamPanelIsCreator` was still false. Fixed by re-applying permissions when
+  the info lands rather than serialising the two requests.
+
+## A structural change the feature forced
+
+The team panel was one long scroll, which left the message thread a 160px window
+at the bottom of an 877px sheet. That was tolerable for text and absurd for
+photographs. Splitting it into Campfire / Photos & Chat tabs — the separation
+`TEAM_UI_BASELINE.md` described as two screens all along — gives the thread
+~464px. The feature did not create that problem, it just made it impossible to
+keep ignoring.
+
+## Where it stands
+
+242 pytest, verify_all 108/108, uicheck 30/30, all gates clean. Nothing
+deployed. Age verification and parental consent remain undesigned and this
+raises the stakes on them — flagged, not solved, because it is a legal and
+policy call.
