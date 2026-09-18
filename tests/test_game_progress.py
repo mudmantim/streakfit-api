@@ -165,3 +165,62 @@ def test_level_titles_top_out_at_legend(client):
     top = appmod.xp_to_level(1_000_000)
     assert top['level_title'] == 'Legend'
     assert top['level'] > 8  # the number keeps climbing even though the title stops
+
+
+# ── Mission generation: every exercise must be reachable ────────────────────
+
+def test_every_exercise_in_every_level_can_actually_be_selected(client):
+    """No drawn exercise may be unreachable.
+
+    This caught a real defect: beginner's only high-fun exercises all live in
+    `conditioning`, so an unconditional fun floor made the retry loop redraw
+    until that category landed on one of the three high-fun options —
+    permanently excluding the other three. Every beginner saw 27 of 30
+    exercises for the life of their account, and three illustrations were dead.
+    """
+    import datetime as dt
+
+    import app as appmod
+
+    start = dt.date(2026, 1, 1)
+    for skill, categories in appmod.EXERCISE_LIBRARY.items():
+        expected = {ex['key'] for exs in categories.values() for ex in exs}
+        seen = set()
+        for user_id in range(9000, 9004):
+            for offset in range(160):
+                day = (start + dt.timedelta(days=offset)).isoformat()
+                seen.update(e['key'] for e in appmod.get_daily_exercises(user_id, day, skill))
+        missing = expected - seen
+        assert not missing, f'{skill}: unreachable exercises {sorted(missing)}'
+
+
+def test_most_days_still_include_something_high_energy(client):
+    """The fun floor may be waived to keep content reachable, but not abandoned."""
+    import datetime as dt
+
+    import app as appmod
+
+    start = dt.date(2026, 1, 1)
+    days = high_fun = 0
+    for user_id in range(9100, 9110):
+        for offset in range(60):
+            day = (start + dt.timedelta(days=offset)).isoformat()
+            picks = appmod.get_daily_exercises(user_id, day, 'beginner')
+            days += 1
+            if any(e['fun_score'] == 'high' for e in picks):
+                high_fun += 1
+    assert high_fun / days >= 0.75, f'only {high_fun / days:.0%} of days have a high-fun exercise'
+
+
+def test_a_mission_is_always_five_one_per_category(client):
+    import datetime as dt
+
+    import app as appmod
+
+    start = dt.date(2026, 1, 1)
+    for skill in appmod.EXERCISE_LIBRARY:
+        for offset in range(30):
+            day = (start + dt.timedelta(days=offset)).isoformat()
+            picks = appmod.get_daily_exercises(7777, day, skill)
+            assert len(picks) == 5
+            assert [p['category'] for p in picks] == list(appmod._CATEGORIES)

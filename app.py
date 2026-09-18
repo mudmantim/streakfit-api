@@ -1092,14 +1092,33 @@ def get_daily_exercises(user_id, date_str, skill_level):
         ex['fun_score'] == 'high' for exs in pool.values() for ex in exs
     )
 
+    # When every high-fun exercise at this level lives in ONE category, an
+    # unconditional fun floor silently deletes content: the retry loop keeps
+    # redrawing until that category lands on a high-fun option, so the
+    # category's other exercises can never be selected at all. That was real
+    # -- beginner's only high-fun moves are all in `conditioning`, so
+    # marching_in_place, step_touch and standing_bicycle were unreachable
+    # forever, and every beginner saw 27 of 30 exercises for the life of their
+    # account. Waiving the floor on a deterministic one day in five keeps the
+    # intent (most days have something energetic) without making a tenth of
+    # the library dead. Same seed, so the day stays reproducible.
+    fun_categories = {
+        cat for cat, exs in pool.items()
+        if any(ex['fun_score'] == 'high' for ex in exs)
+    }
+    fun_floor_would_monopolise = len(fun_categories) == 1
+    waive_fun_floor = fun_floor_would_monopolise and (seed % 5 == 0)
+
     candidate = None
     for _ in range(_GENERATOR_MAX_RETRIES):
         candidate = [rng.choice(pool[cat]) for cat in _CATEGORIES]
         impacts   = [ex['impact'] for ex in candidate]
 
         # Constraint 1 — fun floor: at least one high-fun exercise when the
-        # pool makes it possible.
-        fun_ok    = any(ex['fun_score'] == 'high' for ex in candidate) or not level_has_high_fun
+        # pool makes it possible, except on a waived day (see above).
+        fun_ok    = (any(ex['fun_score'] == 'high' for ex in candidate)
+                     or not level_has_high_fun
+                     or waive_fun_floor)
         # Constraint 2 — impact balance: not every exercise can be static.
         impact_ok = any(i in ('low', 'high') for i in impacts)
         # Constraint 3 — high-impact cap: no more than 2 explosive exercises.
