@@ -1507,6 +1507,17 @@ var RICKIE_LINES = {
         "That's a habit forming.",
         "A week together. Rickie likes this."
     ],
+    // Distinct from `milestone`, which is written for *browsing* the Memory
+    // Book ("Rickie flips back through these sometimes") -- the wrong register
+    // for the moment one is earned, and plainly wrong for a first one.
+    milestoneUnlocked: [
+        "That one's worth keeping.",
+        "Rickie's adding this to the book.",
+        "A new one for the collection.",
+        "That just became a milestone.",
+        "Something to look back on later.",
+        "Rickie noticed that one."
+    ],
     milestone: [
         "Rickie's been keeping track — you've earned a few of these.",
         "Look at everything you've built so far.",
@@ -1766,6 +1777,33 @@ function showRickieReaction(line, summary) {
         }, 300);
     }, displayMs);
 }
+
+// A milestone used to unlock in silence -- the only way to find out you had
+// passed 100 exercises was to open the Memory Book later and notice a line had
+// changed. These are rare by design (the nearest is 100 exercises, roughly
+// three weeks in), so they get their own beat rather than being folded into the
+// completion toast, and they wait for that toast to clear so two celebrations
+// don't stack on top of each other.
+function _announceMilestones(milestones) {
+    if (!milestones || !milestones.length) return;
+    if (!_rickieAllowsReaction(true)) return;   // milestone-significant: quiet mode still shows these
+
+    var delay = 900;
+    milestones.forEach(function (m, i) {
+        setTimeout(function () {
+            showRickieReaction(_pickRickieLine('milestoneUnlocked'), {});
+            var el = document.getElementById('rickie-reaction-levelup');
+            if (el) {
+                el.textContent = '\uD83C\uDFC5 ' + m.label + ' unlocked';
+                el.hidden = false;
+            }
+            var toast = document.getElementById('rickie-reaction');
+            if (toast) toast.classList.add('celebrate');
+            fireConfetti(document.getElementById('daily-count-badge'));
+        }, delay + (i * 4200));
+    });
+}
+
 
 // ── Rickie's Memory Book ────────────────────────────────────────────────────────
 // This is a scrapbook, not a stats page. Memories lead; numbers only ever
@@ -3042,6 +3080,11 @@ function renderBrainBoostQuestion(brainBoost) {
                         _applyRickieExpression();
                     }
                 }
+
+                // A milestone crossed here (100 Brain Boosts, or a level/XP
+                // threshold the answer pushed past) is announced even in quiet
+                // mode -- it is milestone-significant, unlike the answer itself.
+                _announceMilestones(result.data.milestones_unlocked);
 
                 // Brain Boost now awards XP/acorns too, so refresh from /api/me
                 // rather than hand-patching a single counter.
@@ -4707,6 +4750,7 @@ async function handleCompleteExercise(key, btn, row) {
         }
         _applyRickieExpression();
         _applyCampfireUpdates(result.data.team_campfire_updates);
+        _announceMilestones(result.data.milestones_unlocked);
         // Let the flash animation play, then reload
         setTimeout(function () { loadDailyExercises(); }, 480);
     } else {

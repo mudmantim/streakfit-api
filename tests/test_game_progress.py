@@ -224,3 +224,78 @@ def test_a_mission_is_always_five_one_per_category(client):
             picks = appmod.get_daily_exercises(7777, day, skill)
             assert len(picks) == 5
             assert [p['category'] for p in picks] == list(appmod._CATEGORIES)
+
+
+# ── Milestones announce themselves ─────────────────────────────────────────
+
+def test_first_mission_milestone_is_announced_when_it_happens(client):
+    token = register_and_login(client, 'milestone_first')
+    keys = _daily_keys(client, token)
+    for key in keys[:4]:
+        payload = _complete(client, token, key)
+        assert payload['milestones_unlocked'] == []   # nothing crossed yet
+
+    fifth = _complete(client, token, keys[4])
+
+    unlocked = {m['key'] for m in fifth['milestones_unlocked']}
+    assert 'first_mission' in unlocked
+
+
+def test_a_milestone_is_announced_once_not_every_day_after(client):
+    """The crossing is the event, not the state of being past it."""
+    token = register_and_login(client, 'milestone_once')
+    keys = _daily_keys(client, token)
+    for key in keys:
+        _complete(client, token, key)
+
+    # A second day: still past first_mission, but it must not re-announce.
+    _seed_prior_day('milestone_once', keys, days_ago=2)
+    later = client.get('/api/daily', headers=auth_headers(token)).get_json()
+    assert later['completed_count'] == 5   # today is already done
+    repeat = _complete(client, token, keys[0])
+    assert repeat['milestones_unlocked'] == []
+
+
+def test_an_idempotent_tap_announces_nothing(client):
+    token = register_and_login(client, 'milestone_noop')
+    keys = _daily_keys(client, token)
+    _complete(client, token, keys[0])
+
+    again = _complete(client, token, keys[0])
+
+    assert again['progress_events'] == []
+    assert again['milestones_unlocked'] == []
+
+
+def test_milestones_crossed_only_fires_on_the_crossing_step():
+    import app as appmod
+
+    # 99 -> 100 crosses.
+    assert [m['key'] for m in appmod._milestones_crossed(
+        {'exercises_completed': 100}, {'exercises_completed': 1})] == ['exercises_100']
+    # 100 -> 101 does not.
+    assert appmod._milestones_crossed(
+        {'exercises_completed': 101}, {'exercises_completed': 1}) == []
+    # A metric that did not move is never checked, even when already past it.
+    assert appmod._milestones_crossed({'exercises_completed': 500}, {}) == []
+
+
+def test_a_single_jump_past_a_target_still_counts():
+    """A big award must not step over a milestone without announcing it."""
+    import app as appmod
+
+    crossed = appmod._milestones_crossed({'xp_total': 1040}, {'xp_total': 60})
+    assert [m['key'] for m in crossed] == ['xp_1000']
+
+
+def test_award_progress_reports_which_event_it_was(client):
+    token = register_and_login(client, 'event_typed')
+    keys = _daily_keys(client, token)
+    for key in keys[:4]:
+        _complete(client, token, key)
+
+    fifth = _complete(client, token, keys[4])
+
+    types = [e['event_type'] for e in fifth['progress_events']]
+    assert 'mission_complete' in types
+    assert 'perfect_mission' in types

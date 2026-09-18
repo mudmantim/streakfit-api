@@ -1440,6 +1440,9 @@ def award_progress(user, event_type, xp, acorns, team_id=None):
     new_level = new_level_info['level']
 
     return {
+        # event_type is echoed so callers (and the client) can tell which award
+        # a progress event actually was, instead of inferring it from amounts.
+        'event_type': event_type,
         'xp_awarded': xp,
         'acorns_awarded': acorns,
         'old_level': old_level,
@@ -2409,6 +2412,29 @@ def get_demo_daily():
     }), 200
 
 
+def _milestones_crossed(metric_values, deltas):
+    """Which milestones this single action just pushed the user past.
+
+    Milestones existed but never announced themselves -- you only found out by
+    opening the Memory Book and noticing a line had changed, which means the
+    moment a 100-exercise milestone lands is silent. A milestone can only be
+    crossed by a metric that actually moved, so `deltas` both selects what to
+    check and gives the before-value to compare against; metrics that did not
+    change are skipped without a query.
+    """
+    crossed = []
+    for m in _MILESTONE_DEFINITIONS:
+        delta = deltas.get(m['metric'], 0)
+        if delta <= 0:
+            continue
+        after = metric_values.get(m['metric'])
+        if after is None:
+            continue
+        if (after - delta) < m['target'] <= after:
+            crossed.append({'key': m['key'], 'label': m['label'], 'target': m['target']})
+    return crossed
+
+
 def _progress_response(old_level, user, events):
     """Combine a list of award_progress() results into the additive response
     fields shared by both completion routes. Route-response shaping only —
@@ -2561,7 +2587,50 @@ def complete_daily_exercise(exercise_key):
         "team_campfire_updates": team_campfire_updates
     }
     response.update(_progress_response(old_level, user, events))
+    response["milestones_unlocked"] = _completion_milestones(
+        user_id, user, old_level, events, awarded=bool(events)
+    )
     return jsonify(response), 200
+
+
+def _completion_milestones(user_id, user, old_level, events, awarded):
+    """Milestones crossed by this completion, for the client to celebrate.
+
+    Costs one COUNT on the hot write path, and only when something was actually
+    awarded -- a repeated tap on an already-done exercise changes nothing and
+    cannot cross anything. `missions_completed` is only resolved when the user
+    has just finished a mission, since that is the only time it can move.
+    """
+    if not awarded:
+        return []
+
+    xp_delta = sum(e['xp_awarded'] for e in events)
+    acorn_delta = sum(e['acorns_awarded'] for e in events)
+    new_level = xp_to_level(user.xp_total)['level']
+
+    exercises_completed = db.session.execute(
+        db.select(db.func.count(DailyCompletion.id)).where(DailyCompletion.user_id == user_id)
+    ).scalar() or 0
+
+    metric_values = {
+        'exercises_completed': exercises_completed,
+        'xp_total': user.xp_total,
+        'acorns_total': user.acorns_total,
+        'level': new_level,
+    }
+    deltas = {
+        'exercises_completed': 1,
+        'xp_total': xp_delta,
+        'acorns_total': acorn_delta,
+        'level': new_level - old_level,
+    }
+
+    if any(e['event_type'] == 'mission_complete' for e in events):
+        missions = get_user_stats(user_id)['total_missions']
+        metric_values['missions_completed'] = missions
+        deltas['missions_completed'] = 1
+
+    return _milestones_crossed(metric_values, deltas)
 
 
 @app.route('/api/brain-boost/answer', methods=['POST'])
@@ -2640,6 +2709,28 @@ def answer_brain_boost():
         "explanation": boost['explanation']
     }
     response.update(_progress_response(old_level, user, events))
+
+    # brain_boost_100 can only ever be crossed here. The other metrics move too
+    # (XP, acorns, level), so they are checked with the same deltas.
+    if events:
+        new_level = xp_to_level(user.xp_total)['level']
+        stats = get_user_stats(user_id)
+        response["milestones_unlocked"] = _milestones_crossed(
+            {
+                'brain_boosts_answered': stats['brain_boost_answers'],
+                'xp_total': user.xp_total,
+                'acorns_total': user.acorns_total,
+                'level': new_level,
+            },
+            {
+                'brain_boosts_answered': 1,
+                'xp_total': sum(e['xp_awarded'] for e in events),
+                'acorns_total': sum(e['acorns_awarded'] for e in events),
+                'level': new_level - old_level,
+            },
+        )
+    else:
+        response["milestones_unlocked"] = []
     return jsonify(response), 200
 
 
