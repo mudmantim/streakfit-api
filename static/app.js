@@ -4554,9 +4554,33 @@ function renderDailyExercise(ex) {
     linkRow.appendChild(howBtn);
     linkRow.appendChild(coachLink);
 
-    info.appendChild(name);
-    info.appendChild(meta);
-    info.appendChild(linkRow);
+    // The illustration was only ever visible after tapping "How to do this",
+    // so the mission read as a wall of text -- a poor showing for 90 drawings,
+    // and hard going for the youngest users the app is built for. Showing it
+    // inline makes the row scannable at a glance. It opens the same Exercise
+    // Tips content as the button, because a picture is the thing a child taps.
+    var thumbBtn = document.createElement('button');
+    thumbBtn.type = 'button';
+    thumbBtn.className = 'daily-exercise-thumb-btn';
+    thumbBtn.setAttribute('aria-label', 'How to do ' + ex.name);
+    thumbBtn.addEventListener('click', function () { openExerciseModal(ex); });
+
+    var thumb = document.createElement('img');
+    thumb.className = 'daily-exercise-thumb';
+    thumb.src = ex.image_url;
+    thumb.alt = '';               // decorative: the name sits right beside it
+    thumb.loading = 'lazy';
+    thumb.decoding = 'async';
+    thumbBtn.appendChild(thumb);
+
+    var infoText = document.createElement('div');
+    infoText.className = 'daily-exercise-text';
+    infoText.appendChild(name);
+    infoText.appendChild(meta);
+    infoText.appendChild(linkRow);
+
+    info.appendChild(thumbBtn);
+    info.appendChild(infoText);
 
     // ── Category pill ──────────────────────────────────────────────────────────────────────
     var cat = document.createElement('span');

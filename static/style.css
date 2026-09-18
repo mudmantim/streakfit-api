@@ -1092,7 +1092,39 @@ input:focus {
 }
 .daily-exercise-done .daily-exercise-name { color: var(--gray-500); }
 
-.daily-exercise-info { flex: 1; min-width: 0; }
+.daily-exercise-info {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    align-items: flex-start;
+    gap: .65rem;
+}
+
+.daily-exercise-text { min-width: 0; flex: 1; }
+
+/* 64px, not smaller: the exercise illustrations were drawn to stay legible
+   down to about 80px, so this is already pushing it -- shrinking further
+   turns them into grey smudges. */
+.daily-exercise-thumb-btn {
+    flex-shrink: 0;
+    width: 64px;
+    height: 64px;
+    padding: 0;
+    border: 1px solid var(--gray-100);
+    border-radius: 10px;
+    background: var(--gray-50);
+    cursor: pointer;
+    overflow: hidden;
+}
+
+.daily-exercise-thumb {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    display: block;
+}
+
+.daily-exercise-done .daily-exercise-thumb-btn { opacity: .55; }
 
 .daily-exercise-name {
     font-size: .95rem;
