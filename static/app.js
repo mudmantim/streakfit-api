@@ -4616,6 +4616,24 @@ async function handleCompleteExercise(key, btn, row) {
 
     if (isGuest) {
         guestCompleted.add(key);
+        // A guest doing the exact same thing as a registered user used to get
+        // none of the response: no Rickie line, no confetti, not even on 5/5 --
+        // the one moment that is supposed to make signing up feel worth it was
+        // the weakest version of itself. There is no XP to report for a guest,
+        // and showRickieReaction already omits that line when there is nothing
+        // to say, so the moment lands without promising numbers we aren't
+        // keeping for them.
+        var guestDone = guestCompleted.size >= 5;
+        showRickieReaction(_pickRickieLine(guestDone ? 'perfectMission' : 'missionComplete'), {});
+        if (guestDone) {
+            fireConfetti(document.getElementById('daily-count-badge'));
+            currentRickieExpression = getRickieExpression({
+                type: 'mission_complete', perfectMission: true
+            });
+        } else {
+            currentRickieExpression = getRickieExpression({ type: 'mission_complete' });
+        }
+        _applyRickieExpression();
         setTimeout(function () { loadDailyExercises(); }, 480);
         return;
     }
@@ -4682,13 +4700,49 @@ async function handleSkillLevelChange(value) {
 }
 
 async function loadChallenges() {
-    var result = await api('/api/challenges');
-    if (!result) return;
-
     var list = document.getElementById('challenges-list');
+    if (!list) return;
+
+    // Loading state: every other section on this page has one. Without it a
+    // slow request leaves the last render on screen with no sign anything is
+    // happening.
+    list.innerHTML = '';
+    var loading = document.createElement('div');
+    loading.className = 'state-loading';
+    var spinner = document.createElement('div');
+    spinner.className = 'spinner';
+    var loadingText = document.createElement('p');
+    loadingText.textContent = 'Loading your side quests…';
+    loading.appendChild(spinner);
+    loading.appendChild(loadingText);
+    list.appendChild(loading);
+
+    var result = await api('/api/challenges');
+
     list.innerHTML = ''; // safe: content added via createElement below
 
-    if (result.status !== 200) return;
+    // A failed fetch used to leave this section silently blank -- visually
+    // identical to "you have no side quests", so a server error read as an
+    // empty state and the user had nothing to retry.
+    if (!result || result.status !== 200) {
+        var err = document.createElement('div');
+        err.className = 'empty-state';
+
+        var errText = document.createElement('p');
+        errText.className = 'empty-sub';
+        errText.textContent = "Couldn't load your side quests — try again in a moment.";
+        err.appendChild(errText);
+
+        var retry = document.createElement('button');
+        retry.type = 'button';
+        retry.className = 'btn-primary teams-retry-btn';
+        retry.textContent = 'Retry';
+        retry.addEventListener('click', function () { loadChallenges(); });
+        err.appendChild(retry);
+
+        list.appendChild(err);
+        return;
+    }
 
     var challenges = result.data;
 
