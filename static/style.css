@@ -332,6 +332,14 @@ input:focus {
     white-space: nowrap;
     transition: background .15s, transform .1s, box-shadow .15s;
     -webkit-tap-highlight-color: transparent;
+    /* This stylesheet's own minimum tap target. Padding alone left the short
+       ones at 42px -- Side Quests' "Add" among them -- which is close enough
+       to look right and still be wrong. inline-flex keeps the label centred
+       when min-height is what sets the size. */
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
 }
 
 .btn-primary:hover  { background: var(--indigo-dark); box-shadow: var(--shadow-md); }

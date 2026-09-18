@@ -13,7 +13,7 @@ BIN    := $(VENV)/bin
 LOAD_ENV := set -a; [ -f .env ] && . ./.env; set +a
 export FLASK_APP := app
 
-.PHONY: help setup check-python venv install env db migrate revision run test lint lint-fix typecheck build-check check verify freeze clean
+.PHONY: help setup check-python venv install env db migrate revision run test lint lint-fix typecheck build-check check verify uicheck freeze clean
 
 help: ## Show this help
 	@echo "StreakFit — make targets:"
@@ -112,6 +112,9 @@ check: install lint typecheck build-check test ## What CI runs: lint + types + b
 
 verify: ## Run the end-to-end verification suite against a running local server
 	@$(BIN)/python scripts/verify_all.py --base-url http://localhost:5000
+
+uicheck: ## Drive the real UI in headless Chrome (needs Chrome + a running local server)
+	@$(BIN)/python scripts/uicheck.py --base-url http://localhost:5000
 
 freeze: ## Print the exact resolved dependency set (for lockfile reconciliation)
 	@$(BIN)/pip freeze
