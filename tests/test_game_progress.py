@@ -79,25 +79,46 @@ def test_repeating_the_same_key_today_is_idempotent(client):
 
 # ── Day 2 onward: the shape that drove the reaction fix ─────────────────────
 
-def test_returning_user_earns_nothing_on_the_first_four_taps(client):
-    """Pins the behaviour the frontend has to cope with.
-
-    This is not an endorsement of the economy — it is the reason `app.js` must
-    NOT gate Rickie's acknowledgement on XP. If this test starts failing because
-    repeat completions began paying, that is a deliberate economy change and the
-    reaction logic should be re-reviewed alongside it.
-    """
+def test_returning_user_is_paid_for_every_tap(client):
+    """Coming back and moving again is the behaviour the product exists to
+    reinforce, so a repeat completion pays. See docs/reward-economy.md."""
     token = register_and_login(client, 'day2_returner')
     keys = _daily_keys(client, token)
     _seed_prior_day('day2_returner', keys)
 
     awards = [_complete(client, token, key) for key in keys]
 
-    assert [a['xp_awarded'] for a in awards[:4]] == [0, 0, 0, 0]
+    assert [a['xp_awarded'] for a in awards[:4]] == [5, 5, 5, 5]
+    # No acorns for repeats: acorns have no sink yet and stay tied to notable
+    # events, so the most frequent action in the app must not inflate them.
     assert [a['acorns_awarded'] for a in awards[:4]] == [0, 0, 0, 0]
-    # Only finishing the mission pays: 25 mission_complete + 15 perfect_mission.
-    assert awards[4]['xp_awarded'] == 40
+    # 5 repeat + 25 mission_complete + 15 perfect_mission
+    assert awards[4]['xp_awarded'] == 45
     assert awards[4]['acorns_awarded'] == 5
+
+
+def test_finishing_the_mission_outweighs_the_taps_that_led_to_it(client):
+    """The load-bearing constraint on the repeat value.
+
+    Five repeat taps must be worth less than the bonus for completing the
+    mission, or the product stops being about finishing. This is what pins the
+    repeat reward below 8 XP — raise REPEAT_EXERCISE_XP past it and this fails.
+    """
+    import app as appmod
+
+    five_taps = 5 * appmod.REPEAT_EXERCISE_XP
+    finishing = appmod.MISSION_COMPLETE_XP + appmod.PERFECT_MISSION_XP
+    assert five_taps < finishing, (
+        f'{five_taps} XP of taps >= {finishing} XP for finishing — '
+        'completing the mission is no longer the biggest beat of the day'
+    )
+
+
+def test_discovery_still_clearly_beats_a_repeat(client):
+    """A new exercise should feel like an event, not a rounding difference."""
+    import app as appmod
+
+    assert appmod.NEW_EXERCISE_BONUS_XP >= 4 * appmod.REPEAT_EXERCISE_XP
 
 
 def test_returning_user_still_builds_a_streak(client):
@@ -122,7 +143,7 @@ def test_a_genuinely_new_exercise_still_pays_for_a_returning_user(client):
 
     awards = [_complete(client, token, key) for key in keys]
 
-    assert [a['xp_awarded'] for a in awards[:4]] == [0, 0, 0, 0]
+    assert [a['xp_awarded'] for a in awards[:4]] == [5, 5, 5, 5]
     assert awards[4]['xp_awarded'] == 60  # 20 new-exercise + 40 mission bonuses
 
 

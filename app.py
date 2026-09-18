@@ -1347,6 +1347,7 @@ PERFECT_MISSION_XP = 15
 BRAIN_BOOST_CORRECT_XP = 10
 BRAIN_BOOST_ATTEMPT_XP = 3
 NEW_EXERCISE_BONUS_XP = 20
+REPEAT_EXERCISE_XP = 5
 FAMILY_SESSION_XP = 30
 
 MISSION_COMPLETE_ACORNS = 3
@@ -2457,6 +2458,16 @@ def complete_daily_exercise(exercise_key):
 
         if is_new_exercise_ever:
             events.append(award_progress(user, 'new_exercise', NEW_EXERCISE_BONUS_XP, NEW_EXERCISE_BONUS_ACORNS))
+        else:
+            # Coming back and moving again is the behaviour this whole app
+            # exists to reinforce, so it cannot pay nothing. Sizing (see
+            # docs/reward-economy.md): 5 is the largest value that keeps
+            # FINISHING the mission the biggest beat of the day -- five taps
+            # are 25 XP against the 40 XP mission bonus. At 8 they tie; at 10
+            # the taps outweigh completing, which would invert the message.
+            # No acorns: acorns have no sink yet, and keeping them tied to
+            # notable events preserves them for one.
+            events.append(award_progress(user, 'repeat_exercise', REPEAT_EXERCISE_XP, 0))
 
         team_campfire_updates = []
         if completed_count == 5:
