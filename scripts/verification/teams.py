@@ -36,11 +36,45 @@ def run(api, results, scenario):
             any(m["username"] == users["b"]["username"] and not m["is_creator"] for m in detail["members"]),
         )
 
+        # Witness fields: the roster's whole purpose is showing whether the
+        # people you share a campfire with moved today. Shipped without them
+        # for the life of the team feature.
+        member = next((m for m in detail["members"] if m["username"] == users["a"]["username"]), {})
+        results.check(
+            "teams.roster_carries_today_status",
+            "completed_today" in member and "completed_today_count" in member,
+            f"member keys={sorted(member)}",
+        )
+        results.check(
+            "teams.roster_carries_streak",
+            isinstance(member.get("current_streak"), int),
+            f"current_streak={member.get('current_streak')!r}",
+        )
+        # No leaderboard: the roster must not arrive pre-sorted by who is ahead.
+        results.check(
+            "teams.roster_not_ranked_by_streak",
+            [m["is_creator"] for m in detail["members"]][0] is True,
+            "creator should lead the roster, not the highest streak",
+        )
+
+        campfire = detail.get("campfire", {})
+        results.check(
+            "teams.campfire_reports_next_stage",
+            campfire.get("next_stage") == "Small Flame" and campfire.get("next_stage_at") == 100,
+            f"campfire={campfire}",
+        )
+
     # Listed in A's teams list (not just the detail route).
     status, teams_list = api.request("GET", "/api/teams", token=users["a"]["token"])
     ok = results.check("teams.list_readable", status == 200, f"status={status}")
     if ok:
         results.check("teams.appears_in_creator_list", any(t["id"] == team_id for t in teams_list))
+        row = next((t for t in teams_list if t["id"] == team_id), {})
+        results.check(
+            "teams.list_carries_moved_today",
+            isinstance(row.get("moved_today"), int),
+            f"moved_today={row.get('moved_today')!r}",
+        )
 
     # Joining with a garbage code fails cleanly.
     status, _ = api.request(

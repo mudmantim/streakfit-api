@@ -114,9 +114,14 @@ def create_and_join_team(api, results, scenario, creator_role="a", joiner_roles=
     return scenario
 
 
-def complete_daily_mission(api, results, token, check_prefix="mission"):
+def complete_daily_mission(api, results, token, check_prefix="mission", capture=None):
     """Completes all of today's exercises for the given token. Returns
-    True only if every step succeeded."""
+    True only if every step succeeded.
+
+    `capture`, when a dict is passed, receives the final completion response
+    under "final" -- the only place a caller can see mission-completion
+    rewards and unlocked milestones. Optional so existing callers, which only
+    care whether it worked, are unaffected."""
     status, daily = api.request("GET", "/api/daily", token=token)
     ok = results.check(f"{check_prefix}.get_daily", status == 200 and "exercises" in daily, f"status={status}")
     if not ok:
@@ -125,9 +130,11 @@ def complete_daily_mission(api, results, token, check_prefix="mission"):
     keys = [ex["key"] for ex in daily["exercises"]]
     results.check(f"{check_prefix}.five_exercises_today", len(keys) == 5, f"got {len(keys)}")
 
-    last_status = None
+    last_status, last_body = None, None
     for key in keys:
-        last_status, _ = api.request("POST", f"/api/daily/{key}/complete", token=token)
+        last_status, last_body = api.request("POST", f"/api/daily/{key}/complete", token=token)
+    if capture is not None:
+        capture["final"] = last_body
     return results.check(f"{check_prefix}.complete_all_five", last_status == 200, f"last status={last_status}")
 
 

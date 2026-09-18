@@ -448,3 +448,117 @@ request — not from proactively hunting for improvements. Carried-forward items
 rate-limit storage resets each deploy), **no application-level cap on `/api/coach`** as defence in
 depth for a paid API, and **M9** above. One local docs-only commit is deliberately unpushed, to be
 bundled with the next functional change rather than triggering a deploy on its own.
+
+---
+
+# Session 5 (2026-09-18) — out of maintenance mode, into product completion
+
+Tim reopened the project with a different goal: not more hardening, but
+**"StreakFit must become a fully working, fun, polished app that Olivia can
+actually use and enjoy."** The production and security work was declared the
+foundation, not the job.
+
+## What the reconstruction found
+
+Day 1 of StreakFit is genuinely good. Register in ten seconds, five exercises
+with illustrations, and at 5/5 a streak banner, confetti, a level-up and the
+Insight/Brain Boost unlock. Nothing about the first session needed rescuing.
+
+**Day 2 was where it fell apart, and the reason is worth remembering.**
+`new_exercise` pays once ever and the mission bonuses only land on the fifth
+completion, so a returning user earned **0 XP on four of their five taps**.
+That is arguable as economy design. What was not arguable: `app.js` gated
+Rickie's reaction toast on `summary.xp > 0`, so the companion said **nothing at
+all** for four of every five taps. A character bible built around being
+"genuinely glad every time you show up" had produced an app that went quiet the
+moment the novelty bonus ran out.
+
+It survived because **every day-1 completion pays**. A first session looks
+perfect. Every test passed, every API response was correct, and the bug was
+only reachable by being a returning user — which nothing in the test suite, the
+verification suite, or any manual pass had ever been.
+
+The second finding was the same shape. `GET /api/teams/<id>` returned members
+as `{user_id, username, is_creator}` — no "did they move today", no streak.
+The founding witness-only model was missing from the **API**, not just the UI,
+so a parent could not open StreakFit and see whether their kid had moved. And
+`/api/teams/<id>/moments` sat fully implemented, humanised and tested with **no
+caller anywhere in the frontend** — the exact "shipped but unreachable through
+the UI" failure that `CLAUDE.md`'s verification standard was written after,
+still present in the codebase that documents it.
+
+## Sizing the repeat reward, rather than picking a number
+
+Tim authorised paying for repeat completions but explicitly not an arbitrary
+value. Simulating 365 days across 40 users with the real `get_daily_exercises()`
+showed discovery decaying from 5 new exercises on day 1 to ~0.4 by day 14 and
+none after day 30 — daily income collapsing 153 → 53 XP.
+
+Three constraints then bound the value, and they agree on **5**:
+
+1. Five repeat taps must be worth less than the 40 XP for *finishing*, or the
+   product stops being about finishing. `5 × repeat < 40` ⟹ repeat < 8.
+2. A discovery must stay an event: 20 XP is 4× a repeat at 5, only 2× at 10.
+3. Below 5 the bar barely moves — at 3 XP a tap is ~1% of a mid-game level.
+
+Two tests encode the *constraints*, not the number, so raising the value past
+the point where taps outweigh finishing fails CI. Full reasoning and the
+simulation table now live in `docs/reward-economy.md`. No acorns for repeats:
+acorns have no sink, and paying them for the most frequent action in the app
+would inflate a currency that may later get a use.
+
+## A tenth of the beginner library was unreachable
+
+Found while simulating that discovery curve, not by looking for it. Every
+beginner saw exactly **27 of their 30 exercises, forever**. `marching_in_place`,
+`step_touch` and `standing_bicycle` had never been selected — not rarely,
+*never* — across 40 users × 365 days.
+
+Beginner's only high-fun exercises all live in `conditioning`, and the fun floor
+requires one in every set, so the generator redrew until conditioning landed on
+one of those three. The other three were mathematically excluded. Three drawn
+illustrations were dead, and the category meant to be the fun one was the least
+varied — which is exactly the monotony a returning user feels.
+
+Fixed by detecting the monopoly case and waiving the floor on a deterministic
+one day in five. All 30 reachable now; 90% of beginner days still include
+something high-energy; intermediate and advanced never trigger the waiver.
+
+## Methodology notes worth keeping
+
+- **A stale service worker made me briefly believe a correct fix had failed.**
+  The first verification of the reaction fix showed Rickie still silent. The fix
+  was fine; the browser was serving the previous `app.js` from the SW cache. Any
+  browser check must clear the service worker first, and `uicheck.py` now does
+  it on every run. A cache is a perfectly good way to verify yesterday's code.
+- **A gate that has not been watched failing is not a gate.** Every new check
+  here was fault-injected. The route-reachability gate passed its first fault
+  injection for the *wrong reason* — it matched a code comment that merely
+  mentioned the route, which is to say it would have hidden precisely the
+  problem it exists to find. It now strips comments before matching.
+- **Two of my assumptions about this codebase were wrong and cheap to check:**
+  `award_progress` did not return `event_type` (it does now), and the team
+  creation response nests under `team`. Both would have been silent failures.
+
+## What now exists that did not
+
+`scripts/uicheck.py` (`make uicheck`) drives the real app in headless Chrome at
+390×844 and asserts on what a person sees — 18 checks. It exists because both
+headline bugs of this session were invisible to pytest *and* to the verification
+suite, which is not a gap either of those was ever going to close. Stdlib-only
+CDP client, no new dependency, local-only by design.
+
+`build_check.py` now fails if any `/api/` route has no caller in the frontend.
+
+## State at the end of the session
+
+199 pytest, 88 verification checks (was 81), 18 UI checks, ruff/mypy/build clean.
+Nothing deployed — `product-completion` is a local branch and production still
+serves the maintenance-mode build. Carried-forward infrastructure items (M1b,
+M9, the `/api/coach` spend cap) were deliberately left alone.
+
+Still open and deliberately not decided here: **acorns have no sink**, so the
+number climbs and buys nothing; Brain Boost holds 40 questions shown to every
+user on the same date, so a daily user repeats them every 40 days; and Side
+Quests award no XP at all, running a reward loop entirely parallel to the game's.
+Each is a product decision rather than a defect, and each is Tim's call.

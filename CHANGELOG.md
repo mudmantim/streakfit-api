@@ -12,6 +12,49 @@ decisions lives in `PROJECT_JOURNAL.md`.
 
 ---
 
+## v0756 — Product completion: the day-2 experience (branch `product-completion`, NOT deployed)
+
+**Not deployed.** Sits on the `product-completion` branch; production still serves the
+maintenance-mode build. Service-worker cache went `v0748` → `v0756` across the pass. No
+migration and no new environment variable, so whenever it does ship, rollback is code-only.
+
+StreakFit came out of maintenance mode for a product-completion push, aimed at the app
+being something a child actually returns to. The reconstruction found Day 1 in good shape
+and Day 2 broken.
+
+- **Rickie went silent on day two.** `new_exercise` pays once ever and the mission bonuses
+  only land on the 5th, so a returning user earned 0 XP on four of five taps — and `app.js`
+  gated the reaction toast on XP, so the companion said nothing at all for those four. Only
+  reachable by being a returning user, which no test or manual pass had ever been. The
+  reaction is now decided by Rickie's mode alone.
+- **Repeat completions now pay 5 XP**, sized against the economy rather than picked: five
+  taps must stay worth less than the 40 XP for *finishing* (so repeat < 8), a discovery must
+  stay 4× a repeat, and below 5 the bar barely moves. Simulated over 365 days × 40 users.
+  Reasoning and table in `docs/reward-economy.md`. No acorns — they still have no sink.
+- **Teams finally witness.** The roster had no "did they move today" and no streak, in the
+  API as well as the UI, so a parent could not see whether their kid had moved. Added
+  batched (`_witness_for_ids`), with no "missed today" state and no ordering by streak —
+  tests pin that it stays a witness and never becomes a leaderboard.
+- **`/api/teams/<id>/moments` got its first caller**, having shipped working, humanised and
+  tested with no frontend consumer at all. The campfire gained a stage, a progress bar and
+  the distance to the next stage.
+- **Three beginner exercises were unreachable forever** — every beginner saw 27 of 30,
+  because beginner's only high-fun moves are all in one category and the fun floor forced
+  it. All 30 reachable now; 90% of days still include something high-energy.
+- **Milestones announce themselves** instead of only appearing later in the Memory Book.
+- **Guests get the celebration too** (they previously got no Rickie line and no confetti at
+  5/5 — the moment whose job is to earn the signup), Side Quests can now fail visibly
+  instead of rendering an error as an empty state, exercise illustrations show in the
+  mission row, and `.btn-primary` reaches the 44px tap target it was 2px short of.
+
+**New gates, both fault-injected.** `scripts/uicheck.py` (`make uicheck`) drives the real UI
+in headless Chrome and asserts on what a person sees — the layer where both headline bugs
+lived, invisible to pytest and to `verify_all` alike. `build_check.py` now fails if any
+`/api/` route has no caller in the frontend, so nothing else ships unreachable.
+
+**Results:** 199 pytest (was 167), `verify_all` **88/88** (was 81), `uicheck` 18/18, ruff,
+mypy and build check clean. Verification suite version 2 → 3.
+
 ## v0748 (2) — Rate limits keyed on the real client (`d262336`, deployed 2026-07-26)
 
 **Deployed and verified.** Pushed `6a6eedf..d262336` at 21:15:13Z; `/health` returned 200 on every

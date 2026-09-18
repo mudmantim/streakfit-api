@@ -36,6 +36,20 @@ Exit codes: `0` all passed, `1` at least one check failed, `2` a setup step (e.g
 | `security.py` | Invite rotation, remove member, leave team, unauthorized access — mutates membership |
 | `admin.py` | StreakFit Control's own routes (R3.0) are reachable and reject unauthenticated requests. Independent of the team scenario; runs last. Never triggers `POST /api/admin/verify` itself — that would recurse |
 
+## What this suite does not cover
+
+These modules check the **API**. They cannot see whether the app *shows* any of
+it — and the two worst bugs this project has shipped lived precisely there: a
+correct API response that the UI then ignored (Rickie's reaction gated on XP,
+so he fell silent on day two) and a working endpoint no screen ever called
+(team moments). `scripts/uicheck.py` (`make uicheck`) covers that layer by
+driving the real UI in headless Chrome. It is local-only and deliberately not
+part of `verify_all.py`, which stays standard-library-only and production-safe.
+
+`scripts/build_check.py` also now asserts that every `/api/` route has a caller
+in the frontend, so a route can no longer ship unreachable without the build
+gate saying so.
+
 Suite version and last-changed date live in `__init__.py` (`VERIFICATION_SUITE_VERSION`) — bump it by hand whenever this table changes, same discipline as the `static/sw.js` cache-version rule.
 
 ## Two ways to reach the app

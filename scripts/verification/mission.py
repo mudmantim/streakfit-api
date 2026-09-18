@@ -17,7 +17,22 @@ from verification._fixtures import build_team_scenario, complete_daily_mission
 
 def run(api, results, scenario):
     token = scenario.users["a"]["token"]
-    complete_daily_mission(api, results, token)
+    finish = {}
+    complete_daily_mission(api, results, token, capture=finish)
+
+    # Finishing must pay, and must announce the milestone it just crossed --
+    # both were silent in the app for their whole existence.
+    final = finish.get("final") or {}
+    results.check(
+        "mission.completion_pays_for_finishing",
+        (final.get("xp_awarded") or 0) >= 40,
+        f"xp_awarded={final.get('xp_awarded')!r}",
+    )
+    results.check(
+        "mission.first_mission_milestone_announced",
+        any(m.get("key") == "first_mission" for m in (final.get("milestones_unlocked") or [])),
+        f"milestones_unlocked={final.get('milestones_unlocked')!r}",
+    )
 
     status, daily = api.request("GET", "/api/daily", token=token)
     ok = results.check("mission.reflects_completed_state", status == 200, f"status={status}")
