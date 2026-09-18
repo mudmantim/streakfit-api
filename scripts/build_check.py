@@ -244,6 +244,94 @@ def check_exercise_illustrations() -> None:
         )
 
 
+# Routes that legitimately have no caller in static/app.js, with the reason.
+# Anything NOT listed here must be reachable from the app, or it is a feature
+# users cannot get to.
+UNCALLED_ROUTE_ALLOWLIST = {
+    "/api/admin/stats": "admin console (static/admin.html)",
+    "/api/admin/project-status": "admin console",
+    "/api/admin/system-health": "admin console",
+    "/api/admin/verify": "admin console",
+    "/api/admin/verify/status": "admin console",
+    "/api/admin/verify/history": "admin console",
+    "/api/challenges/<int:challenge_id>": "single-challenge detail; list view carries the same data",
+    "/api/teams/<int:team_id>/campfire": "campfire summary is embedded in GET /api/teams/<id>",
+}
+
+
+def check_api_routes_are_reachable() -> None:
+    """Every API route must be reachable from the frontend, or explicitly excused.
+
+    This exists because of the R2 team layer: several endpoints shipped working,
+    tested, and completely unreachable through the UI, and only a much later
+    stability review noticed. A route with no caller is not a finished feature,
+    so the build gate now says so out loud instead of leaving it to be found by
+    someone reading the code a year later.
+    """
+    global checks_run
+    checks_run += 1
+
+    app_py = (ROOT / "app.py").read_text(encoding="utf-8")
+    routes = re.findall(r"@app\.route\(\s*['\"]([^'\"]+)['\"]", app_py)
+    api_routes = sorted({r for r in routes if r.startswith("/api/")})
+    if not api_routes:
+        fail("found no /api/ routes in app.py — this check would pass vacuously")
+        return
+
+    raw = "\n".join(
+        (STATIC / name).read_text(encoding="utf-8")
+        for name in ("app.js", "admin.html")
+        if (STATIC / name).exists()
+    )
+    # Comments must not count as callers. A comment that merely *mentions* a
+    # route (including one explaining that the route had no caller) would
+    # otherwise satisfy this check and hide the very problem it exists to find.
+    caller_lines = []
+    in_block = False
+    for line in raw.splitlines():
+        stripped = line.strip()
+        if in_block:
+            if "*/" in stripped:
+                in_block = False
+                stripped = stripped.split("*/", 1)[1]
+            else:
+                continue
+        if stripped.startswith("/*"):
+            in_block = "*/" not in stripped
+            if not in_block:
+                stripped = stripped.split("*/", 1)[1]
+            else:
+                continue
+        if stripped.startswith("//") or stripped.startswith("*"):
+            continue
+        caller_lines.append(stripped)
+    callers = "\n".join(caller_lines)
+
+    unreachable = []
+    for route in api_routes:
+        # '/api/teams/<int:team_id>/messages' -> require "/api/teams/" and then
+        # "/messages" on the same line. The gap has to tolerate the way app.js
+        # builds these: string concatenation, quotes and template literals, e.g.
+        #   api('/api/teams/' + teamId + '/messages')
+        literal = re.sub(r"<[^>]+>", "\x00", route)
+        parts = [re.escape(p) for p in literal.split("\x00") if p]
+        pattern = "[^\\n]{0,80}?".join(parts)
+        if not re.search(pattern, callers):
+            if route not in UNCALLED_ROUTE_ALLOWLIST:
+                unreachable.append(route)
+
+    if unreachable:
+        fail(
+            f"{len(unreachable)} API route(s) have no caller in the frontend — "
+            f"built but unreachable through the UI: {', '.join(unreachable)}. "
+            "Wire them up, or add them to UNCALLED_ROUTE_ALLOWLIST with a reason."
+        )
+
+    stale = [r for r in UNCALLED_ROUTE_ALLOWLIST if r not in api_routes]
+    if stale:
+        warn(f"allowlisted routes no longer exist in app.py: {', '.join(stale)}")
+
+
 def main() -> int:
     for check in (
         check_asset_references,
@@ -252,6 +340,7 @@ def main() -> int:
         check_json_files,
         check_app_imports,
         check_exercise_illustrations,
+        check_api_routes_are_reachable,
     ):
         try:
             check()

@@ -933,15 +933,206 @@ async function _loadTeamInfo(teamId) {
         _teamPanelMeta.textContent = data.member_count + (data.member_count === 1 ? ' member' : ' members');
     }
     if (_teamPanelStats) {
-        var stage = data.campfire.stage;
-        var total = data.campfire.total_team_missions;
-        var stageEmoji = CAMPFIRE_STAGE_EMOJI[stage] || '✨';
-        _teamPanelStats.textContent = stageEmoji + ' ' + stage + ' · ' + total + (total === 1 ? ' log' : ' logs');
+        // The campfire section below owns stage and log count now, so this
+        // line carries the thing you actually opened the panel to find out.
+        var movedToday = (data.members || []).filter(function (m) { return m.completed_today; }).length;
+        var totalMembers = (data.members || []).length;
+        _teamPanelStats.classList.toggle('has-moved', movedToday > 0);
+        if (movedToday === 0) {
+            _teamPanelStats.textContent = 'No one has logged a mission yet today';
+        } else if (movedToday === totalMembers) {
+            _teamPanelStats.textContent = totalMembers === 1
+                ? '\u2713 You moved today'
+                : '\u2713 Everyone moved today';
+        } else {
+            _teamPanelStats.textContent = '\u2713 ' + movedToday + ' of ' + totalMembers + ' moved today';
+        }
     }
 
+    _teamPanelInfo.appendChild(_buildCampfireSection(data));
     _teamPanelInfo.appendChild(_buildRosterSection(data));
     _teamPanelInfo.appendChild(_buildInviteSection(data));
     _teamPanelInfo.appendChild(_buildLeaveTeamRow(data));
+
+    // Moments last: it is history, not news. Loaded separately so a slow or
+    // failing history never holds up the roster, which is what people open
+    // the panel for.
+    var momentsSection = _buildMomentsSection();
+    _teamPanelInfo.appendChild(momentsSection);
+    _loadTeamMoments(teamId, momentsSection);
+}
+
+
+// The campfire is the team's shared object -- the thing that grows because
+// everyone kept showing up. It was previously one line of text, which is a
+// poor showing for the only thing a team collectively owns. Thresholds come
+// from the API (`_campfire_progress`) so they are never duplicated here.
+function _buildCampfireSection(data) {
+    var wrap = document.createElement('div');
+    wrap.className = 'team-panel-info-section team-campfire-section';
+
+    var c = data.campfire || {};
+    var total = c.total_team_missions || 0;
+
+    var head = document.createElement('div');
+    head.className = 'campfire-head';
+
+    var flame = document.createElement('span');
+    flame.className = 'campfire-flame campfire-flame-' +
+        String(c.stage || 'Kindling').toLowerCase().replace(/\s+/g, '-');
+    flame.setAttribute('aria-hidden', 'true');
+    flame.textContent = CAMPFIRE_STAGE_EMOJI[c.stage] || '\u2728';
+    head.appendChild(flame);
+
+    var headText = document.createElement('div');
+    var stageEl = document.createElement('p');
+    stageEl.className = 'campfire-stage';
+    stageEl.textContent = c.stage || 'Kindling';
+    headText.appendChild(stageEl);
+
+    var logsEl = document.createElement('p');
+    logsEl.className = 'campfire-logs';
+    logsEl.textContent = total + (total === 1 ? ' log' : ' logs') + ' on the fire';
+    headText.appendChild(logsEl);
+    head.appendChild(headText);
+    wrap.appendChild(head);
+
+    if (c.next_stage) {
+        var track = document.createElement('div');
+        track.className = 'campfire-track';
+        track.setAttribute('role', 'progressbar');
+        track.setAttribute('aria-valuemin', '0');
+        track.setAttribute('aria-valuemax', '100');
+        var pct = Math.round((c.progress_to_next_stage || 0) * 100);
+        track.setAttribute('aria-valuenow', String(pct));
+        track.setAttribute('aria-label', 'Progress to ' + c.next_stage);
+
+        var fill = document.createElement('div');
+        fill.className = 'campfire-fill';
+        // Always show a sliver so a brand-new campfire doesn't look broken.
+        fill.style.width = Math.max(pct, 2) + '%';
+        track.appendChild(fill);
+        wrap.appendChild(track);
+
+        var cap = document.createElement('p');
+        cap.className = 'campfire-caption';
+        cap.textContent = c.logs_to_next_stage + ' more to reach ' + c.next_stage;
+        wrap.appendChild(cap);
+    } else {
+        var top = document.createElement('p');
+        top.className = 'campfire-caption';
+        top.textContent = "The brightest it gets \u2014 and still burning.";
+        wrap.appendChild(top);
+    }
+
+    return wrap;
+}
+
+
+function _buildMomentsSection() {
+    var wrap = document.createElement('div');
+    wrap.className = 'team-panel-info-section team-moments-section';
+
+    var label = document.createElement('p');
+    label.className = 'team-panel-section-label';
+    label.textContent = 'Team history';
+    wrap.appendChild(label);
+
+    var body = document.createElement('div');
+    body.className = 'team-moments-body';
+    var loading = document.createElement('p');
+    loading.className = 'team-moments-empty';
+    loading.textContent = 'Looking back through it\u2026';
+    body.appendChild(loading);
+    wrap.appendChild(body);
+
+    return wrap;
+}
+
+
+// `/api/teams/<id>/moments` has existed, humanised and tested, with no caller
+// in the app at all -- the "shipped but unreachable through the UI" failure
+// CLAUDE.md's verification standard was written after. This is its first
+// consumer.
+var TEAM_MOMENT_ICON = {
+    team_created:          '\uD83C\uDFD5\uFE0F',
+    member_joined:         '\uD83D\uDC4B',
+    member_left:           '\uD83D\uDC4B',
+    campfire_log_added:    '\uD83E\uDeB5',
+    campfire_stage_reached:'\u2B50'
+};
+var TEAM_MOMENTS_SHOWN = 8;
+
+async function _loadTeamMoments(teamId, section) {
+    var body = section.querySelector('.team-moments-body');
+    if (!body) return;
+
+    var result = await api('/api/teams/' + teamId + '/moments');
+    if (_teamPanelTeamId !== teamId) return;   // panel moved on while we waited
+    body.innerHTML = '';
+
+    if (!result || result.status !== 200) {
+        var err = document.createElement('p');
+        err.className = 'team-moments-empty';
+        err.textContent = "Couldn't load the team's history just now.";
+        body.appendChild(err);
+        return;
+    }
+
+    var moments = result.data || [];
+    if (!moments.length) {
+        var empty = document.createElement('p');
+        empty.className = 'team-moments-empty';
+        empty.textContent = 'Your history starts here.';
+        body.appendChild(empty);
+        return;
+    }
+
+    // Newest first, and only a recent slice: this is a glance back, not an
+    // audit log. The Memory Book is where a full history would belong.
+    moments.slice(0, TEAM_MOMENTS_SHOWN).forEach(function (m) {
+        var row = document.createElement('div');
+        row.className = 'team-moment-row';
+
+        var icon = document.createElement('span');
+        icon.className = 'team-moment-icon';
+        icon.setAttribute('aria-hidden', 'true');
+        icon.textContent = TEAM_MOMENT_ICON[m.moment_type] || '\u2022';
+        row.appendChild(icon);
+
+        var textWrap = document.createElement('div');
+        var text = document.createElement('p');
+        text.className = 'team-moment-text';
+        text.textContent = m.display_text;
+        textWrap.appendChild(text);
+
+        var when = _momentWhen(m.occurred_at);
+        if (when) {
+            var whenEl = document.createElement('p');
+            whenEl.className = 'team-moment-when';
+            whenEl.textContent = when;
+            textWrap.appendChild(whenEl);
+        }
+        row.appendChild(textWrap);
+        body.appendChild(row);
+    });
+}
+
+
+function _momentWhen(iso) {
+    if (!iso) return '';
+    // Server timestamps are naive UTC; without the marker the browser reads
+    // them as local time and "just now" becomes hours off.
+    var then = new Date(/[Zz]|[+-]\d{2}:?\d{2}$/.test(iso) ? iso : iso + 'Z');
+    if (isNaN(then.getTime())) return '';
+    var mins = Math.floor((Date.now() - then.getTime()) / 60000);
+    if (mins < 1) return 'just now';
+    if (mins < 60) return mins + (mins === 1 ? ' minute ago' : ' minutes ago');
+    var hrs = Math.floor(mins / 60);
+    if (hrs < 24) return hrs + (hrs === 1 ? ' hour ago' : ' hours ago');
+    var days = Math.floor(hrs / 24);
+    if (days < 7) return days + (days === 1 ? ' day ago' : ' days ago');
+    return then.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 }
 
 // What a member's row says about today. Deliberately has no "missed it" state:

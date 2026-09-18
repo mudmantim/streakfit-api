@@ -2675,6 +2675,39 @@ def _campfire_stage(total_missions):
             stage = name
     return stage
 
+def _campfire_progress(total_missions):
+    """Stage plus how far along it is, so the UI never hard-codes thresholds.
+
+    `next_stage` is None at the top stage — a campfire that has arrived
+    somewhere is not "0% of the way to nothing", and the UI shows the total
+    instead of an empty bar.
+    """
+    stage = _campfire_stage(total_missions)
+    stage_at = 0
+    next_stage = None
+    next_stage_at = None
+    for threshold, name in CAMPFIRE_STAGE_THRESHOLDS:
+        if total_missions >= threshold:
+            stage_at = threshold
+        elif next_stage is None:
+            next_stage, next_stage_at = name, threshold
+
+    progress = None
+    if next_stage_at is not None:
+        span = next_stage_at - stage_at
+        progress = round((total_missions - stage_at) / span, 4) if span > 0 else 0.0
+
+    return {
+        "total_team_missions": total_missions,
+        "stage": stage,
+        "stage_at": stage_at,
+        "next_stage": next_stage,
+        "next_stage_at": next_stage_at,
+        "logs_to_next_stage": (next_stage_at - total_missions) if next_stage_at is not None else None,
+        "progress_to_next_stage": progress,
+    }
+
+
 def _generate_team_invite_code():
     alphabet = string.ascii_uppercase + string.digits
     for _ in range(20):
@@ -2891,10 +2924,7 @@ def get_team(team_id):
         "member_count": len(members),
         "member_cap": _team_member_cap(team_id),
         "invite_code": invite.code if invite else None,
-        "campfire": {
-            "total_team_missions": total_missions,
-            "stage": _campfire_stage(total_missions),
-        },
+        "campfire": _campfire_progress(total_missions),
     }), 200
 
 
@@ -3039,11 +3069,9 @@ def get_team_campfire(team_id):
     if not campfire:
         abort(404)
 
-    return jsonify({
-        "team_id": team_id,
-        "total_team_missions": campfire.total_team_missions,
-        "stage": _campfire_stage(campfire.total_team_missions),
-    }), 200
+    payload = {"team_id": team_id}
+    payload.update(_campfire_progress(campfire.total_team_missions))
+    return jsonify(payload), 200
 
 
 def _moment_display_text(moment_type, subject_username, metadata):
