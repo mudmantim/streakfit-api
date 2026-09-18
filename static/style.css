@@ -1504,6 +1504,20 @@ input:focus {
     margin: 0 0 .7rem;
 }
 
+/* The same-day witness line on a team card. Green when someone moved, quiet
+   grey when nobody has yet -- never red, never an alarm: an absence of good
+   news is not bad news. */
+.team-card-witness {
+    font-size: .82rem;
+    font-weight: 600;
+    color: var(--gray-500);
+    margin: 0 0 .7rem;
+}
+
+.team-card-witness.has-moved {
+    color: var(--green);
+}
+
 .team-card-open-btn {
     padding: .5rem 1rem;
     border-radius: var(--radius);
@@ -1693,9 +1707,26 @@ input:focus {
     font-size: .85rem;
 }
 
+.team-roster-main {
+    display: flex;
+    flex-direction: column;
+    gap: .15rem;
+    min-width: 0;   /* lets a long username wrap instead of pushing Remove off-row */
+}
+
 .team-roster-name {
     color: var(--gray-700);
     word-break: break-word;
+}
+
+.team-roster-status {
+    font-size: .78rem;
+    color: var(--gray-500);
+}
+
+.team-roster-status.is-done {
+    color: var(--green);
+    font-weight: 600;
 }
 
 .team-roster-remove-btn {

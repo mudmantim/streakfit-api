@@ -465,6 +465,22 @@ function _buildTeamCard(team) {
         team.total_team_missions + (team.total_team_missions === 1 ? ' log' : ' logs');
     card.appendChild(stats);
 
+    // The same-day witness line: the one thing you actually open the app to
+    // find out about the people you share a campfire with. A count of who
+    // moved, never a list of who didn't.
+    var moved = document.createElement('p');
+    moved.className = 'team-card-witness';
+    var movedToday = team.moved_today || 0;
+    if (movedToday > 0) {
+        moved.classList.add('has-moved');
+        moved.textContent = movedToday === team.member_count
+            ? (team.member_count === 1 ? '\u2713 You moved today' : '\u2713 Everyone moved today')
+            : '\u2713 ' + movedToday + ' of ' + team.member_count + ' moved today';
+    } else {
+        moved.textContent = 'No one has logged a mission yet today';
+    }
+    card.appendChild(moved);
+
     var openBtn = document.createElement('button');
     openBtn.className = 'team-card-open-btn team-card-open-btn-active';
     openBtn.textContent = 'Open';
@@ -928,6 +944,24 @@ async function _loadTeamInfo(teamId) {
     _teamPanelInfo.appendChild(_buildLeaveTeamRow(data));
 }
 
+// What a member's row says about today. Deliberately has no "missed it" state:
+// someone who hasn't moved yet simply has nothing said about their day, which
+// is the difference between witnessing and supervising. Never punish who
+// showed up -- and never report on who hasn't.
+function _rosterStatusText(m) {
+    var parts = [];
+    if (m.completed_today) {
+        parts.push('\u2713 Moved today');
+    } else if (m.completed_today_count > 0) {
+        parts.push(m.completed_today_count + ' of 5 today');
+    }
+    if (m.current_streak > 0) {
+        parts.push('\uD83D\uDD25 ' + m.current_streak + (m.current_streak === 1 ? ' day' : ' days'));
+    }
+    return parts.join('  \u00b7  ');
+}
+
+
 function _buildRosterSection(data) {
     var wrap = document.createElement('div');
     wrap.className = 'team-panel-info-section';
@@ -944,10 +978,27 @@ function _buildRosterSection(data) {
         var row = document.createElement('div');
         row.className = 'team-roster-row';
 
+        // Name + today's status + streak, and nothing else. This is the
+        // witness-only model from Teams v1: enough to see that the people you
+        // share a campfire with showed up, never enough to rank them.
+        var main = document.createElement('div');
+        main.className = 'team-roster-main';
+
         var name = document.createElement('span');
         name.className = 'team-roster-name';
         name.textContent = m.username + (m.is_creator ? ' (Creator)' : '');
-        row.appendChild(name);
+        main.appendChild(name);
+
+        var status = _rosterStatusText(m);
+        if (status) {
+            var statusEl = document.createElement('span');
+            statusEl.className = 'team-roster-status';
+            if (m.completed_today) statusEl.classList.add('is-done');
+            statusEl.textContent = status;
+            main.appendChild(statusEl);
+        }
+
+        row.appendChild(main);
 
         // Creator can remove any other member -- never themselves (Leave
         // Team is that action) and never rendered for anyone but the creator.

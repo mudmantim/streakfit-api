@@ -2730,22 +2730,49 @@ def list_teams():
         db.select(TeamMembership).where(TeamMembership.user_id == user_id)
     ).scalars().all()
 
+    team_ids = [m.team_id for m in memberships]
+    if not team_ids:
+        return jsonify([]), 200
+
+    # Batched: the per-team loop used to issue three queries per team, and
+    # adding the same-day witness line on top of that would have made every
+    # extra team cost a streak walk as well.
+    teams = {t.id: t for t in db.session.execute(
+        db.select(Team).where(Team.id.in_(team_ids))
+    ).scalars().all()}
+
+    all_memberships = db.session.execute(
+        db.select(TeamMembership).where(TeamMembership.team_id.in_(team_ids))
+    ).scalars().all()
+    members_by_team = {}
+    for m in all_memberships:
+        members_by_team.setdefault(m.team_id, []).append(m.user_id)
+
+    campfires = {c.team_id: c.total_team_missions for c in db.session.execute(
+        db.select(TeamCampfire).where(TeamCampfire.team_id.in_(team_ids))
+    ).scalars().all()}
+
+    witness = _witness_for_ids(m.user_id for m in all_memberships)
+
     result = []
-    for m in memberships:
-        team = db.session.get(Team, m.team_id)
-        member_count = db.session.execute(
-            db.select(db.func.count(TeamMembership.id)).where(TeamMembership.team_id == team.id)
-        ).scalar()
-        campfire = db.session.execute(
-            db.select(TeamCampfire).where(TeamCampfire.team_id == team.id)
-        ).scalar_one_or_none()
-        total_missions = campfire.total_team_missions if campfire else 0
+    for team_id in team_ids:
+        team = teams.get(team_id)
+        if team is None:
+            continue   # defensive: membership row outliving its team
+        member_ids = members_by_team.get(team_id, [])
+        total_missions = campfires.get(team_id, 0)
         result.append({
             "id": team.id,
             "name": team.name,
-            "member_count": member_count,
+            "member_count": len(member_ids),
             "campfire_stage": _campfire_stage(total_missions),
             "total_team_missions": total_missions,
+            # The witness line: how many of you moved today. A count, never a
+            # ranking -- who is missing is not named here.
+            "moved_today": sum(
+                1 for uid in member_ids
+                if witness.get(uid, {}).get('completed_today')
+            ),
         })
 
     return jsonify(result), 200
@@ -2796,16 +2823,25 @@ def get_team(team_id):
         db.select(TeamMembership).where(TeamMembership.team_id == team_id)
     ).scalars().all()
     usernames = _usernames_for_ids(m.user_id for m in memberships)
+    witness = _witness_for_ids(m.user_id for m in memberships)
     members = []
     for m in memberships:
         uname = usernames.get(m.user_id)
         if uname is None:
             continue   # defensive: orphaned membership (user row gone) — skip, don't 500
+        w = witness.get(m.user_id, {})
         members.append({
             "user_id": m.user_id,
             "username": uname,
             "is_creator": m.user_id == team.created_by_user_id,
+            "completed_today": w.get('completed_today', False),
+            "completed_today_count": w.get('completed_today_count', 0),
+            "current_streak": w.get('current_streak', 0),
         })
+    # Deliberately NOT sorted by streak or completion: a roster ordered by who
+    # is doing best is a leaderboard, which every team design doc rules out.
+    # Stable join order, creator first so the roster has a predictable shape.
+    members.sort(key=lambda mem: (not mem["is_creator"], mem["user_id"]))
 
     invite = db.session.execute(
         db.select(TeamInviteCode).where(TeamInviteCode.team_id == team_id)
@@ -3078,6 +3114,64 @@ def _usernames_for_ids(user_ids):
         db.select(User.id, User.username).where(User.id.in_(ids))
     ).all()
     return {rid: uname for rid, uname in rows}
+
+
+def _witness_for_ids(user_ids):
+    """Batch-resolve {user_id: {completed_today_count, completed_today, current_streak}}.
+
+    This is the "witness" data the team roster is actually for: whether the
+    people you share a campfire with have moved today, and how long they have
+    been going. Teams v1 called this the witness-only model -- name, today's
+    status, streak number -- and nothing more, because anything richer starts
+    turning a family into a leaderboard.
+
+    Two queries total, never one per member: the roster is the N+1 trap that
+    `_usernames_for_ids` already exists to avoid, and this walks the same rows.
+    """
+    ids = {i for i in user_ids if i}
+    if not ids:
+        return {}
+
+    today = date.today()
+
+    today_counts = dict(db.session.execute(
+        db.select(DailyCompletion.user_id, db.func.count(DailyCompletion.exercise_key))
+        .where(DailyCompletion.user_id.in_(ids), DailyCompletion.date == today)
+        .group_by(DailyCompletion.user_id)
+    ).all())
+
+    # One row per (user, day they completed a full mission) -- the same
+    # ">= 5 completions" definition of a mission day that get_user_stats uses.
+    mission_days = {}
+    rows = db.session.execute(
+        db.select(DailyCompletion.user_id, DailyCompletion.date)
+        .where(DailyCompletion.user_id.in_(ids))
+        .group_by(DailyCompletion.user_id, DailyCompletion.date)
+        .having(db.func.count(DailyCompletion.exercise_key) >= 5)
+    ).all()
+    for uid, d in rows:
+        mission_days.setdefault(uid, set()).add(d)
+
+    yesterday = today - timedelta(days=1)
+    witness = {}
+    for uid in ids:
+        day_set = mission_days.get(uid, set())
+        # A streak is only "broken" once today has also passed without a
+        # mission, so someone mid-day who hasn't started yet still shows the
+        # streak they went to bed with. Never punish who showed up.
+        check = today if today in day_set else yesterday
+        streak = 0
+        while check in day_set:
+            streak += 1
+            check -= timedelta(days=1)
+
+        count_today = today_counts.get(uid, 0)
+        witness[uid] = {
+            'completed_today_count': count_today,
+            'completed_today': count_today >= 5,
+            'current_streak': streak,
+        }
+    return witness
 
 
 def _serialize_team_message(m, usernames=None):
