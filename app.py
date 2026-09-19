@@ -1102,6 +1102,33 @@ RICKIE_JOKES = [
 _JOKE_TRIGGER_WORDS = ('joke', 'funny', 'silly', 'laugh', 'pun', 'hilarious')
 
 
+def get_recent_week(user_id):
+    """The last seven days, oldest first: did a mission happen on each one?
+
+    Answering "am I actually getting anywhere" from data the product already
+    had. Deliberately only reports the days that DID happen -- a blank day is
+    blank, never marked, never counted, never coloured as a miss.
+    """
+    today = date.today()
+    start = today - timedelta(days=6)
+    done = set(db.session.execute(
+        db.select(DailyCompletion.date)
+        .where(DailyCompletion.user_id == user_id, DailyCompletion.date >= start)
+        .group_by(DailyCompletion.date)
+        .having(db.func.count(DailyCompletion.exercise_key) >= 5)
+    ).scalars().all())
+    out = []
+    for offset in range(6, -1, -1):
+        d = today - timedelta(days=offset)
+        out.append({
+            'date': d.isoformat(),
+            'letter': ['M', 'T', 'W', 'T', 'F', 'S', 'S'][d.weekday()],
+            'done': d in done,
+            'is_today': d == today,
+        })
+    return out
+
+
 def get_user_stats(user_id):
     """Return current_streak, best_streak, total_missions, and brain_boost_answers."""
     completed_dates = sorted(set(db.session.execute(
@@ -2189,6 +2216,9 @@ def get_me():
         "best_streak": stats['best_streak'],
         "total_missions": stats['total_missions'],
         "brain_boost_answers": stats['brain_boost_answers'],
+        # The last seven days, so progress is something a person can see rather
+        # than a level number they have to take on trust.
+        "recent_week": get_recent_week(user_id),
         "xp_total": user.xp_total,
         "acorns_total": user.acorns_total,
         "level": level_info['level'],
@@ -3762,6 +3792,13 @@ def list_teams():
 
     witness = _witness_for_ids(m.user_id for m in all_memberships)
 
+    # Newest message per team, for "something happened while I was away".
+    last_activity = dict(db.session.execute(
+        db.select(TeamMessage.team_id, db.func.max(TeamMessage.created_at))
+        .where(TeamMessage.team_id.in_(team_ids))
+        .group_by(TeamMessage.team_id)
+    ).all())
+
     # Open challenges, so a challenge waiting for you is visible from the
     # dashboard instead of only inside the team panel's chat tab. A reason to
     # come back should not need three taps to discover.
@@ -3803,6 +3840,12 @@ def list_teams():
                 if witness.get(uid, {}).get('completed_today')
             ),
             "open_challenges": open_by_team.get(team_id, 0),
+            # The timestamp of the newest thing in this team. The client
+            # compares it against what it last saw, so "new" means new TO YOU
+            # without the server tracking read state per person.
+            "last_activity_at": (
+                last_activity[team_id].isoformat() if team_id in last_activity else None
+            ),
         })
 
     return jsonify(result), 200

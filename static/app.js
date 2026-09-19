@@ -56,14 +56,10 @@ function _getOrCreatePromptsContainer() {
         // Place retention prompts BELOW Today's Mission — the mission should
         // lead the screen; a permission ask never sits on top of it or pushes
         // it down on load.
-        var missionSection = (document.getElementById('daily-exercises-list') || {}).closest
-            ? document.getElementById('daily-exercises-list').closest('section')
-            : null;
-        if (missionSection) {
-            missionSection.insertAdjacentElement('afterend', el);
-        } else if (main) {
-            main.appendChild(el);
-        }
+        // At the end, with the other utilities. Directly under the mission put
+        // a permission ask in the second-most valuable position on the page,
+        // ahead of the user's own progress.
+        if (main) main.appendChild(el);
     }
     return el;
 }
@@ -262,7 +258,8 @@ function renderJourneyCard() {
 
     document.getElementById('journey-xp-caption').textContent = xpToNext + ' XP to next level';
 
-    document.getElementById('journey-acorns-value').textContent = currentUser.acorns_total || 0;
+    document.getElementById('journey-acorns-value').textContent = _acornsAvailable();
+    _renderWeekStrip();
     var messageEl = document.getElementById('journey-message');
     if (_rickieMode() === 'minimal') {
         messageEl.hidden = true;
@@ -273,6 +270,67 @@ function renderJourneyCard() {
 
     journeyCard.hidden = false;
 }
+
+// Spendable acorns, not lifetime earned. Showing a number the person cannot
+// actually spend is the kind of small dishonesty that makes a reward feel fake.
+function _acornsAvailable() {
+    if (!currentUser) return 0;
+    var earned = currentUser.acorns_total || 0;
+    var spent = currentUser.acorns_spent || 0;
+    return Math.max(0, earned - spent);
+}
+
+// The last seven days as dots. "Am I actually getting anywhere" was previously
+// answered with a level number and an XP bar, which is a claim rather than
+// evidence. Days that happened glow; days that did not are simply plain —
+// never red, never crossed out, never totted up.
+function _renderWeekStrip() {
+    var card = document.getElementById('journey-card');
+    if (!card || !currentUser) return;
+    var week = currentUser.recent_week;
+    if (!week || !week.length) return;
+
+    var existing = card.querySelector('.week-strip');
+    if (existing) existing.remove();
+    var oldCaption = card.querySelector('.week-caption');
+    if (oldCaption) oldCaption.remove();
+
+    var strip = document.createElement('div');
+    strip.className = 'week-strip';
+    week.forEach(function (day) {
+        var cell = document.createElement('div');
+        cell.className = 'week-day';
+        var dot = document.createElement('span');
+        dot.className = 'week-dot' + (day.done ? ' is-done' : '') + (day.is_today ? ' is-today' : '');
+        dot.textContent = day.done ? '\u2713' : '';
+        dot.setAttribute('role', 'img');
+        dot.setAttribute('aria-label', day.date + (day.done ? ': mission done' : ''));
+        var label = document.createElement('span');
+        label.className = 'week-label';
+        label.textContent = day.letter;
+        cell.appendChild(dot);
+        cell.appendChild(label);
+        strip.appendChild(cell);
+    });
+
+    var caption = document.createElement('p');
+    caption.className = 'week-caption';
+    var moved = week.filter(function (d) { return d.done; }).length;
+    // Always phrased as what happened. Never "you missed 3 days".
+    caption.textContent = moved === 0
+        ? 'This week is a fresh page.'
+        : (moved === 7 ? 'Every day this week.' : moved + (moved === 1 ? ' day' : ' days') + ' moved this week.');
+
+    var anchorEl = card.querySelector('.journey-acorns-row');
+    if (anchorEl) {
+        card.insertBefore(strip, anchorEl);
+        card.insertBefore(caption, anchorEl);
+    } else {
+        card.appendChild(strip);
+        card.appendChild(caption);
+    }
+}
+
 
 // ── Teams (R2.2 Team List UI) ────────────────────────────────────────────────
 // Read-only display of R2.1's team data. No create/join actions wired here —
@@ -402,7 +460,10 @@ function _buildTeamRickieCard() {
     var streak = (currentUser && currentUser.current_streak) || 0;
     var stats = document.createElement('p');
     stats.className = 'team-card-stats';
-    stats.textContent = '🔥 ' + streak + (streak === 1 ? ' day' : ' days') + ' together';
+    // "days together" reads oddly for someone with no team — Rickie IS the
+    // company here, so he counts the days he has been along for.
+    stats.textContent = '\uD83D\uDD25 ' + streak + (streak === 1 ? ' day' : ' days')
+        + ' with Rickie';
     card.appendChild(stats);
 
     return card;
@@ -434,6 +495,24 @@ function _applyCampfireUpdates(updates) {
         statsEl.textContent = stageEmoji + ' ' + u.stage + ' · ' +
             u.total_team_missions + (u.total_team_missions === 1 ? ' log' : ' logs');
     });
+}
+
+// Compared against what this device last saw. Deliberately not a server-side
+// read receipt: nobody needs to know who has looked at what, and a family app
+// should not quietly build that.
+function _teamSeenKey(teamId) { return 'sf_team_seen_' + teamId; }
+
+function _teamHasNewActivity(team) {
+    if (!team.last_activity_at) return false;
+    var seen = null;
+    try { seen = localStorage.getItem(_teamSeenKey(team.id)); } catch (e) { return false; }
+    if (!seen) return false;           // never opened it: not "new", just new to them
+    var latest = _parseServerTime(team.last_activity_at);
+    return !!latest && latest > new Date(seen);
+}
+
+function _markTeamSeen(teamId) {
+    try { localStorage.setItem(_teamSeenKey(teamId), new Date().toISOString()); } catch (e) { /* private mode */ }
 }
 
 function _buildTeamCard(team) {
@@ -480,6 +559,17 @@ function _buildTeamCard(team) {
         moved.textContent = 'No one has logged a mission yet today';
     }
     card.appendChild(moved);
+
+    // "Something happened while I wasn't here." A dot, never a count: a rising
+    // number is an anxiety mechanic, and this product does not use those. Read
+    // state lives in localStorage on the device, so the server never has to
+    // track who has seen what.
+    if (_teamHasNewActivity(team)) {
+        var isNew = document.createElement('p');
+        isNew.className = 'team-card-new';
+        isNew.textContent = 'New since you were here';
+        card.appendChild(isNew);
+    }
 
     // A challenge waiting is the single best reason to open the app tomorrow,
     // so it says so here rather than hiding two taps inside the chat tab.
@@ -975,6 +1065,7 @@ function openTeamPanel(team) {
     _teamPanelOverlay.classList.add('open');
     document.body.style.overflow = 'hidden';
 
+    _markTeamSeen(team.id);
     _loadTeamInfo(team.id);
     _loadTeamMessages(team.id);
 }
@@ -1215,12 +1306,21 @@ async function _loadTeamMoments(teamId, section) {
 }
 
 
+// Server timestamps are naive UTC. Without the marker the browser reads them as
+// LOCAL time, which silently shifts everything by the timezone offset — it made
+// "just now" hours wrong, and then made every team look like it had new
+// activity forever. One parser, used everywhere, so that can only be fixed or
+// broken in one place.
+function _parseServerTime(iso) {
+    if (!iso) return null;
+    var d = new Date(/[Zz]|[+-]\d{2}:?\d{2}$/.test(iso) ? iso : iso + 'Z');
+    return isNaN(d.getTime()) ? null : d;
+}
+
 function _momentWhen(iso) {
     if (!iso) return '';
-    // Server timestamps are naive UTC; without the marker the browser reads
-    // them as local time and "just now" becomes hours off.
-    var then = new Date(/[Zz]|[+-]\d{2}:?\d{2}$/.test(iso) ? iso : iso + 'Z');
-    if (isNaN(then.getTime())) return '';
+    var then = _parseServerTime(iso);
+    if (!then) return '';
     var mins = Math.floor((Date.now() - then.getTime()) / 60000);
     if (mins < 1) return 'just now';
     if (mins < 60) return mins + (mins === 1 ? ' minute ago' : ' minutes ago');
@@ -2603,6 +2703,63 @@ async function _sendPhoto(teamId, canvas, caption, sendBtn, objectUrl) {
 }
 
 
+// The today strip: Rickie, one line from him, and the streak at the size the
+// streak deserves. It replaces a bordered notice inside the mission card, and
+// it is the first thing on the page for a reason — what can I do now, and how
+// am I doing, answered before any scrolling.
+function _renderTodayStrip(daily) {
+    var greetingEl = document.getElementById('today-greeting');
+    if (greetingEl) {
+        if (_rickieMode() === 'minimal') {
+            greetingEl.textContent = daily.completed_count >= 5
+                ? 'Today’s mission is done.'
+                : 'Today’s mission is ready.';
+        } else {
+            if (!_cachedGreetingLine) {
+                var pool = isGuest ? 'guest' : _rickieTimeOfDayPool();
+                _cachedGreetingLine = _pickRickieLine(pool);
+            }
+            greetingEl.textContent = daily.completed_count >= 5
+                ? _cachedGreetingLine + ' That’s today done.'
+                : _cachedGreetingLine;
+        }
+    }
+
+    var avatar = document.getElementById('today-rickie');
+    if (avatar) avatar.src = RICKIE_EXPRESSION_SVG[currentRickieExpression] || '/static/rickie.svg';
+
+    var slot = document.getElementById('today-streak-slot');
+    if (!slot) return;
+    slot.innerHTML = '';
+
+    var streak = (currentUser && currentUser.current_streak) || 0;
+    if (streak > 0) {
+        var row = document.createElement('p');
+        row.className = 'today-streak';
+        var n = document.createElement('span');
+        n.className = 'today-streak-number';
+        n.textContent = '\uD83D\uDD25 ' + streak;
+        var label = document.createElement('span');
+        label.className = 'today-streak-label';
+        label.textContent = streak === 1 ? 'day streak' : 'day streak';
+        row.appendChild(n);
+        row.appendChild(label);
+        slot.appendChild(row);
+        return;
+    }
+
+    // No streak yet, or none right now. This says what is available today and
+    // never what was lost — there is no "your streak ended" state anywhere in
+    // StreakFit, by design.
+    var none = document.createElement('p');
+    none.className = 'today-streak-none';
+    none.textContent = daily.completed_count >= 5
+        ? 'Day 1. The streak starts here.'
+        : 'Finish all five to start a streak.';
+    slot.appendChild(none);
+}
+
+
 // ── Rickie's voice ──────────────────────────────────────────────────────────────
 // Every line in here follows the same rules, everywhere Rickie speaks:
 // he never guilts, nags, pressures, compares, or manipulates. He notices,
@@ -3788,56 +3945,26 @@ async function loadDailyExercises() {
     // Varies by time of day (and by guest vs. registered) instead of a single
     // fixed line every visit — small thing, but it's the difference between
     // software and a companion who's actually there in the moment.
-    var rickieIntro = document.getElementById('rickie-mission-intro');
-    if (rickieIntro) {
-        rickieIntro.hidden = daily.completed_count >= 5;
-        var introTextEl = document.getElementById('rickie-intro-text');
-        if (introTextEl && !rickieIntro.hidden) {
-            if (_rickieMode() === 'minimal') {
-                // No personality greeting — plain functional line only.
-                introTextEl.textContent = 'Complete today’s mission and come see me afterward.';
-            } else {
-                // Picked once per page load and reused across re-renders (e.g.
-                // after each of exercises 1-4) so the greeting doesn't flicker
-                // to a new line after every click — just once per visit.
-                if (!_cachedGreetingLine) {
-                    var greetingPool = isGuest ? 'guest' : _rickieTimeOfDayPool();
-                    _cachedGreetingLine = _pickRickieLine(greetingPool);
-                }
-                introTextEl.textContent = _cachedGreetingLine + ' Complete today’s mission and come see me afterward.';
-            }
-        }
-    }
+    _renderTodayStrip(daily);
 
     // Populate streak helper text (below progress bar, hidden when mission complete)
     var helperEl = document.getElementById('daily-streak-helper');
     if (helperEl) {
         if (daily.completed_count < 5) {
-            var helperStreak = (currentUser && currentUser.current_streak) || 0;
-            helperEl.textContent = helperStreak > 0
-                ? 'Complete all 5 to keep your streak'
-                : 'Complete all 5 to start your streak';
+            // The today strip above already carries the streak, so this says
+            // what is left to do rather than repeating the number a third time.
+            helperEl.textContent = 'Five small moves. Any order.';
             helperEl.hidden = false;
         } else {
             helperEl.hidden = true;
         }
     }
 
-    // Populate streak badge (hidden when streak is 0)
+    // The streak badge inside the mission card is gone: the today strip above
+    // states the streak once, at the size it deserves. It was being said three
+    // times on one screen — badge, helper line, and stats row.
     var streakBadge = document.getElementById('daily-streak-badge');
-    if (streakBadge) {
-        var streak = (currentUser && currentUser.current_streak) || 0;
-        if (streak > 0) {
-            // Days 1–6: journey framing ("Day N") — you are at a point on a path
-            // Day 7+:   record framing ("N days") — you have built something
-            streakBadge.textContent = streak <= 6
-                ? '🔥 Day ' + streak
-                : '🔥 ' + streak + ' days';
-            streakBadge.hidden = false;
-        } else {
-            streakBadge.hidden = true;
-        }
-    }
+    if (streakBadge) streakBadge.hidden = true;
 
     // Populate stats row (current streak · best streak · total missions)
     var statsRow = document.getElementById('daily-stats-row');
@@ -3849,13 +3976,18 @@ async function loadDailyExercises() {
         // "you're behind" on a screen that should feel like a fresh start. The
         // streak helper below the bar carries the message until there's real
         // progress worth showing.
-        if (cs > 0 || bs > 0 || tm > 0) {
-            document.getElementById('stat-current-streak').textContent  =
-                '🔥 ' + cs + (cs === 1 ? ' day' : ' days');
+        if (bs > 0 || tm > 0) {
+            // Current streak is omitted here — the today strip owns it. What is
+            // left is the longer story: the best run so far, and the total.
+            document.getElementById('stat-current-streak').textContent =
+                '\uD83C\uDFC5 Best: ' + bs + (bs === 1 ? ' day' : ' days');
             document.getElementById('stat-best-streak').textContent =
-                '🏅 Best: ' + bs + (bs === 1 ? ' day' : ' days');
-            document.getElementById('stat-total-missions').textContent =
-                '✓ ' + tm + (tm === 1 ? ' mission' : ' missions');
+                '\u2713 ' + tm + (tm === 1 ? ' mission' : ' missions');
+            document.getElementById('stat-total-missions').textContent = '';
+            // Hide the separator that belonged to the third stat, or the row
+            // ends on a stray dot.
+            var seps = statsRow.querySelectorAll('.daily-stat-sep');
+            if (seps.length > 1) seps[seps.length - 1].hidden = true;
             statsRow.hidden = false;
         } else {
             statsRow.hidden = true;
@@ -3932,8 +4064,9 @@ async function loadDailyExercises() {
         rBtn.addEventListener('click', function () {
             localStorage.setItem('rise_again_dismissed', daily.date);
             list.removeChild(ceremony);
+            var nextKey = (daily.exercises.find(function (e) { return !e.completed; }) || {}).key;
             daily.exercises.forEach(function (ex) {
-                list.appendChild(renderDailyExercise(ex));
+                list.appendChild(renderDailyExercise(ex, ex.key === nextKey));
             });
             var pt = document.getElementById('daily-progress-text');
             if (pt) pt.textContent = daily.completed_count + ' / 5 completed';
@@ -4010,9 +4143,11 @@ async function loadDailyExercises() {
         }
     }
 
-    // Render exercises
+    // Render exercises. The first undone one is marked so the eye has somewhere
+    // to land; every one of them stays tappable in any order.
+    var _nextUndoneKey = (daily.exercises.find(function (e) { return !e.completed; }) || {}).key;
     daily.exercises.forEach(function (ex) {
-        list.appendChild(renderDailyExercise(ex));
+        list.appendChild(renderDailyExercise(ex, ex.key === _nextUndoneKey));
     });
 
     // Before completion, tease what's coming so a first-timer knows Insight and
@@ -5813,9 +5948,10 @@ var COACH_DATA = {
     }
 };
 
-function renderDailyExercise(ex) {
+function renderDailyExercise(ex, isNext) {
     var row = document.createElement('div');
-    row.className = 'daily-exercise-row' + (ex.completed ? ' daily-exercise-done' : '');
+    row.className = 'daily-exercise-row' + (ex.completed ? ' daily-exercise-done' : '')
+        + (isNext ? ' is-next' : '');
 
     // ── Exercise info (name + reps + how-to toggle) ──────────────────────────────
     var info = document.createElement('div');

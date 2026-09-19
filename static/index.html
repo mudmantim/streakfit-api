@@ -160,12 +160,19 @@
                 Guest mode — sign up anytime to save your streak.
             </p>
 
+            <!-- Today. Rickie and the streak live on the page itself rather
+                 than inside a bordered box in the mission card, which made him
+                 read as a system notice instead of a character. -->
+            <div class="today-strip">
+                <img src="/static/rickie.svg" alt="Rickie" class="today-rickie" id="today-rickie">
+                <div class="today-text">
+                    <p class="today-greeting" id="today-greeting">Rickie's getting today ready…</p>
+                    <div id="today-streak-slot"></div>
+                </div>
+            </div>
+
             <!-- Today's 5 ─────────────────────────────────────────── -->
             <section class="card daily-card">
-                <p id="rickie-mission-intro" class="rickie-mission-intro">
-                    <img src="/static/rickie.svg" alt="Rickie" class="rickie-avatar-sm">
-                    <span id="rickie-intro-text">Hi, I'm Rickie. Complete today's mission and come see me afterward.</span>
-                </p>
                 <div class="daily-header-row">
                     <div>
                         <h2 class="daily-title">Today's Mission</h2>
@@ -254,13 +261,6 @@
                 <div id="teams-list"></div>
             </section>
 
-            <!-- Install StreakFit ──────────────────────────────────── -->
-            <section id="install-card" class="card install-card" hidden>
-                <h3 class="install-card-title">Add StreakFit to your home screen</h3>
-                <button id="install-card-btn" class="btn-primary install-card-btn">Add to Home Screen</button>
-                <p id="install-card-instructions" class="install-card-instructions" hidden></p>
-            </section>
-
             <!-- Side Quests ─────────────────────────────────────────── -->
             <section id="side-quests-section" class="side-quests-section">
                 <div class="side-quests-header">
@@ -276,6 +276,15 @@
                     </div>
                     <p id="create-error" class="error" role="alert"></p>
                 </form>
+            </section>
+
+            <!-- Utilities last. These used to sit between the mission and the
+                 user's progress, which is the most valuable position on the
+                 page and not where an install prompt belongs. -->
+            <section id="install-card" class="card install-card" hidden>
+                <h3 class="install-card-title">Add StreakFit to your home screen</h3>
+                <button id="install-card-btn" class="btn-primary install-card-btn">Add to Home Screen</button>
+                <p id="install-card-instructions" class="install-card-instructions" hidden></p>
             </section>
 
         </main>
