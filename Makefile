@@ -122,3 +122,9 @@ freeze: ## Print the exact resolved dependency set (for lockfile reconciliation)
 clean: ## Remove the virtualenv, caches, and local SQLite DB
 	@rm -rf $(VENV) .pytest_cache **/__pycache__ streakfit.db instance
 	@echo "cleaned (kept .env)"
+
+content: ## Validate the content store (all batches)
+	@$(BIN)/python scripts/content/validate.py
+
+content-counts: ## Accepted / pending / rejected, by type and confidence
+	@$(BIN)/python scripts/content/validate.py --counts

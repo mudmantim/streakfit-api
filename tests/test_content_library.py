@@ -39,6 +39,12 @@ def _all_text():
         yield "boost-explanation", q["explanation"]
         for option in q["options"]:
             yield "boost-option", option
+    # The joke pool was never scanned. Sixty strings that Rickie says out loud,
+    # exempt from every vocabulary and tone rule in this file because nobody had
+    # added them to the generator — found by the content-store validator, which
+    # reads the whole library rather than the two lists somebody remembered.
+    for joke in appmod.RICKIE_JOKES:
+        yield "joke", joke
 
 
 # ── Never-negative, never medical ──────────────────────────────────────────
@@ -115,13 +121,17 @@ def test_the_same_person_gets_the_same_fact_all_day():
 
 def test_the_correct_answer_is_not_always_in_the_same_slot():
     """The original 40 had the answer at index 1 thirty times and never at 2 or
-    3, so 'always pick the second one' scored 75%."""
+    3, so 'always pick the second one' scored 75%.
+
+    Measured on the STORED order, which is now what gets served. A runtime
+    shuffle used to sit in between and has been removed: with the store
+    scattered too, it was applying its permutation a second time, and squaring
+    a permutation of four elements is not uniform — the answer came back to
+    where it started far too often. 27% at the most common position became 51%.
+    """
     from collections import Counter
 
-    spread = Counter(
-        appmod._presented_brain_boost(q)["correct_index"]
-        for q in appmod.BRAIN_BOOST_LIBRARY
-    )
+    spread = Counter(q["correct_index"] for q in appmod.BRAIN_BOOST_LIBRARY)
     assert set(spread) == {0, 1, 2, 3}, f"some positions are never correct: {dict(spread)}"
     most_common = spread.most_common(1)[0][1]
     assert most_common < len(appmod.BRAIN_BOOST_LIBRARY) * 0.4, (
@@ -129,17 +139,17 @@ def test_the_correct_answer_is_not_always_in_the_same_slot():
     )
 
 
-def test_option_order_is_stable_for_a_question():
-    """It is shuffled once, deterministically — not re-rolled per request, or
-    the answer a person is submitting would not be the one they read."""
-    q = appmod.BRAIN_BOOST_LIBRARY[0]
-    assert appmod._presented_brain_boost(q) == appmod._presented_brain_boost(q)
-
-
-def test_shuffling_options_keeps_the_right_answer_right():
-    for q in appmod.BRAIN_BOOST_LIBRARY:
-        shown = appmod._presented_brain_boost(q)
-        assert shown["options"][shown["correct_index"]] == q["options"][q["correct_index"]]
+def test_the_question_served_is_the_question_stored():
+    """Nothing reorders options between the store and the reader any more, so
+    the answer somebody submits is the one they read. This used to need a
+    stability test because a shuffle sat in the middle."""
+    for date_str in ("2026-01-01", "2026-06-15"):
+        shown = appmod.get_daily_brain_boost(date_str, user_id=7)
+        stored = next(q for q in appmod.BRAIN_BOOST_LIBRARY
+                      if q["question"] == shown["question"])
+        assert shown["options"] == stored["options"]
+        assert shown["correct_index"] == stored["correct_index"]
+        assert shown is not stored, "served a reference to the library itself"
 
 
 def test_the_answer_route_marks_the_presented_answer_correct(client):
@@ -358,3 +368,63 @@ def test_no_two_entries_say_the_same_thing():
         if len(wa & wb) / len(wa | wb) >= 0.40:
             dupes.append(f"{ta[:60]!r}\n    ~ {tb[:60]!r}")
     assert not dupes, "near-duplicate content:\n" + "\n".join(dupes[:5])
+
+
+# ── The content store ───────────────────────────────────────────────────────
+#
+# The library lives in content/items/*.jsonl now, not in application code. These
+# hold the properties that make that store trustworthy; the editorial gates live
+# in scripts/content/validate.py and run over the whole corpus.
+
+def test_the_store_is_what_the_application_serves():
+    """No parallel copy. If these ever diverge, one of them is a ghost."""
+    import streakfit_content as store
+
+    served = [i for i in store.ALL_ITEMS if i["status"] == "accepted"]
+    assert len(appmod.INSIGHT_LIBRARY) == sum(
+        1 for i in served if i["type"] in ("fact", "movement"))
+    assert len(appmod.BRAIN_BOOST_LIBRARY) == sum(1 for i in served if i["type"] == "trivia")
+    assert len(appmod.RICKIE_JOKES) == sum(1 for i in served if i["type"] == "joke")
+
+
+def test_every_id_is_unique_and_well_formed():
+    import streakfit_content as store
+
+    ids = [i["id"] for i in store.ALL_ITEMS]
+    assert len(set(ids)) == len(ids), "a content id is reused"
+    for item_id in ids:
+        assert re.match(r"^SF-[A-Z]{3}-\d{6}$", item_id), item_id
+
+
+def test_a_confident_claim_carries_a_source():
+    """The single rule that stops the library drifting back toward confident
+    nonsense as it grows: `established` means somebody looked it up."""
+    import streakfit_content as store
+
+    unsourced = [i["id"] for i in store.ALL_ITEMS
+                 if i["status"] == "accepted"
+                 and i["confidence"] == "established" and not i.get("sources")]
+    assert not unsourced, f"claimed as established with no source: {unsourced[:5]}"
+
+
+def test_only_accepted_content_reaches_a_reader():
+    import streakfit_content as store
+
+    texts = {e["text"] for e in appmod.INSIGHT_LIBRARY} | set(appmod.RICKIE_JOKES)
+    for item in store.ALL_ITEMS:
+        if item["status"] != "accepted" and item.get("text"):
+            assert item["text"] not in texts, f"{item['id']} is {item['status']} but served"
+
+
+def test_the_store_validator_passes():
+    """The editorial gates, run as a test so a batch cannot be merged red."""
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    root = Path(appmod.__file__).resolve().parent
+    result = subprocess.run(
+        [sys.executable, str(root / "scripts" / "content" / "validate.py")],
+        capture_output=True, text=True, timeout=300,
+    )
+    assert result.returncode == 0, result.stdout[-3000:] + result.stderr[-1000:]
