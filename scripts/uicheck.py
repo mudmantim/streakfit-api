@@ -264,16 +264,21 @@ def make_user(app, tag: str, seed_days: list[int] | None = None):
     return username, token
 
 
-def seed_today_keys(app, username: str, base: str, token: str):
-    """Mark today's actual mission keys as done on a previous day, so the user
-    is a genuine returning user for whom nothing today is new."""
+def seed_today_keys(app, username: str, base: str, token: str, days_ago: int = 3):
+    """Mark today's actual mission keys as done on an earlier day, so the user
+    is a genuine returning user for whom nothing today is new.
+
+    Three days back, not one: today's mission now actively avoids repeating
+    what was done YESTERDAY, so seeding into yesterday would change the mission
+    and the keys would no longer be the ones on screen. What this check is
+    about is repeat completions paying, which only needs "done before"."""
     from app import DailyCompletion, User, db
 
     daily = _api(base, "/api/daily", token=token)
     keys = [e["key"] for e in daily["exercises"]]
     with app.app_context():
         row = db.session.execute(db.select(User).where(User.username == username)).scalar_one()
-        when = dt.date.today() - dt.timedelta(days=1)
+        when = dt.date.today() - dt.timedelta(days=days_ago)
         for key in keys:
             db.session.add(DailyCompletion(user_id=row.id, date=when, exercise_key=key))
         db.session.commit()
@@ -573,6 +578,63 @@ def check_side_quests_still_work(b: Browser, base: str, app) -> None:
     check("Check In" in listed, "a new side quest offers a check-in")
 
 
+def check_step_up_is_offered_not_imposed(b: Browser, base: str, app) -> None:
+    """The progression affordance, driven through the real UI.
+
+    The thing being verified is not that the number can go up — a unit test
+    covers that. It is that the prescription a practised user sees is still the
+    ORIGINAL one until they choose otherwise, because a number that rises on
+    its own turns a daily habit into a target with a failure condition.
+    """
+    print("\nProgression — 'Want a little more?' is an offer")
+    from app import DailyCompletion, User, db
+
+    username, token = make_user(app, "stepup")
+    daily = _api(base, "/api/daily", token=token)
+    keys = [e["key"] for e in daily["exercises"]]
+    before = {e["key"]: e["reps_or_duration"] for e in daily["exercises"]}
+
+    # Enough practice of the same movements to earn the offer. Spaced out
+    # deliberately: a run of seven consecutive days plus a gap makes this a
+    # returning user, and the Rise Again ceremony then takes over the screen —
+    # correctly, but it is not what this check is looking at.
+    with app.app_context():
+        row = db.session.execute(db.select(User).where(User.username == username)).scalar_one()
+        for off in range(4, 20, 2):
+            when = dt.date.today() - dt.timedelta(days=off)
+            for key in keys:
+                db.session.add(DailyCompletion(user_id=row.id, date=when, exercise_key=key))
+        db.session.commit()
+
+    after = _api(base, "/api/daily", token=token)
+    same = [e for e in after["exercises"] if e["key"] in before]
+    check(bool(same) and all(e["reps_or_duration"] == before[e["key"]] for e in same),
+          "practice never raises the prescription underneath the user",
+          str([(e["key"], before.get(e["key"]), e["reps_or_duration"]) for e in same][:2]))
+    offered = [e for e in after["exercises"] if e.get("step_up")]
+    if not check(bool(offered), "a practised movement offers a larger version"):
+        return
+
+    b.goto(base + "/", wait=1.0)
+    b.js(f"localStorage.setItem('streakfit_token', {json.dumps(token)})")
+    b.goto(base + "/", wait=3.0)
+
+    count = b.js("document.querySelectorAll('.daily-exercise-stepup').length")
+    if not check(bool(count), "the offer is visible in the mission", f"found {count}"):
+        return
+    label = b.js("document.querySelector('.daily-exercise-stepup').textContent") or ""
+    check("Want a little more?" in label, "it reads as an offer", label[:80])
+
+    # Taking it swaps the line in place and the offer goes away.
+    b.js("document.querySelector('.daily-exercise-stepup').click()")
+    time.sleep(0.4)
+    remaining = b.js("document.querySelectorAll('.daily-exercise-stepup').length")
+    check(remaining == count - 1, "taking it removes the offer", f"{count} -> {remaining}")
+    check(not b.js("(()=>{const r=document.querySelector('.daily-exercise-row');"
+                   " return r && /Want a little more/.test(r.textContent);})()"),
+          "the row now shows the larger prescription instead of the offer")
+
+
 def check_page_is_clean(b: Browser, base: str, app) -> None:
     print("\nThe page itself, at phone width")
     _, token = make_user(app, "clean")
@@ -664,6 +726,7 @@ def main() -> int:
         check_team_witness(browser, base, flask_app)
         check_photo_sharing(browser, base, flask_app)
         check_side_quests_still_work(browser, base, flask_app)
+        check_step_up_is_offered_not_imposed(browser, base, flask_app)
         check_page_is_clean(browser, base, flask_app)
     except Exception as exc:  # a crash must never read as a pass
         bad(f"check run crashed: {type(exc).__name__}: {exc}")

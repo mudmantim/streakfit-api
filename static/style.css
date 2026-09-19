@@ -3673,3 +3673,70 @@ body.theme-classic .theme-btn.active { background: rgba(79,70,229,.2); }
 .team-panel-title {
     letter-spacing: -0.015em;
 }
+
+/* ── Progression: the step-up offer and the borrowed exercise ───────────────
+   Both are additions to an exercise row and both are deliberately quiet. The
+   step-up is an offer, so it must not compete with the "I did this" button —
+   the mission is complete whether or not anyone takes it. */
+
+.daily-exercise-flag {
+    display: inline-block;
+    margin-top: var(--space-1);
+    padding: 2px 8px;
+    border-radius: 999px;
+    background: var(--surface-raised, rgba(255, 255, 255, 0.06));
+    color: var(--text-muted);
+    font-size: var(--text-xs);
+    letter-spacing: 0.01em;
+}
+
+.daily-exercise-stepup {
+    display: block;
+    margin-top: var(--space-1);
+    padding: 6px 0;
+    border: 0;
+    background: none;
+    color: var(--accent, #f0a500);
+    font: inherit;
+    font-size: var(--text-xs);
+    text-align: left;
+    cursor: pointer;
+    min-height: 44px;          /* tap target — it sits among other controls */
+}
+
+.daily-exercise-stepup:hover,
+.daily-exercise-stepup:focus-visible {
+    text-decoration: underline;
+}
+
+/* The "next level exists" offer. Shown once, then never again. */
+.tier-readiness {
+    margin: var(--space-4) 0;
+    padding: var(--space-4);
+    border-radius: var(--radius-lg, 16px);
+    background: var(--surface-raised, rgba(255, 255, 255, 0.06));
+}
+
+.tier-readiness-title {
+    margin: 0 0 var(--space-1);
+    font-size: var(--text-sm);
+    font-weight: 600;
+}
+
+.tier-readiness-body {
+    margin: 0 0 var(--space-3);
+    font-size: var(--text-sm);
+    color: var(--text-muted);
+    line-height: 1.5;
+}
+
+.tier-readiness-row {
+    display: flex;
+    gap: var(--space-2);
+    flex-wrap: wrap;
+}
+
+.tier-readiness-row button {
+    flex: 1 1 auto;
+    min-height: 44px;
+}

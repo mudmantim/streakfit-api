@@ -20,11 +20,17 @@ def _complete(client, token, key):
     return client.post(f'/api/daily/{key}/complete', headers=auth_headers(token)).get_json()
 
 
-def _seed_prior_day(username, keys, days_ago=1):
+def _seed_prior_day(username, keys, days_ago=3):
     """Give this user a history in which they have already done these exercises.
 
     This is what makes a user a *returning* one: `new_exercise` pays once ever,
-    so yesterday's completions are precisely what stops today's from paying.
+    so an earlier completion is precisely what stops today's from paying.
+
+    Three days back rather than one, by default, because today's mission now
+    actively avoids repeating YESTERDAY — seeding the same keys into yesterday
+    would change the mission and the keys under test would no longer be in it.
+    Tests that specifically need yesterday pass days_ago=1 and re-read the
+    mission afterwards.
     """
     user = db.session.execute(db.select(User).where(User.username == username)).scalar_one()
     when = datetime.date.today() - datetime.timedelta(days=days_ago)
@@ -123,8 +129,9 @@ def test_discovery_still_clearly_beats_a_repeat(client):
 
 def test_returning_user_still_builds_a_streak(client):
     token = register_and_login(client, 'day2_streaker')
+    _seed_prior_day('day2_streaker', _daily_keys(client, token), days_ago=1)
+    # Re-read: yesterday's completions change what today's mission offers.
     keys = _daily_keys(client, token)
-    _seed_prior_day('day2_streaker', keys)
 
     for key in keys:
         _complete(client, token, key)
@@ -299,3 +306,167 @@ def test_award_progress_reports_which_event_it_was(client):
     types = [e['event_type'] for e in fifth['progress_events']]
     assert 'mission_complete' in types
     assert 'perfect_mission' in types
+
+
+# ── The mission remembers: progression, recovery, and the tier ramp ─────────
+#
+# Added after a 40-user simulation over 30/60/90 days found the daily mission
+# had no memory at all: reps were fixed strings forever, one slot in five
+# repeated yesterday, an advanced user got two explosive days back to back one
+# week in five, and changing tier swapped 100% of the pool in a single step.
+
+import app as appmod
+
+
+def _days(n, start=datetime.date(2026, 1, 1)):
+    return [(start + datetime.timedelta(days=i)).isoformat() for i in range(n)]
+
+
+def test_yesterdays_exercises_are_avoided_when_they_can_be():
+    """18-20% of slots used to repeat yesterday, with nothing watching."""
+    repeats = slots = 0
+    for uid in range(500, 540):
+        prev = set()
+        for day in _days(30):
+            picked = appmod.get_daily_exercises(uid, day, 'intermediate',
+                                                recent={'keys': prev, 'high_impact': 0})
+            keys = {ex['key'] for ex in picked}
+            repeats += len(keys & prev)
+            slots += 5
+            prev = keys
+    share = repeats / slots
+    assert share < 0.05, f"{share:.1%} of slots repeat yesterday (was 20%)"
+
+
+def test_a_heavy_day_is_not_followed_by_another_one():
+    """Advanced users got two explosive days in a row 20% of the time."""
+    for uid in range(600, 640):
+        for day in _days(20):
+            picked = appmod.get_daily_exercises(
+                uid, day, 'advanced', recent={'keys': set(), 'high_impact': 2})
+            high = sum(1 for ex in picked if ex['impact'] == 'high')
+            assert high <= 1, f"{high} explosive exercises the day after a heavy one"
+
+
+def test_an_ordinary_day_still_allows_a_hard_one():
+    """The recovery rule must not quietly become a permanent cap — that would
+    make every day easier, which is not what was wrong."""
+    seen_two = any(
+        sum(1 for ex in appmod.get_daily_exercises(
+            uid, day, 'advanced', recent={'keys': set(), 'high_impact': 0})
+            if ex['impact'] == 'high') == 2
+        for uid in range(700, 720) for day in _days(10)
+    )
+    assert seen_two, "no day ever reaches two high-impact exercises any more"
+
+
+def test_a_rest_day_is_not_something_to_recover_from():
+    """Recovery reads what was actually COMPLETED. Someone who did nothing
+    yesterday is not carrying fatigue, and must not be given an easier day for
+    having missed one — that would be the app quietly rewarding the miss."""
+    with_rest = appmod.get_daily_exercises(11, '2026-03-01', 'advanced',
+                                           recent={'keys': set(), 'high_impact': 0})
+    no_history = appmod.get_daily_exercises(11, '2026-03-01', 'advanced')
+    assert [e['key'] for e in with_rest] == [e['key'] for e in no_history]
+
+
+def test_the_step_up_is_earned_and_stops_growing():
+    base = '3 sets of 12 reps'
+    assert appmod.step_up_for(base, 0) is None       # not earned yet
+    assert appmod.step_up_for(base, 3) is None
+    assert appmod.step_up_for(base, 4) == '3 sets of 14 reps'
+    assert appmod.step_up_for(base, 10) == '3 sets of 16 reps'
+    assert appmod.step_up_for(base, 25) == '3 sets of 18 reps'
+    assert appmod.step_up_for(base, 5000) == '3 sets of 18 reps'   # capped at +50%
+
+
+def test_the_step_up_declines_wordings_it_cannot_safely_change():
+    """Silence is the correct answer for anything ambiguous. '30 seconds on /
+    30 seconds off' has a second number whose relationship to the first we'd
+    only be guessing at."""
+    for odd in ['2 rounds of 30 seconds on / 30 seconds off',
+                '3 sets of 8 breath cycles', 'As many as feel good', '']:
+        assert appmod.step_up_for(odd, 100) is None, odd
+
+
+def test_the_prescription_itself_never_changes_underneath_anyone():
+    """The whole design decision: a number that goes up on its own turns a
+    daily habit into a target, and the first day you can't hit it becomes a
+    failure. The larger version is offered beside the prescription."""
+    early = appmod.get_daily_exercises(9, '2026-02-01', 'beginner', missions_completed=0)
+    later = appmod.get_daily_exercises(9, '2026-02-01', 'beginner', missions_completed=400)
+    base = {e['key']: e['reps_or_duration'] for e in early}
+    for ex in later:
+        if ex['key'] in base:
+            assert ex['reps_or_duration'] == base[ex['key']]
+
+
+def test_the_tier_ramp_starts_at_nothing_and_rises_gradually():
+    def share(missions):
+        total = sum(1 for uid in range(800, 900)
+                    for ex in appmod.get_daily_exercises(
+                        uid, '2026-04-01', 'beginner', missions_completed=missions)
+                    if ex.get('from_next_tier'))
+        return total / (100 * 5)
+
+    assert share(0) == 0.0
+    assert share(appmod._RAMP_START - 1) == 0.0
+    mid, full = share(30), share(appmod._RAMP_FULL)
+    assert 0 < mid < full, f"not gradual: {mid:.1%} then {full:.1%}"
+    assert full < 0.25, f"{full:.0%} of a beginner's day comes from the level above"
+
+
+def test_a_borrowed_exercise_says_so():
+    """It is a shift in emphasis the person can see, not content that appears
+    unannounced and harder than they signed up for."""
+    borrowed = [ex for uid in range(900, 940)
+                for ex in appmod.get_daily_exercises(uid, '2026-04-01', 'beginner',
+                                                     missions_completed=90)
+                if ex.get('from_next_tier')]
+    assert borrowed
+    assert all(ex['difficulty'] == 'intermediate' for ex in borrowed)
+
+
+def test_the_top_tier_borrows_from_nothing():
+    for ex in appmod.get_daily_exercises(1, '2026-04-01', 'advanced', missions_completed=500):
+        assert not ex.get('from_next_tier')
+
+
+def test_readiness_is_an_offer_and_only_after_real_practice():
+    assert appmod.tier_readiness('beginner', 10) is None
+    assert appmod.tier_readiness('advanced', 500) is None       # nowhere to go
+    ready = appmod.tier_readiness('beginner', appmod._RAMP_FULL)
+    assert ready['next_level'] == 'intermediate'
+    low = ready['message'].lower()
+    for pushy in ('should', 'need to', 'time to move on', 'ready to graduate', 'too easy'):
+        assert pushy not in low, f"readiness message pressures the user: {ready['message']!r}"
+
+
+def test_tier_hopping_no_longer_farms_the_discovery_bonus(client):
+    """The exploit: the three tiers share no exercise keys, so switching tier
+    mid-day used to re-open five fresh first-evers. beginner -> intermediate ->
+    advanced paid 340 XP on day one instead of 140, reaching level 3."""
+    token = register_and_login(client, 'tier_hopper')
+    total = 0
+    for tier in ('beginner', 'intermediate', 'advanced'):
+        client.patch('/api/me', json={'skill_level': tier}, headers=auth_headers(token))
+        for key in _daily_keys(client, token):
+            total += _complete(client, token, key).get('xp_awarded', 0)
+
+    assert total < 200, f"{total} XP from tier-hopping on day one"
+    me = client.get('/api/me', headers=auth_headers(token)).get_json()
+    assert me['total_missions'] == 1        # these were always honest
+    assert me['current_streak'] == 1
+
+
+def test_extra_movement_beyond_the_mission_still_counts_and_still_pays(client):
+    """Closing the exploit must not turn into punishing someone for moving
+    more. The sixth exercise of a day pays the repeat rate — which is what a
+    sixth exercise is — rather than nothing."""
+    token = register_and_login(client, 'tier_extra')
+    for key in _daily_keys(client, token):
+        _complete(client, token, key)
+    client.patch('/api/me', json={'skill_level': 'intermediate'},
+                 headers=auth_headers(token))
+    sixth = _complete(client, token, _daily_keys(client, token)[0])
+    assert sixth['xp_awarded'] == appmod.REPEAT_EXERCISE_XP

@@ -4110,6 +4110,51 @@ async function loadDailyExercises() {
         return;
     }
 
+    // "The next level exists." Shown once per person, dismissible, and never
+    // again — it is an offer, and an offer repeated daily is a nag. Nothing in
+    // the app changes if it is ignored.
+    if (daily.tier_readiness && localStorage.getItem('tier_readiness_seen') !== daily.tier_readiness.next_level) {
+        var ready = document.createElement('div');
+        ready.className = 'tier-readiness';
+
+        var readyTitle = document.createElement('p');
+        readyTitle.className = 'tier-readiness-title';
+        readyTitle.textContent = 'Whenever you like';
+
+        var readyBody = document.createElement('p');
+        readyBody.className = 'tier-readiness-body';
+        readyBody.textContent = daily.tier_readiness.message;
+
+        var readyRow = document.createElement('div');
+        readyRow.className = 'tier-readiness-row';
+
+        var readyGo = document.createElement('button');
+        readyGo.className = 'btn-primary';
+        readyGo.textContent = 'Take a look';
+        readyGo.addEventListener('click', function () {
+            localStorage.setItem('tier_readiness_seen', daily.tier_readiness.next_level);
+            ready.remove();
+            toggleSettings(true);
+            var sel = document.getElementById('skill-level-select');
+            if (sel) { sel.focus(); sel.scrollIntoView({ block: 'center' }); }
+        });
+
+        var readyNo = document.createElement('button');
+        readyNo.className = 'btn-secondary';
+        readyNo.textContent = "I'm happy here";
+        readyNo.addEventListener('click', function () {
+            localStorage.setItem('tier_readiness_seen', daily.tier_readiness.next_level);
+            ready.remove();
+        });
+
+        readyRow.appendChild(readyGo);
+        readyRow.appendChild(readyNo);
+        ready.appendChild(readyTitle);
+        ready.appendChild(readyBody);
+        ready.appendChild(readyRow);
+        list.appendChild(ready);
+    }
+
     if (daily.completed_count === 5) {
         if (isGuest) {
             if (!guestCompleteFired) {
@@ -6031,6 +6076,32 @@ function renderDailyExercise(ex, isNext) {
     infoText.className = 'daily-exercise-text';
     infoText.appendChild(name);
     infoText.appendChild(meta);
+
+    // A movement borrowed from the level above. Said out loud, because a
+    // harder exercise turning up unannounced reads as the app getting it
+    // wrong rather than as progress.
+    if (ex.from_next_tier) {
+        var harder = document.createElement('span');
+        harder.className = 'daily-exercise-flag';
+        harder.textContent = 'A step up — from the next level';
+        infoText.appendChild(harder);
+    }
+
+    // The optional bigger version. Never replaces the prescription above it:
+    // the mission is complete either way, and this is an offer, so it reads
+    // as one.
+    if (ex.step_up && !ex.completed) {
+        var more = document.createElement('button');
+        more.type = 'button';
+        more.className = 'daily-exercise-stepup';
+        more.textContent = 'Want a little more? ' + ex.step_up;
+        more.addEventListener('click', function () {
+            meta.textContent = ex.step_up;
+            more.remove();
+        });
+        infoText.appendChild(more);
+    }
+
     infoText.appendChild(linkRow);
 
     info.appendChild(thumbBtn);
