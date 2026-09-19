@@ -1,0 +1,78 @@
+{
+  "verdicts": [
+    {
+      "id": "SF-TRV-000447",
+      "verdict": "revise",
+      "reason": "The key is not uniquely correct. A wet bathroom floor is transparent and routinely invisible until you are standing on it, so it is at least as 'easy to miss' as a curled rug edge — a distractor that competes with the key on the exact axis the stem asks about. Separately the item is close to tautological: the stem asks which hazard is subtle and the rug edge is the only option that is not a famously conspicuous hazard, so a reader who knows nothing can eliminate the other three on the wording alone. Stated as 'simplified' with no source, but 'the easiest one to miss' is a superlative comparative judgment, not a simplification of a known fact. Either narrow the stem to something checkable (e.g. what fall data actually implicates in the home) or rewrite so the distractors are also low-salience hazards.",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000444",
+      "verdict": "revise",
+      "reason": "Two problems. (1) Internal contradiction: the stem stipulates 'the same NEW workout', i.e. novelty held constant, and the key then says the difference is 'mostly how new it was to each'. Under the stem's own premise that is the one factor ruled out. The explanation's second clause — that people differ a lot in response to the same work — is the honest answer and is not what the key says. DOMS high/low responder variation to identical unaccustomed eccentric work is large and well documented, so 'mostly novelty' is stated more firmly than the evidence supports. (2) Textbook guessability: the key is the only hedged option ('Mostly...') against three absolutes ('much harder', 'better', 'must be different'), and option 4 flags itself as wrong with 'must'. The anti-comparison message is good and worth keeping; the stem and option set need rebuilding.",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000430",
+      "verdict": "revise",
+      "reason": "The stem asks for the energy used 'at the start of a movement', and that is the phosphagen system — ATP already in the fiber plus creatine phosphate — which covers roughly the first ten seconds. Glycolysis from glycogen is the next system up, not the one at the start. As written the item teaches a nine-year-old the wrong stage of the energy pathway; this is a simplification that misleads rather than one that omits. Fix by changing the stem to what glycogen actually is (the body's stored carbohydrate fuel, spent once a movement keeps going). Guessability is also weak: calcium-in-bones and iron-in-blood are not energy stores at all and protein is not fast-release, so glycogen is the only option that answers the category of the question.",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000425",
+      "verdict": "accept",
+      "reason": "",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000494",
+      "verdict": "accept",
+      "reason": "",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000470",
+      "verdict": "accept",
+      "reason": "",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000483",
+      "verdict": "revise",
+      "reason": "Overstated firmness plus a false dichotomy. Sweat/rain diversion is a plausible and widely repeated hypothesis about eyebrows, not an established function; the better-evidenced line of work treats eyebrows primarily as social/expressive signalling and the diversion role as secondary and inferred. The item states it flatly as 'the' job. Worse, the explanation's 'Eyelashes are the ones that handle dust' marks distractor 3 wrong when eyebrows do in fact intercept falling debris as well — so the item declares one option uniquely correct against a distractor that is partly true. Needs hedging ('probably helps steer...') and removal of the eyelash exclusivity claim, or a real source.",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000434",
+      "verdict": "accept",
+      "reason": "",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000469",
+      "verdict": "accept",
+      "reason": "",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000433",
+      "verdict": "revise",
+      "reason": "Most serious item in the sample. The mechanism is right — sympathetic arousal cuts salivary flow — but the closing line, 'A dry mouth on a start line is a nervous system doing its job, not a sign that you are short of water', is a categorical reassurance that a symptom is nothing, with no boundary. Dry mouth genuinely is one of the signs of dehydration, and this app is used by children and by seniors, the group with the most blunted thirst response and the highest dehydration risk. Told this, a hot, under-drunk reader has been given a reason not to drink. The claim must be bounded: nerves can dry your mouth before a start, and if it stays dry once you have settled, or you are hot and sweating, drink anyway. Also, distractor 1 ('You breathe out more water') is partially a real contributing mechanism — nervous mouth-breathing does dry the mouth — so it is not cleanly wrong.",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000487",
+      "verdict": "accept",
+      "reason": "",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000486",
+      "verdict": "accept",
+      "reason": "",
+      "sources_checked": [
+        "https://my.clevelandclinic.org/health/body/hyoid-bone — resolves; states verbatim 'your hyoid bone is unique because it's the only bone in your body that doesn't connect to another bone' and 'ligaments, muscles and cartilage keep this crescent-shaped bone in place'; lists the tongue and the muscles in the floor of the mouth among the structures it supports, and swallowing among the functions. Supports the item's claim and its explanation; 'anchors' is a fair paraphrase of the source's 'supports' and does not step beyond it."
+      ]
+    }
+  ]
+}
