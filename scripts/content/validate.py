@@ -83,9 +83,28 @@ def words(text: str) -> set[str]:
 
 
 def body(item: dict) -> str:
+    """Everything a reader sees. Used for vocabulary and safety checks."""
     if item["type"] == "trivia":
         return " ".join([item.get("question", ""), item.get("explanation", "")]
                         + list(item.get("options", [])))
+    return item.get("text", "")
+
+
+def claim(item: dict) -> str:
+    """What an item actually TELLS you — the answer and the explanation, not the
+    distractors.
+
+    Duplicate detection needs this rather than `body`. Three wrong options are
+    three-quarters of a question's words and they dilute the similarity of the
+    quarter that matters, which is how a mini-experiment about standing up from
+    a chair sat beside a question whose answer was "a squat" and neither the
+    gate nor I noticed.
+    """
+    if item["type"] == "trivia":
+        options = item.get("options") or []
+        idx = item.get("answer_index", 0)
+        answer = options[idx] if 0 <= idx < len(options) else ""
+        return f"{answer} {item.get('explanation', '')}"
     return item.get("text", "")
 
 
@@ -231,11 +250,11 @@ def check_duplicates(items: list[dict]) -> list[str]:
     errs = []
     exact = defaultdict(list)
     for i in served:
-        exact[body(i).strip().lower()].append(i["id"])
+        exact[claim(i).strip().lower()].append(i["id"])
     for _text, ids in exact.items():
         if len(ids) > 1:
             errs.append(f"identical content in {', '.join(ids)}")
-    keyed = [(i["id"], words(body(i))) for i in served]
+    keyed = [(i["id"], words(claim(i))) for i in served]
     for (ida, wa), (idb, wb) in itertools.combinations(keyed, 2):
         if not wa or not wb:
             continue
@@ -299,8 +318,11 @@ def main() -> int:
         print(f"  ... and {len(errors) - 40} more errors")
 
     print()
+    # Never report items as cleared while errors stand — that line was printing
+    # "614 items cleared to serve" directly above five blocking errors.
+    cleared = 0 if errors else len(accepted)
     print(f"{len(errors)} errors, {len(warnings)} warnings, "
-          f"{len(accepted)} items cleared to serve")
+          f"{cleared} items cleared to serve")
     if errors:
         print("\nAccepted content may not carry an error. Fix, or set status to "
               "'pending' until it is fixed.")

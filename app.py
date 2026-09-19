@@ -611,6 +611,19 @@ def _personal_daily_index(kind, user_id, date_str, size):
 
 
 def get_daily_insight(date_str, user_id='demo'):
+    """Today's discovery for this person.
+
+    The slot used to serve facts only. It now rotates across facts, movement
+    discoveries, riddles, mini-experiments and Rickie's own asides, because a
+    library that is going to run to thousands cannot be one kind of thing
+    without becoming wallpaper.
+
+    Rotation is the existing per-person permutation, which already guarantees
+    nobody repeats until the library is exhausted — 397 days at present. Types
+    land in whatever order that permutation puts them in, deliberately: a fixed
+    "riddle on Tuesdays" cycle is exactly the predictability this is meant to
+    avoid.
+    """
     return INSIGHT_LIBRARY[
         _personal_daily_index('insight', user_id, date_str, len(INSIGHT_LIBRARY))
     ]

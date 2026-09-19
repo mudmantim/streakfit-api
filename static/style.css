@@ -3961,3 +3961,10 @@ body.theme-classic .theme-btn.active { background: rgba(79,70,229,.2); }
     outline: 2px solid var(--indigo);
     outline-offset: 2px;
 }
+
+/* A riddle's answer, hidden until asked for. */
+.insight-riddle-answer {
+    margin-top: var(--space-2);
+    font-weight: 600;
+    color: var(--indigo-dark);
+}

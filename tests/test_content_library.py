@@ -185,11 +185,15 @@ def test_every_question_is_well_formed():
         assert all(o.strip() for o in q["options"]), q["question"]
 
 
-def test_every_insight_uses_a_known_category():
-    known = {e["category"] for e in appmod.INSIGHT_LIBRARY[:90]}
+def test_every_discovery_has_a_category_and_a_body():
+    """The category set used to be "whatever the first 90 items said", which
+    stopped meaning anything once the library gained riddles and experiments
+    with categories of their own. What matters is that every item declares one
+    and that nothing is empty."""
     for entry in appmod.INSIGHT_LIBRARY:
-        assert entry["category"] in known, entry
-        assert entry["text"].strip()
+        assert entry["category"].strip(), entry
+        assert entry["text"].strip(), entry
+        assert entry["type"] in ("fact", "movement", "riddle", "experiment", "rickie"), entry
 
 
 def test_no_duplicate_content():
@@ -382,7 +386,7 @@ def test_the_store_is_what_the_application_serves():
 
     served = [i for i in store.ALL_ITEMS if i["status"] == "accepted"]
     assert len(appmod.INSIGHT_LIBRARY) == sum(
-        1 for i in served if i["type"] in ("fact", "movement"))
+        1 for i in served if i["type"] in store._DISCOVERY_TYPES)
     assert len(appmod.BRAIN_BOOST_LIBRARY) == sum(1 for i in served if i["type"] == "trivia")
     assert len(appmod.RICKIE_JOKES) == sum(1 for i in served if i["type"] == "joke")
 

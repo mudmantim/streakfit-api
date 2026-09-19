@@ -893,6 +893,61 @@ def check_coming_back_after_a_while(b: Browser, base: str, app) -> None:
           "one tap overrules the suggestion", after["effort"]["level"])
 
 
+def check_discovery_types_reach_a_reader(b: Browser, base: str, app) -> None:
+    """Riddles, mini-experiments and Rickie's asides, on screen.
+
+    The content store gained three types that no surface served. Content that
+    exists and cannot be reached is the failure this project already has a rule
+    about — the R2 team layer shipped six features nobody could get to — so this
+    drives each new type through the real card rather than trusting the count.
+    """
+    print("\nDiscovery — the new content types actually render")
+    from app import INSIGHT_LIBRARY
+
+    wanted = ("riddle", "experiment", "rickie")
+    have = {t for t in wanted if any(i.get("type") == t for i in INSIGHT_LIBRARY)}
+    if not check(have == set(wanted), "all three new types are in the served library",
+                 f"found {sorted(have)}"):
+        return
+
+    _, token = make_user(app, "discovery")
+    b.goto(base + "/", wait=1.0)
+    b.js(f"localStorage.setItem('streakfit_token', {json.dumps(token)})")
+    b.goto(base + "/", wait=3.0)
+
+    for kind in wanted:
+        item = next(i for i in INSIGHT_LIBRARY if i.get("type") == kind)
+        # Render the real card with a real item of this type.
+        b.js("(()=>{const c=renderInsightCard(" + json.dumps(item) + ");"
+             " c.id='uicheck-discovery'; document.body.appendChild(c);"
+             " const r=c.querySelector('.insight-reveal-btn'); if(r) r.click();"
+             " return 1;})()")
+        time.sleep(0.4)
+        label = b.js("(document.querySelector('#uicheck-discovery .insight-category')"
+                     "||{}).textContent") or ""
+        shown = b.js("(document.querySelector('#uicheck-discovery .insight-text')"
+                     "||{}).textContent") or ""
+        check(bool(label) and bool(shown.strip()),
+              f"a {kind} renders with a label and a body", f"{label!r} / {shown[:40]!r}")
+
+        if kind == "riddle":
+            answer_hidden = b.js(
+                "(()=>{const a=document.querySelector('#uicheck-discovery "
+                ".insight-riddle-answer'); return !!a && a.hidden;})()")
+            check(answer_hidden, "a riddle does not give away its own answer")
+            b.js("(()=>{const btns=[...document.querySelectorAll('#uicheck-discovery button')]"
+                 ".filter(x=>/Give up/.test(x.textContent)); if(btns[0]) btns[0].click();"
+                 " return 1;})()")
+            time.sleep(0.3)
+            revealed = b.js(
+                "(()=>{const a=document.querySelector('#uicheck-discovery "
+                ".insight-riddle-answer'); return !!a && !a.hidden && !!a.textContent.trim();})()")
+            check(revealed, "and gives it up when asked")
+
+        b.js("(()=>{const c=document.getElementById('uicheck-discovery');"
+             " if(c) c.remove(); return 1;})()")
+
+
 def check_page_is_clean(b: Browser, base: str, app) -> None:
     print("\nThe page itself, at phone width")
     _, token = make_user(app, "clean")
@@ -989,6 +1044,7 @@ def main() -> int:
         check_brain_boost_can_be_answered(browser, base, flask_app)
         check_someone_can_actually_sign_up(browser, base, flask_app)
         check_coming_back_after_a_while(browser, base, flask_app)
+        check_discovery_types_reach_a_reader(browser, base, flask_app)
         check_page_is_clean(browser, base, flask_app)
     except Exception as exc:  # a crash must never read as a pass
         bad(f"check run crashed: {type(exc).__name__}: {exc}")

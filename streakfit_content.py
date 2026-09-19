@@ -63,9 +63,20 @@ SERVED = [i for i in ALL_ITEMS if i.get("status") == SERVED_STATUS]
 # Kept exactly as they were. The store is a better place to put the content, not
 # a reason to rewrite every consumer of it on the same day.
 
+# The daily discovery slot. Facts and movement discoveries were the whole of it;
+# riddles, mini-experiments and Rickie's own asides now rotate through the same
+# place rather than needing a surface of their own. One slot, more kinds of
+# thing in it — which is what stops it feeling like the same card every day
+# without adding another card to the screen.
+#
+# `type` is carried through so the UI can render a riddle as a riddle. Nothing
+# reads it as a category; the category field is still the category.
+_DISCOVERY_TYPES = ("fact", "movement", "riddle", "experiment", "rickie")
+
 INSIGHT_LIBRARY = [
-    {"text": i["text"], "category": i["category"]}
-    for i in SERVED if i["type"] in ("fact", "movement")
+    {"text": i["text"], "category": i["category"], "type": i["type"],
+     "min_age": i.get("min_age", 9)}
+    for i in SERVED if i["type"] in _DISCOVERY_TYPES
 ]
 
 BRAIN_BOOST_LIBRARY = [

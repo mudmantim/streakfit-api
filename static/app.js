@@ -4416,16 +4416,28 @@ function renderInsightCard(insight) {
     teaserAvatar.src = '/static/rickie.svg';
     teaserAvatar.alt = 'Rickie';
 
+    // The slot rotates across kinds of discovery now, so the teaser says which
+    // one is behind it. "Rickie found today's Insight" in front of a riddle
+    // reads as a mislabel, and the tease is the whole point of the card.
+    var KINDS = {
+        fact:       { tease: "Rickie found something out.",      label: 'Did you know' },
+        movement:   { tease: "Rickie found something out.",      label: 'Did you know' },
+        riddle:     { tease: "Rickie has a riddle for you.",     label: 'Riddle' },
+        experiment: { tease: "Rickie wants you to try something.", label: 'Try this' },
+        rickie:     { tease: "Rickie has an opinion.",           label: 'Rickie says' }
+    };
+    var kind = KINDS[insight.type] || KINDS.fact;
+
     var teaserText = document.createElement('p');
     teaserText.className = 'insight-teaser-text';
-    teaserText.textContent = '🦝 Rickie found today\'s Insight...';
+    teaserText.textContent = '🦝 ' + kind.tease;
 
     teaserTop.appendChild(teaserAvatar);
     teaserTop.appendChild(teaserText);
 
     var revealBtn = document.createElement('button');
     revealBtn.className = 'insight-reveal-btn';
-    revealBtn.textContent = 'Reveal Insight';
+    revealBtn.textContent = insight.type === 'riddle' ? 'Hear the riddle' : 'Reveal';
 
     teaser.appendChild(teaserTop);
     teaser.appendChild(revealBtn);
@@ -4436,16 +4448,42 @@ function renderInsightCard(insight) {
 
     var category = document.createElement('p');
     category.className = 'insight-category';
-    category.textContent = insight.category;
-
-    var text = document.createElement('p');
-    text.className = 'insight-text';
-    text.textContent = insight.text;
+    category.textContent = kind.label;
 
     revealed.appendChild(category);
-    revealed.appendChild(text);
 
-    if (!isGuest) {
+    if (insight.type === 'riddle') {
+        // The answer is stored after a blank line. Showing both at once is
+        // just telling somebody a fact in the shape of a question.
+        var parts = insight.text.split('\n\n');
+        var riddleQ = document.createElement('p');
+        riddleQ.className = 'insight-text';
+        riddleQ.textContent = parts[0];
+        revealed.appendChild(riddleQ);
+
+        var answer = document.createElement('p');
+        answer.className = 'insight-text insight-riddle-answer';
+        answer.textContent = parts.slice(1).join('\n\n');
+        answer.hidden = true;
+
+        var showAnswer = document.createElement('button');
+        showAnswer.className = 'insight-tell-more';
+        showAnswer.textContent = 'Give up? →';
+        showAnswer.addEventListener('click', function () {
+            answer.hidden = false;
+            showAnswer.remove();
+        });
+        revealed.appendChild(answer);
+        revealed.appendChild(showAnswer);
+    } else {
+        var text = document.createElement('p');
+        text.className = 'insight-text';
+        text.textContent = insight.text;
+        revealed.appendChild(text);
+    }
+
+    if (!isGuest && (insight.type === 'fact' || insight.type === 'movement'
+                     || insight.type === 'experiment')) {
         var tellMore = document.createElement('button');
         tellMore.className = 'insight-tell-more';
         tellMore.textContent = 'Tell me more →';
