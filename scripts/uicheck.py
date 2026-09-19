@@ -667,7 +667,12 @@ def check_panes_and_solo_first(b: Browser, base: str, app) -> None:
     with a gap in it.
     """
     print("\nPanes — and a solo user is not nudged toward Teams")
-    _, token = make_user(app, "panes")
+    # Needs a completed mission behind them: the reminder prompt is withheld
+    # until someone has finished one, and that prompt is exactly the element
+    # that leaked onto Today when the pane rule lost a specificity fight with
+    # an id selector. A fresh account never renders it, so a fresh account
+    # cannot catch the bug.
+    _, token = make_user(app, "panes", seed_days=[2, 1])
     b.goto(base + "/", wait=1.0)
     b.js(f"localStorage.setItem('streakfit_token', {json.dumps(token)})")
     b.goto(base + "/", wait=3.0)
@@ -683,6 +688,18 @@ def check_panes_and_solo_first(b: Browser, base: str, app) -> None:
 
     solo_tab = b.js("!document.getElementById('pane-nav-team').hidden")
     check(not solo_tab, "a solo user gets no Team tab", f"tab visible: {solo_tab}")
+
+    # Every member of an inactive pane must really be gone, not merely marked.
+    # An id-based `display` rule outranks the pane selector, which is how the
+    # reminder prompt stayed on Today with its class correctly applied.
+    leaked = b.js(
+        "(()=>{const m=document.querySelector('main.container');const out=[];"
+        " for (const p of ['progress','team']) {"
+        "   for (const el of m.querySelectorAll('.pane-'+p)) {"
+        "     if (el.offsetParent) out.push((el.id||el.className)+' ['+p+']'); } }"
+        " return out.join(', ');})()"
+    ) or ""
+    check(not leaked, "nothing from another pane leaks onto Today", leaked)
 
     check(go_to_pane(b, "progress"), "Progress is reachable")
     check(bool(b.js("(()=>{const j=document.getElementById('journey-card');"

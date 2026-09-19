@@ -3678,8 +3678,8 @@ body.theme-classic .theme-btn.active { background: rgba(79,70,229,.2); }
     margin-top: var(--space-1);
     padding: 2px 8px;
     border-radius: 999px;
-    background: var(--surface-raised, rgba(255, 255, 255, 0.06));
-    color: var(--text-muted);
+    background: var(--gray-100);
+    color: var(--gray-500);
     font-size: var(--text-xs);
     letter-spacing: 0.01em;
 }
@@ -3690,7 +3690,7 @@ body.theme-classic .theme-btn.active { background: rgba(79,70,229,.2); }
     padding: 6px 0;
     border: 0;
     background: none;
-    color: var(--accent, #f0a500);
+    color: var(--indigo);
     font: inherit;
     font-size: var(--text-xs);
     text-align: left;
@@ -3707,8 +3707,8 @@ body.theme-classic .theme-btn.active { background: rgba(79,70,229,.2); }
 .tier-readiness {
     margin: var(--space-4) 0;
     padding: var(--space-4);
-    border-radius: var(--radius-lg, 16px);
-    background: var(--surface-raised, rgba(255, 255, 255, 0.06));
+    border-radius: var(--radius-lg);
+    background: var(--gray-100);
 }
 
 .tier-readiness-title {
@@ -3720,7 +3720,7 @@ body.theme-classic .theme-btn.active { background: rgba(79,70,229,.2); }
 .tier-readiness-body {
     margin: 0 0 var(--space-3);
     font-size: var(--text-sm);
-    color: var(--text-muted);
+    color: var(--gray-500);
     line-height: 1.5;
 }
 
@@ -3740,13 +3740,20 @@ body.theme-classic .theme-btn.active { background: rgba(79,70,229,.2); }
    alone accounting for half of it. Three panes cut that to roughly one screen
    each. Sections are hidden, never unmounted — see the note in app.js. */
 
+/* !important, deliberately. Several sections carry an id-based display rule
+   (`#retention-prompts { display: flex }` is one), and an id beats any
+   selector built from classes and attributes — so the reminder prompt stayed
+   on Today with its pane class correctly applied and no visible reason why.
+   A pane switch is a visibility override by definition, which is the one case
+   this is actually for. `test_panes_and_solo_first` checks every member of an
+   inactive pane is really gone, so a future id rule can't quietly leak again. */
 .container[data-pane="today"] .pane-progress,
 .container[data-pane="today"] .pane-team,
 .container[data-pane="progress"] .pane-today,
 .container[data-pane="progress"] .pane-team,
 .container[data-pane="team"] .pane-today,
 .container[data-pane="team"] .pane-progress {
-    display: none;
+    display: none !important;
 }
 
 .pane-nav {
@@ -3757,17 +3764,17 @@ body.theme-classic .theme-btn.active { background: rgba(79,70,229,.2); }
     gap: var(--space-1);
     padding: var(--space-2) var(--space-3);
     padding-bottom: calc(var(--space-2) + env(safe-area-inset-bottom, 0px));
-    background: var(--surface, #14161a);
-    border-top: 1px solid var(--border, rgba(255, 255, 255, 0.08));
+    background: var(--t-daily-card-bg, #fff);
+    border-top: 1px solid var(--gray-200);
 }
 
 .pane-nav-btn {
     flex: 1;
     min-height: 44px;
     border: 0;
-    border-radius: var(--radius-md, 12px);
+    border-radius: var(--radius);
     background: none;
-    color: var(--text-muted);
+    color: var(--gray-500);
     font: inherit;
     font-size: var(--text-sm);
     font-weight: 600;
@@ -3775,12 +3782,12 @@ body.theme-classic .theme-btn.active { background: rgba(79,70,229,.2); }
 }
 
 .pane-nav-btn.is-active {
-    background: var(--surface-raised, rgba(255, 255, 255, 0.07));
-    color: var(--text, #fff);
+    background: #fff;
+    color: var(--gray-900);
 }
 
 .pane-nav-btn:focus-visible {
-    outline: 2px solid var(--accent, #f0a500);
+    outline: 2px solid var(--indigo);
     outline-offset: 2px;
 }
 
@@ -3788,8 +3795,8 @@ body.theme-classic .theme-btn.active { background: rgba(79,70,229,.2); }
 .solo-team-invite {
     margin: var(--space-4) 0 0;
     padding: var(--space-3) var(--space-4);
-    border-radius: var(--radius-lg, 16px);
-    background: var(--surface-raised, rgba(255, 255, 255, 0.05));
+    border-radius: var(--radius-lg);
+    background: var(--gray-50);
     display: flex;
     align-items: center;
     gap: var(--space-3);
@@ -3800,12 +3807,32 @@ body.theme-classic .theme-btn.active { background: rgba(79,70,229,.2); }
     flex: 1 1 200px;
     margin: 0;
     font-size: var(--text-sm);
-    color: var(--text-muted);
+    color: var(--gray-500);
     line-height: 1.5;
 }
 
-.solo-team-invite .btn-secondary {
+/* There was no secondary button in the stylesheet — .btn-secondary was being
+   used in markup and rendering as a browser default, which is how the "Add
+   people" row ended up looking like a form control from 1998. */
+.btn-secondary {
+    padding: .6rem 1.1rem;
     min-height: 44px;
+    border: 1px solid var(--gray-200);
+    border-radius: var(--radius);
+    background: #fff;
+    color: var(--gray-700);
+    font-size: .9rem;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.btn-secondary:hover {
+    background: var(--gray-50);
+}
+
+.btn-secondary:focus-visible {
+    outline: 2px solid var(--indigo);
+    outline-offset: 2px;
 }
 
 /* ── Exercise row density ──────────────────────────────────────────────────

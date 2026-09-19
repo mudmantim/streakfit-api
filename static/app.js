@@ -52,13 +52,11 @@ function _getOrCreatePromptsContainer() {
     if (!el) {
         el = document.createElement('div');
         el.id = 'retention-prompts';
+        // A one-time permission ask is not part of today. It lives in
+        // Progress with the other utilities, so it never sits under the
+        // mission taking up 124px of the screen a person came here to use.
+        el.className = 'pane-progress';
         var main = document.querySelector('#dashboard-view main');
-        // Place retention prompts BELOW Today's Mission — the mission should
-        // lead the screen; a permission ask never sits on top of it or pushes
-        // it down on load.
-        // At the end, with the other utilities. Directly under the mission put
-        // a permission ask in the second-most valuable position on the page,
-        // ahead of the user's own progress.
         if (main) main.appendChild(el);
     }
     return el;
