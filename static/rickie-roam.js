@@ -128,25 +128,65 @@
      * card padding obstructs nothing; standing over the "I did this" button
      * obstructs everything.
      */
-    var IMPORTANT = 'button, a, input, select, textarea, .bb-option-btn, ' +
-                    '.daily-exercise-name, .daily-exercise-meta, .daily-exercise-thumb-btn, ' +
-                    '.exercise-link-row, .insight-text, .insight-category, ' +
-                    '.daily-effort-options, .pane-nav';
+    /* Controls, always. Kept as an explicit list because some of these are
+     * empty of text (an icon button, a bare input) and would otherwise look
+     * like free space. */
+    var CONTROLS = 'button, a, input, select, textarea, img, svg, ' +
+                   '.bb-option-btn, .daily-exercise-thumb-btn, .pane-nav';
+
+    /* Everything he must never stand on is EVERY VISIBLE PIECE OF TEXT, found
+     * by walking the DOM — not a list of class names.
+     *
+     * It was a list of class names, and an independent review of the running
+     * app found him parked over the mission counter, the date subtitle, the
+     * "Exercise Tips" button label and the Brain Boost question, in four of six
+     * phone screenshots. The automated check PASSED throughout, because it
+     * measured the same hand-written list the placement engine did: both knew
+     * about `.daily-exercise-name` and neither knew about the counter.
+     *
+     * A list of "text that matters" is a denylist, and a denylist of page
+     * content is wrong by construction: every element added to the app is
+     * implicitly declared safe to stand on until somebody remembers to add it.
+     * The conservative default has to be the other way round — text is
+     * occupied, and free space is what is left.
+     *
+     * Leaf-ish only: an element is counted when it holds a non-empty text node
+     * of its own, so a wrapping <div> around a paragraph does not blank out the
+     * whole card and leave him nowhere to go. */
+    function textBearing(node) {
+        for (var i = 0; i < node.childNodes.length; i++) {
+            var c = node.childNodes[i];
+            if (c.nodeType === 3 && c.nodeValue && c.nodeValue.trim()) return true;
+        }
+        return false;
+    }
 
     function occupiedRects() {
         var s = stage();
         var rects = [];
-        var nodes = document.querySelectorAll(IMPORTANT);
-        for (var i = 0; i < nodes.length; i++) {
-            var node = nodes[i];
+        var band = document.getElementById('rickie-roam-band');
+        var seen = [];
+        var nodes = document.querySelectorAll(CONTROLS);
+        for (var i = 0; i < nodes.length; i++) seen.push(nodes[i]);
+        var all = document.body.querySelectorAll('*');
+        for (var j = 0; j < all.length; j++) {
+            if (textBearing(all[j])) seen.push(all[j]);
+        }
+        for (var k = 0; k < seen.length; k++) {
+            var node = seen[k];
             if (!node.offsetParent) continue;
+            /* He is not an obstruction to himself. */
+            if (band && (node === band || band.contains(node))) continue;
             var r = node.getBoundingClientRect();
             if (!r.width || !r.height) continue;
             if (r.bottom < 0 || r.top > s.height || r.right < 0 || r.left > s.width) continue;
             /* A little breathing room, so he stands beside a button rather
              * than brushing it. */
-            rects.push({ left: r.left - 10, right: r.right + 10,
-                         top: r.top - 10, bottom: r.bottom + 10 });
+            /* 6px, not 10: with text counted, 10px of margin on every block
+             * halved the gaps he could reach (8 clear positions vs 15). Still
+             * enough that he stands beside a thing rather than brushing it. */
+            rects.push({ left: r.left - 6, right: r.right + 6,
+                         top: r.top - 6, bottom: r.bottom + 6 });
         }
         return rects;
     }
@@ -180,10 +220,23 @@
     function freeSpots() {
         var rects = occupiedRects();
         var spots = [];
-        for (var row = 0; row <= 8; row++) {
-            var y = 0.06 + (row / 8) * 0.86;
-            for (var col = 0; col <= 10; col++) {
-                var x = 0.03 + (col / 10) * 0.9;
+        /* A FINE grid — 17 x 21, not 9 x 11.
+         *
+         * Once text counts as occupied, the gaps he can stand in are the
+         * spaces between blocks, and they are smaller than the old grid's
+         * step. Measured on a real phone-width mission card: the coarse grid
+         * found 0 clear positions of 99 and reported that he had nowhere to
+         * go, while a fine grid over the SAME occupancy found 8 of 357. The
+         * space was always there; the grid was stepping over it.
+         *
+         * It is pure arithmetic over a list of rectangles, run when he decides
+         * to move and on scroll — not per frame — so the extra points cost
+         * nothing worth measuring.
+         */
+        for (var row = 0; row <= 16; row++) {
+            var y = 0.04 + (row / 16) * 0.90;
+            for (var col = 0; col <= 20; col++) {
+                var x = 0.02 + (col / 20) * 0.94;
                 if (isClear(x, y, rects)) spots.push({ x: x, y: y, weight: 1 + y * 3 });
             }
         }

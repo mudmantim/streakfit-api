@@ -1116,20 +1116,36 @@ def check_rickie_roams(b: Browser, base: str, app) -> None:
           const st=e.parentNode.getBoundingClientRect();
           e.style.transform='translate('+Math.round(s.x*(st.width-56))+'px,'+
             Math.round(s.y*(st.height-56))+'px)'; return 1;})()""")
+        # Measures EVERY VISIBLE PIECE OF TEXT, not a list of class names.
+        #
+        # This check passed for weeks while an independent review of the running
+        # app found him parked over the mission counter, the date subtitle, a
+        # button label and the Brain Boost question in four of six phone
+        # screenshots. It passed because it asked about the same hand-written
+        # list the placement engine used: both knew `.daily-exercise-name`,
+        # neither knew about the counter. A test that shares its subject's blind
+        # spot is not a test, it is a second opinion from the same person.
         hit = b.js("""(()=>{const r=document.querySelector('.rickie-roam').getBoundingClientRect();
+          const band=document.getElementById('rickie-roam-band');
           const bad=[];
-          for(const el of document.querySelectorAll(
-              'button,a,input,select,textarea,.daily-exercise-name,.daily-exercise-meta,.bb-option-btn')){
+          const textBearing=(n)=>{for(const c of n.childNodes)
+            if(c.nodeType===3&&c.nodeValue&&c.nodeValue.trim()) return true; return false;};
+          const nodes=new Set(document.querySelectorAll(
+              'button,a,input,select,textarea,img,svg,.bb-option-btn'));
+          for(const el of document.body.querySelectorAll('*'))
+            if(textBearing(el)) nodes.add(el);
+          for(const el of nodes){
             if(!el.offsetParent) continue;
+            if(band&&(el===band||band.contains(el))) continue;
             const q=el.getBoundingClientRect();
-            if(!q.width) continue;
+            if(!q.width||!q.height) continue;
             if(!(q.right<r.left||q.left>r.right||q.bottom<r.top||q.top>r.bottom))
               bad.push((el.id||el.className||el.tagName).toString().slice(0,30));
           } return bad.join('|');})()""")
         if hit:
             blocked.append(hit)
     b.js("RickieRoam.setPaused(false)")
-    check(not blocked, "eight clear positions, none covering a control or exercise text",
+    check(not blocked, "every position he may stand in is clear of controls AND text",
           "; ".join(blocked[:3]))
 
     # A tap at his position reaches the page underneath.
