@@ -1350,6 +1350,9 @@ class TeamMessage(db.Model):
     # table, one query, one chronological order, and the emoji reactions that
     # already exist (plain short messages) work on it with no new schema.
     photo_id = db.Column(db.Integer, db.ForeignKey('team_photo.id'), nullable=True)
+    # Same idea as photo_id: a challenge appears as a card in the one thread
+    # rather than a second feed with its own ordering.
+    challenge_id = db.Column(db.Integer, db.ForeignKey('team_challenge.id'), nullable=True)
     created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
 
     __table_args__ = (
@@ -1437,6 +1440,43 @@ class UserFilterUnlock(db.Model):
 
     __table_args__ = (
         db.UniqueConstraint('user_id', 'filter_key', name='uq_user_filter_unlock'),
+    )
+
+
+class TeamChallenge(db.Model):
+    """One person nudging another to move.
+
+    Presets only, never free text. A child being able to type any dare into a
+    family app is a safety hole, and the fixed list keeps every challenge
+    inside the same equipment-free, family-safe movement model the exercise
+    library already follows.
+
+    There is no loser and no failure state: a challenge nobody completes simply
+    expires quietly. Nothing in StreakFit tells a person they did not do
+    something.
+    """
+    __tablename__ = 'team_challenge'
+    id = db.Column(db.Integer, primary_key=True)
+    public_id = db.Column(db.String(32), nullable=False, unique=True, index=True)
+    team_id = db.Column(db.Integer, db.ForeignKey('team.id'), nullable=False, index=True)
+    created_by_user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True)
+    # NULL means the whole team; otherwise one person was named.
+    target_user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True)
+    preset_key = db.Column(db.String(40), nullable=False)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, index=True)
+    expires_at = db.Column(db.DateTime, nullable=True)
+
+
+class TeamChallengeCompletion(db.Model):
+    __tablename__ = 'team_challenge_completion'
+    id = db.Column(db.Integer, primary_key=True)
+    challenge_id = db.Column(db.Integer, db.ForeignKey('team_challenge.id'),
+                             nullable=False, index=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False, index=True)
+    completed_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+
+    __table_args__ = (
+        db.UniqueConstraint('challenge_id', 'user_id', name='uq_challenge_completion'),
     )
 
 
@@ -3150,6 +3190,87 @@ def _photo_bytes(photo):
     return photo.image_data
 
 
+# --- Team challenges: movement as the conversation ----------------------------
+#
+# Presets only. A free-text dare in a family app used by children is a safety
+# hole no amount of moderation closes, and the fixed list keeps every challenge
+# equipment-free, indoor-or-outdoor, and within the same movement model the
+# exercise library already follows. Adding one is a dict.
+#
+# Never a loser: there is no "failed" state, no timer counting down in anyone's
+# face, and nothing is ever said about a challenge a person did not do.
+
+CHALLENGE_PRESETS = [
+    {'key': 'squats_20', 'title': '20 squats', 'emoji': '\U0001F9B5',
+     'blurb': 'Anywhere with floor space.'},
+    {'key': 'walk_10', 'title': 'Walk for 10 minutes', 'emoji': '\U0001F6B6',
+     'blurb': 'Around the block, or around the house.'},
+    {'key': 'plank_30', 'title': 'Hold a plank for 30 seconds', 'emoji': '\U0001F4AA',
+     'blurb': 'Knees down counts.'},
+    {'key': 'outside_15', 'title': 'Get outside for 15 minutes', 'emoji': '\U0001F333',
+     'blurb': 'Weather permitting. Rickie approves of puddles.'},
+    {'key': 'jumping_jacks_25', 'title': '25 jumping jacks', 'emoji': '\u26A1',
+     'blurb': 'Quick and loud.'},
+    {'key': 'stretch_5', 'title': 'Stretch for 5 minutes', 'emoji': '\U0001F9D8',
+     'blurb': 'Whatever feels tight.'},
+    {'key': 'dance_song', 'title': 'Dance to one whole song', 'emoji': '\U0001F3B5',
+     'blurb': 'Your song. No notes from anyone else.'},
+    {'key': 'stairs_3', 'title': 'Up and down the stairs 3 times', 'emoji': '\U0001FA9C',
+     'blurb': 'Only if you have stairs and they are safe.'},
+]
+CHALLENGE_PRESETS_BY_KEY = {c['key']: c for c in CHALLENGE_PRESETS}
+
+CHALLENGE_EXPIRY_HOURS = 36
+CHALLENGE_COMPLETE_XP = 15
+CHALLENGE_COMPLETE_ACORNS = 2
+# A daily cap so two people cannot sit and challenge each other for XP. Past it
+# the challenge still completes and still celebrates -- it just stops paying,
+# which is the difference between a cap and a punishment.
+CHALLENGE_REWARDED_PER_DAY = 3
+
+
+def _challenge_is_open(challenge):
+    return not challenge.expires_at or challenge.expires_at > datetime.utcnow()
+
+
+def _serialize_challenge(challenge, completions_by_id, usernames, viewer_id):
+    preset = CHALLENGE_PRESETS_BY_KEY.get(challenge.preset_key, {})
+    done = completions_by_id.get(challenge.id, [])
+    return {
+        'public_id': challenge.public_id,
+        'preset_key': challenge.preset_key,
+        'title': preset.get('title', 'A challenge'),
+        'emoji': preset.get('emoji', '\u2B50'),
+        'blurb': preset.get('blurb', ''),
+        'from_username': usernames.get(challenge.created_by_user_id),
+        'to_username': usernames.get(challenge.target_user_id) if challenge.target_user_id else None,
+        'for_everyone': challenge.target_user_id is None,
+        # Named or not, anyone on the team may do it -- a challenge is an
+        # invitation, not an assignment.
+        'open': _challenge_is_open(challenge),
+        'completed_by': [usernames.get(uid) for uid in done if usernames.get(uid)],
+        'completed_by_me': viewer_id in done,
+        'created_at': challenge.created_at.isoformat(),
+    }
+
+
+def _challenges_for_messages(messages, viewer_id):
+    ids = {m.challenge_id for m in messages if m.challenge_id}
+    if not ids:
+        return {}, {}
+    rows = db.session.execute(
+        db.select(TeamChallenge).where(TeamChallenge.id.in_(ids))
+    ).scalars().all()
+    completions = db.session.execute(
+        db.select(TeamChallengeCompletion.challenge_id, TeamChallengeCompletion.user_id)
+        .where(TeamChallengeCompletion.challenge_id.in_(ids))
+    ).all()
+    by_id = {}
+    for cid, uid in completions:
+        by_id.setdefault(cid, []).append(uid)
+    return {c.id: c for c in rows}, by_id
+
+
 # --- StreakFit photo filters ---------------------------------------------------
 #
 # The catalog lives on the server and carries its own RENDER SPEC, so the client
@@ -3918,6 +4039,14 @@ def _moment_display_text(moment_type, subject_username, metadata):
         return f"{subject_username} left the team" if subject_username else "A member left"
     if moment_type == 'campfire_log_added':
         return f"{subject_username} added a log to the campfire" if subject_username else "A log was added to the campfire"
+    if moment_type == 'challenge_started':
+        title = (metadata or {}).get('title')
+        who = subject_username or 'Someone'
+        return f"{who} started a challenge: {title}" if title else f"{who} started a challenge"
+    if moment_type == 'challenge_completed':
+        title = (metadata or {}).get('title')
+        who = subject_username or 'Someone'
+        return f"{who} completed: {title}" if title else f"{who} completed a challenge"
     if moment_type == 'photo_shared':
         return f"{subject_username} shared a photo" if subject_username else "A photo was shared"
     if moment_type == 'campfire_stage_reached':
@@ -3979,6 +4108,16 @@ RICKIE_TEAM_MESSAGES = {
     'campfire_stage_reached': [
         "The campfire grew brighter.",
         "You built this together.",
+    ],
+    # Rickie at a challenge: pleased, a bit competitive, never a scoreboard.
+    # He congratulates whoever moved and says nothing at all about anyone who
+    # did not -- there is no losing side to comment on.
+    'challenge_completed': [
+        "Done. Rickie saw the whole thing.",
+        "That one's in the books.",
+        "Rickie would have joined in, but he was holding the snacks.",
+        "Called it. Well — Rickie watched it.",
+        "Somebody just did the thing.",
     ],
 }
 
@@ -4067,7 +4206,7 @@ def _witness_for_ids(user_ids):
     return witness
 
 
-def _serialize_team_message(m, usernames=None, photos=None):
+def _serialize_team_message(m, usernames=None, photos=None, challenges=None, viewer_id=None):
     """`usernames` is a pre-resolved {id: username} map (batch path, no per-row
     query). When omitted, falls back to a single lookup for direct/one-off use."""
     sender_username = None
@@ -4083,6 +4222,12 @@ def _serialize_team_message(m, usernames=None, photos=None):
         "body": m.body,
         "created_at": m.created_at.isoformat(),
     }
+    if getattr(m, 'challenge_id', None) and challenges is not None:
+        challenge = challenges[0].get(m.challenge_id)
+        if challenge is not None:
+            out["challenge"] = _serialize_challenge(
+                challenge, challenges[1], usernames or {}, viewer_id)
+
     if getattr(m, 'photo_id', None):
         photo = photos.get(m.photo_id) if photos is not None else db.session.get(TeamPhoto, m.photo_id)
         if photo is not None:
@@ -4141,7 +4286,19 @@ def get_team_messages(team_id):
         ).all()
         photos = {r.id: r for r in rows}
 
-    return jsonify([_serialize_team_message(m, usernames, photos) for m in messages]), 200
+    challenge_rows, completions = _challenges_for_messages(messages, user_id)
+    # Usernames for whoever a challenge names, not just message senders.
+    extra_ids = set()
+    for ch in challenge_rows.values():
+        extra_ids.update([ch.created_by_user_id, ch.target_user_id])
+    for uids in completions.values():
+        extra_ids.update(uids)
+    usernames.update(_usernames_for_ids(extra_ids - set(usernames)))
+
+    return jsonify([
+        _serialize_team_message(m, usernames, photos, (challenge_rows, completions), user_id)
+        for m in messages
+    ]), 200
 
 
 @app.route('/api/teams/<int:team_id>/messages', methods=['POST'])
@@ -4173,6 +4330,147 @@ def post_team_message(team_id):
     db.session.commit()
 
     return jsonify(_serialize_team_message(message)), 201
+
+
+# --- Team challenges ----------------------------------------------------------
+
+@app.route('/api/challenge-presets', methods=['GET'])
+@jwt_required()
+def list_challenge_presets():
+    return jsonify(CHALLENGE_PRESETS), 200
+
+
+@app.route('/api/teams/<int:team_id>/challenges', methods=['POST'])
+@jwt_required()
+@limiter.limit("20 per hour", key_func=user_or_ip_key)
+@limiter.limit("6 per minute", key_func=user_or_ip_key)
+def create_team_challenge(team_id):
+    user_id = int(get_jwt_identity())
+
+    membership = db.session.execute(
+        db.select(TeamMembership).where(
+            TeamMembership.team_id == team_id, TeamMembership.user_id == user_id)
+    ).scalar_one_or_none()
+    if not membership:
+        return jsonify({"error": "Forbidden"}), 403
+
+    data = request.get_json(silent=True) or {}
+    preset = CHALLENGE_PRESETS_BY_KEY.get((data.get('preset_key') or '').strip())
+    if preset is None:
+        return jsonify({"error": "unknown_challenge"}), 400
+
+    target_user_id = data.get('target_user_id')
+    if target_user_id is not None:
+        target_member = db.session.execute(
+            db.select(TeamMembership).where(
+                TeamMembership.team_id == team_id,
+                TeamMembership.user_id == int(target_user_id))
+        ).scalar_one_or_none()
+        if not target_member:
+            return jsonify({"error": "not_a_team_member"}), 400
+        target_user_id = int(target_user_id)
+
+    now = datetime.utcnow()
+    challenge = TeamChallenge(
+        public_id=uuid.uuid4().hex,
+        team_id=team_id,
+        created_by_user_id=user_id,
+        target_user_id=target_user_id,
+        preset_key=preset['key'],
+        created_at=now,
+        expires_at=now + timedelta(hours=CHALLENGE_EXPIRY_HOURS),
+    )
+    db.session.add(challenge)
+    db.session.flush()
+
+    sender = db.session.get(User, user_id)
+    message = TeamMessage(
+        team_id=team_id, sender_type='user', sender_user_id=user_id,
+        body=f"{sender.username if sender else 'Someone'} started a challenge: {preset['title']}",
+        challenge_id=challenge.id, created_at=now,
+    )
+    db.session.add(message)
+    create_team_moment(team_id, 'challenge_started', subject_user_id=user_id,
+                       metadata={"title": preset['title']})
+    db.session.commit()
+
+    usernames = _usernames_for_ids([user_id, target_user_id])
+    payload = _serialize_team_message(message)
+    payload['challenge'] = _serialize_challenge(challenge, {}, usernames, user_id)
+    return jsonify(payload), 201
+
+
+@app.route('/api/teams/<int:team_id>/challenges/<string:public_id>/complete', methods=['POST'])
+@jwt_required()
+@limiter.limit("30 per hour", key_func=user_or_ip_key)
+def complete_team_challenge(team_id, public_id):
+    """Doing the thing. Awards through the same economy as everything else.
+
+    Past the daily rewarded cap this still succeeds and still celebrates -- it
+    just stops paying XP. Refusing the completion, or telling someone they had
+    done too many, would be punishing a person for moving.
+    """
+    user_id = int(get_jwt_identity())
+
+    membership = db.session.execute(
+        db.select(TeamMembership).where(
+            TeamMembership.team_id == team_id, TeamMembership.user_id == user_id)
+    ).scalar_one_or_none()
+    if not membership:
+        return jsonify({"error": "Forbidden"}), 403
+
+    challenge = db.session.execute(
+        db.select(TeamChallenge).where(TeamChallenge.public_id == public_id)
+    ).scalar_one_or_none()
+    if challenge is None or challenge.team_id != team_id:
+        return jsonify({"error": "not_found"}), 404
+
+    already = db.session.execute(
+        db.select(TeamChallengeCompletion).where(
+            TeamChallengeCompletion.challenge_id == challenge.id,
+            TeamChallengeCompletion.user_id == user_id)
+    ).scalar_one_or_none()
+    if already:
+        return jsonify({"already_completed": True, "xp_awarded": 0, "acorns_awarded": 0}), 200
+
+    user = db.session.get(User, user_id)
+    old_level = xp_to_level(user.xp_total)['level']
+
+    # Counted BEFORE the new row is staged: a query autoflushes the pending
+    # insert, so counting afterwards included the completion being recorded and
+    # quietly paid out one fewer than the cap allows.
+    since = datetime.utcnow() - timedelta(hours=24)
+    rewarded_today = db.session.execute(
+        db.select(db.func.count(TeamChallengeCompletion.id)).where(
+            TeamChallengeCompletion.user_id == user_id,
+            TeamChallengeCompletion.completed_at >= since)
+    ).scalar() or 0
+
+    db.session.add(TeamChallengeCompletion(challenge_id=challenge.id, user_id=user_id))
+
+    events = []
+    if rewarded_today < CHALLENGE_REWARDED_PER_DAY:
+        events.append(award_progress(user, 'challenge_complete',
+                                     CHALLENGE_COMPLETE_XP, CHALLENGE_COMPLETE_ACORNS))
+
+    preset = CHALLENGE_PRESETS_BY_KEY.get(challenge.preset_key, {})
+    create_team_moment(team_id, 'challenge_completed', subject_user_id=user_id,
+                       metadata={"title": preset.get('title')})
+    create_rickie_team_message(team_id, 'challenge_completed')
+    db.session.commit()
+
+    response = {
+        "completed": True,
+        "challenge_title": preset.get('title'),
+        # The natural next beat: you did the thing, now show them.
+        "suggest_photo": True,
+        "suggested_filter": 'team_challenge',
+    }
+    response.update(_progress_response(old_level, user, events))
+    response["milestones_unlocked"] = _completion_milestones(
+        user_id, user, old_level, events, awarded=bool(events))
+    response["filters_unlocked"] = _filters_newly_unlocked(user_id, user, old_level, events)
+    return jsonify(response), 200
 
 
 # --- Team photos (private to the team, never discoverable) ---------------------

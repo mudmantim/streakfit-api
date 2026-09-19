@@ -790,6 +790,7 @@ var _teamPanelSendBtn  = null;
 // the invite code. Reset on close so it can't leak into the next team.
 var _teamPanelIsCreator = false;
 var _teamPanelChatPane = null;
+var _teamPanelMembers = [];
 var _teamPanelTeamId   = null;
 var _teamPanelInfo     = null;
 var _teamPanelMeta     = null;
@@ -944,6 +945,14 @@ function openTeamPanel(team) {
         if (file) openPhotoComposer(file);
     });
 
+    var challengeBtn = document.createElement('button');
+    challengeBtn.type = 'button';
+    challengeBtn.className = 'team-panel-photo-btn';
+    challengeBtn.setAttribute('aria-label', 'Challenge your team to move');
+    challengeBtn.textContent = '\u26A1';
+    challengeBtn.addEventListener('click', function () { openChallengePicker(team.id); });
+
+    inputRow.appendChild(challengeBtn);
     inputRow.appendChild(photoBtn);
     inputRow.appendChild(_photoInput);
     inputRow.appendChild(_teamPanelInput);
@@ -1021,6 +1030,7 @@ async function _loadTeamInfo(teamId) {
     }
 
     _teamPanelIsCreator = !!data.is_creator;
+    _teamPanelMembers = data.members || [];
     _refreshPhotoDeletePermissions();
 
     _teamPanelInfo.appendChild(_buildCampfireSection(data));
@@ -1443,7 +1453,9 @@ function _appendTeamMsg(m) {
         wrap.appendChild(sender);
     }
 
-    if (m.photo) {
+    if (m.challenge) {
+        wrap.appendChild(_buildChallengeCard(m.challenge));
+    } else if (m.photo) {
         wrap.appendChild(_buildPhotoBubble(m.photo));
     } else {
         var body = document.createElement('p');
@@ -1463,6 +1475,230 @@ function _photoUrl(publicId) {
     // wherever a tampered response pointed it; deriving it from the open team
     // and the photo's own id can only ever address this team's photos.
     return '/api/teams/' + _teamPanelTeamId + '/photos/' + encodeURIComponent(publicId);
+}
+
+// Picking a challenge. A short list of presets and, optionally, one person to
+// aim it at -- there is deliberately no free-text box, because a typed dare in
+// a family app used by children is a safety hole no moderation closes.
+async function openChallengePicker(teamId) {
+    if (document.querySelector('.tchallenge-picker-overlay')) return;
+
+    var presets = await api('/api/challenge-presets');
+    if (!presets || presets.status !== 200) return;
+
+    var overlay = document.createElement('div');
+    overlay.className = 'tchallenge-picker-overlay';
+    var sheet = document.createElement('div');
+    sheet.className = 'tchallenge-picker';
+
+    var head = document.createElement('div');
+    head.className = 'photo-composer-head';
+    var title = document.createElement('p');
+    title.className = 'photo-composer-title';
+    title.textContent = 'Challenge your team';
+    var close = document.createElement('button');
+    close.type = 'button';
+    close.className = 'photo-composer-close';
+    close.setAttribute('aria-label', 'Cancel');
+    close.textContent = '\u2715';
+    close.addEventListener('click', function () { overlay.remove(); });
+    head.appendChild(title);
+    head.appendChild(close);
+    sheet.appendChild(head);
+
+    var whoLabel = document.createElement('p');
+    whoLabel.className = 'tchallenge-picker-label';
+    whoLabel.textContent = 'Who?';
+    sheet.appendChild(whoLabel);
+
+    var whoRow = document.createElement('div');
+    whoRow.className = 'tchallenge-who-row';
+    var target = { id: null };
+    var options = [{ id: null, name: 'Everyone' }].concat(
+        (_teamPanelMembers || [])
+            .filter(function (m) { return !currentUser || m.user_id !== currentUser.id; })
+            .map(function (m) { return { id: m.user_id, name: m.username }; })
+    );
+    options.forEach(function (opt, i) {
+        var chip = document.createElement('button');
+        chip.type = 'button';
+        chip.className = 'photo-filter-chip' + (i === 0 ? ' is-active' : '');
+        chip.textContent = opt.name;
+        chip.addEventListener('click', function () {
+            target.id = opt.id;
+            [].forEach.call(whoRow.children, function (c) { c.classList.remove('is-active'); });
+            chip.classList.add('is-active');
+        });
+        whoRow.appendChild(chip);
+    });
+    sheet.appendChild(whoRow);
+
+    var what = document.createElement('p');
+    what.className = 'tchallenge-picker-label';
+    what.textContent = 'What?';
+    sheet.appendChild(what);
+
+    var list = document.createElement('div');
+    list.className = 'tchallenge-preset-list';
+    presets.data.forEach(function (p) {
+        var row = document.createElement('button');
+        row.type = 'button';
+        row.className = 'tchallenge-preset';
+        var e = document.createElement('span');
+        e.className = 'tchallenge-emoji';
+        e.setAttribute('aria-hidden', 'true');
+        e.textContent = p.emoji;
+        var txt = document.createElement('span');
+        var t = document.createElement('span');
+        t.className = 'tchallenge-preset-title';
+        t.textContent = p.title;
+        var b = document.createElement('span');
+        b.className = 'tchallenge-preset-blurb';
+        b.textContent = p.blurb;
+        txt.appendChild(t);
+        txt.appendChild(b);
+        row.appendChild(e);
+        row.appendChild(txt);
+        row.addEventListener('click', function () {
+            row.disabled = true;
+            _sendChallenge(teamId, p.key, target.id, overlay);
+        });
+        list.appendChild(row);
+    });
+    sheet.appendChild(list);
+
+    overlay.appendChild(sheet);
+    document.body.appendChild(overlay);
+}
+
+async function _sendChallenge(teamId, presetKey, targetUserId, overlay) {
+    var body = { preset_key: presetKey };
+    if (targetUserId) body.target_user_id = targetUserId;
+    var result = await api('/api/teams/' + teamId + '/challenges', 'POST', body);
+    overlay.remove();
+    if (!result || result.status !== 201) return;
+    var empty = _teamPanelThread && _teamPanelThread.querySelector('.team-panel-empty');
+    if (empty) empty.remove();
+    if (_teamPanelTeamId === teamId) _appendTeamMsg(result.data);
+}
+
+
+// A challenge in the thread. Movement is the message -- this is the one thing
+// a chat app cannot do, because it does not know whether you actually moved.
+function _buildChallengeCard(ch) {
+    var box = document.createElement('div');
+    box.className = 'tchallenge-card' + (ch.completed_by_me ? ' is-done' : '');
+
+    var head = document.createElement('div');
+    head.className = 'tchallenge-head';
+    var emoji = document.createElement('span');
+    emoji.className = 'tchallenge-emoji';
+    emoji.setAttribute('aria-hidden', 'true');
+    emoji.textContent = ch.emoji;
+    head.appendChild(emoji);
+
+    var headText = document.createElement('div');
+    var title = document.createElement('p');
+    title.className = 'tchallenge-title';
+    title.textContent = ch.title;
+    headText.appendChild(title);
+
+    var who = document.createElement('p');
+    who.className = 'tchallenge-who';
+    who.textContent = ch.for_everyone
+        ? (ch.from_username || 'Someone') + ' challenged the team'
+        : (ch.from_username || 'Someone') + ' challenged ' + (ch.to_username || 'someone');
+    headText.appendChild(who);
+    head.appendChild(headText);
+    box.appendChild(head);
+
+    if (ch.blurb) {
+        var blurb = document.createElement('p');
+        blurb.className = 'tchallenge-blurb';
+        blurb.textContent = ch.blurb;
+        box.appendChild(blurb);
+    }
+
+    // Who has done it. Never who hasn't — there is no list of the absent here,
+    // the same rule the team roster follows.
+    if (ch.completed_by && ch.completed_by.length) {
+        var done = document.createElement('p');
+        done.className = 'tchallenge-done-by';
+        done.textContent = '\u2713 ' + ch.completed_by.join(', ')
+            + (ch.completed_by.length === 1 ? ' did it' : ' did it');
+        box.appendChild(done);
+    }
+
+    if (ch.completed_by_me) {
+        var mine = document.createElement('p');
+        mine.className = 'tchallenge-done-by is-me';
+        mine.textContent = 'You did this one.';
+        box.appendChild(mine);
+    } else if (ch.open) {
+        var btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'btn-primary tchallenge-do-btn';
+        btn.textContent = 'I did it';
+        btn.addEventListener('click', function () { _completeChallenge(ch, btn, box); });
+        box.appendChild(btn);
+    } else {
+        // Expired. Stated as a fact about the challenge, never as something
+        // the person failed to do.
+        var over = document.createElement('p');
+        over.className = 'tchallenge-blurb';
+        over.textContent = 'This one has wrapped up.';
+        box.appendChild(over);
+    }
+
+    return box;
+}
+
+async function _completeChallenge(ch, btn, box) {
+    var teamId = _teamPanelTeamId;
+    if (!teamId) return;
+    btn.disabled = true;
+    btn.textContent = 'Nice…';
+
+    var path = '/api/teams/' + teamId + '/challenges/' + encodeURIComponent(ch.public_id) + '/complete';
+    var result = await api(path, 'POST');
+    if (!result || result.status !== 200) {
+        btn.disabled = false;
+        btn.textContent = 'I did it';
+        return;
+    }
+
+    var data = result.data;
+    var summary = _summarizeProgress(data);
+    summary.confetti = true;
+    summary.celebrate = true;
+    if (_rickieAllowsReaction(true)) {
+        showRickieReaction(_pickRickieLine('challengeDone'), summary);
+    }
+    _announceMilestones(data.milestones_unlocked);
+    _announceFilters(data.filters_unlocked);
+
+    btn.remove();
+    box.classList.add('is-done');
+    var mine = document.createElement('p');
+    mine.className = 'tchallenge-done-by is-me';
+    mine.textContent = 'You did this one.';
+    box.appendChild(mine);
+
+    // The natural next beat: you did the thing, now show them. Offered, never
+    // required -- it sits there until tapped or ignored.
+    if (data.suggest_photo) {
+        var prove = document.createElement('button');
+        prove.type = 'button';
+        prove.className = 'tchallenge-prove-btn';
+        prove.textContent = '\uD83D\uDCF8 Prove it — send a victory picture';
+        prove.addEventListener('click', function () {
+            _challengePhotoFilter = data.suggested_filter || null;
+            var input = document.querySelector('.team-panel-input-row input[type=file]');
+            if (input) input.click();
+        });
+        box.appendChild(prove);
+    }
+    if (currentUser) loadUserPreferences();
 }
 
 function _buildPhotoBubble(photo) {
@@ -2048,6 +2284,10 @@ async function openPhotoComposer(file, opts) {
     }
     _composerImage = img;
     _composerFilterKey = 'none';
+    if (_challengePhotoFilter) {
+        _composerFilterKey = _challengePhotoFilter;
+        _challengePhotoFilter = null;
+    }
 
     await _refreshPhotoFilters();
     _buildPhotoComposer(teamId, objectUrl, solo);
@@ -2414,6 +2654,16 @@ var RICKIE_LINES = {
     // Distinct from `milestone`, which is written for *browsing* the Memory
     // Book ("Rickie flips back through these sometimes") -- the wrong register
     // for the moment one is earned, and plainly wrong for a first one.
+    // Rickie at a challenge: pleased and a little competitive, never a referee.
+    // He has opinions about the challenge, never about the person.
+    challengeDone: [
+        "Challenge accepted, challenge finished.",
+        "Rickie watched the whole thing. Solid work.",
+        "That's how that's done.",
+        "Rickie would have joined in, but somebody had to hold the snacks.",
+        "Consider it proven.",
+        "Rickie is telling everyone about this one.",
+    ],
     milestoneUnlocked: [
         "That one's worth keeping.",
         "Rickie's adding this to the book.",
@@ -2718,6 +2968,22 @@ function _playNextRickieToast() {
 // three weeks in), so they get their own beat rather than being folded into the
 // completion toast, and they wait for that toast to clear so two celebrations
 // don't stack on top of each other.
+var _challengePhotoFilter = null;
+
+// Earning something should say what it unlocked. Without this a person finished
+// a mission, quietly gained a filter, and only met it later three taps deep in
+// a composer.
+function _announceFilters(filters) {
+    if (!filters || !filters.length) return;
+    if (!_rickieAllowsReaction(true)) return;
+    filters.forEach(function (f) {
+        showRickieReaction('New filter: ' + f.name, {
+            badge: '\uD83D\uDCF8 ' + f.blurb,
+            celebrate: true,
+        });
+    });
+}
+
 function _announceMilestones(milestones) {
     if (!milestones || !milestones.length) return;
     if (!_rickieAllowsReaction(true)) return;   // milestone-significant: quiet mode still shows these
@@ -4012,6 +4278,7 @@ function renderBrainBoostQuestion(brainBoost) {
                 // threshold the answer pushed past) is announced even in quiet
                 // mode -- it is milestone-significant, unlike the answer itself.
                 _announceMilestones(result.data.milestones_unlocked);
+            _announceFilters(result.data.filters_unlocked);
 
                 // Brain Boost now awards XP/acorns too, so refresh from /api/me
                 // rather than hand-patching a single counter.
@@ -5677,6 +5944,7 @@ async function handleCompleteExercise(key, btn, row) {
         _applyRickieExpression();
         _applyCampfireUpdates(result.data.team_campfire_updates);
         _announceMilestones(result.data.milestones_unlocked);
+        _announceFilters(result.data.filters_unlocked);
         // Let the flash animation play, then reload
         setTimeout(function () { loadDailyExercises(); }, 480);
     } else {
@@ -5775,7 +6043,7 @@ function renderChallenge(c) {
     var atRisk      = !alreadyDone && c.last_check_in === yesterday && c.current_streak > 0;
 
     var card = document.createElement('div');
-    card.className = 'challenge-card';
+    card.className = 'tchallenge-card';
     if (alreadyDone)          card.classList.add('done-today');
     else if (atRisk)          card.classList.add('at-risk');
     else if (c.current_streak > 0) card.classList.add('has-streak');
@@ -5784,7 +6052,7 @@ function renderChallenge(c) {
     info.className = 'challenge-info';
 
     var title = document.createElement('p');
-    title.className = 'challenge-title';
+    title.className = 'tchallenge-title';
     title.textContent = (c.current_streak > 0 ? '🔥 ' : '') + c.title; // 🔥
 
     var streakRow = document.createElement('div');
@@ -5831,7 +6099,7 @@ async function handleCreateChallenge(event) {
     event.preventDefault();
     setError('create-error', '');
 
-    var titleInput = document.getElementById('challenge-title');
+    var titleInput = document.getElementById('tchallenge-title');
     var title = titleInput.value.trim();
     if (!title) return;
 

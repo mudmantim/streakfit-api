@@ -3168,3 +3168,154 @@ body.theme-classic .theme-btn.active { background: rgba(79,70,229,.2); }
     gap: .4rem;
     margin-top: .2rem;
 }
+
+/* ── Team challenges: movement as the message ────────────────────────────
+   Prefixed `tchallenge-` because `.challenge-card` and `.challenge-title`
+   were already taken by Side Quests, which is backed by the Challenge
+   model. The collision made these cards inherit a horizontal flex row and
+   wrap their text one character per line. */
+
+.tchallenge-card {
+    /* Explicit, not inherited: a stray flex row from elsewhere is what broke
+       this the first time. */
+    display: flex;
+    flex-direction: column;
+    border: 1.5px solid var(--indigo);
+    border-radius: 14px;
+    padding: .75rem;
+    background: linear-gradient(160deg, #eef2ff 0%, #faf5ff 100%);
+    max-width: 280px;
+}
+
+.tchallenge-card.is-done {
+    border-color: var(--green);
+    background: linear-gradient(160deg, #ecfdf5 0%, #f0fdf4 100%);
+}
+
+.tchallenge-head {
+    display: flex;
+    align-items: flex-start;
+    gap: .55rem;
+}
+
+.tchallenge-emoji { font-size: 1.5rem; line-height: 1.1; flex-shrink: 0; }
+
+.tchallenge-title {
+    margin: 0;
+    font-size: .95rem;
+    font-weight: 800;
+    color: var(--gray-800);
+}
+
+.tchallenge-who {
+    margin: .1rem 0 0;
+    font-size: .74rem;
+    color: var(--gray-500);
+}
+
+.tchallenge-blurb {
+    margin: .45rem 0 0;
+    font-size: .78rem;
+    color: var(--gray-500);
+}
+
+.tchallenge-done-by {
+    margin: .45rem 0 0;
+    font-size: .78rem;
+    font-weight: 600;
+    color: var(--green);
+}
+
+.tchallenge-done-by.is-me { color: var(--green); }
+
+.tchallenge-do-btn { width: 100%; margin-top: .6rem; }
+
+.tchallenge-prove-btn {
+    width: 100%;
+    margin-top: .45rem;
+    min-height: 44px;
+    border: 1px dashed var(--indigo);
+    border-radius: 10px;
+    background: #fff;
+    color: var(--indigo);
+    font-size: .82rem;
+    font-weight: 700;
+    cursor: pointer;
+}
+
+.tchallenge-picker-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 1300;
+    background: rgba(17, 24, 39, .72);
+    display: flex;
+    align-items: flex-end;
+    justify-content: center;
+}
+
+.tchallenge-picker {
+    width: 100%;
+    max-width: 480px;
+    max-height: 90vh;
+    overflow-y: auto;
+    background: #fff;
+    border-radius: 18px 18px 0 0;
+    padding: 1rem 1rem calc(1rem + env(safe-area-inset-bottom));
+}
+
+.tchallenge-picker-label {
+    margin: .5rem 0 .4rem;
+    font-size: .72rem;
+    font-weight: 700;
+    letter-spacing: .04em;
+    text-transform: uppercase;
+    color: var(--gray-500);
+}
+
+.tchallenge-who-row {
+    display: flex;
+    gap: .4rem;
+    overflow-x: auto;
+    padding-bottom: .2rem;
+    scrollbar-width: none;
+}
+
+.tchallenge-who-row::-webkit-scrollbar { display: none; }
+
+.tchallenge-preset-list {
+    display: flex;
+    flex-direction: column;
+    gap: .45rem;
+}
+
+.tchallenge-preset {
+    display: flex;
+    align-items: center;
+    gap: .65rem;
+    width: 100%;
+    min-height: 56px;
+    padding: .55rem .7rem;
+    border: 1px solid var(--gray-200);
+    border-radius: 12px;
+    background: var(--gray-50);
+    text-align: left;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+    transition: transform .1s, border-color .15s;
+}
+
+.tchallenge-preset:active { transform: scale(.985); }
+.tchallenge-preset:hover { border-color: var(--indigo); }
+
+.tchallenge-preset-title {
+    display: block;
+    font-size: .92rem;
+    font-weight: 700;
+    color: var(--gray-800);
+}
+
+.tchallenge-preset-blurb {
+    display: block;
+    font-size: .76rem;
+    color: var(--gray-500);
+}
