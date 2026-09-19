@@ -66,9 +66,34 @@ unit — `scripts/content/validate.py --batch 0002` checks exactly one.
 | `min_age` | all | The youngest reader it suits. 9 is the product's floor; 13 and 16 exist for material that is fine but lands better older. |
 | `confidence` | all | `established` · `simplified` · `contested` · `editorial` — see below. |
 | `sources` | required unless `editorial` | URLs. A factual claim with no source cannot be `accepted`. |
-| `status` | all | `accepted` · `pending` · `rejected`. **Only `accepted` items are served.** |
+| `stage` | all | Where the item has actually got to. See below. **Only `accepted` is served.** |
+| `review` | all | `{pass, depth, notes}` — which review pass looked at it, how hard, and what it said. |
 | `added` `batch` | all | Provenance. Which batch, when. |
 | `notes` | optional | Why it was rejected, or what was checked. |
+
+### Stage is a pipeline position, not a verdict
+
+Five states, because "we generated it" and "somebody read it" and "it is in the
+product" are three different claims and collapsing them is how a library of
+5,000 unreviewed lines gets described as finished.
+
+| stage | means |
+|---|---|
+| `generated` | Written. Nothing has looked at it. |
+| `validated` | Passed `scripts/content/validate.py` — structure, vocabulary, bias, duplicates. **No human has judged whether it is any good, true, or worth reading.** |
+| `reviewed` | A person has read it against the editorial standard and recorded what they checked. |
+| `accepted` | Reviewed and cleared for delivery. Only these reach a reader. |
+| `revise` | Has a specific, named problem. Stays on disk with the reason. |
+| `rejected` | Will not be used. Also stays on disk with the reason, so the next batch does not make the same mistake. |
+
+An item's author fixing the gate failures on their own batch is **not** a
+review. Passing validation moves something to `validated` and no further.
+
+`review.depth` records how hard the check was, because these are not the same:
+
+- **`sourced`** — the claim was looked up and the source says what the item says.
+- **`read`** — a person read it and judged it. Weaker, and honest about being weaker.
+- **`tested`** — for experiments: somebody actually did the thing.
 
 ### The confidence field is the point
 

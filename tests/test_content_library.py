@@ -8,7 +8,6 @@ never strays into bodies, diets, or medical advice.
 import datetime
 import re
 
-import pytest
 
 import app as appmod
 from conftest import auth_headers, register_and_login
@@ -203,10 +202,51 @@ def test_no_duplicate_content():
     assert len(set(questions)) == len(questions), "duplicate Brain Boost question"
 
 
-@pytest.mark.parametrize("field,limit", [("text", 200)])
-def test_insights_stay_short_enough_to_read_on_a_phone(field, limit):
-    too_long = [e["text"] for e in appmod.INSIGHT_LIBRARY if len(e[field]) > limit]
-    assert not too_long, f"{len(too_long)} insights are over {limit} chars: {too_long[:2]}"
+# Two shapes, two limits. A fact is one line on a card and 200 characters is
+# generous for it. A mini-experiment is a set of instructions, and the three
+# that went over were the three that gained a safety precaution — "stand near a
+# wall", "stop well before anything pulls". Trimming those back to fit a limit
+# written for one-liners would be letting a number edit a safety note.
+_LENGTH_LIMITS = {"fact": 200, "movement": 200, "rickie": 200,
+                  "riddle": 240, "experiment": 340}
+
+
+def test_a_discovery_stays_short_enough_to_read_on_a_phone():
+    too_long = [
+        (e["type"], len(e["text"]), e["text"][:60])
+        for e in appmod.INSIGHT_LIBRARY
+        if len(e["text"]) > _LENGTH_LIMITS.get(e["type"], 200)
+    ]
+    assert not too_long, f"{len(too_long)} over their limit: {too_long[:3]}"
+
+
+def test_an_experiment_that_needs_balance_says_what_to_hold():
+    """Safety, as a property of the content rather than a hope about it.
+
+    Anything asking a reader to stand on one foot, hop, or shift their weight
+    has to name something to hold or offer a way to do it sitting down. The app
+    does not know who is reading — an eleven-year-old, a grandparent, somebody
+    with a knee that decides these things — and "stand on one foot" with no
+    qualifier assumes it does.
+    """
+    needs_balance = re.compile(r"\b(stand on one foot|one foot|hop|hopping|"
+                               r"shift your weight|eyes closed)\b", re.I)
+    safe_wording = re.compile(r"\b(near a wall|worktop|hold|holding|something to "
+                              r"hold|sitting|seated|chair|if you would rather|"
+                              r"only as far as)\b", re.I)
+    offenders = [
+        e["text"][:70] for e in appmod.INSIGHT_LIBRARY
+        if e["type"] == "experiment" and needs_balance.search(e["text"])
+        and not safe_wording.search(e["text"])
+    ]
+    assert not offenders, "balance task with nothing to hold:\n" + "\n".join(offenders)
+
+
+def test_no_experiment_asks_anyone_to_hold_their_breath():
+    for e in appmod.INSIGHT_LIBRARY:
+        if e["type"] != "experiment":
+            continue
+        assert not re.search(r"hold\w* (your |the )?breath|breath.?hold", e["text"], re.I), e["text"]
 
 
 # ── Guessability: the answer must not be findable without knowing anything ──
@@ -384,7 +424,7 @@ def test_the_store_is_what_the_application_serves():
     """No parallel copy. If these ever diverge, one of them is a ghost."""
     import streakfit_content as store
 
-    served = [i for i in store.ALL_ITEMS if i["status"] == "accepted"]
+    served = [i for i in store.ALL_ITEMS if i["stage"] == "accepted"]
     assert len(appmod.INSIGHT_LIBRARY) == sum(
         1 for i in served if i["type"] in store._DISCOVERY_TYPES)
     assert len(appmod.BRAIN_BOOST_LIBRARY) == sum(1 for i in served if i["type"] == "trivia")
@@ -406,7 +446,7 @@ def test_a_confident_claim_carries_a_source():
     import streakfit_content as store
 
     unsourced = [i["id"] for i in store.ALL_ITEMS
-                 if i["status"] == "accepted"
+                 if i["stage"] == "accepted"
                  and i["confidence"] == "established" and not i.get("sources")]
     assert not unsourced, f"claimed as established with no source: {unsourced[:5]}"
 
@@ -416,8 +456,8 @@ def test_only_accepted_content_reaches_a_reader():
 
     texts = {e["text"] for e in appmod.INSIGHT_LIBRARY} | set(appmod.RICKIE_JOKES)
     for item in store.ALL_ITEMS:
-        if item["status"] != "accepted" and item.get("text"):
-            assert item["text"] not in texts, f"{item['id']} is {item['status']} but served"
+        if item["stage"] != "accepted" and item.get("text"):
+            assert item["text"] not in texts, f"{item['id']} is {item['stage']} but served"
 
 
 def test_the_store_validator_passes():
@@ -432,3 +472,30 @@ def test_the_store_validator_passes():
         capture_output=True, text=True, timeout=300,
     )
     assert result.returncode == 0, result.stdout[-3000:] + result.stderr[-1000:]
+
+
+def test_nothing_reaches_a_reader_without_a_recorded_review():
+    """Validation is a program checking structure. It is not somebody reading
+    the thing. An item may only be served once a review pass has been recorded
+    against it, with how hard it was checked."""
+    import streakfit_content as store
+
+    unreviewed = []
+    for item in store.ALL_ITEMS:
+        if item["stage"] != "accepted":
+            continue
+        review = item.get("review") or {}
+        if not review.get("pass") or review.get("depth") not in ("sourced", "read", "tested"):
+            unreviewed.append(item["id"])
+    assert not unreviewed, f"served without a recorded review: {unreviewed[:5]}"
+
+
+def test_the_stages_are_reported_separately():
+    """"We generated 5,000", "5,000 passed validation" and "5,000 are in the
+    product" are three different claims, and the counts must not collapse
+    them."""
+    import streakfit_content as store
+
+    counts = store.counts()
+    assert "by_stage" in counts
+    assert sum(counts["by_stage"].values()) == counts["total"]

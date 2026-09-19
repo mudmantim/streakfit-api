@@ -256,6 +256,14 @@ UNCALLED_ROUTE_ALLOWLIST = {
     "/api/admin/verify/history": "admin console",
     "/api/challenges/<int:challenge_id>": "single-challenge detail; list view carries the same data",
     "/api/teams/<int:team_id>/campfire": "campfire summary is embedded in GET /api/teams/<id>",
+    # Machine-facing by design. Mudman Command's verifier probes a running app
+    # over HTTP and has no session and no browser; a frontend caller would not
+    # make these more reachable, it would make them decorative. Covered by
+    # tests/test_qualification_endpoints.py and by an actual run of Command's
+    # verifier — see docs/qualification/mudman-command.md.
+    "/api/health": "liveness probe for Mudman Command and the platform, not the UI",
+    "/api/build-identity": "build identity for Mudman Command's verifier",
+    "/api/verification/self": "subsystem self-checks for Mudman Command's verifier",
 }
 
 

@@ -21,10 +21,14 @@ from pathlib import Path
 
 CONTENT_DIR = Path(__file__).resolve().parent / "content" / "items"
 
-# Only these reach a reader. `pending` is work in review, `rejected` is kept on
-# disk on purpose — a rejected item with its reason is how the next batch avoids
-# making the same mistake, and deleting it loses that.
-SERVED_STATUS = "accepted"
+# Only these reach a reader.
+#
+# `validated` is the interesting one: it means the structure is sound and NOBODY
+# HAS READ IT. That is a real state a lot of content sits in, and serving it
+# because it passed a regex is how a library of five thousand unreviewed lines
+# ends up described as finished. Rejected and revise rows stay on disk with
+# their reason, because that reason is how the next batch avoids the mistake.
+SERVED_STAGE = "accepted"
 
 
 def _load_items() -> list[dict]:
@@ -56,7 +60,7 @@ def _load_items() -> list[dict]:
 
 
 ALL_ITEMS = _load_items()
-SERVED = [i for i in ALL_ITEMS if i.get("status") == SERVED_STATUS]
+SERVED = [i for i in ALL_ITEMS if i.get("stage") == SERVED_STAGE]
 
 # ── The shapes the application already uses ─────────────────────────────────
 #
@@ -94,12 +98,12 @@ BY_ID = {i["id"]: i for i in ALL_ITEMS}
 
 
 def counts() -> dict:
-    """Accepted, pending and rejected, by status and by type — reported
-    separately on purpose, because "we have 5,000 items" and "5,000 items are
-    in the product" are different claims."""
-    out: dict = {"total": len(ALL_ITEMS), "by_status": {}, "by_type": {}, "by_confidence": {}}
+    """By stage, type and confidence — reported separately on purpose, because
+    "we generated 5,000", "5,000 passed validation" and "5,000 are in the
+    product" are three different claims."""
+    out: dict = {"total": len(ALL_ITEMS), "by_stage": {}, "by_type": {}, "by_confidence": {}}
     for item in ALL_ITEMS:
-        for field, key in (("status", "by_status"), ("type", "by_type"),
+        for field, key in (("stage", "by_stage"), ("type", "by_type"),
                            ("confidence", "by_confidence")):
             bucket = out[key]
             bucket[item.get(field)] = bucket.get(item.get(field), 0) + 1

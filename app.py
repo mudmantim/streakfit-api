@@ -56,6 +56,9 @@ app.wsgi_app = ProxyFix(app.wsgi_app, x_for=2)  # type: ignore[method-assign]
 # than an invented value.
 _PROCESS_STARTED_AT = datetime.utcnow()
 
+# Stated by /api/build-identity. Bumped deliberately, not derived from a commit.
+APP_VERSION = "0.9.0"
+
 # Fallback to local SQLite only if Render's PostgreSQL URL isn't present
 DATABASE_URL = os.environ.get('DATABASE_URL')
 if DATABASE_URL and DATABASE_URL.startswith("postgres://"):
@@ -1643,6 +1646,253 @@ def service_worker():
 @app.route('/health', methods=['GET'])
 def health():
     return jsonify({"status": "ok"}), 200
+
+
+# ── Mudman Command qualification endpoints ───────────────────────────────────
+#
+# Three routes, written to Mudman Command's actual contract
+# (~/projects/mudman-command/src/lib/verification/{types,runner}.ts), not to an
+# assumption about it. Its verifier probes a RUNNING app over HTTP; it never
+# reaches into this repository, so it cannot run pytest, uicheck or verify_all.
+# An app is only registered there once it implements build identity, which is
+# why StreakFit has not been.
+#
+# Nothing here is for Command's benefit alone. "Is the running build the one we
+# shipped?" is a question this project could not answer at all: /health returned
+# 200 identically whether a deploy had landed or the previous build was still
+# serving.
+
+_BUILD_STARTED_AT = datetime.utcnow()
+
+
+def _git_sha():
+    """The commit this build came from, if it can be established.
+
+    Render sets RENDER_GIT_COMMIT. Locally there is a .git directory. Neither is
+    guaranteed, and `null` is a first-class answer — Command reads a missing sha
+    as "sha unknown" and downgrades the evidence level rather than failing, which
+    is the correct response to not knowing.
+    """
+    for var in ('RENDER_GIT_COMMIT', 'GIT_COMMIT', 'SOURCE_VERSION'):
+        value = os.environ.get(var)
+        if value:
+            return value
+    head = os.path.join(os.path.dirname(os.path.abspath(__file__)), '.git', 'HEAD')
+    try:
+        with open(head, encoding='utf-8') as fh:
+            ref = fh.read().strip()
+        if ref.startswith('ref: '):
+            path = os.path.join(os.path.dirname(head), ref[5:])
+            with open(path, encoding='utf-8') as fh:
+                return fh.read().strip()
+        return ref
+    except OSError:
+        return None
+
+
+def _git_branch():
+    value = os.environ.get('RENDER_GIT_BRANCH') or os.environ.get('GIT_BRANCH')
+    if value:
+        return value
+    head = os.path.join(os.path.dirname(os.path.abspath(__file__)), '.git', 'HEAD')
+    try:
+        with open(head, encoding='utf-8') as fh:
+            ref = fh.read().strip()
+        return ref[16:] if ref.startswith('ref: refs/heads/') else None
+    except OSError:
+        return None
+
+
+def _migration_state():
+    """What the database says about itself, and whether we could ask.
+
+    `state` is 'ok' only when the schema was actually read. Command treats an
+    unknown state as OBSERVED rather than VERIFIED — weaker evidence, not a
+    failure — and that distinction is only honest if this never guesses.
+    """
+    try:
+        from alembic.config import Config
+        from alembic.runtime.migration import MigrationContext
+        from alembic.script import ScriptDirectory
+        cfg = Config()
+        cfg.set_main_option(
+            'script_location',
+            os.path.join(os.path.dirname(os.path.abspath(__file__)), 'migrations'))
+        script = ScriptDirectory.from_config(cfg)
+        head = script.get_current_head()
+        applied = len(list(script.walk_revisions()))
+        with db.engine.connect() as conn:
+            current = MigrationContext.configure(conn).get_current_revision()
+        return {'latest': current, 'appliedCount': applied,
+                'state': 'ok' if current == head else 'unknown'}
+    except Exception:
+        return {'latest': None, 'appliedCount': None, 'state': 'unknown'}
+
+
+@app.route('/api/health', methods=['GET'])
+def api_health():
+    """Liveness, at the path Command probes by default.
+
+    /health already existed and keeps working — Render's health check points at
+    it. This is the same answer at the conventional path, so nothing has to be
+    configured per-app to find it.
+    """
+    return jsonify({"status": "ok"}), 200
+
+
+@app.route('/api/build-identity', methods=['GET'])
+def build_identity():
+    """What build is actually serving this request.
+
+    Unauthenticated on purpose: a verifier has no session, and everything here
+    is already public in the repository or meaningless without it. No secrets,
+    no configuration values, no user data.
+    """
+    return jsonify({
+        "schemaVersion": "1.0",
+        "application": "streakfit",
+        "version": APP_VERSION,
+        "gitSha": _git_sha(),
+        "gitBranch": _git_branch(),
+        "buildDate": _BUILD_STARTED_AT.isoformat() + "Z",
+        "environment": os.environ.get('STREAKFIT_ENV', 'development'),
+        "deploymentId": os.environ.get('RENDER_SERVICE_ID'),
+        "instanceId": os.environ.get('RENDER_INSTANCE_ID') or str(os.getpid()),
+        "migration": _migration_state(),
+        "storageProvider": "postgres" if str(
+            app.config.get('SQLALCHEMY_DATABASE_URI', '')).startswith('postgres') else "sqlite",
+        # Command reads these to decide which checks apply. `hasAuthentication`
+        # stays TRUE: StreakFit has authentication, and its own framework says
+        # silence must never reduce scrutiny. Its auth probe is currently
+        # hardcoded to PorchLight's paths, so that check will not pass here yet
+        # — which is the honest state and an owner decision to resolve, not
+        # something to dodge by claiming we have no login.
+        "featureFlags": {
+            "hasAuthentication": True,
+            "hasPaidBoundary": False,
+        },
+        "apiVersion": "1",
+        "verificationFrameworkVersion": "1.0",
+        "healthTimestamp": datetime.utcnow().isoformat() + "Z",
+    }), 200
+
+
+def _self_check(check_id, label, asserts, method, status, level, observed,
+                failure_reason=None, limitations=None, critical=True, duration_ms=0):
+    return {
+        "id": check_id, "label": label, "asserts": asserts, "method": method,
+        "status": status, "level": level, "observed": observed,
+        "failureReason": failure_reason, "limitations": limitations,
+        "durationMs": duration_ms, "critical": critical,
+    }
+
+
+@app.route('/api/verification/self', methods=['GET'])
+def verification_self():
+    """The checks only this application can run on itself.
+
+    Command's own note is the design brief: an app answering 200 with an empty
+    list has said nothing about its database or storage, and a naive roll-up
+    would go green for something nobody examined. So every check here either
+    exercises the thing or reports UNKNOWN — none of them assert health from
+    configuration.
+
+    `observed` never carries user content. It carries counts.
+    """
+    checks = []
+
+    started = datetime.utcnow()
+    try:
+        db.session.execute(db.text('SELECT 1'))
+        users = db.session.execute(db.select(db.func.count(User.id))).scalar()
+        checks.append(_self_check(
+            "db.reachable", "Database reachable",
+            "The application can execute a query against its database.",
+            "SELECT 1, then a COUNT over the user table.",
+            "PASS", "VERIFIED", f"query returned, {users} accounts",
+            duration_ms=int((datetime.utcnow() - started).total_seconds() * 1000)))
+    except Exception as exc:
+        checks.append(_self_check(
+            "db.reachable", "Database reachable",
+            "The application can execute a query against its database.",
+            "SELECT 1 against the configured database.",
+            "FAIL", "VERIFIED", f"{type(exc).__name__}",
+            failure_reason="The database did not answer; nothing that stores data works.",
+            duration_ms=int((datetime.utcnow() - started).total_seconds() * 1000)))
+
+    migration = _migration_state()
+    checks.append(_self_check(
+        "db.migrations", "Schema at head",
+        "The database schema matches the migration chain this build expects.",
+        "Compare the Alembic head in migrations/ with the revision stamped in the database.",
+        "PASS" if migration['state'] == 'ok' else "UNKNOWN",
+        "VERIFIED" if migration['state'] == 'ok' else "UNKNOWN",
+        f"stamped at {migration['latest']}, {migration['appliedCount']} revisions in the chain"
+        if migration['state'] == 'ok' else "could not read the migration state",
+        failure_reason=None if migration['state'] == 'ok' else
+        "Schema currency is unconfirmed, so every data-dependent result is weaker.",
+        limitations=None if migration['state'] == 'ok' else
+        "Says nothing about whether the schema is correct — only that it could not be read."))
+
+    # The content store is a deploy artefact: files on disk that must ship with
+    # the build. An app that starts with an empty library looks entirely healthy
+    # and has nothing to say to anybody.
+    try:
+        import streakfit_content as _content
+        served = len(_content.SERVED)
+        checks.append(_self_check(
+            "content.loaded", "Content store loaded",
+            "The discovery library shipped with this build and parsed.",
+            "Count the accepted items the loader built from content/items/*.jsonl.",
+            "PASS" if served >= 300 else "FAIL",
+            "VERIFIED",
+            f"{served} accepted items, {len(_content.ALL_ITEMS)} in the store",
+            failure_reason=None if served >= 300 else
+            "The content store is missing or mostly unaccepted; the app has little to show.",
+            critical=True))
+    except Exception as exc:
+        checks.append(_self_check(
+            "content.loaded", "Content store loaded",
+            "The discovery library shipped with this build and parsed.",
+            "Import the content loader.",
+            "FAIL", "VERIFIED", f"{type(exc).__name__}",
+            failure_reason="The content store did not load."))
+
+    # Ask Rickie is a core feature and it is configuration-dependent. Reporting
+    # it as healthy when no key is set would be exactly the false green this
+    # framework exists to prevent.
+    key_present = bool((_anthropic_api_key or '').strip())
+    checks.append(_self_check(
+        "coach.configured", "Ask Rickie configured",
+        "The coach has an API key and would attempt a real call.",
+        "Check whether ANTHROPIC_API_KEY is set. No call is made — that costs money.",
+        "PASS" if key_present else "UNKNOWN",
+        "OBSERVED" if key_present else "UNKNOWN",
+        "a key is configured" if key_present else "no key configured",
+        failure_reason=None if key_present else
+        "Ask Rickie returns 503 for every request.",
+        limitations="A key being present does not establish that it works — "
+                    "proving that requires spending money, which an unattended "
+                    "check may not do.",
+        critical=False))
+
+    exercises = sum(len(cat) for tier in EXERCISE_LIBRARY.values() for cat in tier.values())
+    checks.append(_self_check(
+        "exercises.loaded", "Exercise library loaded",
+        "The movement library this build serves is present and complete.",
+        "Count exercises across all three tiers and five categories.",
+        "PASS" if exercises == 90 else "FAIL", "VERIFIED",
+        f"{exercises} exercises across {len(EXERCISE_LIBRARY)} tiers",
+        failure_reason=None if exercises == 90 else
+        "The exercise library is incomplete; missions would be wrong.",
+        critical=True))
+
+    return jsonify({
+        "application": "streakfit",
+        "generatedAt": datetime.utcnow().isoformat() + "Z",
+        "checks": checks,
+    }), 200
+
 
 
 # --- Admin ---

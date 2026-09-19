@@ -26,39 +26,61 @@ TODAY = date.today().isoformat()
 # know; a riddle a nine-year-old cannot get is just a way of telling them they
 # are not clever.
 RIDDLES = [
-    ("I have a spine but no bones, ribs but no chest. What am I?", "A book."),
-    ("The more of me you take, the more you leave behind. What am I?", "Footsteps."),
-    ("I go up when the rain comes down. What am I?", "An umbrella."),
-    ("I'm full of holes but I still hold water. What am I?", "A sponge."),
-    ("I have hands but cannot clap. What am I?", "A clock."),
-    ("I run all day and never get tired, and I have a mouth but never eat.",
-     "A river."),
-    ("What gets wetter the more it dries?", "A towel."),
-    ("I'm tall when I'm young and short when I'm old. What am I?", "A candle."),
-    ("What has one eye but cannot see?", "A needle."),
-    ("What can travel around the world while staying in one corner?", "A stamp."),
-    ("I'm light as a feather, but the strongest person can't hold me for long.",
-     "Your breath."),
-    ("What has legs but doesn't walk?", "A table."),
-    ("I have a neck but no head, and I wear a cap. What am I?", "A bottle."),
-    ("The person who makes me doesn't want me. The person who buys me doesn't "
-     "use me. The person who uses me never knows.", "A coffin."),
-    ("What has keys but opens no locks?", "A piano."),
-    ("What has a bed but never sleeps?", "A river."),
-    ("What can you catch but never throw?", "A cold."),
-    ("I'm always in front of you but you can never see me. What am I?",
-     "The future."),
-    ("What has a thumb and four fingers but isn't alive?", "A glove."),
-    ("What has words but never speaks?", "A book."),
+    # Original, and about the reader's own body — which is both the point of the
+    # product and the reason they work. The first twenty here were classic
+    # public-domain riddles (piano, candle, towel, stamp) and every one was
+    # rejected on review: recycled, two answer-duplicates, and one about
+    # coffins. See scripts/content/review_0002.py.
+    ("I work hardest when you go downstairs, and I complain about it tomorrow.",
+     "Your thigh muscles."),
+    ("I beat without ever being hit, and I would rather you did not notice me.",
+     "Your heart."),
+    ("The harder you work, the more of me you make — and my entire job is to leave.",
+     "Sweat."),
+    ("I am taller in the morning than at night, and nobody ever catches me shrinking.",
+     "You are. The discs in your spine compress over a day."),
+    ("I come in pairs, I can only pull, and I need a partner to undo my work.",
+     "A muscle."),
+    ("You practiced me for years, you cannot remember learning me, and robots "
+     "still cannot copy me properly.", "Walking."),
+    ("Three of us vote on which way is up. When we disagree, you feel sick.",
+     "Your eyes, your inner ear, and the sensors in your feet."),
+    ("I am the biggest thing you own and you wear me on the outside.",
+     "Your skin."),
+    ("I never stop moving, even while you are standing perfectly still.",
+     "You are — your balance corrects itself dozens of times a minute."),
+    ("You cannot do me to yourself on purpose, however hard you concentrate, "
+     "and nobody is entirely sure why not.", "Tickle yourself."),
+    ("I am what is left of a reflex for fluffing up fur you no longer have.",
+     "Goosebumps."),
+    ("Break me and I knit. Load me and I thicken. Ignore me and I quietly give up.",
+     "A bone."),
+    ("I arrive at your wrist a moment after the beat that made me.",
+     "Your pulse."),
+    ("I happen before you have decided anything, which is the entire point "
+     "of me.", "A reflex."),
+    ("You cannot hear me, I run all day, and I am the only muscle you would "
+     "rather never be in charge of.", "Your heart."),
+    ("I am hollow, I am lighter than you would guess, and I am a factory for "
+     "the blood you are using right now.", "A bone."),
+    ("Warm me up and I reach further. Rush me and I push back.",
+     "A muscle you are stretching."),
+    ("I am the first thing to get tired when you read, and the fix is to look "
+     "at something far away.", "The focusing muscle in your eye."),
+    ("Your ancestors used me to run down animals in the heat. You mostly use me "
+     "to be embarrassed.", "Sweating."),
+    ("I am the gap between noticing and moving, and almost all of me happens "
+     "in your head.", "Reaction time."),
 ]
 
 # ── Mini-experiments ────────────────────────────────────────────────────────
 # Safe, needs nothing, takes under a minute. Every one is something you find
 # out about YOUR OWN body — never a comparison with anyone else's.
 EXPERIMENTS = [
-    ("Stand on one foot and count. Now close your eyes and try again. Most "
-     "people last a fraction as long — that's how much of your balance was "
-     "coming from your eyes without you knowing.", 9),
+    ("Stand near a wall or a worktop, close enough to touch it. Stand on one "
+     "foot and count. Now try it with your eyes closed. Most people last a "
+     "fraction as long — that is how much of your balance was coming from your "
+     "eyes without you knowing.", 9),
     ("Hold your arm out and touch your nose with your eyes shut. You didn't "
      "look and you didn't miss. That's a whole sense most people never notice "
      "they have.", 9),
@@ -71,14 +93,16 @@ EXPERIMENTS = [
     ("Press your finger and watch the color come back. That's your blood "
      "refilling capillaries you just squeezed empty, and it takes about a "
      "second.", 9),
-    ("Try to touch your toes, note where you get to, then walk briskly for two "
-     "minutes and try again. Warm muscle moves further than cold muscle, and "
-     "you can feel the difference in one walk.", 9),
+    ("Reach down toward your toes — only as far as is comfortable, and stop "
+     "well before anything pulls. Note where you got to, walk for two minutes, "
+     "and try again. Warm muscle reaches further than cold muscle, and one walk "
+     "is enough to feel it.", 9),
     ("Stand with your feet together, then a shoulder-width apart. The second "
      "one feels obviously steadier. That's your base of support, and it's the "
      "same reason a stepladder's legs splay out.", 9),
-    ("Walk across a room. Now do it with your arms folded. It feels wrong "
-     "because your arms were doing work you never asked them to do.", 9),
+    ("Walk across a clear bit of floor. Now do it again with your arms folded. "
+     "It feels wrong because your arms were doing work you never asked them to "
+     "do.", 9),
     ("Yawn on purpose and notice you can't do it convincingly. Then watch "
      "somebody else yawn. One of those is a reflex and one is acting.", 9),
     ("Look at something far away for twenty seconds after reading this. Your "
@@ -87,9 +111,10 @@ EXPERIMENTS = [
     ("Clench your jaw and put your fingers just in front of your ears. That "
      "movement under your fingertips is the muscle that bites — and it is doing "
      "it every time you eat without you ever noticing.", 9),
-    ("Hop on one foot five times. Notice your ankle making corrections you "
-     "never decided to make — dozens of tiny ones, none of which reached your "
-     "attention.", 9),
+    ("Shift your weight onto one foot — hopping if you like, near something to "
+     "hold if you would rather, or just leaning in a chair. Feel the ankle "
+     "making corrections you never decided to make, dozens of them, none of "
+     "which reached your attention.", 9),
     ("Breathe out slowly for twice as long as you breathe in, three times. "
      "Your heart rate drops slightly on every exhale, which is the whole trick "
      "behind slow breathing.", 9),
@@ -184,13 +209,16 @@ FACTS = [
 
 # ── Trivia, same areas ──────────────────────────────────────────────────────
 TRIVIA = [
-    ("Where are the muscles that move your fingers?",
+    ("Where are the muscles that give your fingers their strength?",
      ["Mostly in your forearm", "Inside the fingers themselves",
       "In the palm of your hand", "Spread evenly through the whole arm"], 0,
-     "Make a fist and feel just below your elbow — that's your hand working. "
-     "The fingers are pulled by tendons running down from the forearm, which is "
-     "why they can be narrow and still strong.", "Muscles & Bones", "established",
-     ["https://www.ncbi.nlm.nih.gov/books/NBK526095/"]),
+     "Make a fist and feel just below your elbow — that is your grip working. "
+     "The strong finger movements come from muscles in the forearm pulling on "
+     "tendons, which is why fingers can be narrow and still powerful. The hand "
+     "has small muscles of its own, and they do the fine control rather than "
+     "the force.", "Muscles & Bones", "established",
+     ["https://www.ncbi.nlm.nih.gov/books/NBK546607/",
+      "https://www.ncbi.nlm.nih.gov/books/NBK537229/"]),
     ("What happens to a muscle when somebody stops training?",
      ["It gets smaller", "It turns into fat", "It stays the same but weakens",
       "It stiffens permanently"], 0,
@@ -279,7 +307,11 @@ def main() -> int:
              min_age: int = 9) -> dict:
         return {"id": next_id(kind), "category": category, "min_age": min_age,
                 "confidence": confidence, "sources": sources,
-                "status": "accepted", "added": TODAY, "batch": BATCH}
+                # Generated. Nothing has read it yet, and the author fixing
+                # their own gate failures is not a review.
+                "stage": "generated",
+                "review": {"pass": None, "depth": None, "notes": None},
+                "added": TODAY, "batch": BATCH}
 
     riddles = [dict(base("RID", "Riddles", "editorial", []), type="riddle",
                     text=f"{q}\n\n{a}") for q, a in RIDDLES]

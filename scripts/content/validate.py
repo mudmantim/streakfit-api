@@ -36,7 +36,8 @@ ITEMS = ROOT / "content" / "items"
 
 TYPES = {"fact", "trivia", "joke", "riddle", "movement", "experiment", "rickie"}
 CONFIDENCE = {"established", "simplified", "contested", "editorial"}
-STATUS = {"accepted", "pending", "rejected"}
+STAGES = ("generated", "validated", "reviewed", "accepted", "revise", "rejected")
+SERVED_STAGE = "accepted"
 ID_RE = re.compile(r"^SF-[A-Z]{3}-\d{6}$")
 
 # ── Vocabulary that must never reach a reader ───────────────────────────────
@@ -134,7 +135,7 @@ def load(batch: str | None = None) -> list[dict]:
 
 def check_shape(item: dict) -> list[str]:
     errs = []
-    for field in ("id", "type", "category", "min_age", "confidence", "status", "added", "batch"):
+    for field in ("id", "type", "category", "min_age", "confidence", "stage", "added", "batch"):
         if not item.get(field) and item.get(field) != 0:
             errs.append(f"missing {field}")
     if not ID_RE.match(item.get("id", "")):
@@ -143,8 +144,15 @@ def check_shape(item: dict) -> list[str]:
         errs.append(f"unknown type {item.get('type')!r}")
     if item.get("confidence") not in CONFIDENCE:
         errs.append(f"unknown confidence {item.get('confidence')!r}")
-    if item.get("status") not in STATUS:
-        errs.append(f"unknown status {item.get('status')!r}")
+    if item.get("stage") not in STAGES:
+        errs.append(f"unknown stage {item.get('stage')!r}")
+    if item.get("stage") in ("reviewed", "accepted"):
+        review = item.get("review") or {}
+        if not review.get("pass"):
+            errs.append(f"stage {item['stage']!r} with no review recorded — "
+                        "passing validation is not a review")
+        if review.get("depth") not in ("sourced", "read", "tested"):
+            errs.append(f"review depth {review.get('depth')!r} is not sourced/read/tested")
     if item.get("min_age") not in (9, 13, 16):
         errs.append(f"min_age {item.get('min_age')!r} is not one of 9, 13, 16")
 
@@ -203,7 +211,7 @@ def check_language(item: dict) -> tuple[list[str], list[str]]:
 def check_trivia_tells(items: list[dict]) -> tuple[list[str], list[str]]:
     """Corpus-level: the ways an answer can be found without knowing anything."""
     errs, warns = [], []
-    trivia = [i for i in items if i["type"] == "trivia" and i["status"] == "accepted"]
+    trivia = [i for i in items if i["type"] == "trivia" and i["stage"] == SERVED_STAGE]
     if len(trivia) < 20:
         return errs, warns
 
@@ -246,7 +254,7 @@ def check_trivia_tells(items: list[dict]) -> tuple[list[str], list[str]]:
 
 
 def check_duplicates(items: list[dict]) -> list[str]:
-    served = [i for i in items if i["status"] == "accepted"]
+    served = [i for i in items if i["stage"] == SERVED_STAGE]
     errs = []
     exact = defaultdict(list)
     for i in served:
@@ -274,14 +282,14 @@ def main() -> int:
         print("no content found")
         return 1
 
-    by_status = Counter(i.get("status") for i in items)
+    by_stage = Counter(i.get("stage") for i in items)
     by_type = Counter(i.get("type") for i in items)
     by_conf = Counter(i.get("confidence") for i in items)
-    accepted = [i for i in items if i.get("status") == "accepted"]
+    accepted = [i for i in items if i.get("stage") == SERVED_STAGE]
 
     print(f"Content store — {len(items)} items across {len(set(i['_file'] for i in items))} files")
-    print(f"  accepted {by_status['accepted']} · pending {by_status['pending']} "
-          f"· rejected {by_status['rejected']}")
+    print("  by stage      " + ", ".join(
+        f"{stage} {by_stage[stage]}" for stage in STAGES if by_stage[stage]))
     print("  by type       " + ", ".join(f"{k} {v}" for k, v in sorted(by_type.items())))
     print("  by confidence " + ", ".join(f"{k} {v}" for k, v in sorted(by_conf.items())))
     if args.counts:
