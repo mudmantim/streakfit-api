@@ -12,6 +12,45 @@ decisions lives in `PROJECT_JOURNAL.md`.
 
 ---
 
+## v0768 — Impress Olivia: challenges, real content, filters worth using (branch `product-completion`, NOT deployed)
+
+**Not deployed.** Adds a second migration (`s3t4u5v6w7x8`), so a deploy from this
+branch now runs two migrations. Service worker `v0761` → `v0768`.
+
+Additive by design: everything here sits on top of the solo movement app rather than
+replacing it, and one of the first findings was a violation of exactly that.
+
+- **Filters were unusable without a team.** They are earned by moving and could only be
+  applied in a team photo composer, so a solo user earned the best rewards in the product
+  and never saw them. The composer now has a solo mode from the Journey card — same
+  filters, saves to the phone, nothing uploaded.
+- **Filters judged by rendering them, not by reading the catalog.** `golden_hour` was
+  indistinguishable from no filter at 20 acorns; `goofy_specs` promised glasses and gave
+  Rickie in a corner; Rickie was the same asset in a corner in five of twelve. Three new
+  primitives (`vignette`, `burst`, and a `stat` badge that prints your **real streak and
+  level onto the photo**), plus `bleed` so Rickie leans into frame. 14 filters now.
+- **Content depth.** 90 insights → 270, 40 Brain Boost questions → 190, all held to the
+  same accuracy rules with anything uncertain dropped. Selection is a shuffled per-user
+  order: no repeats until the library is exhausted, and two people in a house almost never
+  get the same fact. The original 40 questions had the answer at index 1 thirty times and
+  never at 2 or 3 — "always pick the second one" scored 75%. Now evenly spread.
+- **Challenges.** Presets only, never free text. Eight equipment-free movement challenges,
+  aimed at the team or one person, landing as a card in the existing thread. Completing
+  pays 15 XP (against 40 for your own mission — a test pins that ordering), Rickie reacts,
+  and the card offers "Prove it — send a victory picture" straight into the composer with
+  the Challenge Won filter selected. No loser, no failure state, and nothing anywhere names
+  who did not do it.
+- **Celebrations queue instead of overwriting.** "+60 XP, Level 2 — Adventurer" — the
+  biggest moment of a first day — was on screen for 900ms before the milestone toast
+  replaced it.
+- **Chat aliveness.** Timestamps, new messages animating in while the backlog does not,
+  and optimistic send so a message appears immediately on a bad connection instead of
+  freezing the input. Tactile press states across the primary controls.
+- **Earning something now says what it unlocked** — filter unlocks are announced at the
+  moment they happen rather than being discovered three taps deep in a composer.
+
+**Results:** 291+ pytest, `verify_all` 108/108, `uicheck` 30/30, all gates clean.
+
 ## v0761 — Team photos with StreakFit filters (branch `product-completion`, NOT deployed)
 
 **Not deployed.** Adds a migration (`r2s3t4u5v6w7`), so unlike the rest of this branch

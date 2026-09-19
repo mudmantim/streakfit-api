@@ -3319,3 +3319,54 @@ body.theme-classic .theme-btn.active { background: rgba(79,70,229,.2); }
     font-size: .76rem;
     color: var(--gray-500);
 }
+
+/* ── Chat aliveness ──────────────────────────────────────────────────────── */
+
+.team-msg-when {
+    margin: .15rem 0 0;
+    font-size: .68rem;
+    color: var(--gray-400);
+}
+
+/* New arrivals slide in. The backlog does not — opening the panel should not
+   look like a slot machine. */
+.team-msg { transition: opacity .22s ease, transform .22s ease; }
+
+.team-msg-enter {
+    opacity: 0;
+    transform: translateY(8px);
+}
+
+.team-msg.is-sending { opacity: .5; }
+
+@media (prefers-reduced-motion: reduce) {
+    .team-msg, .team-msg-enter { transition: none; transform: none; opacity: 1; }
+}
+
+/* ── Tactile feedback: things should answer a thumb ─────────────────────── */
+
+.btn-primary,
+.btn-daily-complete,
+.team-panel-reaction-btn,
+.photo-filter-chip,
+.team-panel-tab {
+    transition: transform .09s ease, background .15s ease, box-shadow .15s ease;
+}
+
+.btn-primary:active,
+.btn-daily-complete:active,
+.team-panel-reaction-btn:active,
+.photo-filter-chip:active,
+.team-panel-tab:active {
+    transform: scale(.955);
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .btn-primary, .btn-daily-complete, .team-panel-reaction-btn,
+    .photo-filter-chip, .team-panel-tab {
+        transition: none;
+    }
+    .btn-primary:active, .btn-daily-complete:active,
+    .team-panel-reaction-btn:active, .photo-filter-chip:active,
+    .team-panel-tab:active { transform: none; }
+}

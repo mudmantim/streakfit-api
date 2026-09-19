@@ -791,6 +791,8 @@ var _teamPanelSendBtn  = null;
 var _teamPanelIsCreator = false;
 var _teamPanelChatPane = null;
 var _teamPanelMembers = [];
+// False while the backlog paints, so only genuinely new messages animate.
+var _teamThreadPainted = false;
 var _teamPanelTeamId   = null;
 var _teamPanelInfo     = null;
 var _teamPanelMeta     = null;
@@ -1435,7 +1437,9 @@ async function _loadTeamMessages(teamId) {
         return;
     }
 
+    _teamThreadPainted = false;
     result.data.forEach(function (m) { _appendTeamMsg(m); });
+    _teamThreadPainted = true;
     _teamPanelThread.scrollTop = _teamPanelThread.scrollHeight;
 }
 
@@ -1464,8 +1468,24 @@ function _appendTeamMsg(m) {
         wrap.appendChild(body);
     }
 
+    // When it happened. A thread with no times reads as a database list, and
+    // "2 minutes ago" is also the cheapest possible signal that the family is
+    // actually around right now.
+    if (m.created_at) {
+        var when = document.createElement('p');
+        when.className = 'team-msg-when';
+        when.textContent = _momentWhen(m.created_at);
+        wrap.appendChild(when);
+    }
+
     _teamPanelThread.appendChild(wrap);
     _teamPanelThread.scrollTop = _teamPanelThread.scrollHeight;
+    // New arrivals animate in; the backlog painted on open does not, or opening
+    // the panel would look like a slot machine.
+    if (_teamThreadPainted) {
+        wrap.classList.add('team-msg-enter');
+        requestAnimationFrame(function () { wrap.classList.remove('team-msg-enter'); });
+    }
     return wrap;
 }
 
@@ -1842,15 +1862,28 @@ async function _sendTeamMessage(body) {
     var teamId = _teamPanelTeamId;
     if (!teamId) return;
 
-    _teamPanelInput.disabled   = true;
     _teamPanelSendBtn.disabled = true;
+
+    // Show it straight away, dimmed, rather than freezing the input until the
+    // server answers. On a phone on bad signal that wait is the difference
+    // between "alive" and "broken".
+    var empty0 = _teamPanelThread.querySelector('.team-panel-empty');
+    if (empty0) empty0.remove();
+    var pending = _appendTeamMsg({
+        sender_type: 'user',
+        sender_username: currentUser ? currentUser.username : null,
+        body: body,
+        created_at: new Date().toISOString(),
+    });
+    if (pending) pending.classList.add('is-sending');
 
     var result = await api('/api/teams/' + teamId + '/messages', 'POST', { body: body });
 
-    _teamPanelInput.disabled   = false;
     _teamPanelSendBtn.disabled = false;
 
     if (_teamPanelTeamId !== teamId) return; // panel closed/switched while sending
+
+    if (pending) pending.remove();
 
     if (!result || result.status !== 201) {
         var errEl = document.createElement('p');
@@ -2656,6 +2689,16 @@ var RICKIE_LINES = {
     // for the moment one is earned, and plainly wrong for a first one.
     // Rickie at a challenge: pleased and a little competitive, never a referee.
     // He has opinions about the challenge, never about the person.
+    // The first movement of a day, before any streak or level is involved.
+    // This is the moment a solo user most needs someone to notice, and the one
+    // the product previously passed over in silence.
+    firstMoveOfDay: [
+        "There it is. First one of the day.",
+        "Rickie was hoping you'd show up.",
+        "Day's officially started now.",
+        "One down. Rickie's paying attention.",
+        "That's the hardest one out of the way.",
+    ],
     challengeDone: [
         "Challenge accepted, challenge finished.",
         "Rickie watched the whole thing. Solid work.",
@@ -5926,6 +5969,9 @@ async function handleCompleteExercise(key, btn, row) {
                 poolKey = 'firstMission';
             } else if (wasPerfectMission) {
                 poolKey = 'perfectMission';
+            } else if (result.data.completed_count === 1) {
+                // Someone just started moving today. Worth its own line.
+                poolKey = 'firstMoveOfDay';
             }
             // Confetti only for the moments that have earned it: a full
             // mission or a level-up. It rides on the toast so it lands with

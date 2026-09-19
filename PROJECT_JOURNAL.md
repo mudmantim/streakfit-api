@@ -645,3 +645,88 @@ keep ignoring.
 deployed. Age verification and parental consent remain undesigned and this
 raises the stakes on them — flagged, not solved, because it is a legal and
 policy call.
+
+---
+
+# Session 6 (2026-09-18) — Impress Olivia, without losing the solo user
+
+Tim raised the bar: the next time Olivia opens StreakFit it should feel like a
+transformation, and the standard is "whoa, StreakFit can do THAT now?". Then he
+added the constraint that matters more — everything social is **additive**.
+StreakFit remains a movement app with a real information layer, and a person who
+never creates a team must get the full core benefit. The hierarchy is movement,
+then useful information, then encouragement, then progression, then social.
+
+## The constraint caught a real defect immediately
+
+Filters are earned by moving. The only place to *use* one was a team photo
+composer. So a solo user could earn the best rewards in the product and never
+see them — the exact thing the constraint forbids. The composer now has a solo
+mode reached from the Journey card: same filters, saves to the phone, nothing
+uploaded, no team required.
+
+## Judging the filters by looking at them
+
+Rendering all twelve side by side was worth more than reading the catalog.
+`golden_hour` was indistinguishable from no filter and cost 20 acorns.
+`goofy_specs` promised glasses and delivered Rickie in a corner. The "gold" in
+`first_mission_gold` was a sepia tint nobody could see. And Rickie appeared as
+the same asset in a corner across five of them.
+
+Three new primitives fixed most of it — `vignette`, `burst`, and a `stat` badge
+that prints the person's **real streak and level onto the picture**. That last
+one is the only filter primitive StreakFit can have and a camera app cannot,
+because a camera app does not know whether you moved today.
+
+## Content was the thinnest part of the product
+
+90 insights and 40 questions, indexed by day of the year: every user worldwide
+saw the same fact on the same date, and a daily user met the same question every
+40 days. Now 270 and 190, with selection shuffled per person so nobody repeats
+until the library is exhausted and two people in a house are almost never on the
+same fact — which is the point, because half the value of a fact is telling
+someone.
+
+The sharper find: in the original 40 questions the correct answer sat at index 1
+thirty times and index 0 ten times. **Indices 2 and 3 were never correct.**
+"Always pick the second one" scored 75%, and a child would have found that
+faster than an adult.
+
+## Challenges, and why they are presets
+
+The social ask was movement challenges. The design decision that matters is that
+they are a fixed preset list, never free text: a typed dare in a family app used
+by children is a safety hole no moderation closes. Eight equipment-free options
+inside the same movement model the exercise library already uses.
+
+There is no loser. No failure state, no countdown, and nothing anywhere names a
+person who did not do it — the card lists who did and stops. An untouched
+challenge simply closes. Rickie's challenge lines were checked for the same
+thing: none of them nudge the people who have not joined in.
+
+And it amplifies rather than replaces: 15 XP against 40 for finishing your own
+mission, with a test pinning that ordering, and a daily cap that stops paying
+without ever refusing a completion — refusing one would be telling someone they
+had moved too much.
+
+## Three bugs that only using it could find
+
+- **The biggest moment of a first day lasted 900ms.** Finishing a first mission
+  and unlocking a milestone happen in the same instant, and the milestone toast
+  replaced the completion one — so "+60 XP, Level 2 — Adventurer" flashed past.
+  Reactions are queued now.
+- **The challenge card wrapped its text one character per line.**
+  `.challenge-card` and `.challenge-title` were already taken by Side Quests,
+  which is backed by the `Challenge` model, so the new cards inherited a
+  horizontal flex row — and my rules were quietly overriding the Side Quests
+  card's own appearance.
+- **The daily challenge cap paid one fewer than it allowed**, because the count
+  query autoflushed the pending completion it was about to count.
+
+## Two of my own tests were wrong
+
+Substring matching flagged "within" for "thin", and "One imperfect day feels
+like total failure" got flagged as shaming — when it is the *correct answer* to
+why all-or-nothing plans collapse, and among the most on-brand content in the
+library. The tests were fixed, not the content. Worth remembering: a
+never-negative rule enforced bluntly will start deleting the good stuff.
