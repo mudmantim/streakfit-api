@@ -827,6 +827,72 @@ def check_brain_boost_can_be_answered(b: Browser, base: str, app) -> None:
         check(word not in low, f"the wrong-answer copy stays kind ({word!r} absent)")
 
 
+def check_coming_back_after_a_while(b: Browser, base: str, app) -> None:
+    """The returning user, in a browser.
+
+    Before this, the selection function was never told how long anybody had
+    been away, so someone who had been training at advanced and had not moved
+    for forty days was handed their exact peak load on the morning they came
+    back. The fix is not "an easier day as a reward for missing" — an absence
+    is not a failure and nothing is taken away. It is that what a body could do
+    in March is not a claim about this morning.
+    """
+    print("\nComing back after a while")
+    from app import DailyCompletion, User, db
+
+    username, token = make_user(app, "returning")
+    with app.app_context():
+        row = db.session.execute(db.select(User).where(User.username == username)).scalar_one()
+        row.skill_level = "advanced"
+        row.xp_total, row.acorns_total = 2400, 150
+        last = dt.date.today() - dt.timedelta(days=41)
+        for d in range(30):
+            for key in ("archer_push_up", "pistol_squat_progression", "hollow_body_hold",
+                        "deep_squat_hold", "burpee"):
+                db.session.add(DailyCompletion(user_id=row.id, date=last - dt.timedelta(days=d),
+                                               exercise_key=key))
+        db.session.commit()
+
+    b.goto(base + "/", wait=1.0)
+    b.js(f"localStorage.setItem('streakfit_token', {json.dumps(token)})")
+    b.goto(base + "/", wait=3.5)
+
+    daily = _api(base, "/api/daily", token=token)
+    check(daily["effort"]["level"] == "easy",
+          "a long absence pre-selects a gentler day", daily["effort"]["level"])
+    check(daily["effort"]["chosen"] is False,
+          "it is suggested, not decided for them")
+    explosive = [e["name"] for e in daily["exercises"] if e.get("from_easier_tier")]
+    check(all(not e.get("from_next_tier") for e in daily["exercises"]),
+          "no movement from a harder level on the first day back", str(explosive))
+
+    note = (b.js("(document.getElementById('daily-effort-note')||{}).textContent") or "")
+    check("earned" in note.lower(),
+          "and it says nothing they earned has moved", note[:70])
+    for scolding in ("been a while", "welcome back", "missed", "40"):
+        check(scolding not in note.lower(),
+              f"the line does not mention the absence ({scolding!r})")
+
+    me = _api(base, "/api/me", token=token)
+    check(me.get("xp_total") == 2400 and me.get("total_missions") == 30
+          and me.get("best_streak") == 30,
+          "nothing earned was lost by being away",
+          f"xp={me.get('xp_total')} missions={me.get('total_missions')} best={me.get('best_streak')}")
+
+    labels = b.js("(()=>[...document.querySelectorAll('.effort-btn')]"
+                  ".map(e=>e.textContent.trim()+(e.classList.contains('is-on')?'*':'')))()") or []
+    check(len(labels) == 3 and any(x.endswith("*") for x in labels),
+          "the choice is on screen with one option selected", str(labels))
+
+    # And they can overrule it in one tap.
+    b.js("(()=>{const b=[...document.querySelectorAll('.effort-btn')]"
+         ".find(e=>/My usual/.test(e.textContent)); if(b) b.click(); return 1;})()")
+    time.sleep(2.5)
+    after = _api(base, "/api/daily", token=token)
+    check(after["effort"]["level"] == "usual" and after["effort"]["chosen"] is True,
+          "one tap overrules the suggestion", after["effort"]["level"])
+
+
 def check_page_is_clean(b: Browser, base: str, app) -> None:
     print("\nThe page itself, at phone width")
     _, token = make_user(app, "clean")
@@ -922,6 +988,7 @@ def main() -> int:
         check_panes_and_solo_first(browser, base, flask_app)
         check_brain_boost_can_be_answered(browser, base, flask_app)
         check_someone_can_actually_sign_up(browser, base, flask_app)
+        check_coming_back_after_a_while(browser, base, flask_app)
         check_page_is_clean(browser, base, flask_app)
     except Exception as exc:  # a crash must never read as a pass
         bad(f"check run crashed: {type(exc).__name__}: {exc}")

@@ -204,6 +204,16 @@
                     <span class="daily-stat" id="stat-total-missions"></span>
                 </div>
 
+                <!-- How hard today should be. The app cannot know this — a
+                     completion records a date and an exercise key and nothing
+                     about how it went — so it asks instead of guessing. Every
+                     option pays exactly the same. -->
+                <div id="daily-effort" class="daily-effort" hidden>
+                    <p id="daily-effort-note" class="daily-effort-note" hidden></p>
+                    <div id="daily-effort-options" class="daily-effort-options"
+                         role="radiogroup" aria-label="How hard should today be?"></div>
+                </div>
+
                 <div id="daily-exercises-list">
                     <div class="state-loading">
                         <div class="spinner"></div>

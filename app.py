@@ -1425,41 +1425,62 @@ def get_user_stats(user_id):
 
 _TIER_ORDER = ('beginner', 'intermediate', 'advanced')
 
-# Missions completed before the next tier starts appearing at all, and before
-# it reaches its full share. Deliberately slow: the point is that by the time
-# somebody changes tier they have already met a quarter of the new pool, so the
-# change is a shift in emphasis rather than a wall.
-_RAMP_START = 14
-_RAMP_FULL = 45
-_RAMP_MAX_SHARE = 0.15
+# ── Effort: the only honest source of "ready for more" ───────────────────────
 #
-# At most about one slot in seven, and not until a fortnight of finished
-# missions. That is enough to do the job: over the month before anyone would
-# think about changing tier it works out at roughly twenty draws from a
-# thirty-exercise pool, so the new tier is somewhere they have already been.
-# A quarter was tried first and doubled a beginner's distinct exercises over 90
-# days — a bigger change than removing the cliff needed, and beginner is a
-# level people choose for reasons.
+# The first version of this escalated difficulty automatically once someone had
+# finished fourteen missions, reaching a full share by forty-five. That was
+# wrong, and the reasoning was wrong in a way worth writing down.
 #
-# It's a share rather than a weight because a weight has to be a whole number,
-# and a whole number on a small pool moves in one jump. The first version went
-# from nothing to 13% the day someone crossed a threshold, which is a smaller
-# cliff rather than no cliff. Measured end to end the realised share lands a
-# little above this number — around 17% at the top of the ramp — because the
-# constraint retry loop re-rolls some candidates.
+# Mission count measures CONSISTENCY. It says nothing about capability. Someone
+# can complete forty-five beginner missions precisely because beginner is the
+# right level for their body, their age, or a limitation the app knows nothing
+# about — and rewarding their consistency with harder movements they did not
+# ask for is the app deciding something it has no evidence for.
+#
+# And it has no evidence for it. A completion records a user, a date and an
+# exercise key. Not how hard it was, not how long it took, not whether they
+# finished it comfortably. The data required to establish physical readiness
+# DOES NOT EXIST in this schema, so no amount of cleverness with what is there
+# can produce it. The honest source of "I could do more today" is the person.
+#
+# Four different things were being conflated, and they are now separate:
+#
+#   recovery     what you did YESTERDAY caps what you are given today
+#   returning    how long you have been away eases today and the days after
+#   capability   demonstrated per MOVEMENT, by having done that movement often;
+#                this is what the step-up offer is, and it still never applies
+#                itself
+#   willingness  a choice, made by the person, for today
+#
+# Rewards are identical at every effort level. That is not an oversight. The
+# moment a harder choice pays more, the choice stops being about what your body
+# wants today and becomes a thing you are losing by not picking.
 
+EFFORT_LEVELS = ('easy', 'usual', 'more')
+EFFORT_DEFAULT = 'usual'
 
-def _blend_share(skill_level, missions_completed):
-    """How much of today, on average, comes from the level above. 0.0 to 0.15,
-    rising smoothly between _RAMP_START and _RAMP_FULL finished missions."""
-    if skill_level not in _TIER_ORDER:
-        return 0.0
-    if _TIER_ORDER.index(skill_level) + 1 >= len(_TIER_ORDER):
-        return 0.0
-    if missions_completed < _RAMP_START:
-        return 0.0
-    span = max(1, _RAMP_FULL - _RAMP_START)
-    return _RAMP_MAX_SHARE * min(1.0, (missions_completed - _RAMP_START) / span)
+EFFORT_COPY = {
+    'easy':  {'label': 'Take it easy',  'note': 'Gentler movements, nothing explosive.'},
+    'usual': {'label': 'My usual',      'note': 'The mission as it comes.'},
+    'more':  {'label': 'Try a little more',
+              'note': 'Adds the odd movement from the level above.'},
+}
+
+# How much of a "try a little more" day is drawn from the tier above. Roughly
+# one slot in seven — enough that changing tier later is a shift in emphasis
+# rather than a wall, and small enough that one unfamiliar movement is the most
+# anyone meets in a day.
+_MORE_SHARE = 0.15
+# The mirror of it: on an easy day, some of the day comes from the tier BELOW,
+# which is what makes "easy" mean something to an advanced user rather than
+# just "the same exercises, fewer jumps".
+_EASY_SHARE = 0.30
+
+# Being away is not a failure and coming back is not a debt, so nothing here
+# takes anything away. What it does is stop handing someone the load they were
+# carrying at their peak on the morning they walk back in.
+RETURN_GAP_DAYS = 7       # away this long and today is eased by default
+RETURN_WINDOW_MISSIONS = 3  # and so are the next couple, while it settles
 
 
 def _next_tier(skill_level):
@@ -1469,56 +1490,100 @@ def _next_tier(skill_level):
     return _TIER_ORDER[idx + 1]
 
 
-def tier_readiness(skill_level, missions_completed):
-    """Whether to mention that the next level exists. An offer, not a nudge:
-    nothing in the app changes if it's ignored, and it is never shown as
-    something the person is behind on."""
-    if skill_level not in _TIER_ORDER:
+def _easier_tier(skill_level):
+    idx = _TIER_ORDER.index(skill_level) if skill_level in _TIER_ORDER else None
+    if not idx:
         return None
-    idx = _TIER_ORDER.index(skill_level)
-    if idx + 1 >= len(_TIER_ORDER) or missions_completed < _RAMP_FULL:
+    return _TIER_ORDER[idx - 1]
+
+
+def suggested_effort(days_away, missions_since_return):
+    """What to pre-select for someone today. Only ever a suggestion, and the
+    person can change it in one tap.
+
+    A long absence pre-selects an easier day — as care, not as a correction.
+    Nothing they earned is touched: the XP, the level, the acorns, the best
+    streak, the total missions and every milestone are exactly where they left
+    them, because none of those are claims about what their body can do this
+    morning.
+    """
+    if days_away is None:
+        return EFFORT_DEFAULT
+    if days_away >= RETURN_GAP_DAYS and missions_since_return < RETURN_WINDOW_MISSIONS:
+        return 'easy'
+    return EFFORT_DEFAULT
+
+
+def returning_note(days_away):
+    """The line that goes with an eased day, or None. Never says how long it
+    has been, never asks where they were, never uses the word 'back' as though
+    they owed somebody an appearance."""
+    if not days_away or days_away < RETURN_GAP_DAYS:
         return None
-    return {
-        'next_level': _TIER_ORDER[idx + 1],
-        'message': ("You've finished %d missions, and some of the harder moves have "
-                    "been turning up in them for a while now. Whenever you fancy it, "
-                    "%s is there — and you can come straight back."
-                    % (missions_completed, _TIER_ORDER[idx + 1])),
-    }
+    return ("Starting you off gentle today. Everything you've earned is exactly "
+            "where you left it — change this to whatever suits you.")
 
 
 def get_daily_exercises(user_id, date_str, skill_level, recent=None,
-                        missions_completed=0):
+                        effort=EFFORT_DEFAULT, days_away=0):
     """The five exercises for one person on one day.
 
-    Still a pure function of its arguments — `recent` and `missions_completed`
-    are passed in rather than read from the database, so the same code runs in a
-    request, in a test, and in a 90-day simulation without a session.
+    Still a pure function of its arguments — history is passed in rather than
+    read from the database, so the same code runs in a request, in a test and
+    in a ninety-day simulation without a session.
 
     `recent` is {'keys': set of yesterday's completed keys,
                  'high_impact': how many of them were explosive} or None.
+    `effort` is one of EFFORT_LEVELS, chosen by the person.
+    `days_away` is the gap before today, used to cap load on a return.
     """
     if skill_level not in EXERCISE_LIBRARY:
         skill_level = 'beginner'
+    if effort not in EFFORT_LEVELS:
+        effort = EFFORT_DEFAULT
     recent = recent or {}
     yesterday_keys = set(recent.get('keys') or ())
     yesterday_high = int(recent.get('high_impact') or 0)
+    days_away = int(days_away or 0)
 
+    # Effort is part of the seed so the day stays reproducible per choice, and
+    # so changing your mind genuinely changes the mission rather than shuffling
+    # the same five.
     seed = int(hashlib.sha256(
-        f"{user_id}:{date_str}:{skill_level}".encode()
+        f"{user_id}:{date_str}:{skill_level}:{effort}".encode()
     ).hexdigest(), 16) % (2 ** 32)
     rng  = random.Random(seed)
     own = EXERCISE_LIBRARY[skill_level]
-    harder_tier = _next_tier(skill_level)
-    harder = EXERCISE_LIBRARY[harder_tier] if harder_tier else None
-    blend = _blend_share(skill_level, missions_completed)
+
+    if effort == 'more':
+        other_tier, other_share, flag = _next_tier(skill_level), _MORE_SHARE, 'from_next_tier'
+    elif effort == 'easy':
+        other_tier, other_share, flag = _easier_tier(skill_level), _EASY_SHARE, 'from_easier_tier'
+    else:
+        other_tier, other_share, flag = None, 0.0, None
+    other = EXERCISE_LIBRARY[other_tier] if other_tier else None
+
+    def _gentle(options):
+        """Non-explosive options, or all of them if a category has none."""
+        calm = [ex for ex in options if ex['impact'] != 'high']
+        return calm or options
 
     def pick(cat):
-        """One exercise for one category — occasionally borrowed from the level
-        above, and flagged when it is so nothing arrives unexplained."""
-        if harder and blend and rng.random() < blend:
-            return dict(rng.choice(harder[cat]), from_next_tier=True)
-        return rng.choice(own[cat])
+        """One exercise for one category. A borrowed one is flagged either way,
+        so neither a harder movement nor an easier one arrives unexplained.
+
+        An easy day CHOOSES gently rather than rerolling until it happens to
+        land gently. Advanced conditioning is five explosive movements out of
+        six, so the odds of drawing a calm five by chance are about one in
+        forty — the retry loop gave up and handed back a heavy day to someone
+        who had asked for the opposite.
+        """
+        if other and other_share and rng.random() < other_share:
+            pool = other[cat]
+            return dict(rng.choice(_gentle(pool) if effort == 'easy' else pool),
+                        **{flag: True})
+        pool = own[cat]
+        return rng.choice(_gentle(pool) if effort == 'easy' else pool)
 
     # Pre-check: can this level satisfy the fun floor at all?
     level_has_high_fun = any(
@@ -1542,11 +1607,20 @@ def get_daily_exercises(user_id, date_str, skill_level, recent=None,
     fun_floor_would_monopolise = len(fun_categories) == 1
     waive_fun_floor = fun_floor_would_monopolise and (seed % 5 == 0)
 
-    # Yesterday's load caps today's. One explosive exercise is fine after a
-    # heavy day; three in a row is how people get hurt and how they stop.
-    # Only ONE day back, and only from what was actually completed — a rest day
-    # yesterday is not something to recover from.
-    high_cap = 1 if yesterday_high >= 2 else 2
+    # Three separate reasons to carry less explosive work today, and the
+    # gentlest of them wins.
+    #   - yesterday was heavy, and two explosive days back to back is how
+    #     people get hurt and how they stop;
+    #   - they have been away a while, so whatever they could do in March is
+    #     not a claim about this morning;
+    #   - they asked for an easier day.
+    high_cap = 2
+    if yesterday_high >= 2:
+        high_cap = 1
+    if days_away >= RETURN_GAP_DAYS:
+        high_cap = min(high_cap, 1)
+    if effort == 'easy':
+        high_cap = 0
 
     # Preferences, not requirements: a candidate that avoids repeating
     # yesterday wins if we find one, but we never fail to produce a mission
@@ -1558,13 +1632,16 @@ def get_daily_exercises(user_id, date_str, skill_level, recent=None,
         impacts   = [ex['impact'] for ex in candidate]
 
         # Constraint 1 — fun floor: at least one high-fun exercise when the
-        # pool makes it possible, except on a waived day (see above).
+        # pool makes it possible, except on a waived day (see above). An easy
+        # day still gets to be fun; fun and explosive are different axes.
         fun_ok    = (any(ex['fun_score'] == 'high' for ex in candidate)
                      or not level_has_high_fun
                      or waive_fun_floor)
         # Constraint 2 — impact balance: not every exercise can be static.
-        impact_ok = any(i in ('low', 'high') for i in impacts)
-        # Constraint 3 — high-impact cap, tightened after a heavy day.
+        # Waived on an easy day, where a session of gentle movement is the
+        # point rather than a failure to be energetic.
+        impact_ok = effort == 'easy' or any(i in ('low', 'high') for i in impacts)
+        # Constraint 3 — the high-impact cap worked out above.
         cap_ok    = impacts.count('high') <= high_cap
 
         if not (fun_ok and impact_ok and cap_ok):
@@ -1610,26 +1687,89 @@ def recent_movement(user_id, today):
     return {'keys': keys, 'high_impact': high}
 
 
-def missions_completed_before(user_id, today):
-    """Completed missions up to and NOT including today.
+def days_since_last_active(user_id, today):
+    """Whole days between their last completed exercise and today.
 
-    Today is excluded on purpose. The tier ramp reads this number, and if it
-    could tick over mid-afternoon — the moment someone finishes their fifth
-    exercise — the mission would change underneath them and the completion
-    route would reject the sixth tap as "not in today's daily list". The same
-    class of bug as the challenge daily cap: a count that moves while the thing
-    counting it is still in use.
+    0 means they moved today or yesterday. None means they have never
+    completed anything, which is a first day rather than an absence — a new
+    person is not returning from anywhere.
     """
+    last = db.session.execute(
+        db.select(db.func.max(DailyCompletion.date))
+        .where(DailyCompletion.user_id == user_id,
+               DailyCompletion.date < today)
+    ).scalar()
+    if last is None:
+        return None
+    return max(0, (today - last).days - 1)
+
+
+def missions_since(user_id, since_date):
+    """Completed missions on or after a date. Used to decide how long a
+    returning person's gentler window lasts."""
+    if since_date is None:
+        return 0
     return db.session.execute(
         db.select(db.func.count()).select_from(
             db.select(DailyCompletion.date)
             .where(DailyCompletion.user_id == user_id,
-                   DailyCompletion.date < today)
+                   DailyCompletion.date >= since_date)
             .group_by(DailyCompletion.date)
             .having(db.func.count(DailyCompletion.exercise_key) >= 5)
             .subquery()
         )
     ).scalar() or 0
+
+
+def effort_for(user_id, today, days_away, missions_since_return):
+    """Today's effort level: what they chose, else what yesterday was, else the
+    suggestion. Reading it never writes a row — an untouched day has no row at
+    all, so nothing is recorded about a person who simply used the app."""
+    chosen = db.session.execute(
+        db.select(DailyEffort.level)
+        .where(DailyEffort.user_id == user_id, DailyEffort.date == today)
+    ).scalar()
+    if chosen in EFFORT_LEVELS:
+        return chosen, True
+    suggested = suggested_effort(days_away, missions_since_return)
+    if suggested != EFFORT_DEFAULT:
+        return suggested, False
+    previous = db.session.execute(
+        db.select(DailyEffort.level)
+        .where(DailyEffort.user_id == user_id, DailyEffort.date < today)
+        .order_by(DailyEffort.date.desc()).limit(1)
+    ).scalar()
+    return (previous if previous in EFFORT_LEVELS else EFFORT_DEFAULT), False
+
+
+_READINESS_MORE_DAYS = 5
+
+
+def tier_readiness(user_id, skill_level):
+    """Whether to mention that the next level exists.
+
+    Gated on the only evidence the app actually has: this person has chosen
+    "try a little more" on at least five separate days and finished those
+    missions. Not on mission count, which measures how consistent somebody is
+    and says nothing whatever about what their body is ready for.
+
+    An offer, and nothing in the app changes if it is ignored.
+    """
+    nxt = _next_tier(skill_level)
+    if not nxt:
+        return None
+    days = db.session.execute(
+        db.select(db.func.count(DailyEffort.id))
+        .where(DailyEffort.user_id == user_id, DailyEffort.level == 'more')
+    ).scalar() or 0
+    if days < _READINESS_MORE_DAYS:
+        return None
+    return {
+        'next_level': nxt,
+        'message': ("You've asked for a bit more a few times now, and those days "
+                    "have gone fine. Whenever you fancy it, %s is there — and you "
+                    "can come straight back." % nxt),
+    }
 
 
 def practice_counts(user_id):
@@ -1756,6 +1896,28 @@ class Challenge(db.Model):
     longest_streak = db.Column(db.Integer, default=0)
     last_check_in = db.Column(db.Date, nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+class DailyEffort(db.Model):
+    """How hard a person asked today to be.
+
+    A row per user per day, because the mission is derived from it and the
+    answer has to survive a page reload — otherwise the five exercises someone
+    is looking at would not be the five the completion route will accept.
+
+    It is not a setting on the account. It resets to the previous day's answer
+    rather than persisting as a label, so nobody ends up living under a
+    permanent "easy" they picked once during a bad week.
+    """
+    __tablename__ = 'daily_effort'
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    date = db.Column(db.Date, nullable=False)
+    level = db.Column(db.String(16), nullable=False)
+
+    __table_args__ = (
+        db.UniqueConstraint('user_id', 'date', name='uq_daily_effort'),
+    )
+
 
 class DailyCompletion(db.Model):
     __tablename__ = 'daily_completion'
@@ -3103,6 +3265,87 @@ def check_in(challenge_id):
         "new_record": new_record
     }), 200
 
+def todays_mission(user_id, skill_level, today):
+    """Today's five, plus everything needed to explain them.
+
+    Both /api/daily and the completion route go through here. They used to
+    build the mission separately, which is the shape of bug where the exercise
+    on screen is rejected as "not in today's list" because one of them read a
+    number the other did not.
+    """
+    days_away = days_since_last_active(user_id, today)
+    since = None if days_away is None else today - timedelta(days=days_away)
+    missions_since_return = missions_since(user_id, since) if days_away else 0
+    effort, chosen = effort_for(user_id, today, days_away, missions_since_return)
+    exercises = get_daily_exercises(
+        user_id, today.isoformat(), skill_level,
+        recent=recent_movement(user_id, today),
+        effort=effort,
+        days_away=days_away or 0,
+    )
+    return {
+        'exercises': exercises,
+        'effort': effort,
+        'effort_chosen': chosen,
+        'days_away': days_away,
+        'returning_note': None if chosen else returning_note(days_away),
+        # Not on somebody's very first day. They picked a level at sign-up
+        # minutes ago and have no experience of the app to calibrate against,
+        # so three difficulty buttons before the first mission is a decision
+        # with nothing behind it. It appears once there is a yesterday.
+        'show_effort': days_away is not None,
+    }
+
+
+@app.route('/api/daily/effort', methods=['PUT'])
+@jwt_required()
+@limiter.limit("60 per hour", key_func=user_or_ip_key)
+def set_daily_effort():
+    """Choose how hard today should be.
+
+    Easing off is always allowed. Asking for MORE is refused once the mission
+    has been started, because the five exercises would change underneath
+    completions that already exist — and because "I've done three, let me swap
+    to the harder set" is the one version of this that is about the score
+    rather than about the body.
+    """
+    user_id = int(get_jwt_identity())
+    user = db.session.get(User, user_id)
+    if user is None:
+        abort(404)
+
+    level = (request.get_json(silent=True) or {}).get('level')
+    if level not in EFFORT_LEVELS:
+        return jsonify({"error": "unknown_effort_level",
+                        "allowed": list(EFFORT_LEVELS)}), 400
+
+    today = date.today()
+    current = todays_mission(user_id, user.skill_level, today)
+    started = db.session.execute(
+        db.select(db.func.count(DailyCompletion.id))
+        .where(DailyCompletion.user_id == user_id, DailyCompletion.date == today)
+    ).scalar() or 0
+    if started and EFFORT_LEVELS.index(level) > EFFORT_LEVELS.index(current['effort']):
+        return jsonify({
+            "error": "already_started",
+            "message": "You're partway through today — you can always take it "
+                       "easier, and a bigger day is there tomorrow.",
+        }), 409
+
+    row = db.session.execute(
+        db.select(DailyEffort)
+        .where(DailyEffort.user_id == user_id, DailyEffort.date == today)
+    ).scalar_one_or_none()
+    if row is None:
+        row = DailyEffort(user_id=user_id, date=today, level=level)
+        db.session.add(row)
+    else:
+        row.level = level
+    db.session.commit()
+    app.logger.info("event=effort_set user_id=%s level=%s", user_id, level)
+    return jsonify({"level": level}), 200
+
+
 @app.route('/api/daily', methods=['GET'])
 @jwt_required()
 def get_daily():
@@ -3113,19 +3356,18 @@ def get_daily():
 
     today = date.today()
     today_str = today.isoformat()
-    exercises = get_daily_exercises(
-        user_id, today_str, user.skill_level,
-        recent=recent_movement(user_id, today),
-        missions_completed=missions_completed_before(user_id, today),
-    )
+    mission = todays_mission(user_id, user.skill_level, today)
+    exercises = mission['exercises']
     # A larger version offered beside the prescription, never instead of it.
+    # Not on an easy day: someone who asked for gentle should not then be
+    # invited to do more of it.
     done = practice_counts(user_id)
-    missions_done = missions_completed_before(user_id, today)
     exercises = [
-        dict(ex, step_up=step_up_for(ex['reps_or_duration'], done.get(ex['key'], 0)))
+        dict(ex, step_up=(None if mission['effort'] == 'easy'
+                          else step_up_for(ex['reps_or_duration'], done.get(ex['key'], 0))))
         for ex in exercises
     ]
-    readiness = tier_readiness(user.skill_level, missions_done)
+    readiness = tier_readiness(user_id, user.skill_level)
     insight   = get_daily_insight(today_str, user_id)
     boost     = get_daily_brain_boost(today_str, user_id)
 
@@ -3185,6 +3427,13 @@ def get_daily():
         "insight": insight,
         "brain_boost": brain_boost_payload,
         "tier_readiness": readiness,
+        "effort": {
+            "show": mission['show_effort'],
+            "level": mission['effort'],
+            "chosen": mission['effort_chosen'],
+            "options": [dict(EFFORT_COPY[lv], level=lv) for lv in EFFORT_LEVELS],
+            "note": mission['returning_note'],
+        },
         "exercises": [
             {
                 "key": ex['key'],
@@ -3195,9 +3444,10 @@ def get_daily():
                 # A bigger version of the same movement, earned by having done
                 # it before. Optional — the mission completes either way.
                 "step_up": ex.get('step_up'),
-                # True when this one was borrowed from the level above, so the
+                # Borrowed from an adjacent level, in either direction, so the
                 # UI can say so rather than let it arrive unexplained.
                 "from_next_tier": bool(ex.get('from_next_tier')),
+                "from_easier_tier": bool(ex.get('from_easier_tier')),
                 "instructions": ex['instructions'],
                 "completed": ex['key'] in completed_keys,
                 "image_url": f"/static/exercises/{ex['key']}.svg"
@@ -3283,13 +3533,9 @@ def complete_daily_exercise(exercise_key):
         abort(404)
 
     today = date.today()
-    today_str = today.isoformat()
 
-    valid_keys = {ex['key'] for ex in get_daily_exercises(
-        user_id, today_str, user.skill_level,
-        recent=recent_movement(user_id, today),
-        missions_completed=missions_completed_before(user_id, today),
-    )}
+    valid_keys = {ex['key'] for ex in
+                  todays_mission(user_id, user.skill_level, today)['exercises']}
     if exercise_key not in valid_keys:
         return jsonify({"error": "Exercise not in today's daily list"}), 400
 

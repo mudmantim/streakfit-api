@@ -3914,3 +3914,50 @@ body.theme-classic .theme-btn.active { background: rgba(79,70,229,.2); }
 .daily-exercise-row .exercise-link-row {
     width: 100%;
 }
+
+/* ── How hard today should be ───────────────────────────────────────────────
+   Three options, sitting quietly under the progress bar. Deliberately not a
+   modal and not a gate: the default needs no interaction at all, because a
+   daily habit should not open with a question. */
+
+.daily-effort {
+    margin: var(--space-3) 0 var(--space-2);
+}
+
+.daily-effort-note {
+    margin: 0 0 var(--space-2);
+    font-size: .82rem;
+    line-height: 1.5;
+    color: var(--gray-600);
+}
+
+.daily-effort-options {
+    display: flex;
+    gap: .4rem;
+}
+
+.effort-btn {
+    flex: 1;
+    min-height: 44px;
+    padding: .4rem .3rem;
+    border: 1px solid var(--gray-200);
+    border-radius: var(--radius);
+    background: #fff;
+    color: var(--gray-600);
+    font: inherit;
+    font-size: .78rem;
+    font-weight: 600;
+    line-height: 1.25;
+    cursor: pointer;
+}
+
+.effort-btn.is-on {
+    border-color: var(--indigo);
+    background: var(--indigo-pale);
+    color: var(--indigo-dark);
+}
+
+.effort-btn:focus-visible {
+    outline: 2px solid var(--indigo);
+    outline-offset: 2px;
+}

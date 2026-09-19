@@ -4094,6 +4094,8 @@ async function loadDailyExercises() {
         else bar.classList.remove('complete');
     }
 
+    renderEffortChoice(daily);
+
     // Update count badge
     var badge = document.getElementById('daily-count-badge');
     if (badge) {
@@ -6081,6 +6083,75 @@ var COACH_DATA = {
     }
 };
 
+// ── How hard today should be ────────────────────────────────────────────────
+//
+// The app asks because it genuinely cannot know. A completion records a user,
+// a date and an exercise key — nothing about whether it was hard, whether it
+// was finished comfortably, or whether the person has a knee that decides
+// these things for them. Difficulty used to escalate on its own once someone
+// had finished fourteen missions, which treated being consistent as evidence
+// of being ready for more, and those are different facts about a person.
+//
+// Every option is worth exactly the same XP. The moment a harder choice pays
+// better it stops being a question about today and becomes something you are
+// losing by not picking.
+
+var _effortBusy = false;
+
+function renderEffortChoice(daily) {
+    var wrap = document.getElementById('daily-effort');
+    var optionsWrap = document.getElementById('daily-effort-options');
+    var noteEl = document.getElementById('daily-effort-note');
+    if (!wrap || !optionsWrap || !daily.effort) return;
+    if (isGuest || !daily.effort.show) { wrap.hidden = true; return; }
+
+    wrap.hidden = false;
+    noteEl.hidden = !daily.effort.note;
+    noteEl.textContent = daily.effort.note || '';
+
+    optionsWrap.innerHTML = '';
+    daily.effort.options.forEach(function (opt) {
+        var btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'effort-btn' + (opt.level === daily.effort.level ? ' is-on' : '');
+        btn.setAttribute('role', 'radio');
+        btn.setAttribute('aria-checked', String(opt.level === daily.effort.level));
+        btn.title = opt.note;
+
+        var label = document.createElement('span');
+        label.className = 'effort-btn-label';
+        label.textContent = opt.label;
+        btn.appendChild(label);
+
+        btn.addEventListener('click', function () { setEffort(opt.level); });
+        optionsWrap.appendChild(btn);
+    });
+}
+
+async function setEffort(level) {
+    if (_effortBusy) return;
+    _effortBusy = true;
+    try {
+        var result = await api('/api/daily/effort', 'PUT', { level: level });
+        if (result && result.status === 409) {
+            // Asking for MORE once the mission has been started would change
+            // the five exercises underneath completions that already exist.
+            // Easing off is always allowed; this only ever fires upward.
+            var note = document.getElementById('daily-effort-note');
+            if (note) {
+                note.hidden = false;
+                note.textContent = (result.data && result.data.message)
+                    || "You're partway through today — a bigger day is there tomorrow.";
+            }
+            return;
+        }
+        await loadDailyExercises();
+    } finally {
+        _effortBusy = false;
+    }
+}
+
+
 function renderDailyExercise(ex, isNext) {
     var row = document.createElement('div');
     row.className = 'daily-exercise-row' + (ex.completed ? ' daily-exercise-done' : '')
@@ -6150,11 +6221,13 @@ function renderDailyExercise(ex, isNext) {
     // A movement borrowed from the level above. Said out loud, because a
     // harder exercise turning up unannounced reads as the app getting it
     // wrong rather than as progress.
-    if (ex.from_next_tier && isNext) {
-        var harder = document.createElement('span');
-        harder.className = 'daily-exercise-flag';
-        harder.textContent = 'A step up — from the next level';
-        infoText.appendChild(harder);
+    if ((ex.from_next_tier || ex.from_easier_tier) && isNext) {
+        var flag = document.createElement('span');
+        flag.className = 'daily-exercise-flag';
+        flag.textContent = ex.from_next_tier
+            ? 'A step up — from the next level'
+            : 'A gentler one — from the level below';
+        infoText.appendChild(flag);
     }
 
     // The optional bigger version. Never replaces the prescription above it:

@@ -7,6 +7,8 @@ so the day-2 shape is pinned here deliberately rather than left implicit.
 """
 import datetime
 
+import pytest
+
 import app as appmod
 from app import DailyCompletion, User, db
 from conftest import auth_headers, register_and_login
@@ -359,14 +361,24 @@ def test_an_ordinary_day_still_allows_a_hard_one():
     assert seen_two, "no day ever reaches two high-impact exercises any more"
 
 
-def test_a_rest_day_is_not_something_to_recover_from():
-    """Recovery reads what was actually COMPLETED. Someone who did nothing
-    yesterday is not carrying fatigue, and must not be given an easier day for
-    having missed one — that would be the app quietly rewarding the miss."""
-    with_rest = appmod.get_daily_exercises(11, '2026-03-01', 'advanced',
-                                           recent={'keys': set(), 'high_impact': 0})
+def test_a_quiet_yesterday_is_not_treated_as_fatigue():
+    """Recovery reads what was COMPLETED, so it caps a heavy day, not a quiet
+    one. This is about yesterday specifically. Being away for a WHILE is a
+    different thing and is handled separately — see the returning-user tests,
+    where an absence eases the day ON PURPOSE.
+
+    This test used to be called "a rest day is not something to recover from"
+    and its comment said easing off after a missed day would be "the app
+    quietly rewarding the miss". That reasoning was wrong and does not belong
+    in this product: an absence is not a failure, and an easier return is not
+    an undeserved prize. All it should ever have claimed is that one ordinary
+    quiet day does not mean somebody is carrying fatigue.
+    """
+    after_quiet = appmod.get_daily_exercises(11, '2026-03-01', 'advanced',
+                                             recent={'keys': set(), 'high_impact': 0})
     no_history = appmod.get_daily_exercises(11, '2026-03-01', 'advanced')
-    assert [e['key'] for e in with_rest] == [e['key'] for e in no_history]
+    assert [e['key'] for e in after_quiet] == [e['key'] for e in no_history]
+
 
 
 def test_the_step_up_is_earned_and_stops_growing():
@@ -392,53 +404,132 @@ def test_the_prescription_itself_never_changes_underneath_anyone():
     """The whole design decision: a number that goes up on its own turns a
     daily habit into a target, and the first day you can't hit it becomes a
     failure. The larger version is offered beside the prescription."""
-    early = appmod.get_daily_exercises(9, '2026-02-01', 'beginner', missions_completed=0)
-    later = appmod.get_daily_exercises(9, '2026-02-01', 'beginner', missions_completed=400)
-    base = {e['key']: e['reps_or_duration'] for e in early}
-    for ex in later:
-        if ex['key'] in base:
-            assert ex['reps_or_duration'] == base[ex['key']]
+    for effort in appmod.EFFORT_LEVELS:
+        for ex in appmod.get_daily_exercises(9, '2026-02-01', 'beginner', effort=effort):
+            source = appmod._EXERCISE_BY_KEY[ex['key']]
+            assert ex['reps_or_duration'] == source['reps_or_duration']
 
 
-def test_the_tier_ramp_starts_at_nothing_and_rises_gradually():
-    def share(missions):
+# ── Consistency is not readiness ────────────────────────────────────────────
+#
+# Difficulty used to escalate automatically once someone had finished fourteen
+# missions. Mission count measures how consistent a person is and says nothing
+# about what their body is ready for — somebody can finish forty-five beginner
+# missions precisely because beginner is the right level for them. These pin
+# the four things that used to be conflated into one: recovery from yesterday,
+# easing a return, capability demonstrated per movement, and willingness asked
+# for out loud.
+
+def test_nothing_about_a_history_can_make_the_day_harder_on_its_own():
+    """The signature can no longer express the old behaviour: there is no
+    input carrying a mission count, so there is nothing to escalate from."""
+    import inspect as _inspect
+    params = _inspect.signature(appmod.get_daily_exercises).parameters
+    assert 'missions_completed' not in params
+    for uid in range(1200, 1240):
+        picked = appmod.get_daily_exercises(uid, '2026-05-01', 'beginner')
+        assert not any(ex.get('from_next_tier') for ex in picked)
+
+
+def test_a_harder_movement_appears_only_when_someone_asks_for_one():
+    def share(effort):
         total = sum(1 for uid in range(800, 900)
-                    for ex in appmod.get_daily_exercises(
-                        uid, '2026-04-01', 'beginner', missions_completed=missions)
+                    for ex in appmod.get_daily_exercises(uid, '2026-04-01', 'beginner',
+                                                         effort=effort)
                     if ex.get('from_next_tier'))
         return total / (100 * 5)
 
-    assert share(0) == 0.0
-    assert share(appmod._RAMP_START - 1) == 0.0
-    mid, full = share(30), share(appmod._RAMP_FULL)
-    assert 0 < mid < full, f"not gradual: {mid:.1%} then {full:.1%}"
-    assert full < 0.25, f"{full:.0%} of a beginner's day comes from the level above"
+    assert share('usual') == 0.0
+    assert share('easy') == 0.0
+    assert 0 < share('more') < 0.30, "asking for a little more should stay little"
 
 
-def test_a_borrowed_exercise_says_so():
-    """It is a shift in emphasis the person can see, not content that appears
-    unannounced and harder than they signed up for."""
-    borrowed = [ex for uid in range(900, 940)
-                for ex in appmod.get_daily_exercises(uid, '2026-04-01', 'beginner',
-                                                     missions_completed=90)
-                if ex.get('from_next_tier')]
-    assert borrowed
-    assert all(ex['difficulty'] == 'intermediate' for ex in borrowed)
+def test_an_easy_day_is_genuinely_easier_for_an_advanced_user():
+    """Not merely 'the same exercises with fewer jumps'. Advanced conditioning
+    is five explosive movements out of six, so an easy day has to be able to
+    reach the level below or it cannot honour the request."""
+    borrowed = 0
+    for uid in range(900, 960):
+        picked = appmod.get_daily_exercises(uid, '2026-04-01', 'advanced', effort='easy')
+        assert all(ex['impact'] != 'high' for ex in picked), \
+            "an easy day still handed out explosive movements"
+        borrowed += sum(1 for ex in picked if ex.get('from_easier_tier'))
+    assert borrowed > 0, "nothing was ever drawn from the gentler level"
 
 
-def test_the_top_tier_borrows_from_nothing():
-    for ex in appmod.get_daily_exercises(1, '2026-04-01', 'advanced', missions_completed=500):
+def test_an_easy_day_is_still_allowed_to_be_fun():
+    """Gentle and dull are different axes. Someone who asks for an easier day
+    should not be handed the five most boring things in the library."""
+    fun = sum(
+        1 for uid in range(960, 1020)
+        if any(ex['fun_score'] == 'high'
+               for ex in appmod.get_daily_exercises(uid, '2026-04-01', 'intermediate',
+                                                    effort='easy'))
+    )
+    assert fun > 25, f"only {fun}/60 easy days had anything energetic in them"
+
+
+def test_a_borrowed_exercise_says_so_in_both_directions():
+    """Neither a harder movement nor a gentler one arrives unexplained."""
+    harder = [ex for uid in range(900, 960)
+              for ex in appmod.get_daily_exercises(uid, '2026-04-01', 'beginner', effort='more')
+              if ex.get('from_next_tier')]
+    assert harder and all(ex['difficulty'] == 'intermediate' for ex in harder)
+    gentler = [ex for uid in range(900, 960)
+               for ex in appmod.get_daily_exercises(uid, '2026-04-01', 'advanced', effort='easy')
+               if ex.get('from_easier_tier')]
+    assert gentler and all(ex['difficulty'] == 'intermediate' for ex in gentler)
+
+
+def test_the_top_and_bottom_tiers_have_nowhere_to_borrow_from():
+    for ex in appmod.get_daily_exercises(1, '2026-04-01', 'advanced', effort='more'):
         assert not ex.get('from_next_tier')
+    for ex in appmod.get_daily_exercises(1, '2026-04-01', 'beginner', effort='easy'):
+        assert not ex.get('from_easier_tier')
 
 
-def test_readiness_is_an_offer_and_only_after_real_practice():
-    assert appmod.tier_readiness('beginner', 10) is None
-    assert appmod.tier_readiness('advanced', 500) is None       # nowhere to go
-    ready = appmod.tier_readiness('beginner', appmod._RAMP_FULL)
-    assert ready['next_level'] == 'intermediate'
+def test_every_effort_level_is_worth_exactly_the_same():
+    """Load-bearing. The moment a harder day pays more, the question stops
+    being about what someone's body wants today and becomes something they are
+    losing by not picking."""
+    import inspect as _inspect
+    for fn in (appmod.complete_daily_exercise, appmod.award_progress):
+        src = _inspect.getsource(fn)
+        assert 'effort' not in src.lower(), (
+            f"{fn.__name__} reads the effort level — rewards must not depend on "
+            "how hard someone asked today to be"
+        )
+
+
+def test_readiness_is_gated_on_asking_for_more_not_on_showing_up(app):
+    u = User(username='readiness_user', password_hash='x')
+    db.session.add(u)
+    db.session.commit()
+    assert appmod.tier_readiness(u.id, 'beginner') is None
+    assert appmod.tier_readiness(u.id, 'advanced') is None       # nowhere to go
+
+    base = datetime.date(2026, 1, 1)
+    for d in range(40):
+        for key in ('wall_push_up', 'bodyweight_squat', 'dead_bug',
+                    'ankle_circles', 'marching_in_place'):
+            db.session.add(DailyCompletion(user_id=u.id,
+                                           date=base + datetime.timedelta(days=d),
+                                           exercise_key=key))
+    db.session.commit()
+    assert appmod.tier_readiness(u.id, 'beginner') is None, \
+        "forty finished missions is consistency, and must not be read as readiness"
+
+    for d in range(appmod._READINESS_MORE_DAYS):
+        db.session.add(appmod.DailyEffort(user_id=u.id,
+                                          date=base + datetime.timedelta(days=d),
+                                          level='more'))
+    db.session.commit()
+    ready = appmod.tier_readiness(u.id, 'beginner')
+    assert ready and ready['next_level'] == 'intermediate'
     low = ready['message'].lower()
     for pushy in ('should', 'need to', 'time to move on', 'ready to graduate', 'too easy'):
         assert pushy not in low, f"readiness message pressures the user: {ready['message']!r}"
+
 
 
 def test_tier_hopping_no_longer_farms_the_discovery_bonus(client):
@@ -469,3 +560,231 @@ def test_extra_movement_beyond_the_mission_still_counts_and_still_pays(client):
                  headers=auth_headers(token))
     sixth = _complete(client, token, _daily_keys(client, token)[0])
     assert sixth['xp_awarded'] == appmod.REPEAT_EXERCISE_XP
+
+
+# ── Coming back after a while ───────────────────────────────────────────────
+#
+# Before this, the selection function was never told how long someone had been
+# away, so the first day back was identical to the day they stopped. Someone
+# who had been training at advanced and had not moved for sixty days was handed
+# 1.35 explosive exercises — their exact peak load — on the morning they
+# returned. That is the defect. It is not that an easier day would have
+# "rewarded the miss": an absence is not a failure, and nothing here takes
+# anything away from anyone.
+
+def _returning_user(username, tier, missions, days_away, keys):
+    u = User(username=username, password_hash='x', skill_level=tier)
+    db.session.add(u)
+    db.session.commit()
+    last = datetime.date.today() - datetime.timedelta(days=days_away + 1)
+    for d in range(missions):
+        day = last - datetime.timedelta(days=d)
+        for key in keys:
+            db.session.add(DailyCompletion(user_id=u.id, date=day, exercise_key=key))
+    u.xp_total, u.acorns_total = 2400, 150
+    db.session.commit()
+    return u
+
+
+_BEGINNER_FIVE = ('wall_push_up', 'bodyweight_squat', 'dead_bug',
+                  'ankle_circles', 'marching_in_place')
+_ADVANCED_FIVE = ('archer_push_up', 'pistol_squat_progression', 'hollow_body_hold',
+                  'deep_squat_hold', 'burpee')
+
+
+@pytest.mark.parametrize("days_away", [7, 30, 60])
+@pytest.mark.parametrize("tier,keys", [("beginner", _BEGINNER_FIVE),
+                                       ("advanced", _ADVANCED_FIVE)])
+def test_coming_back_is_eased_not_resumed_at_full_load(app, tier, keys, days_away):
+    u = _returning_user(f"ret_{tier}_{days_away}", tier, 40, days_away, keys)
+    mission = appmod.todays_mission(u.id, tier, datetime.date.today())
+
+    assert mission['days_away'] == days_away
+    assert mission['effort'] == 'easy', "a long absence should pre-select a gentler day"
+    assert mission['effort_chosen'] is False, "suggested, not chosen for them"
+    assert all(ex['impact'] != 'high' for ex in mission['exercises']), \
+        "handed explosive movements on the first day back"
+    assert mission['returning_note'], "eased the day without saying why"
+
+
+@pytest.mark.parametrize("days_away", [7, 30, 60])
+def test_nothing_earned_is_lost_by_being_away(app, days_away):
+    """An absence must not cost anyone their record. What it changes is what
+    today asks of their body, which is a different fact about them."""
+    u = _returning_user(f"keep_{days_away}", 'advanced', 40, days_away, _ADVANCED_FIVE)
+    stats = appmod.get_user_stats(u.id)
+    assert u.xp_total == 2400
+    assert u.acorns_total == 150
+    assert stats['total_missions'] == 40
+    assert stats['best_streak'] == 40
+    # Milestones are all cumulative metrics, so none of them un-earn either.
+    for m in appmod._MILESTONE_DEFINITIONS:
+        assert m['metric'] in ('missions_completed', 'exercises_completed',
+                               'brain_boosts_answered', 'xp_total', 'acorns_total',
+                               'level'), \
+            f"{m['key']} is measured by {m['metric']}, which may reset on an absence"
+
+
+def test_the_returning_note_never_mentions_the_absence(app):
+    note = appmod.returning_note(45)
+    assert note
+    low = note.lower()
+    for scolding in ('45', 'been a while', 'where have you', 'missed', 'haven\'t',
+                     'welcome back', 'long time', 'lost'):
+        assert scolding not in low, f"the returning line says {scolding!r}: {note!r}"
+
+
+def test_a_short_gap_is_just_a_gap(app):
+    """Two or three days off is ordinary life, not a return."""
+    u = _returning_user("shortgap", 'advanced', 20, 3, _ADVANCED_FIVE)
+    mission = appmod.todays_mission(u.id, 'advanced', datetime.date.today())
+    assert mission['effort'] == appmod.EFFORT_DEFAULT
+    assert mission['returning_note'] is None
+
+
+def test_the_gentler_window_ends_once_they_are_going_again(app):
+    """Easing the return is care on the day, not a lasting judgement about
+    what someone can do."""
+    u = _returning_user("settled", 'advanced', 20, 30, _ADVANCED_FIVE)
+    # Three missions since coming back.
+    for d in range(appmod.RETURN_WINDOW_MISSIONS):
+        day = datetime.date.today() - datetime.timedelta(days=d)
+        for key in _ADVANCED_FIVE:
+            db.session.add(DailyCompletion(user_id=u.id, date=day, exercise_key=key))
+    db.session.commit()
+    assert appmod.suggested_effort(30, appmod.RETURN_WINDOW_MISSIONS) == appmod.EFFORT_DEFAULT
+
+
+def test_a_brand_new_person_is_not_returning_from_anywhere(app):
+    u = User(username='first_day_ever', password_hash='x')
+    db.session.add(u)
+    db.session.commit()
+    mission = appmod.todays_mission(u.id, 'beginner', datetime.date.today())
+    assert mission['days_away'] is None
+    assert mission['effort'] == appmod.EFFORT_DEFAULT
+    assert mission['returning_note'] is None
+
+
+# ── The choice itself ───────────────────────────────────────────────────────
+
+def test_easing_off_is_always_allowed_mid_mission(client):
+    token = register_and_login(client, 'ease_off')
+    keys = _daily_keys(client, token)
+    _complete(client, token, keys[0])
+    resp = client.put('/api/daily/effort', json={'level': 'easy'},
+                      headers=auth_headers(token))
+    assert resp.status_code == 200
+    assert client.get('/api/daily', headers=auth_headers(token)).get_json()['effort']['level'] == 'easy'
+
+
+def test_asking_for_more_is_refused_once_the_mission_has_started(client):
+    """Not to punish anyone — the five exercises would change underneath
+    completions that already exist, and "I've done three, let me swap to the
+    harder set" is the one version of this that is about the score."""
+    token = register_and_login(client, 'ask_more_late')
+    keys = _daily_keys(client, token)
+    _complete(client, token, keys[0])
+    resp = client.put('/api/daily/effort', json={'level': 'more'},
+                      headers=auth_headers(token))
+    assert resp.status_code == 409
+    body = resp.get_json()
+    assert 'tomorrow' in body['message'].lower()
+    for blaming in ('cannot', 'not allowed', 'too late', 'failed'):
+        assert blaming not in body['message'].lower(), body['message']
+
+
+def test_the_choice_is_free_before_anything_is_completed(client):
+    token = register_and_login(client, 'free_choice')
+    for level in ('more', 'easy', 'usual', 'more'):
+        assert client.put('/api/daily/effort', json={'level': level},
+                          headers=auth_headers(token)).status_code == 200
+
+
+def test_an_unknown_effort_level_is_rejected(client):
+    token = register_and_login(client, 'bad_effort')
+    resp = client.put('/api/daily/effort', json={'level': 'brutal'},
+                      headers=auth_headers(token))
+    assert resp.status_code == 400
+    assert set(resp.get_json()['allowed']) == set(appmod.EFFORT_LEVELS)
+
+
+def test_the_mission_shown_is_the_mission_accepted(client):
+    """Whatever effort is in play, /api/daily and the completion route must
+    agree about which five exercises exist — they used to build the mission
+    separately, which is the shape of bug where the exercise on screen is
+    rejected as 'not in today's list'."""
+    token = register_and_login(client, 'agreement')
+    for level in ('easy', 'usual', 'more'):
+        client.put('/api/daily/effort', json={'level': level}, headers=auth_headers(token))
+        for key in _daily_keys(client, token):
+            resp = client.post(f'/api/daily/{key}/complete', headers=auth_headers(token))
+            assert resp.status_code == 200, (level, key, resp.get_json())
+        client.put('/api/daily/effort', json={'level': 'easy'}, headers=auth_headers(token))
+
+
+def test_overruling_the_suggestion_still_keeps_a_floor_under_the_first_day_back(app):
+    """Someone who has been away is free to say "my usual" — and is given it.
+    What survives the override is one modest cap: at most one explosive
+    movement on the day they come back, rather than the two a normal day
+    allows.
+
+    This is the only reason the selection function is told about the absence at
+    all. When the suggestion is accepted, `effort='easy'` already caps
+    explosive work at zero and the absence changes nothing — so removing the
+    days_away argument passed every test until this one existed, which is a
+    fair warning about how easy it is to write a redundant parameter and
+    believe it is doing something.
+    """
+    away, back = 45, 0
+    for effort in ('usual', 'more'):
+        for uid in range(1300, 1340):
+            fresh = appmod.get_daily_exercises(uid, '2026-06-01', 'advanced',
+                                               effort=effort, days_away=back)
+            returning = appmod.get_daily_exercises(uid, '2026-06-01', 'advanced',
+                                                   effort=effort, days_away=away)
+            assert sum(1 for e in returning if e['impact'] == 'high') <= 1, \
+                f"{effort}: a first day back reached the full explosive load"
+            del fresh  # only here to show the comparison was available
+
+    # And the cap lifts again once they are going: nothing is permanent.
+    reached_two = any(
+        sum(1 for e in appmod.get_daily_exercises(uid, '2026-06-01', 'advanced',
+                                                  effort='usual', days_away=0)
+            if e['impact'] == 'high') == 2
+        for uid in range(1300, 1360)
+    )
+    assert reached_two, "the ordinary advanced day never reaches two any more"
+
+
+def test_a_returning_person_still_gets_what_they_asked_for(app):
+    """The floor is a floor, not a veto. Asking for a bit more on the way back
+    still brings movements from the level above."""
+    borrowed = sum(
+        1 for uid in range(1400, 1460)
+        for ex in appmod.get_daily_exercises(uid, '2026-06-01', 'beginner',
+                                             effort='more', days_away=45)
+        if ex.get('from_next_tier')
+    )
+    assert borrowed > 0, "a returning person who asked for more was quietly denied it"
+
+
+def test_the_route_actually_passes_the_absence_along(app):
+    """Covers the CALL SITE, not just the function.
+
+    The previous test exercises get_daily_exercises directly, so hard-coding
+    days_away=0 where todays_mission calls it passed everything — the
+    suggestion is 'easy' on a return, and an easy day caps explosive work at
+    zero all by itself, which hid the fact that the argument was never
+    arriving. This goes through todays_mission with the suggestion overruled,
+    which is the one path where the absence has to do the work itself.
+    """
+    u = _returning_user('route_absence', 'advanced', 30, 45, _ADVANCED_FIVE)
+    db.session.add(appmod.DailyEffort(user_id=u.id, date=datetime.date.today(),
+                                      level='usual'))
+    db.session.commit()
+
+    mission = appmod.todays_mission(u.id, 'advanced', datetime.date.today())
+    assert mission['effort'] == 'usual', "their choice was overridden"
+    assert mission['days_away'] == 45
+    high = sum(1 for ex in mission['exercises'] if ex['impact'] == 'high')
+    assert high <= 1, f"{high} explosive exercises on a first day back at 'my usual'"
