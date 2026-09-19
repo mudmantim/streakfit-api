@@ -154,7 +154,12 @@
             </div>
         </header>
 
-        <main class="container">
+        <!-- Three panes, toggled with CSS. Everything stays mounted: five
+             different render paths write into these regions in one pass and
+             several of them never run again, so unmounting a section is how you
+             get a Journey card that can't come back. display:none costs
+             nothing and breaks nothing. -->
+        <main class="container" data-pane="today">
 
             <p id="guest-mode-banner" class="guest-mode-banner" hidden>
                 Guest mode — sign up anytime to save your streak.
@@ -163,7 +168,7 @@
             <!-- Today. Rickie and the streak live on the page itself rather
                  than inside a bordered box in the mission card, which made him
                  read as a system notice instead of a character. -->
-            <div class="today-strip">
+            <div class="today-strip pane-today">
                 <img src="/static/rickie.svg" alt="Rickie" class="today-rickie" id="today-rickie">
                 <div class="today-text">
                     <p class="today-greeting" id="today-greeting">Rickie's getting today ready…</p>
@@ -172,13 +177,12 @@
             </div>
 
             <!-- Today's 5 ─────────────────────────────────────────── -->
-            <section class="card daily-card">
+            <section class="card daily-card pane-today">
                 <div class="daily-header-row">
                     <div>
                         <h2 class="daily-title">Today's Mission</h2>
                         <div class="daily-mission-meta">
                             <span id="daily-mission-date" class="daily-mission-date"></span>
-                            <span id="daily-streak-badge" class="daily-streak-badge" hidden></span>
                         </div>
                     </div>
                     <span id="daily-count-badge" class="daily-count-badge">0/5</span>
@@ -214,7 +218,7 @@
             </section>
 
             <!-- Rickie's Journey ────────────────────────────────────── -->
-            <section id="journey-card" class="card journey-card" hidden>
+            <section id="journey-card" class="card journey-card pane-progress" hidden>
                 <div class="journey-header">
                     <img src="/static/rickie.svg" alt="Rickie" class="journey-avatar">
                     <div class="journey-header-text">
@@ -253,7 +257,7 @@
             </section>
 
             <!-- Teams ─────────────────────────────────────────────── -->
-            <section id="teams-section" class="teams-section">
+            <section id="teams-section" class="teams-section pane-team">
                 <div class="teams-header">
                     <h2 class="teams-title">Teams</h2>
                     <p class="teams-subtitle">Who you're building this with</p>
@@ -262,7 +266,12 @@
             </section>
 
             <!-- Side Quests ─────────────────────────────────────────── -->
-            <section id="side-quests-section" class="side-quests-section">
+            <!-- Side Quests sits in Progress, not on Today. It is a second
+                 habit tracker with its own streak that awards no XP, acorns,
+                 levels or milestones — and it was broken for an unknown period
+                 without anyone noticing, which is the strongest evidence
+                 available that it is not what people come here for. -->
+            <section id="side-quests-section" class="side-quests-section pane-progress">
                 <div class="side-quests-header">
                     <h2 class="side-quests-title">Side Quests</h2>
                     <p class="side-quests-subtitle">Track your own daily habits</p>
@@ -281,13 +290,32 @@
             <!-- Utilities last. These used to sit between the mission and the
                  user's progress, which is the most valuable position on the
                  page and not where an install prompt belongs. -->
-            <section id="install-card" class="card install-card" hidden>
+            <section id="install-card" class="card install-card pane-progress" hidden>
                 <h3 class="install-card-title">Add StreakFit to your home screen</h3>
                 <button id="install-card-btn" class="btn-primary install-card-btn">Add to Home Screen</button>
                 <p id="install-card-instructions" class="install-card-instructions" hidden></p>
             </section>
 
+            <!-- For someone with no team. A single quiet row at the foot of
+                 Progress instead of a permanent tab: a tab labelled Team is a
+                 standing nudge at a person who has chosen not to use it, and
+                 the solo experience is meant to be whole on its own. -->
+            <div id="solo-team-invite" class="solo-team-invite pane-progress" hidden>
+                <p class="solo-team-invite-text">Doing this with someone else? You can share a
+                    campfire with them.</p>
+                <button id="solo-team-invite-btn" class="btn-secondary">Add people</button>
+            </div>
+
         </main>
+
+        <!-- Pane switcher. Team only appears once there is a team. -->
+        <nav class="pane-nav" id="pane-nav" aria-label="Sections">
+            <button class="pane-nav-btn is-active" data-pane-target="today"
+                    aria-current="page">Today</button>
+            <button class="pane-nav-btn" data-pane-target="progress">Progress</button>
+            <button class="pane-nav-btn" id="pane-nav-team" data-pane-target="team"
+                    hidden>Team</button>
+        </nav>
 
         <!-- Rickie's Reaction (completion toast) ─────────────────── -->
         <div id="rickie-reaction" class="rickie-reaction" hidden aria-live="polite">

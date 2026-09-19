@@ -7,6 +7,7 @@ so the day-2 shape is pinned here deliberately rather than left implicit.
 """
 import datetime
 
+import app as appmod
 from app import DailyCompletion, User, db
 from conftest import auth_headers, register_and_login
 
@@ -314,8 +315,6 @@ def test_award_progress_reports_which_event_it_was(client):
 # had no memory at all: reps were fixed strings forever, one slot in five
 # repeated yesterday, an advanced user got two explosive days back to back one
 # week in five, and changing tier swapped 100% of the pool in a single step.
-
-import app as appmod
 
 
 def _days(n, start=datetime.date(2026, 1, 1)):

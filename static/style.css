@@ -637,12 +637,6 @@ input:focus {
     font-weight: 500;
 }
 
-.daily-streak-badge {
-    font-size: .75rem;
-    font-weight: 700;
-    color: var(--amber);
-}
-
 .daily-title {
     font-size: 1.05rem;
     font-weight: 700;
@@ -3739,4 +3733,157 @@ body.theme-classic .theme-btn.active { background: rgba(79,70,229,.2); }
 .tier-readiness-row button {
     flex: 1 1 auto;
     min-height: 44px;
+}
+
+/* ── Panes ─────────────────────────────────────────────────────────────────
+   The home screen measured 2,800-3,200px at 390px wide, with the mission card
+   alone accounting for half of it. Three panes cut that to roughly one screen
+   each. Sections are hidden, never unmounted — see the note in app.js. */
+
+.container[data-pane="today"] .pane-progress,
+.container[data-pane="today"] .pane-team,
+.container[data-pane="progress"] .pane-today,
+.container[data-pane="progress"] .pane-team,
+.container[data-pane="team"] .pane-today,
+.container[data-pane="team"] .pane-progress {
+    display: none;
+}
+
+.pane-nav {
+    position: sticky;
+    bottom: 0;
+    z-index: 20;
+    display: flex;
+    gap: var(--space-1);
+    padding: var(--space-2) var(--space-3);
+    padding-bottom: calc(var(--space-2) + env(safe-area-inset-bottom, 0px));
+    background: var(--surface, #14161a);
+    border-top: 1px solid var(--border, rgba(255, 255, 255, 0.08));
+}
+
+.pane-nav-btn {
+    flex: 1;
+    min-height: 44px;
+    border: 0;
+    border-radius: var(--radius-md, 12px);
+    background: none;
+    color: var(--text-muted);
+    font: inherit;
+    font-size: var(--text-sm);
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.pane-nav-btn.is-active {
+    background: var(--surface-raised, rgba(255, 255, 255, 0.07));
+    color: var(--text, #fff);
+}
+
+.pane-nav-btn:focus-visible {
+    outline: 2px solid var(--accent, #f0a500);
+    outline-offset: 2px;
+}
+
+/* The one row a solo user sees about teams. */
+.solo-team-invite {
+    margin: var(--space-4) 0 0;
+    padding: var(--space-3) var(--space-4);
+    border-radius: var(--radius-lg, 16px);
+    background: var(--surface-raised, rgba(255, 255, 255, 0.05));
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    flex-wrap: wrap;
+}
+
+.solo-team-invite-text {
+    flex: 1 1 200px;
+    margin: 0;
+    font-size: var(--text-sm);
+    color: var(--text-muted);
+    line-height: 1.5;
+}
+
+.solo-team-invite .btn-secondary {
+    min-height: 44px;
+}
+
+/* ── Exercise row density ──────────────────────────────────────────────────
+   The mission card was 1,110-1,419px at phone width — 45-55% of the whole
+   page — because each of the five rows stacked three things vertically: the
+   info block, a category pill on its own line, and the button on a third.
+   Laying them out across instead takes a row from ~165px to ~90px.
+
+   The 64px illustration is NOT part of the saving. The drawings were made to
+   stay legible down to about 80px and 64 is already pushing it, so shrinking
+   them further would trade a real thing (a child can see what the movement
+   is) for scroll length. The height comes out of the stacking. */
+
+.daily-exercise-row {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: var(--space-1);
+}
+
+/* The main line never wraps: illustration, name and prescription, button. */
+.daily-exercise-main {
+    display: flex;
+    align-items: center;
+    flex-wrap: nowrap;
+    gap: var(--space-3);
+}
+
+.daily-exercise-main .daily-exercise-info {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.daily-exercise-row .daily-exercise-info {
+    align-items: center;
+}
+
+.daily-exercise-main .btn-daily-complete,
+.daily-exercise-main .btn-daily-done {
+    flex-shrink: 0;
+}
+
+/* Category and prescription on one line, the category as a quiet tag rather
+   than a pill competing with the exercise name. */
+.daily-exercise-meta {
+    display: flex;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: 0 .4rem;
+}
+
+.daily-category-tag {
+    font-size: .68rem;
+    font-weight: 600;
+    text-transform: capitalize;
+    white-space: nowrap;
+    opacity: .85;
+}
+
+.daily-category-tag.pill-upper-body   { color: #1d4ed8; }
+.daily-category-tag.pill-lower-body   { color: #166534; }
+.daily-category-tag.pill-core         { color: #c2410c; }
+.daily-category-tag.pill-mobility     { color: #6d28d9; }
+.daily-category-tag.pill-conditioning { color: #b91c1c; }
+
+.daily-category-tag::after {
+    content: "·";
+    margin-left: .4rem;
+    opacity: .5;
+    color: var(--gray-500);
+}
+
+/* The expanded row — the exercise you're about to do. The instructions panel
+   still spans the full width when opened, so it has to be allowed to wrap. */
+.daily-exercise-row .exercise-instructions {
+    width: 100%;
+}
+
+.daily-exercise-row .exercise-link-row {
+    width: 100%;
 }

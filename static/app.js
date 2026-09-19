@@ -356,6 +356,7 @@ async function loadTeams() {
 
     if (isGuest) {
         renderTeamsSection({ guest: true });
+        updateTeamPaneVisibility(0);
         return;
     }
 
@@ -368,6 +369,7 @@ async function loadTeams() {
     }
 
     renderTeamsSection({ teams: result.data });
+    updateTeamPaneVisibility((result.data || []).length);
 }
 
 function renderTeamsSection(state) {
@@ -3627,6 +3629,67 @@ async function api(path, method, body) {
 
 // ── View helpers ──────────────────────────────────────────────────────────────
 
+
+// ── Panes ─────────────────────────────────────────────────────────────────────
+//
+// Three sections of one page, switched with a data attribute the stylesheet
+// reads. Nothing is unmounted: five separate render paths write into these
+// regions in a single pass and several of them never run a second time, so
+// removing a section from the DOM is how you end up with a Journey card that
+// can never come back. The problem worth solving was scroll length — the home
+// screen measured 2,800-3,200px at phone width, with the mission card alone
+// accounting for half of it — and display:none solves that without touching
+// anything else.
+//
+// Team is deliberately NOT a permanent tab. It appears once the person
+// actually has a team; before that there is one quiet row at the foot of
+// Progress. A standing tab labelled Team is a daily nudge at someone who has
+// chosen not to use it, and the solo experience is meant to be whole on its
+// own rather than a version of the app with a gap in it.
+
+function showPane(name) {
+    var main = document.querySelector('main.container');
+    if (!main) return;
+    if (name === 'team' && document.getElementById('pane-nav-team').hidden) name = 'progress';
+    main.dataset.pane = name;
+    var buttons = document.querySelectorAll('.pane-nav-btn');
+    for (var i = 0; i < buttons.length; i++) {
+        var on = buttons[i].dataset.paneTarget === name;
+        buttons[i].classList.toggle('is-active', on);
+        if (on) { buttons[i].setAttribute('aria-current', 'page'); }
+        else { buttons[i].removeAttribute('aria-current'); }
+    }
+    window.scrollTo(0, 0);
+}
+
+// Called whenever the teams list is known. A person who leaves their last team
+// gets the tab back off them, and lands on Progress rather than on a pane that
+// has just stopped existing.
+function updateTeamPaneVisibility(teamCount) {
+    var tab = document.getElementById('pane-nav-team');
+    var invite = document.getElementById('solo-team-invite');
+    if (!tab) return;
+    var has = teamCount > 0;
+    tab.hidden = !has;
+    if (invite) invite.hidden = has || isGuest;
+    var main = document.querySelector('main.container');
+    if (!has && main && main.dataset.pane === 'team') showPane('progress');
+}
+
+document.addEventListener('click', function (e) {
+    var btn = e.target.closest && e.target.closest('.pane-nav-btn');
+    if (btn) showPane(btn.dataset.paneTarget);
+    // Asking for it is what makes the tab appear. Until then the Team pane is
+    // reachable but not advertised — the difference between available and
+    // suggested, which is the whole point of keeping it conditional.
+    var invite = e.target.closest && e.target.closest('#solo-team-invite-btn');
+    if (invite) {
+        var teamTab = document.getElementById('pane-nav-team');
+        if (teamTab) teamTab.hidden = false;
+        showPane('team');
+    }
+});
+
 function showView(name) {
     document.getElementById('auth-view').hidden      = (name !== 'auth');
     document.getElementById('dashboard-view').hidden = (name !== 'dashboard');
@@ -3988,11 +4051,10 @@ async function loadDailyExercises() {
         }
     }
 
-    // The streak badge inside the mission card is gone: the today strip above
-    // states the streak once, at the size it deserves. It was being said three
-    // times on one screen — badge, helper line, and stats row.
-    var streakBadge = document.getElementById('daily-streak-badge');
-    if (streakBadge) streakBadge.hidden = true;
+    // The streak badge that used to sit in the mission card is gone entirely —
+    // the today strip above states the streak once, at the size it deserves.
+    // It was being said three times on one screen: badge, helper line, stats
+    // row. The markup went with it rather than staying as hidden furniture.
 
     // Populate stats row (current streak · best streak · total missions)
     var statsRow = document.getElementById('daily-stats-row');
@@ -6034,9 +6096,19 @@ function renderDailyExercise(ex, isNext) {
     name.className = 'daily-exercise-name';
     name.textContent = ex.name; // textContent — never innerHTML
 
+    // Category and prescription share one line. The category used to have a
+    // pill on a line of its own, which cost 21px per row for a word most
+    // people read once.
     var meta = document.createElement('span');
     meta.className = 'daily-exercise-meta';
-    meta.textContent = ex.reps_or_duration;
+    var catTag = document.createElement('span');
+    catTag.className = 'daily-category-tag ' + (CATEGORY_PILL[ex.category] || '');
+    catTag.textContent = ex.category.replace(/_/g, ' ');
+    var metaText = document.createElement('span');
+    metaText.className = 'daily-exercise-reps';
+    metaText.textContent = ex.reps_or_duration;
+    meta.appendChild(catTag);
+    meta.appendChild(metaText);
 
     var howBtn = document.createElement('button');
     howBtn.className = 'btn-how-to';
@@ -6080,7 +6152,7 @@ function renderDailyExercise(ex, isNext) {
     // A movement borrowed from the level above. Said out loud, because a
     // harder exercise turning up unannounced reads as the app getting it
     // wrong rather than as progress.
-    if (ex.from_next_tier) {
+    if (ex.from_next_tier && isNext) {
         var harder = document.createElement('span');
         harder.className = 'daily-exercise-flag';
         harder.textContent = 'A step up — from the next level';
@@ -6090,7 +6162,7 @@ function renderDailyExercise(ex, isNext) {
     // The optional bigger version. Never replaces the prescription above it:
     // the mission is complete either way, and this is an offer, so it reads
     // as one.
-    if (ex.step_up && !ex.completed) {
+    if (ex.step_up && !ex.completed && isNext) {
         var more = document.createElement('button');
         more.type = 'button';
         more.className = 'daily-exercise-stepup';
@@ -6102,16 +6174,20 @@ function renderDailyExercise(ex, isNext) {
         infoText.appendChild(more);
     }
 
-    infoText.appendChild(linkRow);
+    // Progressive disclosure, and the reason it is safe: the how-to controls
+    // are expanded on the exercise you are ABOUT TO DO, which is the one where
+    // form and safety actually matter, and they cost 44px on one row instead
+    // of on five. On the other four the illustration is still a button whose
+    // label is "How to do <name>", so nothing is unreachable and nothing is
+    // hidden from a beginner — the row for the movement in front of them is
+    // always the expanded one, and it moves down as they work through it.
+    // Appended to the ROW rather than the text column, so it gets the full
+    // card width and sits on one line — nested inside the narrower column the
+    // two chips wrapped and cost 94px instead of 44px.
+    var showDetails = isNext && !ex.completed;
 
     info.appendChild(thumbBtn);
     info.appendChild(infoText);
-
-    // ── Category pill ──────────────────────────────────────────────────────────────────────
-    var cat = document.createElement('span');
-    var pillClass = CATEGORY_PILL[ex.category] || '';
-    cat.className = 'daily-category-pill ' + pillClass;
-    cat.textContent = ex.category.replace(/_/g, ' ');
 
     // ── "I did this" / Done button ───────────────────────────────────────────────────────────────
     var btn = document.createElement('button');
@@ -6150,9 +6226,17 @@ function renderDailyExercise(ex, isNext) {
         howBtn.setAttribute('aria-expanded', String(opening));
     };
 
-    row.appendChild(info);
-    row.appendChild(cat);
-    row.appendChild(btn);
+    // The row is a column of at most three things: the main line (illustration,
+    // name, prescription, button — always one line), then the how-to controls
+    // and the instructions panel, which only exist on the exercise in front of
+    // you and get the full card width when they do.
+    var mainLine = document.createElement('div');
+    mainLine.className = 'daily-exercise-main';
+    mainLine.appendChild(info);
+    mainLine.appendChild(btn);
+
+    row.appendChild(mainLine);
+    if (showDetails) row.appendChild(linkRow);
     row.appendChild(instrPanel); // wraps to full width via flex-wrap
     return row;
 }
@@ -6704,8 +6788,18 @@ function openCoach(context) {
         _coachPanel.appendChild(_coachThread);
         _coachPanel.appendChild(inputRow);
 
-        var sideQuests = document.querySelector('.side-quests-section');
-        sideQuests.parentNode.insertBefore(_coachPanel, sideQuests);
+        // Appended to the page itself rather than inserted before Side
+        // Quests. The old mount point was an unguarded
+        // `querySelector('.side-quests-section').parentNode`, which happened
+        // to keep working when Side Quests moved to the Progress pane — the
+        // panel was its sibling, not its child. That is luck, not design, and
+        // it stops being lucky the moment anyone wraps the panes in container
+        // elements. Anchoring to the page is the thing that was actually meant.
+        // No pane class on purpose: Rickie is opened from Today, from the
+        // insight card and from the Team Rickie card, and belongs in all three.
+        var host = document.querySelector('main.container');
+        if (!host) return;
+        host.appendChild(_coachPanel);
     }
 
     _coachPanel.hidden = false;

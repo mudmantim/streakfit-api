@@ -304,6 +304,23 @@ def tap_and_read(b: Browser, settle: float = 1.1):
     }
 
 
+def go_to_pane(b: Browser, name: str) -> bool:
+    """Switch panes the way a person does — by tapping the nav button.
+
+    Not by calling showPane(): these checks exist to prove a surface is
+    REACHABLE, and driving the router directly would keep passing even if the
+    button that gets you there had stopped working. That is the exact failure
+    this harness was built for.
+    """
+    clicked = b.js(
+        "(()=>{const b=[...document.querySelectorAll('.pane-nav-btn')]"
+        f".find(x=>x.dataset.paneTarget==='{name}' && !x.hidden);"
+        " if(!b) return 0; b.click(); return 1;})()"
+    )
+    time.sleep(0.6)
+    return bool(clicked)
+
+
 def check_returning_user_is_acknowledged(b: Browser, base: str, app) -> None:
     print("\nA returning user (day 2) — the bug that started all of this")
     username, token = make_user(app, "day2")
@@ -419,6 +436,7 @@ def check_team_witness(b: Browser, base: str, app) -> None:
     b.js(f"localStorage.setItem('streakfit_token', {json.dumps(parent_token)})")
     b.goto(base + "/", wait=3.0)
 
+    check(go_to_pane(b, "team"), "the Team tab appears for someone who has a team")
     cards = b.js("JSON.stringify([...document.querySelectorAll('.team-card')].map(e=>e.innerText))")
     check("moved today" in (cards or ""), "the team card carries a same-day witness line",
           f"cards were {cards}")
@@ -465,6 +483,7 @@ def check_photo_sharing(b: Browser, base: str, app) -> None:
         b.goto(base + "/", wait=1.0)
         b.js(f"localStorage.setItem('streakfit_token', {json.dumps(token)})")
         b.goto(base + "/", wait=3.0)
+        go_to_pane(b, "team")
         b.js("(()=>{const x=[...document.querySelectorAll('button')]"
              ".find(e=>e.textContent.trim()==='Open'); if(x) x.click(); return 1;})()")
         time.sleep(2.5)
@@ -562,8 +581,11 @@ def check_side_quests_still_work(b: Browser, base: str, app) -> None:
     b.js(f"localStorage.setItem('streakfit_token', {json.dumps(token)})")
     b.goto(base + "/", wait=3.0)
 
-    check(bool(b.js("!!document.getElementById('challenge-title')")),
-          "the side-quest form is on the page")
+    if not check(go_to_pane(b, "progress"), "Side Quests is reachable from the nav"):
+        return
+    check(bool(b.js("(()=>{const i=document.getElementById('challenge-title');"
+                    " return !!i && !!i.offsetParent;})()")),
+          "the side-quest form is visible once you are there")
 
     b.js("(()=>{const i=document.getElementById('challenge-title');"
          " i.value='Read for 10 minutes'; return 1;})()")
@@ -633,6 +655,67 @@ def check_step_up_is_offered_not_imposed(b: Browser, base: str, app) -> None:
     check(not b.js("(()=>{const r=document.querySelector('.daily-exercise-row');"
                    " return r && /Want a little more/.test(r.textContent);})()"),
           "the row now shows the larger prescription instead of the offer")
+
+
+def check_panes_and_solo_first(b: Browser, base: str, app) -> None:
+    """The home screen is three panes, and Team is not one of them by default.
+
+    The load-bearing assertion here is the last one: a person who has never
+    joined a team must not be shown a permanent tab labelled Team. A standing
+    tab is a daily nudge toward a feature someone has chosen not to use, and
+    the solo experience is meant to be whole rather than a version of the app
+    with a gap in it.
+    """
+    print("\nPanes — and a solo user is not nudged toward Teams")
+    _, token = make_user(app, "panes")
+    b.goto(base + "/", wait=1.0)
+    b.js(f"localStorage.setItem('streakfit_token', {json.dumps(token)})")
+    b.goto(base + "/", wait=3.0)
+
+    check(b.js("document.querySelector('main.container').dataset.pane") == "today",
+          "the app opens on Today")
+    check(bool(b.js("(()=>{const m=document.querySelector('.daily-card');"
+                    " return m && !!m.offsetParent;})()")),
+          "the mission is what you see first")
+    check(not b.js("(()=>{const j=document.getElementById('side-quests-section');"
+                   " return !!j && !!j.offsetParent;})()"),
+          "Side Quests is not competing with the mission on Today")
+
+    solo_tab = b.js("!document.getElementById('pane-nav-team').hidden")
+    check(not solo_tab, "a solo user gets no Team tab", f"tab visible: {solo_tab}")
+
+    check(go_to_pane(b, "progress"), "Progress is reachable")
+    check(bool(b.js("(()=>{const j=document.getElementById('journey-card');"
+                    " return j && !!j.offsetParent;})()")),
+          "the Journey card lives in Progress")
+    check(bool(b.js("(()=>{const i=document.getElementById('solo-team-invite');"
+                    " return i && !!i.offsetParent;})()")),
+          "the one quiet way in to Teams is at the foot of Progress")
+
+    # Asking for it is what reveals the tab.
+    b.js("document.getElementById('solo-team-invite-btn').click()")
+    time.sleep(0.6)
+    check(b.js("document.querySelector('main.container').dataset.pane") == "team"
+          and not b.js("document.getElementById('pane-nav-team').hidden"),
+          "asking to add people opens Teams and keeps the tab")
+
+    # Rickie must be openable from Today, where his buttons are.
+    #
+    # Scope note, because it would be easy to over-claim this one: the coach
+    # panel's old mount point inserted it as a SIBLING of the Side Quests
+    # section, so moving that section into another pane did not in fact break
+    # it, and this check passes with either version. It was still worth making
+    # the mount explicit — a sibling relationship with a section that has since
+    # moved panes is a trap for whoever wraps the panes in container elements
+    # next — but what this assertion actually proves is only that Rickie opens
+    # and is visible from Today.
+    go_to_pane(b, "today")
+    b.js("(()=>{const x=[...document.querySelectorAll('button')]"
+         ".find(e=>/Rickie|Ask|Coach/i.test(e.textContent)); if(x) x.click(); return 1;})()")
+    time.sleep(1.2)
+    check(bool(b.js("(()=>{const p=document.querySelector('.coach-panel');"
+                    " return p && !p.hidden && !!p.offsetParent;})()")),
+          "Rickie opens from Today and is actually visible")
 
 
 def check_page_is_clean(b: Browser, base: str, app) -> None:
@@ -727,6 +810,7 @@ def main() -> int:
         check_photo_sharing(browser, base, flask_app)
         check_side_quests_still_work(browser, base, flask_app)
         check_step_up_is_offered_not_imposed(browser, base, flask_app)
+        check_panes_and_solo_first(browser, base, flask_app)
         check_page_is_clean(browser, base, flask_app)
     except Exception as exc:  # a crash must never read as a pass
         bad(f"check run crashed: {type(exc).__name__}: {exc}")
