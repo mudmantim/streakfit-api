@@ -1,0 +1,9 @@
+{
+  "verdicts": [
+    {
+      "id": "SF-TRV-000482",
+      "verdict": "revise",
+      "reason": "Cross-author duplicate: teaches the same fact as SF-TRV-000426 (digestion begins in the mouth), written independently by a different author who could not see the other batch. 426 is kept because it teaches the mechanism (starch/amylase) rather than only the location. The process fix is to give parallel authors each other's stems, not just the librarys."
+    }
+  ]
+}

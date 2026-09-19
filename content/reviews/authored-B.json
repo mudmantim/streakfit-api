@@ -1,0 +1,426 @@
+{
+ "items": [
+  {
+   "category": "Warm-Up & Soreness",
+   "question": "Where does the extra warmth in a warm-up come from?",
+   "options": [
+    "Blood carrying heat out of your core",
+    "Friction between the bones in a joint",
+    "Muscles making heat as they work",
+    "Warmer air reaching the skin"
+   ],
+   "answer_index": 2,
+   "explanation": "Working muscle is a bit wasteful: a lot of the energy it uses leaves as heat rather than movement. That is why you can warm up on a cold morning without the air changing at all.",
+   "confidence": "simplified",
+   "sources": []
+  },
+  {
+   "category": "Warm-Up & Soreness",
+   "question": "What does hot weather change about warming up?",
+   "options": [
+    "Nothing, you warm up the same way",
+    "It can be shorter, not skipped",
+    "It removes the need for one",
+    "It should be longer than usual"
+   ],
+   "answer_index": 1,
+   "explanation": "Heat loosens skin and surface muscle quickly, but a warm-up is also rehearsal: it is where your body works out the movement before the effort counts. That part does not come free with the weather.",
+   "confidence": "simplified",
+   "sources": []
+  },
+  {
+   "category": "Warm-Up & Soreness",
+   "question": "What separates feeling stiff from feeling sore?",
+   "options": [
+    "Stiffness eases as you move around",
+    "Stiffness only happens in the morning",
+    "Soreness is always worse than stiffness",
+    "They tend to arrive at the same time"
+   ],
+   "answer_index": 0,
+   "explanation": "Stiffness is about how a joint feels when it has been still; soreness is about how a muscle feels when you press or load it. Stiffness usually improves within a few minutes of moving. Soreness takes days and does not care that you have got going.",
+   "confidence": "simplified",
+   "sources": []
+  },
+  {
+   "category": "Warm-Up & Soreness",
+   "question": "You have ten minutes in total. How does a warm-up fit in?",
+   "options": [
+    "Skip it and use all ten on the work",
+    "Stretch on the floor for five minutes",
+    "Walk briskly for eight of them",
+    "Start with an easier version of it"
+   ],
+   "answer_index": 3,
+   "explanation": "A warm-up does not have to be a separate activity that eats your ten minutes. The first easy round of the thing you are about to do is a warm-up, and it costs you almost no time at all.",
+   "confidence": "simplified",
+   "sources": []
+  },
+  {
+   "category": "Warm-Up & Soreness",
+   "question": "What is your body doing in the first couple of minutes of effort?",
+   "options": [
+    "Shifting breathing and blood flow up",
+    "Using up the last of yesterday's energy",
+    "Waiting for the muscles to unfreeze",
+    "Working at its hardest point of the day"
+   ],
+   "answer_index": 0,
+   "explanation": "Your muscles ask for more oxygen the instant you start, but breathing and circulation take a minute or two to catch up. That gap is why minute two often feels worse than minute ten, even though you are going the same speed.",
+   "confidence": "simplified",
+   "sources": []
+  },
+  {
+   "category": "Warm-Up & Soreness",
+   "question": "You warm up, then sit and talk for twenty minutes. What happened to it?",
+   "options": [
+    "It stays with you for about an hour",
+    "It counts as your cool-down instead",
+    "It fades, so ease back in again",
+    "It works better after a rest"
+   ],
+   "answer_index": 2,
+   "explanation": "The warmth and the blood flow drain away faster than people expect. You do not need the whole warm-up again, but the first minute back should look like a beginning, not a continuation.",
+   "confidence": "simplified",
+   "sources": []
+  },
+  {
+   "category": "Warm-Up & Soreness",
+   "question": "Someone returns to a routine after three weeks off. What does soreness do?",
+   "options": [
+    "It is gone for good after the first time",
+    "It comes back, though usually less",
+    "It is worse than the very first session",
+    "It returns only if the routine changed"
+   ],
+   "answer_index": 1,
+   "explanation": "Whatever your body learned the first time around does not vanish in three weeks, but it does fade. Expect an echo of the original soreness rather than a repeat of it, and it is not a sign the time off undid everything.",
+   "confidence": "simplified",
+   "sources": []
+  },
+  {
+   "category": "Warm-Up & Soreness",
+   "question": "What does a gentle seated routine need before it starts?",
+   "options": [
+    "Nothing, it is gentle already",
+    "A full stretch of every muscle",
+    "Five minutes of brisk walking",
+    "A few smaller, slower moves"
+   ],
+   "answer_index": 3,
+   "explanation": "A warm-up scales to the thing it is warming up for. For a seated routine that means the same movements through a smaller range first, which is also how you find out what your body is offering today.",
+   "confidence": "simplified",
+   "sources": []
+  },
+  {
+   "category": "Warm-Up & Soreness",
+   "question": "You are sore in a muscle you did not know you had. What does that mean?",
+   "options": [
+    "You used it in an unfamiliar way",
+    "You injured something small there",
+    "That muscle was weak to begin with",
+    "You did the movement incorrectly"
+   ],
+   "answer_index": 0,
+   "explanation": "Most muscles go unnoticed because nothing has ever asked them to work in that direction. A new movement finds them, and the soreness is really just an introduction.",
+   "confidence": "simplified",
+   "sources": []
+  },
+  {
+   "category": "Warm-Up & Soreness",
+   "question": "Two people do the same new workout. One is sore after, one is not. What does that show?",
+   "options": [
+    "The sore one worked much harder",
+    "One of them warmed up better",
+    "Mostly how new it was to each",
+    "Their ages must be different"
+   ],
+   "answer_index": 2,
+   "explanation": "Soreness tracks unfamiliarity far more than it tracks effort, and people differ a lot in how much they get from the same work. It is a poor way to compare two people and a poor way to grade yourself.",
+   "confidence": "simplified",
+   "sources": []
+  },
+  {
+   "category": "Safety & Sense",
+   "question": "What matters most when picking shoes to walk in?",
+   "options": [
+    "That they match your arch type",
+    "That they fit and you can move",
+    "That they have the most cushion",
+    "That they are under a year old"
+   ],
+   "answer_index": 1,
+   "explanation": "Arch-matching charts and replacement schedules sell a lot of shoes, and the evidence behind them is thin. Shoes that fit, stay on, and let your foot bend cover most of what actually matters.",
+   "confidence": "simplified",
+   "sources": []
+  },
+  {
+   "category": "Safety & Sense",
+   "question": "You are learning a new movement and want to know if you have it right. What helps most?",
+   "options": [
+    "Go by how the movement feels",
+    "Count how many you can do",
+    "Watch the video one more time",
+    "Record it and watch it back"
+   ],
+   "answer_index": 3,
+   "explanation": "When a movement is new, the feel of it is the least reliable thing about it: your sense of where your limbs are has not caught up yet. Seeing yourself from outside closes that gap in one go.",
+   "confidence": "simplified",
+   "sources": []
+  },
+  {
+   "category": "Safety & Sense",
+   "question": "Which trip hazard at home is the easiest one to miss?",
+   "options": [
+    "A rug with a curled edge",
+    "A steep flight of stairs",
+    "A wet bathroom floor",
+    "A high step at the door"
+   ],
+   "answer_index": 0,
+   "explanation": "The dramatic hazards get handled, because they look like hazards. A flat rug edge sits at ankle height, matches the floor, and has been there so long that nobody sees it any more.",
+   "confidence": "simplified",
+   "sources": []
+  },
+  {
+   "category": "Safety & Sense",
+   "question": "A watch shows a heart rate above the 'maximum' for your age. What is the sensible read?",
+   "options": [
+    "You went past a safe ceiling",
+    "A high number means you are fit",
+    "Those numbers are rough guesses",
+    "Your heart is working too hard"
+   ],
+   "answer_index": 2,
+   "explanation": "The age formula is an average with a wide spread around it, so plenty of ordinary people sit above their own number. Wrist readings also jump. How you actually feel is the better instrument.",
+   "confidence": "simplified",
+   "sources": []
+  },
+  {
+   "category": "Safety & Sense",
+   "question": "Why is it easy to end up short of water on a cold day?",
+   "options": [
+    "Cold water is harder to absorb",
+    "Cold makes you feel less thirsty",
+    "The body stores less in the cold",
+    "You sweat the same as in summer"
+   ],
+   "answer_index": 1,
+   "explanation": "Cold blunts thirst, and you are also losing water with every breath you can see in front of you. Nothing about the day feels like a hot one, so nobody thinks to drink.",
+   "confidence": "simplified",
+   "sources": []
+  },
+  {
+   "category": "Safety & Sense",
+   "question": "Your form gets sloppy on the last few reps. What is that a sign of?",
+   "options": [
+    "A warm-up that was far too short",
+    "A movement too advanced for now",
+    "The point where the gains happen",
+    "The muscle is out of steam"
+   ],
+   "answer_index": 3,
+   "explanation": "Quality falling off is the clearest signal a muscle gives that it is done. Stopping there costs you almost nothing, because the messy reps were never the ones doing the work.",
+   "confidence": "simplified",
+   "sources": []
+  },
+  {
+   "category": "Safety & Sense",
+   "question": "Why do people who feel steady still use the handrail on stairs?",
+   "options": [
+    "It takes some weight off the knees",
+    "It is there for the unplanned slip",
+    "It keeps you walking more slowly",
+    "It stops your arms from swinging"
+   ],
+   "answer_index": 1,
+   "explanation": "A handrail is not support for people who need support. It is a thing to catch that you do not have to think about, and you only find out you needed it after you already needed it.",
+   "confidence": "simplified",
+   "sources": []
+  },
+  {
+   "category": "Safety & Sense",
+   "question": "You need a chair to hold for a standing exercise. Which chair is the wrong one?",
+   "options": [
+    "One with arms",
+    "One with no cushion",
+    "One on wheels",
+    "One with a tall back"
+   ],
+   "answer_index": 2,
+   "explanation": "A rolling chair moves at exactly the moment you want something not to. Cushions, arms and back height change nothing about whether it holds still, which is the only job you are giving it.",
+   "confidence": "simplified",
+   "sources": []
+  },
+  {
+   "category": "Safety & Sense",
+   "question": "A child wants to lift something heavy. What matters more than the weight?",
+   "options": [
+    "Whether they can control it",
+    "Whether they are tall enough",
+    "How many times they lift it",
+    "Whether their back stays straight"
+   ],
+   "answer_index": 0,
+   "explanation": "Can they pick it up, carry it and set it down without it getting away from them? A load under control is a load their body can learn from. One that is steering them is the one that causes trouble.",
+   "confidence": "simplified",
+   "sources": []
+  },
+  {
+   "category": "Safety & Sense",
+   "question": "What happens as a walking route becomes very familiar?",
+   "options": [
+    "Your stride gets shorter over time",
+    "You notice more of the details",
+    "Your pace stops changing at all",
+    "Attention drops on familiar ground"
+   ],
+   "answer_index": 3,
+   "explanation": "Walking a known route hands the job to autopilot, which is efficient and slightly careless. The curb that has been there for years is exactly the one nobody looks at any more.",
+   "confidence": "simplified",
+   "sources": []
+  },
+  {
+   "category": "Strength & Flexibility",
+   "question": "What does slowing a movement down do to it?",
+   "options": [
+    "Makes it easier on the muscle",
+    "Makes the muscle work longer",
+    "Makes it safer but pointless",
+    "Makes it mostly a stretch"
+   ],
+   "answer_index": 1,
+   "explanation": "The muscle is under load for the whole time you are moving, so taking four seconds instead of one roughly quadruples that. It is the simplest way to make a movement harder when you have nothing to add to it.",
+   "confidence": "simplified",
+   "sources": []
+  },
+  {
+   "category": "Strength & Flexibility",
+   "question": "What does using a movement's full range add?",
+   "options": [
+    "Strength across more positions",
+    "A faster set, with less effort",
+    "Less work for the muscle overall",
+    "More reps before you get tired"
+   ],
+   "answer_index": 0,
+   "explanation": "Muscles get stronger mostly in the positions you train them in. Cutting a movement short builds strength in the middle of the range and leaves the ends, which are the positions real life keeps putting you in.",
+   "confidence": "simplified",
+   "sources": []
+  },
+  {
+   "category": "Strength & Flexibility",
+   "question": "Can strength work make you more flexible?",
+   "options": [
+    "No, it always tightens muscles",
+    "Only stretching changes range",
+    "Yes, full-range work does it",
+    "Yes, if you also hold stretches"
+   ],
+   "answer_index": 2,
+   "explanation": "A muscle loaded through its whole range is being asked to produce force in a long position, which is most of what a stretch asks for too. The old idea that lifting makes you stiff came from watching people train through half a range.",
+   "confidence": "simplified",
+   "sources": []
+  },
+  {
+   "category": "Strength & Flexibility",
+   "question": "Why is one arm usually a little stronger than the other?",
+   "options": [
+    "It has more muscle fibers",
+    "Blood reaches it more easily",
+    "Its bones are slightly longer",
+    "It gets more use day to day"
+   ],
+   "answer_index": 3,
+   "explanation": "You open doors, carry bags and throw with one side without deciding to, and that adds up to years of extra practice. Which is also why the gap narrows once the quieter side gets its own turn.",
+   "confidence": "simplified",
+   "sources": []
+  },
+  {
+   "category": "Strength & Flexibility",
+   "question": "What is the rest between sets for?",
+   "options": [
+    "Letting the soreness settle down",
+    "Letting the muscle refuel a bit",
+    "Giving the muscle time to grow",
+    "Cooling the muscle back down"
+   ],
+   "answer_index": 1,
+   "explanation": "Muscles run the first part of a hard set on a fast-burning fuel they keep on site, and it takes a minute or two to restock. Rest too little and the next set is limited by fuel rather than by strength.",
+   "confidence": "simplified",
+   "sources": []
+  },
+  {
+   "category": "Strength & Flexibility",
+   "question": "How many days a week of muscle-strengthening activity do U.S. guidelines suggest for adults?",
+   "options": [
+    "At least two",
+    "At least five",
+    "Every day",
+    "About one"
+   ],
+   "answer_index": 0,
+   "explanation": "The guideline says at least two days, and it is a floor rather than a target. It also does not say what kind: carrying, climbing and bodyweight movements all count as strengthening.",
+   "confidence": "established",
+   "sources": [
+    "https://www.cdc.gov/physical-activity-basics/guidelines/adults.html"
+   ]
+  },
+  {
+   "category": "Strength & Flexibility",
+   "question": "One arm is in a cast. What does training the other arm do for it?",
+   "options": [
+    "It speeds up the healing",
+    "It makes the gap wider",
+    "It keeps some strength there",
+    "It tires the resting arm out"
+   ],
+   "answer_index": 2,
+   "explanation": "Strength is partly a skill held in the nervous system, and that part is not fully one-sided. The resting limb keeps more than it would have if nothing was being trained at all.",
+   "confidence": "simplified",
+   "sources": []
+  },
+  {
+   "category": "Strength & Flexibility",
+   "question": "Two people do the same stretches for months, and only one can touch their toes. Why?",
+   "options": [
+    "One stretches longer each time",
+    "Hamstring strength differs a lot",
+    "Only one bothered to warm up",
+    "Their proportions differ a lot"
+   ],
+   "answer_index": 3,
+   "explanation": "How far your fingers get depends on the length of your arms, legs and back and the shape of your hip sockets, none of which a routine changes. Compare your own reach over time; comparing it to somebody else's tells you almost nothing.",
+   "confidence": "simplified",
+   "sources": []
+  },
+  {
+   "category": "Strength & Flexibility",
+   "question": "Why does holding a plank get harder when nothing is moving?",
+   "options": [
+    "Muscle fibers tire and hand over",
+    "The muscle slowly stretches out",
+    "Your bones take more of the load",
+    "Breathing gets harder over time"
+   ],
+   "answer_index": 0,
+   "explanation": "In a hold, your fibers take turns rather than all pulling at once. As the rested ones run out, the same position needs more of what is left, which is why second forty-five feels nothing like second five.",
+   "confidence": "simplified",
+   "sources": []
+  },
+  {
+   "category": "Strength & Flexibility",
+   "question": "Why do strength gains slow down after the first couple of months?",
+   "options": [
+    "The muscle has reached its limit",
+    "The exercises get stale to you",
+    "The easiest changes come first",
+    "You stop trying as hard by then"
+   ],
+   "answer_index": 2,
+   "explanation": "Early on your body is learning the movement, which is quick. After that it has to actually build, which is slow. The slowdown is a change of gear, not a sign anything went wrong.",
+   "confidence": "simplified",
+   "sources": []
+  }
+ ]
+}
