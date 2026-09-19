@@ -1632,6 +1632,121 @@ async function _sendTeamMessage(body) {
     _teamPanelInput.focus();
 }
 
+// ── Your data: seeing it, and taking it back ──────────────────────────────────
+
+async function handleExportData() {
+    var btn = document.getElementById('btn-export-data');
+    if (btn) { btn.disabled = true; btn.textContent = 'Gathering…'; }
+
+    var result = await api('/api/me/data');
+    if (btn) { btn.disabled = false; btn.textContent = 'Download my data'; }
+    if (!result || result.status !== 200) {
+        if (btn) btn.textContent = "Couldn't get it";
+        return;
+    }
+
+    var blob = new Blob([JSON.stringify(result.data, null, 2)], { type: 'application/json' });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = 'streakfit-my-data.json';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    if (btn) btn.textContent = 'Downloaded ✓';
+    setTimeout(function () { if (btn) btn.textContent = 'Download my data'; }, 2500);
+}
+
+// Deleting an account is the one action with no undo, so it gets a real screen
+// rather than a confirm() -- which would also freeze the PWA. The password is
+// asked for again because a token left on a shared family tablet must not be
+// able to destroy an account.
+function openDeleteAccount() {
+    if (document.querySelector('.danger-overlay')) return;
+    toggleSettings(false);
+
+    var overlay = document.createElement('div');
+    overlay.className = 'danger-overlay';
+
+    var sheet = document.createElement('div');
+    sheet.className = 'danger-sheet';
+
+    var h = document.createElement('h2');
+    h.className = 'danger-title';
+    h.textContent = 'Delete your account?';
+    sheet.appendChild(h);
+
+    var body = document.createElement('p');
+    body.className = 'danger-body';
+    body.textContent = 'This removes your streak, your progress, your Memory Book, '
+        + 'anything Rickie remembers, and any photos you have shared with a team. '
+        + 'It cannot be undone.';
+    sheet.appendChild(body);
+
+    var keepNote = document.createElement('p');
+    keepNote.className = 'danger-note';
+    keepNote.textContent = 'Messages you sent to a team stay in that team, without your name on them.';
+    sheet.appendChild(keepNote);
+
+    var pw = document.createElement('input');
+    pw.type = 'password';
+    pw.className = 'danger-input';
+    pw.placeholder = 'Your password';
+    pw.setAttribute('autocomplete', 'current-password');
+    sheet.appendChild(pw);
+
+    var err = document.createElement('p');
+    err.className = 'danger-error';
+    err.setAttribute('role', 'alert');
+    sheet.appendChild(err);
+
+    var row = document.createElement('div');
+    row.className = 'danger-actions';
+
+    var cancel = document.createElement('button');
+    cancel.type = 'button';
+    cancel.className = 'btn-primary danger-cancel';
+    cancel.textContent = 'Keep my account';
+    cancel.addEventListener('click', function () { overlay.remove(); });
+
+    var go = document.createElement('button');
+    go.type = 'button';
+    go.className = 'danger-confirm';
+    go.textContent = 'Delete everything';
+    go.addEventListener('click', async function () {
+        err.textContent = '';
+        if (!pw.value) { err.textContent = 'Enter your password to confirm.'; return; }
+        go.disabled = true;
+        go.textContent = 'Deleting…';
+
+        var result = await api('/api/me', 'DELETE', { password: pw.value });
+        go.disabled = false;
+        go.textContent = 'Delete everything';
+
+        if (result && result.status === 200) {
+            overlay.remove();
+            localStorage.removeItem('streakfit_token');
+            window.location.reload();
+            return;
+        }
+        var data = (result && result.data) || {};
+        err.textContent = data.message
+            || (result && result.status === 403 ? "That password doesn't match." : null)
+            || "Couldn't delete the account just now.";
+    });
+
+    // Cancel first, and styled as the primary button: the safe choice should be
+    // the easy one to hit.
+    row.appendChild(cancel);
+    row.appendChild(go);
+    sheet.appendChild(row);
+    overlay.appendChild(sheet);
+    document.body.appendChild(overlay);
+    pw.focus();
+}
+
+
 // ── StreakFit photo filters ────────────────────────────────────────────────────
 //
 // Composition happens here, in the browser, for three reasons: the server never

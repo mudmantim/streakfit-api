@@ -1363,7 +1363,11 @@ class TeamPhoto(db.Model):
     # neighbours; a random id says nothing.
     public_id = db.Column(db.String(32), nullable=False, unique=True, index=True)
     team_id = db.Column(db.Integer, db.ForeignKey('team.id'), nullable=False, index=True)
-    sender_user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    # Nullable so account deletion can drop the link the same way it does for
+    # messages and moments. A photo whose sender is gone keeps its place in the
+    # thread as "Photo removed" -- the shared record survives, the person's
+    # image and their name on it do not.
+    sender_user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True)
     caption = db.Column(db.String(140), nullable=True)
     filter_key = db.Column(db.String(40), nullable=True)
     image_data = db.Column(db.LargeBinary, nullable=True)
@@ -2179,6 +2183,131 @@ def _resolve_exercise_meta(exercise_key):
                 if ex['key'] == exercise_key:
                     return ex['name'], ex['category']
     return exercise_key, None
+
+
+@app.route('/api/me', methods=['DELETE'])
+@jwt_required()
+@limiter.limit("5 per hour", key_func=user_or_ip_key)
+def delete_my_account():
+    """Delete your own account and everything private in it.
+
+    A product used by children has to let a family actually leave, and take the
+    photographs with them. `delete_user_account` has existed and been tested
+    since ADR-0006 with no route in front of it, which meant in practice there
+    was no way out.
+
+    The password is required again even though the caller already holds a valid
+    token: a token left behind on a shared family tablet should not be able to
+    destroy an account, and this is the one action with no undo.
+    """
+    user_id = int(get_jwt_identity())
+    user = db.session.get(User, user_id)
+    if user is None:
+        return jsonify({"error": "User not found"}), 404
+
+    data = request.get_json(silent=True) or {}
+    password = data.get('password') or ''
+    if not check_password_hash(user.password_hash, password):
+        return jsonify({"error": "password_incorrect",
+                        "message": "That password doesn't match."}), 403
+
+    # A dry run first, so a blocked deletion tells the person WHY instead of
+    # failing opaquely. Team owners are blocked by policy (ADR-0007): deleting
+    # them would tear down a team other people are still using.
+    plan = delete_user_account(user_id, dry_run=True)
+    if plan.get("blocked"):
+        return jsonify({
+            "error": "account_deletion_blocked",
+            "message": ("You created a team that other people are still using. "
+                        "Hand it over or remove the team first, then you can "
+                        "delete your account."),
+            "blockers": plan.get("blockers", []),
+        }), 409
+
+    report = delete_user_account(user_id, dry_run=False)
+    if not report.get("executed"):
+        return jsonify({"error": "account_deletion_failed"}), 500
+
+    app.logger.info("event=account_self_deleted user_id=%s photos=%s",
+                    user_id, report.get("counts", {}).get("team_photo_shared", 0))
+    return jsonify({"deleted": True, "counts": report.get("counts", {})}), 200
+
+
+@app.route('/api/me/data', methods=['GET'])
+@jwt_required()
+@limiter.limit("10 per hour", key_func=user_or_ip_key)
+def export_my_data():
+    """Everything StreakFit holds about you, as JSON.
+
+    Deliberately small, because the product deliberately holds little: there is
+    no email, no real name, no phone number, no age and no location -- photos
+    have their GPS stripped before storage. Being able to see the whole of it in
+    one response is the honest way to show that.
+    """
+    user_id = int(get_jwt_identity())
+    user = db.session.get(User, user_id)
+    if user is None:
+        return jsonify({"error": "User not found"}), 404
+
+    stats = get_user_stats(user_id)
+    completions = db.session.execute(
+        db.select(DailyCompletion.date, DailyCompletion.exercise_key)
+        .where(DailyCompletion.user_id == user_id)
+        .order_by(DailyCompletion.date.desc()).limit(500)
+    ).all()
+    coach_turns = db.session.execute(
+        db.select(CoachTurn.role, CoachTurn.content, CoachTurn.created_at)
+        .where(CoachTurn.user_id == user_id).order_by(CoachTurn.created_at.asc())
+    ).all()
+    note = db.session.execute(
+        db.select(CoachNote).where(CoachNote.user_id == user_id)
+    ).scalar_one_or_none()
+    photos = db.session.execute(
+        db.select(TeamPhoto.public_id, TeamPhoto.team_id, TeamPhoto.caption,
+                  TeamPhoto.created_at, TeamPhoto.expires_at, TeamPhoto.deleted_at)
+        .where(TeamPhoto.sender_user_id == user_id)
+    ).all()
+
+    return jsonify({
+        "account": {
+            "username": user.username,
+            "skill_level": user.skill_level,
+            "display_mode": user.display_mode,
+            "rickie_mode": user.rickie_mode,
+            "xp_total": user.xp_total,
+            "acorns_earned": user.acorns_total,
+            "acorns_spent": user.acorns_spent,
+        },
+        "not_collected": [
+            "email address", "real name", "phone number", "date of birth",
+            "location (photo GPS data is stripped before storage)",
+        ],
+        "stats": stats,
+        "exercise_completions": [
+            {"date": d.isoformat(), "exercise": k} for d, k in completions
+        ],
+        "brain_boost_answers": db.session.execute(
+            db.select(db.func.count(BrainBoostAnswer.id))
+            .where(BrainBoostAnswer.user_id == user_id)).scalar() or 0,
+        "coach_conversation": [
+            {"role": r, "content": c, "at": t.isoformat()} for r, c, t in coach_turns
+        ],
+        "coach_notes": {
+            "goals": json.loads(note.goals) if note else [],
+            "preferences": json.loads(note.preferences) if note else [],
+            "notes": json.loads(note.notes) if note else [],
+        },
+        "photos_shared": [
+            {"id": p, "team_id": t, "caption": c,
+             "shared_at": ca.isoformat(),
+             "expires_at": e.isoformat() if e else None,
+             "deleted": d is not None}
+            for p, t, c, ca, e, d in photos
+        ],
+        "teams_joined": db.session.execute(
+            db.select(db.func.count(TeamMembership.id))
+            .where(TeamMembership.user_id == user_id)).scalar() or 0,
+    }), 200
 
 
 @app.route('/api/memory-book', methods=['GET'])
@@ -3367,6 +3496,15 @@ def list_teams():
 
 @app.route('/api/teams/lookup/<code>', methods=['GET'])
 @jwt_required()
+# Measured unprotected at 321 probes/second. A 6-character code is a 2.2-billion
+# space, but an unlimited oracle that returns a team's NAME on a hit turns that
+# into slow family discovery -- exactly what "strengthens existing
+# relationships, not anonymous ones" and "no discovery, ever" rule out. A real
+# person pastes a code once, so this is generous for them and useless for a
+# script. The preview itself stays: seeing the team name before joining is how
+# someone realises they do not actually know these people.
+@limiter.limit("12 per minute", key_func=user_or_ip_key)
+@limiter.limit("60 per hour", key_func=user_or_ip_key)
 def lookup_team_by_code(code):
     invite = db.session.execute(
         db.select(TeamInviteCode).where(TeamInviteCode.code == code.strip().upper())
@@ -4571,6 +4709,7 @@ _USER_PRIVATE_DELETES = [
     ("team_membership",    TeamMembership,   "user_id"),
     ("coach_turn",         CoachTurn,        "user_id"),
     ("coach_note",         CoachNote,        "user_id"),
+    ("user_filter_unlock", UserFilterUnlock, "user_id"),
 ]
 
 
@@ -4584,6 +4723,8 @@ def _account_dependent_counts(user_id):
     counts["team_moment_subject"] = TeamMoment.query.filter(
         TeamMoment.subject_user_id == user_id).count()
     counts["team_owned"] = Team.query.filter(Team.created_by_user_id == user_id).count()
+    counts["team_photo_shared"] = TeamPhoto.query.filter(
+        TeamPhoto.sender_user_id == user_id, TeamPhoto.deleted_at.is_(None)).count()
     return counts
 
 
@@ -4624,6 +4765,15 @@ def delete_user_account(user_id, allow_team_owner=False, dry_run=True):
             {TeamMessage.sender_user_id: None}, synchronize_session=False)
         TeamMoment.query.filter(TeamMoment.subject_user_id == user_id).update(
             {TeamMoment.subject_user_id: None}, synchronize_session=False)
+        # A photograph of a person IS their personal data, so unlike a message
+        # -- where the text is shared context that merely loses its author --
+        # the pixels go. The row stays so the thread keeps its shape and reads
+        # "Photo removed", and the link back to the person is cut.
+        TeamPhoto.query.filter(TeamPhoto.sender_user_id == user_id).update(
+            {TeamPhoto.image_data: None, TeamPhoto.byte_size: 0,
+             TeamPhoto.caption: None, TeamPhoto.sender_user_id: None,
+             TeamPhoto.deleted_at: datetime.utcnow()},
+            synchronize_session=False)
         # Delete private data, then the user.
         for _label, model, attr in _USER_PRIVATE_DELETES:
             model.query.filter(getattr(model, attr) == user_id).delete(synchronize_session=False)

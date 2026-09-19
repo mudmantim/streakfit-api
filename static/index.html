@@ -130,6 +130,25 @@
                         </div>
                     </div>
                     <div class="settings-divider"></div>
+                    <!-- Your data. A product used by families has to let them see
+                         what is held and take it all back out again. -->
+                    <div class="settings-row" id="settings-row-yourdata">
+                        <span class="settings-label">Your data</span>
+                        <button id="btn-export-data" class="btn-forget-coach"
+                                onclick="handleExportData()"
+                                title="Download everything StreakFit holds about you">
+                            Download my data
+                        </button>
+                    </div>
+                    <div class="settings-row" id="settings-row-delete">
+                        <span class="settings-label">Account</span>
+                        <button id="btn-delete-account" class="btn-delete-account"
+                                onclick="openDeleteAccount()"
+                                title="Permanently delete your account, your progress, and your photos">
+                            Delete my account
+                        </button>
+                    </div>
+                    <div class="settings-divider"></div>
                     <button id="btn-logout" class="btn-logout settings-logout" onclick="handleLogout()">Log Out</button>
                 </div>
             </div>

@@ -3067,3 +3067,95 @@ body.theme-classic .theme-btn.active { background: rgba(79,70,229,.2); }
     min-height: 40vh;
     max-height: none;
 }
+
+/* ── Account deletion: the one action with no undo ───────────────────────── */
+
+.btn-delete-account {
+    min-height: 44px;
+    padding: 0 .7rem;
+    background: none;
+    border: 1px solid #fecaca;
+    border-radius: 8px;
+    color: #b91c1c;
+    font-size: .78rem;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.danger-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 1400;
+    background: rgba(17, 24, 39, .75);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 1rem;
+}
+
+.danger-sheet {
+    width: 100%;
+    max-width: 420px;
+    background: #fff;
+    border-radius: 16px;
+    padding: 1.1rem;
+}
+
+.danger-title {
+    margin: 0 0 .5rem;
+    font-size: 1.15rem;
+    font-weight: 800;
+    color: var(--gray-800);
+}
+
+.danger-body {
+    margin: 0 0 .5rem;
+    font-size: .88rem;
+    line-height: 1.5;
+    color: var(--gray-700);
+}
+
+.danger-note {
+    margin: 0 0 .8rem;
+    font-size: .78rem;
+    color: var(--gray-500);
+}
+
+.danger-input {
+    width: 100%;
+    min-height: 44px;
+    padding: .55rem .7rem;
+    border: 1px solid var(--gray-200);
+    border-radius: 10px;
+    font-size: .95rem;
+}
+
+.danger-error {
+    margin: .4rem 0 0;
+    min-height: 1rem;
+    font-size: .8rem;
+    color: #b91c1c;
+}
+
+.danger-actions {
+    display: flex;
+    gap: .5rem;
+    margin-top: .8rem;
+}
+
+/* The safe choice is the big one. Destroying an account should take a
+   deliberate reach, not a thumb landing on the nearest button. */
+.danger-cancel { flex: 2; }
+
+.danger-confirm {
+    flex: 1;
+    min-height: 44px;
+    padding: 0 .6rem;
+    background: none;
+    border: 1px solid #fecaca;
+    border-radius: 8px;
+    color: #b91c1c;
+    font-size: .8rem;
+    font-weight: 700;
+    cursor: pointer;
+}

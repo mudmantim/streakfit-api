@@ -33,7 +33,10 @@ def upgrade():
         sa.Column('id', sa.Integer(), nullable=False),
         sa.Column('public_id', sa.String(length=32), nullable=False),
         sa.Column('team_id', sa.Integer(), nullable=False),
-        sa.Column('sender_user_id', sa.Integer(), nullable=False),
+        # Nullable: account deletion scrubs this link the same way it does a
+        # message's author, so a deleted person's photo leaves the thread
+        # without breaking the foreign key.
+        sa.Column('sender_user_id', sa.Integer(), nullable=True),
         sa.Column('caption', sa.String(length=140), nullable=True),
         sa.Column('filter_key', sa.String(length=40), nullable=True),
         sa.Column('image_data', sa.LargeBinary(), nullable=True),
