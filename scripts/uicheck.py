@@ -949,6 +949,104 @@ def check_discovery_types_reach_a_reader(b: Browser, base: str, app) -> None:
              " if(c) c.remove(); return 1;})()")
 
 
+def check_display_name_can_be_set_changed_and_cleared(b: Browser, base: str, app) -> None:
+    """The control that decides what Rickie calls somebody out loud.
+
+    This existed as a column, a validator and an endpoint with nineteen tests,
+    and no way for a person to reach any of it. The tests proved the rule; they
+    could not prove a user could apply it.
+
+    Clearing is the case worth driving in a browser rather than asserting in
+    pytest: an empty box has to mean "use no name", not "no change submitted",
+    and that distinction lives entirely in the front end.
+    """
+    print("\nThe name Rickie calls you")
+    username, token = make_user(app, "dname")
+    b.goto(base + "/", wait=1.0)
+    b.js(f"localStorage.setItem('streakfit_token', {json.dumps(token)})")
+    b.goto(base + "/", wait=2.5)
+
+    b.js("(()=>{const m=document.getElementById('settings-menu');"
+         " if(m) m.hidden=false; return 1;})()")
+    time.sleep(0.4)
+
+    row_visible = b.js("(()=>{const r=document.getElementById('settings-row-name');"
+                       " return !!(r && !r.hidden);})()")
+    if not check(bool(row_visible), "a registered user can find the control"):
+        return
+
+    # The username here is uicheck_dname_<digits> — a machine handle with a long
+    # digit run, so the safe-name rule should refuse to fall back to it.
+    helped = (b.js("document.getElementById('display-name-help').textContent") or "").strip()
+    check("isn't using a name" in helped,
+          "with no name set, it says he is not using one",
+          helped)
+
+    def set_name(value):
+        b.js("(()=>{const i=document.getElementById('display-name-input');"
+             f" i.value={json.dumps(value)};"
+             " i.dispatchEvent(new Event('change',{bubbles:true})); return 1;})()")
+        time.sleep(1.6)
+
+    # SET
+    set_name("Olivia")
+    check(b.js("document.getElementById('display-name-input').value") == "Olivia",
+          "a name can be set")
+    helped = (b.js("document.getElementById('display-name-help').textContent") or "")
+    check('"Olivia"' in helped, "and the page says what he now calls them", helped.strip())
+
+    # CHANGE
+    set_name("Liv")
+    helped = (b.js("document.getElementById('display-name-help').textContent") or "")
+    check('"Liv"' in helped, "it can be changed", helped.strip())
+
+    # REJECTED — an email address is the case this control exists for
+    set_name("olivia@example.com")
+    helped = (b.js("document.getElementById('display-name-help').textContent") or "")
+    check("email" in helped.lower(), "an email address is refused, and says why",
+          helped.strip())
+    check(b.js("document.getElementById('display-name-input').value") == "Liv",
+          "and the box goes back to the stored name rather than keeping it")
+
+    # CLEAR
+    set_name("")
+    check(b.js("document.getElementById('display-name-input').value") == "",
+          "it can be cleared")
+    helped = (b.js("document.getElementById('display-name-help').textContent") or "").strip()
+    check("isn't using a name" in helped,
+          "and clearing really means no name, not a silent fallback to the login",
+          helped)
+
+    # It must survive a reload — otherwise it only ever lived in the DOM.
+    set_name("Olivia")
+    b.goto(base + "/", wait=2.5)
+    b.js("(()=>{const m=document.getElementById('settings-menu');"
+         " if(m) m.hidden=false; return 1;})()")
+    time.sleep(0.4)
+    check(b.js("document.getElementById('display-name-input').value") == "Olivia",
+          "and it survives a reload")
+
+    # A guest has no account to store it on.
+    b.reset_storage()
+    b.goto(base + "/", wait=1.5)
+    b.goto(base + "/", wait=2.0)
+    b.js("handleGuestMode()")          # the app's own entry point, as elsewhere here
+    time.sleep(2.5)
+    in_guest = b.js("(()=>{const g=document.getElementById('guest-mode-banner');"
+                    " return !!(g && !g.hidden);})()")
+    if not check(bool(in_guest), "the harness really is in guest mode"):
+        return
+    b.js("(()=>{const m=document.getElementById('settings-menu');"
+         " if(m) m.hidden=false; return 1;})()")
+    time.sleep(0.4)
+    hidden = b.js("(()=>{const r=document.getElementById('settings-row-name');"
+                  " return !r || r.hidden;})()")
+    check(bool(hidden), "and a guest is not offered a control they cannot use")
+    help_hidden = b.js("(()=>{const h=document.getElementById('display-name-help');"
+                       " return !h || h.hidden;})()")
+    check(bool(help_hidden), "nor left a stray sentence about a missing control")
+
+
 def check_rickie_roams(b: Browser, base: str, app) -> None:
     """Rickie, moving, and never in the way.
 
@@ -973,21 +1071,38 @@ def check_rickie_roams(b: Browser, base: str, app) -> None:
           "and never swallows a tap")
 
     # Variety: a weighted pick with the last three excluded.
+    #
+    # 600 draws, not 60. At 60 this block was statistically flaky and failed on
+    # luck rather than on Rickie: sit+doze carry ~28% of the weight, so
+    # `resting >= 12` sat about 1.6 standard deviations out and failed roughly
+    # one run in sixteen, and the two rare behaviours carry ~2% between them, so
+    # "the rare behaviours are reachable" drew a blank in about a third of runs.
+    # A suite that cries wolf every third run is a suite people stop reading.
+    #
+    # The loop is pure arithmetic over the weighted picker — no rendering, no
+    # timers — so ten times the sample costs nothing and puts every threshold
+    # several standard deviations from its bound.
+    DRAWS = 600
     ids = (b.js("""(()=>{const out=[];const st=RickieRoam._state;const keep=st.recent.slice();
-      for(let i=0;i<60;i++){const bh=RickieRoam._pick(RickieRoam._behaviours, st.recent);
+      for(let i=0;i<%d;i++){const bh=RickieRoam._pick(RickieRoam._behaviours, st.recent);
         out.push(bh.id); st.recent.push(bh.id); while(st.recent.length>3) st.recent.shift();}
-      st.recent=keep; return out.join(',');})()""") or "").split(",")
+      st.recent=keep; return out.join(',');})()""" % DRAWS) or "").split(",")
     distinct = len(set(ids))
     longest, run = 1, 1
     for i in range(1, len(ids)):
         run = run + 1 if ids[i] == ids[i - 1] else 1
         longest = max(longest, run)
-    check(distinct >= 9, f"he has at least nine things he might do ({distinct} in 60 draws)")
+    check(distinct >= 9,
+          f"he has at least nine things he might do ({distinct} in {DRAWS} draws)")
     check(longest == 1, f"and never does the same one twice running (longest run {longest})")
-    check(any(i in ("tumble", "acornjuggle") for i in ids),
-          "the rare behaviours are reachable")
+    rare = sum(1 for i in ids if i in ("tumble", "acornjuggle"))
+    check(rare > 0, f"the rare behaviours are reachable ({rare} in {DRAWS})")
     resting = sum(1 for i in ids if i in ("sit", "doze"))
-    check(resting >= 12, f"and he rests a good deal of the time ({resting}/60)")
+    # ~28% expected; 20% is about four standard deviations below it at this n,
+    # and still far enough above zero to catch a mascot that never sits down.
+    check(resting >= DRAWS * 0.20,
+          f"and he rests a good deal of the time ({resting}/{DRAWS}, "
+          f"{resting / DRAWS:.0%})")
 
     # Obstruction, measured on the page.
     spots = b.js("RickieRoam._freeSpots().length")
@@ -1018,10 +1133,22 @@ def check_rickie_roams(b: Browser, base: str, app) -> None:
           "; ".join(blocked[:3]))
 
     # A tap at his position reaches the page underneath.
-    under = b.js("""(()=>{const q=document.querySelector('.rickie-roam').getBoundingClientRect();
+    #
+    # Asks the DOM whether the hit element is INSIDE the roaming layer, rather
+    # than whether its class name happens to contain "rickie". The substring
+    # form failed intermittently on `today-rickie` — the static Rickie
+    # illustration on the Today card, which is page content and exactly what a
+    # tap passing through SHOULD land on. Where he stands is random, so that
+    # read as a tap-blocking bug roughly whenever he wandered over that card.
+    under = b.js("""(()=>{const el=document.querySelector('.rickie-roam');
+      const q=el.getBoundingClientRect();
       const hit=document.elementFromPoint(q.left+q.width/2, q.top+q.height/2);
-      return hit ? (hit.className||hit.tagName).toString().slice(0,40) : 'nothing';})()""")
-    check("rickie" not in (under or "").lower(),
+      if(!hit) return 'nothing';
+      const band=document.getElementById('rickie-roam-band');
+      const swallowed=(band&&band.contains(hit))||el.contains(hit)||hit===el||hit===band;
+      return (swallowed?'SWALLOWED:':'through:')+
+             (hit.id||hit.className||hit.tagName).toString().slice(0,40);})()""")
+    check(not str(under).startswith("SWALLOWED"),
           "a tap where he stands reaches the page, not him", str(under))
 
     # He stops while somebody is typing.
@@ -1148,6 +1275,7 @@ def main() -> int:
         check_someone_can_actually_sign_up(browser, base, flask_app)
         check_coming_back_after_a_while(browser, base, flask_app)
         check_discovery_types_reach_a_reader(browser, base, flask_app)
+        check_display_name_can_be_set_changed_and_cleared(browser, base, flask_app)
         check_rickie_roams(browser, base, flask_app)
         check_page_is_clean(browser, base, flask_app)
     except Exception as exc:  # a crash must never read as a pass
