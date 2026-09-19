@@ -274,3 +274,56 @@ def test_export_is_empty_when_nothing_was_ever_stored(client):
     assert data["coach_notes"] == {
         "activities": [], "avoid_movements": [], "session_prefs": [],
     }
+
+
+# ── Through the real coach route ────────────────────────────────────────────
+
+def test_a_sensitive_disclosure_to_rickie_leaves_nothing_behind(client, monkeypatch):
+    """The unit tests above call the extractor. This one goes through
+    /api/coach, because the extractor being safe is only useful if the route
+    is the thing that calls it — and the route is where a future change would
+    plausibly start persisting the raw message alongside the tokens.
+
+    The conversation itself is a separate matter and deliberately so: Rickie
+    still has the full message in front of him for the rest of the session and
+    should respond to it like someone who heard it. What must not happen is it
+    outliving the conversation.
+    """
+    from test_coach import _install_fake_anthropic
+
+    _install_fake_anthropic(monkeypatch)
+    token = register_and_login(client, "coach_sensitive")
+    uid = User.query.filter_by(username="coach_sensitive").first().id
+
+    for message in ["my goal is to lose 10 pounds before summer",
+                    "just so you know, I think I am fat",
+                    "remember that I'm depressed",
+                    "I prefer not eating lunch"]:
+        resp = client.post("/api/coach",
+                           json={"message": message, "context": {"type": "general"}},
+                           headers=auth_headers(token))
+        assert resp.status_code == 200, message
+
+    assert _stored(uid) == []
+    assert appmod._load_coach_note_block(uid) == ""
+
+
+def test_the_conversation_still_carries_what_memory_does_not(client, monkeypatch):
+    """The safety property must not be mistaken for Rickie going deaf.
+
+    Within a session the server threads the real turns into his context, so he
+    can answer what was actually said. Only the permanent record is narrow.
+    """
+    from test_coach import _install_fake_anthropic
+
+    cap = _install_fake_anthropic(monkeypatch)
+    token = register_and_login(client, "coach_hears")
+    client.post("/api/coach",
+                json={"message": "I've had a rough week", "context": {"type": "general"}},
+                headers=auth_headers(token))
+    client.post("/api/coach",
+                json={"message": "what should I do today?", "context": {"type": "general"}},
+                headers=auth_headers(token))
+
+    threaded = json.dumps(cap.get("messages", []))
+    assert "rough week" in threaded, "the session's own turns never reached Rickie"
