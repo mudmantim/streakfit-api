@@ -253,8 +253,16 @@ def _store_vocabulary_flags() -> list[tuple[str, str]]:
     # Not all of BANNED is body vocabulary — it also carries the shaming words
     # ("lazy", "excuses", "guilty"). Labelling the lot "body/weight" would send
     # a reader looking for the wrong thing.
+    #
+    # And a few entries are banned for a FACT CARD but are exactly right coming
+    # from Rickie, because his job includes declining. A card must not discuss
+    # medication; Rickie saying "your doctor can help with medication timing"
+    # while sending an asthmatic to their doctor is the correct answer, and the
+    # first run of this check flagged it. Same for diagnosis: he has to be able
+    # to say "I can't diagnose that."
+    clinical = {"medication", "diagnose", "diagnosis"}
     return ([(r"\b" + re.escape(w) + r"\b", f"banned in the content store: {w!r}")
-             for w in BANNED]
+             for w in BANNED if w not in clinical]
             + [(re.escape(p), f"the product must never say this: {p!r}")
                for p in ACCUSATIONS])
 
