@@ -3159,3 +3159,12 @@ body.theme-classic .theme-btn.active { background: rgba(79,70,229,.2); }
     font-weight: 700;
     cursor: pointer;
 }
+
+/* Journey actions: Memory Book and Make a picture sit together, because both
+   are "what my progress got me" rather than settings. */
+.journey-actions {
+    display: flex;
+    flex-direction: column;
+    gap: .4rem;
+    margin-top: .2rem;
+}

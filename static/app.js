@@ -1842,6 +1842,15 @@ async function renderPhotoToCanvas(canvas, img, spec) {
             var ow = Math.round(Math.min(w, h) * (o.scale || 0.3));
             var oh = Math.round(ow * (oimg.naturalHeight / oimg.naturalWidth || 1));
             var pos = _anchorPosition(o.anchor || 'bottom-right', w, h, ow, oh);
+            // `bleed` pushes an overlay past the edge so it reads as leaning
+            // into the shot rather than sitting politely inside it.
+            if (o.bleed) {
+                var bx = ow * o.bleed, by = oh * o.bleed;
+                if ((o.anchor || '').indexOf('right') !== -1) pos.x += bx;
+                if ((o.anchor || '').indexOf('left') !== -1) pos.x -= bx;
+                if ((o.anchor || '').indexOf('bottom') !== -1) pos.y += by;
+                if ((o.anchor || '').indexOf('top') !== -1) pos.y -= by;
+            }
             ctx.save();
             ctx.globalAlpha = o.opacity === undefined ? 1 : o.opacity;
             ctx.translate(pos.x + ow / 2, pos.y + oh / 2);
@@ -1849,6 +1858,41 @@ async function renderPhotoToCanvas(canvas, img, spec) {
             ctx.drawImage(oimg, -ow / 2, -oh / 2, ow, oh);
             ctx.restore();
         }
+    }
+
+    // Vignette: darkened corners. Cheap, and it makes almost any phone photo
+    // look composed rather than snapped.
+    if (spec.vignette) {
+        var vr = Math.max(w, h) * 0.75;
+        var vg = ctx.createRadialGradient(w / 2, h / 2, vr * 0.35, w / 2, h / 2, vr);
+        vg.addColorStop(0, 'rgba(0,0,0,0)');
+        vg.addColorStop(1, 'rgba(0,0,0,' + (spec.vignette.strength || 0.45) + ')');
+        ctx.save();
+        ctx.fillStyle = vg;
+        ctx.fillRect(0, 0, w, h);
+        ctx.restore();
+    }
+
+    // Burst: rays from behind the subject. This is what a victory looks like
+    // when you cannot afford an animation.
+    if (spec.burst) {
+        var rays = spec.burst.rays || 16;
+        var cx = w / 2, cy = h * (spec.burst.cy || 0.42);
+        var reach = Math.max(w, h);
+        ctx.save();
+        ctx.globalCompositeOperation = 'overlay';
+        ctx.globalAlpha = spec.burst.alpha === undefined ? 0.5 : spec.burst.alpha;
+        for (var b = 0; b < rays; b++) {
+            var a0 = (b / rays) * Math.PI * 2;
+            var a1 = a0 + (Math.PI * 2 / rays) * 0.45;
+            ctx.beginPath();
+            ctx.moveTo(cx, cy);
+            ctx.arc(cx, cy, reach, a0, a1);
+            ctx.closePath();
+            ctx.fillStyle = b % 2 ? (spec.burst.to || '#fde68a') : (spec.burst.from || '#fbbf24');
+            ctx.fill();
+        }
+        ctx.restore();
     }
 
     if (spec.frame) {
@@ -1861,6 +1905,36 @@ async function renderPhotoToCanvas(canvas, img, spec) {
         ctx.lineWidth = fw;
         ctx.strokeRect(fw / 2, fw / 2, w - fw, h - fw);
         ctx.restore();
+    }
+
+    // The real number, burned into the picture. A generic camera app cannot
+    // print your actual streak on a photo, because it does not know it. This is
+    // the one filter primitive that only StreakFit can have, so it reads the
+    // live values rather than any decoration the client made up.
+    if (spec.stat) {
+        var facts = _photoStatFacts(spec.stat.show || ['streak']);
+        if (facts.length) {
+            var padX = Math.round(w * 0.045);
+            var chipH = Math.round(h * 0.085);
+            var y = spec.stat.position === 'top' ? padX : h - chipH - padX;
+            ctx.save();
+            ctx.font = '800 ' + Math.round(chipH * 0.46) + 'px system-ui, sans-serif';
+            ctx.textBaseline = 'middle';
+            var x = padX;
+            facts.forEach(function (f) {
+                var tw = ctx.measureText(f).width + chipH * 0.8;
+                ctx.globalAlpha = 0.88;
+                ctx.fillStyle = spec.stat.dark ? 'rgba(17,24,39,.82)' : 'rgba(255,255,255,.92)';
+                _roundRect(ctx, x, y, tw, chipH, chipH / 2);
+                ctx.fill();
+                ctx.globalAlpha = 1;
+                ctx.fillStyle = spec.stat.dark ? '#fff' : '#111827';
+                ctx.textAlign = 'left';
+                ctx.fillText(f, x + chipH * 0.4, y + chipH / 2);
+                x += tw + padX * 0.5;
+            });
+            ctx.restore();
+        }
     }
 
     if (spec.ribbon) {
@@ -1887,6 +1961,35 @@ async function renderPhotoToCanvas(canvas, img, spec) {
     return canvas;
 }
 
+function _roundRect(ctx, x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+}
+
+// Live values, never invented ones -- a badge claiming a streak the person does
+// not have would be the one dishonest thing in the product.
+function _photoStatFacts(show) {
+    if (!currentUser) return [];
+    var out = [];
+    show.forEach(function (kind) {
+        if (kind === 'streak' && currentUser.current_streak > 0) {
+            out.push('\uD83D\uDD25 Day ' + currentUser.current_streak);
+        } else if (kind === 'level') {
+            out.push('\u2B50 Level ' + currentUser.level + ' \u00b7 ' + currentUser.level_title);
+        } else if (kind === 'missions' && currentUser.total_missions > 0) {
+            out.push('\u2713 ' + currentUser.total_missions + ' missions');
+        } else if (kind === 'acorns' && currentUser.acorns_total > 0) {
+            out.push('\uD83C\uDF30 ' + currentUser.acorns_total);
+        }
+    });
+    return out;
+}
+
 function _specForKey(key) {
     var f = _photoFilters.find(function (x) { return x.key === key; });
     return f ? f.render : {};
@@ -1904,9 +2007,32 @@ async function _refreshPhotoFilters() {
 
 // ── The composer: take a photo -> preview -> filter -> caption -> send ────────
 
-async function openPhotoComposer(file) {
-    var teamId = _teamPanelTeamId;
-    if (!teamId) return;
+// Solo picture-making: no team required, nothing uploaded. The camera opens
+// directly on a phone, same as the team one.
+function startSoloPicture() {
+    var input = document.getElementById('solo-photo-input');
+    if (!input) return;
+    if (!input.dataset.wired) {
+        input.dataset.wired = '1';
+        input.addEventListener('change', function () {
+            var file = input.files && input.files[0];
+            input.value = '';
+            if (file) openPhotoComposer(file, { solo: true });
+        });
+    }
+    input.click();
+}
+
+
+async function openPhotoComposer(file, opts) {
+    opts = opts || {};
+    // Solo mode. Filters are earned by moving, and until now the only place to
+    // USE one was a team photo composer -- so a person with no team could earn
+    // the best rewards in the product and never see them. Solo composes the same
+    // picture and saves it to the phone.
+    var solo = !!opts.solo;
+    var teamId = solo ? null : _teamPanelTeamId;
+    if (!solo && !teamId) return;
 
     var img = new Image();
     var objectUrl = URL.createObjectURL(file);
@@ -1924,7 +2050,7 @@ async function openPhotoComposer(file) {
     _composerFilterKey = 'none';
 
     await _refreshPhotoFilters();
-    _buildPhotoComposer(teamId, objectUrl);
+    _buildPhotoComposer(teamId, objectUrl, solo);
 }
 
 // Deliberately not window.alert: a modal dialog would freeze the PWA and is a
@@ -1938,7 +2064,7 @@ function alertlessPhotoError(message) {
     _teamPanelThread.scrollTop = _teamPanelThread.scrollHeight;
 }
 
-function _buildPhotoComposer(teamId, objectUrl) {
+function _buildPhotoComposer(teamId, objectUrl, solo) {
     // Drop a previous sheet without going through _closePhotoComposer(), which
     // also clears _composerImage -- the image this one is about to draw.
     if (_composerOverlay) {
@@ -1957,7 +2083,7 @@ function _buildPhotoComposer(teamId, objectUrl) {
     head.className = 'photo-composer-head';
     var title = document.createElement('p');
     title.className = 'photo-composer-title';
-    title.textContent = 'Share with your team';
+    title.textContent = solo ? 'Make a picture' : 'Share with your team';
     var closeBtn = document.createElement('button');
     closeBtn.type = 'button';
     closeBtn.className = 'photo-composer-close';
@@ -1987,16 +2113,20 @@ function _buildPhotoComposer(teamId, objectUrl) {
     caption.className = 'photo-caption-input';
     caption.placeholder = 'Say something (optional)';
     caption.maxLength = 140;
-    captionRow.appendChild(caption);
-    sheet.appendChild(captionRow);
+    if (!solo) {
+        captionRow.appendChild(caption);
+        sheet.appendChild(captionRow);
+    }
 
     var privacy = document.createElement('p');
     privacy.className = 'photo-privacy-note';
     // Honest, not reassuring-sounding: the one promise never made here is that
     // a photo cannot be screenshotted, because it can.
-    privacy.textContent = 'Only your team can open this. It disappears from the '
-        + 'app after 30 days, and you can delete it sooner — but anyone who can '
-        + 'see it can screenshot it.';
+    privacy.textContent = solo
+        ? 'This stays on your phone. Nothing is uploaded and nobody else sees it.'
+        : ('Only your team can open this. It disappears from the '
+           + 'app after 30 days, and you can delete it sooner — but anyone who can '
+           + 'see it can screenshot it.');
     sheet.appendChild(privacy);
 
     var actions = document.createElement('div');
@@ -2004,7 +2134,7 @@ function _buildPhotoComposer(teamId, objectUrl) {
     var sendBtn = document.createElement('button');
     sendBtn.type = 'button';
     sendBtn.className = 'btn-primary photo-send-btn';
-    sendBtn.textContent = 'Send to team';
+    sendBtn.textContent = solo ? 'Save to my phone' : 'Send to team';
     actions.appendChild(sendBtn);
     sheet.appendChild(actions);
 
@@ -2061,6 +2191,10 @@ function _buildPhotoComposer(teamId, objectUrl) {
     }
 
     sendBtn.addEventListener('click', function () {
+        if (solo) {
+            _savePhotoLocally(canvas, sendBtn, objectUrl);
+            return;
+        }
         _sendPhoto(teamId, canvas, caption.value.trim(), sendBtn, objectUrl);
     });
 
@@ -2103,6 +2237,30 @@ function _closePhotoComposer() {
     document.body.style.overflow = _teamPanelOverlay && _teamPanelOverlay.classList.contains('open')
         ? 'hidden' : '';
 }
+
+function _savePhotoLocally(canvas, sendBtn, objectUrl) {
+    sendBtn.disabled = true;
+    sendBtn.textContent = 'Saving…';
+    canvas.toBlob(function (blob) {
+        if (!blob) {
+            sendBtn.disabled = false;
+            sendBtn.textContent = 'Save to my phone';
+            return;
+        }
+        var url = URL.createObjectURL(blob);
+        var a = document.createElement('a');
+        a.href = url;
+        a.download = 'streakfit-' + Date.now() + '.jpg';
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+        if (objectUrl) URL.revokeObjectURL(objectUrl);
+        sendBtn.textContent = 'Saved ✓';
+        setTimeout(_closePhotoComposer, 900);
+    }, 'image/jpeg', PHOTO_JPEG_QUALITY);
+}
+
 
 async function _sendPhoto(teamId, canvas, caption, sendBtn, objectUrl) {
     sendBtn.disabled = true;
@@ -2479,12 +2637,32 @@ function fireConfetti(origin) {
 var _rickieReactionHideTimer = null;
 var _rickieReactionRemoveTimer = null;
 
-function showRickieReaction(line, summary) {
-    summary = summary || {};
-    var toast = document.getElementById('rickie-reaction');
-    if (!toast) return;
+// Toasts are queued, not overwritten. Finishing a mission and unlocking a
+// milestone happen in the same instant, and the second used to replace the
+// first after 900ms -- so the biggest moment of a first day ("+60 XP, Level 2 —
+// Adventurer") was on screen for under a second. Each reaction now plays for
+// its full length and the next one waits its turn.
+var _rickieToastQueue = [];
+var _rickieToastPlaying = false;
 
-    document.getElementById('rickie-reaction-line').textContent = line;
+function showRickieReaction(line, summary) {
+    _rickieToastQueue.push({ line: line, summary: summary || {} });
+    if (!_rickieToastPlaying) _playNextRickieToast();
+}
+
+function _playNextRickieToast() {
+    var toast = document.getElementById('rickie-reaction');
+    if (!toast) { _rickieToastQueue.length = 0; _rickieToastPlaying = false; return; }
+
+    var next = _rickieToastQueue.shift();
+    if (!next) {
+        _rickieToastPlaying = false;
+        return;
+    }
+    _rickieToastPlaying = true;
+
+    var summary = next.summary;
+    document.getElementById('rickie-reaction-line').textContent = next.line;
 
     var progressEl = document.getElementById('rickie-reaction-progress');
     var xp = summary.xp || 0;
@@ -2499,27 +2677,37 @@ function showRickieReaction(line, summary) {
         progressEl.hidden = true;
     }
 
+    // `badge` is how a queued toast carries its own second line. The milestone
+    // announcer used to set this element directly after calling show(), which
+    // with a queue would have written onto whichever toast happened to be up.
     var levelUpEl = document.getElementById('rickie-reaction-levelup');
-    if (summary.leveledUp) {
-        levelUpEl.textContent = _pickRickieLine('levelUp') + ' 🎉 Level ' + summary.newLevel + ' — ' + summary.levelTitle;
-        levelUpEl.hidden = false;
-    } else {
-        levelUpEl.hidden = true;
-    }
+    var badge = summary.badge
+        || (summary.leveledUp
+            ? _pickRickieLine('levelUp') + ' 🎉 Level ' + summary.newLevel + ' — ' + summary.levelTitle
+            : '');
+    levelUpEl.textContent = badge;
+    levelUpEl.hidden = !badge;
 
-    toast.classList.toggle('celebrate', !!summary.leveledUp);
+    toast.classList.toggle('celebrate', !!(summary.leveledUp || summary.celebrate));
 
     if (_rickieReactionHideTimer) clearTimeout(_rickieReactionHideTimer);
     if (_rickieReactionRemoveTimer) clearTimeout(_rickieReactionRemoveTimer);
     toast.classList.remove('leaving');
     toast.hidden = false;
 
-    var displayMs = summary.leveledUp ? 4600 : 3600;
+    // Confetti belongs to its own toast, so a queued celebration does not throw
+    // it while a different line is still on screen.
+    if (summary.confetti) fireConfetti(document.getElementById('daily-count-badge'));
+
+    var displayMs = (summary.leveledUp || summary.celebrate) ? 4600 : 3600;
     _rickieReactionHideTimer = setTimeout(function () {
         toast.classList.add('leaving');
         _rickieReactionRemoveTimer = setTimeout(function () {
             toast.hidden = true;
             toast.classList.remove('leaving');
+            // A short beat between reactions, so two celebrations read as two
+            // moments rather than one flickering element.
+            setTimeout(_playNextRickieToast, 280);
         }, 300);
     }, displayMs);
 }
@@ -2534,19 +2722,12 @@ function _announceMilestones(milestones) {
     if (!milestones || !milestones.length) return;
     if (!_rickieAllowsReaction(true)) return;   // milestone-significant: quiet mode still shows these
 
-    var delay = 900;
-    milestones.forEach(function (m, i) {
-        setTimeout(function () {
-            showRickieReaction(_pickRickieLine('milestoneUnlocked'), {});
-            var el = document.getElementById('rickie-reaction-levelup');
-            if (el) {
-                el.textContent = '\uD83C\uDFC5 ' + m.label + ' unlocked';
-                el.hidden = false;
-            }
-            var toast = document.getElementById('rickie-reaction');
-            if (toast) toast.classList.add('celebrate');
-            fireConfetti(document.getElementById('daily-count-badge'));
-        }, delay + (i * 4200));
+    milestones.forEach(function (m) {
+        showRickieReaction(_pickRickieLine('milestoneUnlocked'), {
+            badge: '\uD83C\uDFC5 ' + m.label + ' unlocked',
+            celebrate: true,
+            confetti: true,
+        });
     });
 }
 
@@ -5437,9 +5618,9 @@ async function handleCompleteExercise(key, btn, row) {
         // to say, so the moment lands without promising numbers we aren't
         // keeping for them.
         var guestDone = guestCompleted.size >= 5;
-        showRickieReaction(_pickRickieLine(guestDone ? 'perfectMission' : 'missionComplete'), {});
+        showRickieReaction(_pickRickieLine(guestDone ? 'perfectMission' : 'missionComplete'),
+                           { confetti: guestDone, celebrate: guestDone });
         if (guestDone) {
-            fireConfetti(document.getElementById('daily-count-badge'));
             currentRickieExpression = getRickieExpression({
                 type: 'mission_complete', perfectMission: true
             });
@@ -5479,12 +5660,11 @@ async function handleCompleteExercise(key, btn, row) {
             } else if (wasPerfectMission) {
                 poolKey = 'perfectMission';
             }
-            showRickieReaction(_pickRickieLine(poolKey), summary);
             // Confetti only for the moments that have earned it: a full
-            // mission or a level-up. The badge is the natural origin point.
-            if (wasPerfectMission || summary.leveledUp) {
-                fireConfetti(document.getElementById('daily-count-badge'));
-            }
+            // mission or a level-up. It rides on the toast so it lands with
+            // its own line rather than over whatever is currently showing.
+            summary.confetti = wasPerfectMission || summary.leveledUp;
+            showRickieReaction(_pickRickieLine(poolKey), summary);
             currentRickieExpression = getRickieExpression({
                 type: 'mission_complete',
                 firstMissionEver: wasFirstMission,

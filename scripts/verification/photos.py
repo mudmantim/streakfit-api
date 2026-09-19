@@ -51,7 +51,7 @@ def run(api, results, scenario):
         results.check("photos.free_filter_is_unlocked",
                       by_key.get("rickie_peek", {}).get("unlocked") is True)
         results.check("photos.earned_filter_is_locked_for_a_new_user",
-                      by_key.get("rickie_proud", {}).get("unlocked") is False)
+                      by_key.get("rickie_crew", {}).get("unlocked") is False)
         results.check("photos.acorn_filter_advertises_its_price",
                       (by_key.get("golden_hour", {}).get("cost") or 0) > 0)
         results.check("photos.catalog_reports_a_spendable_balance",
@@ -97,7 +97,7 @@ def run(api, results, scenario):
                             token=member["token"], raw_body=body3, content_type=ct3)
     results.check("photos.non_jpeg_rejected", status == 400, f"status={status}")
 
-    body4, ct4 = _multipart({"filter_key": "rickie_proud"}, "smoke.jpg", SMOKE_JPEG)
+    body4, ct4 = _multipart({"filter_key": "rickie_crew"}, "smoke.jpg", SMOKE_JPEG)
     status, _ = api.request("POST", f"/api/teams/{team_id}/photos",
                             token=member["token"], raw_body=body4, content_type=ct4)
     results.check("photos.locked_filter_refused_server_side", status == 403, f"status={status}")

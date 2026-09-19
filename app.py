@@ -19,6 +19,8 @@ from sqlalchemy.exc import IntegrityError
 from flask_migrate import Migrate
 from werkzeug.middleware.proxy_fix import ProxyFix
 from werkzeug.security import generate_password_hash, check_password_hash
+
+from streakfit_content import EXTRA_BRAIN_BOOST, EXTRA_INSIGHTS
 from flask_jwt_extended import (JWTManager, create_access_token, jwt_required,
                                get_jwt_identity, verify_jwt_in_request)
 from flask_limiter import Limiter
@@ -765,10 +767,29 @@ INSIGHT_LIBRARY = [
 ]
 
 
-def get_daily_insight(date_str):
-    d = date.fromisoformat(date_str)
-    idx = (d.timetuple().tm_yday - 1) % len(INSIGHT_LIBRARY)
-    return INSIGHT_LIBRARY[idx]
+INSIGHT_LIBRARY = INSIGHT_LIBRARY + EXTRA_INSIGHTS
+
+
+def _personal_daily_index(kind, user_id, date_str, size):
+    """Which item of a content library this person sees today.
+
+    Two problems with indexing straight off the day of the year. Everyone saw
+    the SAME fact on the same date, so a family had nothing to tell each other;
+    and the cycle was the library size, so a daily user met the same fact again
+    on a fixed schedule. This shuffles the library into a per-person order and
+    walks it one a day, which means nobody repeats until they have seen all of
+    them, and two people in a house are almost never on the same one.
+    """
+    order = list(range(size))
+    random.Random(f"{kind}:{user_id}").shuffle(order)
+    day_number = date.fromisoformat(date_str).toordinal()
+    return order[day_number % size]
+
+
+def get_daily_insight(date_str, user_id='demo'):
+    return INSIGHT_LIBRARY[
+        _personal_daily_index('insight', user_id, date_str, len(INSIGHT_LIBRARY))
+    ]
 
 
 # --- Brain Boost ---
@@ -984,10 +1005,29 @@ BRAIN_BOOST_LIBRARY = [
 ]
 
 
-def get_daily_brain_boost(date_str):
-    d = date.fromisoformat(date_str)
-    idx = (d.timetuple().tm_yday - 1) % len(BRAIN_BOOST_LIBRARY)
-    return BRAIN_BOOST_LIBRARY[idx]
+BRAIN_BOOST_LIBRARY = BRAIN_BOOST_LIBRARY + EXTRA_BRAIN_BOOST
+
+
+def _presented_brain_boost(boost):
+    """The question with its options in a stable, per-question order.
+
+    The original 40 questions had the right answer at index 1 thirty times and
+    index 0 ten times -- indices 2 and 3 were never correct, so "always pick the
+    second one" scored 75%. A child would find that faster than an adult. The
+    order is derived from the question text, so it is the same every time the
+    same question appears while no longer being the same slot every time.
+    """
+    order = list(range(len(boost['options'])))
+    random.Random('boost-options:' + boost['question']).shuffle(order)
+    out = dict(boost)
+    out['options'] = [boost['options'][i] for i in order]
+    out['correct_index'] = order.index(boost['correct_index'])
+    return out
+
+
+def get_daily_brain_boost(date_str, user_id='demo'):
+    idx = _personal_daily_index('boost', user_id, date_str, len(BRAIN_BOOST_LIBRARY))
+    return _presented_brain_boost(BRAIN_BOOST_LIBRARY[idx])
 
 
 # --- Rickie's joke library ---
@@ -2528,8 +2568,8 @@ def get_daily():
     today = date.today()
     today_str = today.isoformat()
     exercises = get_daily_exercises(user_id, today_str, user.skill_level)
-    insight   = get_daily_insight(today_str)
-    boost     = get_daily_brain_boost(today_str)
+    insight   = get_daily_insight(today_str, user_id)
+    boost     = get_daily_brain_boost(today_str, user_id)
 
     boost_answer = db.session.execute(
         db.select(BrainBoostAnswer).where(
@@ -2808,6 +2848,7 @@ def complete_daily_exercise(exercise_key):
     response["milestones_unlocked"] = _completion_milestones(
         user_id, user, old_level, events, awarded=bool(events)
     )
+    response["filters_unlocked"] = _filters_newly_unlocked(user_id, user, old_level, events)
     return jsonify(response), 200
 
 
@@ -2851,6 +2892,44 @@ def _completion_milestones(user_id, user, old_level, events, awarded):
     return _milestones_crossed(metric_values, deltas)
 
 
+def _filters_newly_unlocked(user_id, user, old_level, events):
+    """Filters this action just put within reach.
+
+    Earning something should say what it unlocked, not leave it to be noticed
+    three taps deep in a composer. The same rules are asked twice -- once of now,
+    once of the moment before the award -- so nothing about how a filter unlocks
+    has to be restated here.
+    """
+    if not events:
+        return []
+
+    stats = get_user_stats(user_id)
+    purchased = _purchased_filter_keys(user_id)
+    xp_delta = sum(e['xp_awarded'] for e in events)
+    finished_a_mission = any(e['event_type'] == 'mission_complete' for e in events)
+    answered_a_boost = any(e['event_type'].startswith('brain_boost') for e in events)
+
+    after = _filter_context(
+        stats['total_missions'], stats['current_streak'], stats['best_streak'],
+        user.xp_total, user.acorns_total, stats['brain_boost_answers'])
+    before = _filter_context(
+        stats['total_missions'] - (1 if finished_a_mission else 0),
+        # Today only became a streak day by finishing a mission, so the streak
+        # before this award was one shorter -- and only then.
+        max(0, stats['current_streak'] - (1 if finished_a_mission else 0)),
+        max(0, stats['best_streak'] - (1 if finished_a_mission else 0)),
+        user.xp_total - xp_delta,
+        user.acorns_total - sum(e['acorns_awarded'] for e in events),
+        stats['brain_boost_answers'] - (1 if answered_a_boost else 0))
+    before['level'] = old_level
+
+    gained = _unlocked_filter_keys(after, purchased) - _unlocked_filter_keys(before, purchased)
+    return [
+        {'key': f['key'], 'name': f['name'], 'blurb': f['blurb']}
+        for f in PHOTO_FILTERS if f['key'] in gained
+    ]
+
+
 @app.route('/api/brain-boost/answer', methods=['POST'])
 @jwt_required()
 def answer_brain_boost():
@@ -2865,7 +2944,9 @@ def answer_brain_boost():
         abort(404)
 
     today = date.today()
-    boost = get_daily_brain_boost(today.isoformat())
+    # Same (date, user) as /api/daily presented, so the option order the person
+    # actually saw is the order their answer index is checked against.
+    boost = get_daily_brain_boost(today.isoformat(), user_id)
 
     if selected_index < 0 or selected_index >= len(boost['options']):
         return jsonify({"error": "invalid_selected_index"}), 400
@@ -2949,6 +3030,7 @@ def answer_brain_boost():
         )
     else:
         response["milestones_unlocked"] = []
+    response["filters_unlocked"] = _filters_newly_unlocked(user_id, user, old_level, events)
     return jsonify(response), 200
 
 
@@ -3099,8 +3181,11 @@ PHOTO_FILTERS = [
         'blurb': 'He got in the shot. He is not sorry.',
         'unlock': {'type': 'free'},
         'render': {
-            'overlays': [{'src': '/static/rickie.svg', 'anchor': 'bottom-right',
-                          'scale': 0.34, 'rotate': -8}],
+            # Cropped past the edge so he reads as leaning INTO frame rather
+            # than being a sticker placed politely in the corner.
+            'overlays': [{'src': '/static/rickie_curious.svg', 'anchor': 'bottom-right',
+                          'scale': 0.46, 'rotate': -10, 'bleed': 0.12}],
+            'vignette': {'strength': 0.25},
         },
     },
     {
@@ -3108,8 +3193,18 @@ PHOTO_FILTERS = [
         'blurb': 'Warm light around the edges.',
         'unlock': {'type': 'free'},
         'render': {
-            'tint': 'saturate(1.12) contrast(1.04)',
+            'tint': 'saturate(1.25) contrast(1.08) brightness(1.02)',
+            'vignette': {'strength': 0.4},
             'frame': {'from': '#f59e0b', 'to': '#ef4444', 'width': 0.035},
+        },
+    },
+    {
+        'key': 'day_stamp', 'name': 'Day Stamp',
+        'blurb': 'Your actual streak, printed on the picture.',
+        'unlock': {'type': 'free'},
+        'render': {
+            'stat': {'show': ['streak', 'level'], 'position': 'bottom', 'dark': True},
+            'vignette': {'strength': 0.3},
         },
     },
     {
@@ -3117,10 +3212,11 @@ PHOTO_FILTERS = [
         'blurb': 'For the photo you take right after the fifth one.',
         'unlock': {'type': 'missions', 'value': 1},
         'render': {
+            'burst': {'from': '#34d399', 'to': '#a7f3d0', 'rays': 18, 'alpha': 0.4},
             'ribbon': {'text': 'MISSION COMPLETE', 'position': 'bottom',
                        'from': '#059669', 'to': '#10b981'},
             'overlays': [{'src': '/static/rickie_proud.svg', 'anchor': 'bottom-left',
-                          'scale': 0.28, 'rotate': 6}],
+                          'scale': 0.34, 'rotate': 6, 'bleed': 0.06}],
         },
     },
     {
@@ -3128,8 +3224,9 @@ PHOTO_FILTERS = [
         'blurb': 'Three days in a row will do that.',
         'unlock': {'type': 'streak', 'value': 3},
         'render': {
-            'tint': 'saturate(1.2) brightness(1.03)',
-            'confetti': {'glyph': '\U0001F525', 'count': 14, 'size': 0.075},
+            'tint': 'saturate(1.3) contrast(1.05)',
+            'confetti': {'glyph': '\U0001F525', 'count': 14, 'size': 0.085},
+            'stat': {'show': ['streak'], 'position': 'top'},
             'frame': {'from': '#ef4444', 'to': '#f59e0b', 'width': 0.03},
         },
     },
@@ -3138,27 +3235,40 @@ PHOTO_FILTERS = [
         'blurb': 'It is raining acorns. Rickie is thrilled.',
         'unlock': {'type': 'level', 'value': 3},
         'render': {
-            'confetti': {'glyph': '\U0001F330', 'count': 18, 'size': 0.07},
+            'confetti': {'glyph': '\U0001F330', 'count': 20, 'size': 0.075},
+            'overlays': [{'src': '/static/rickie_happy.svg', 'anchor': 'bottom-right',
+                          'scale': 0.3, 'rotate': 8, 'bleed': 0.1}],
         },
     },
     {
-        'key': 'rickie_proud', 'name': "Rickie's Proud",
-        'blurb': 'He wanted to be in this one properly.',
+        'key': 'rickie_crew', 'name': "Rickie's Crew",
+        'blurb': 'One Rickie was not enough.',
         'unlock': {'type': 'level', 'value': 5},
         'render': {
-            'overlays': [{'src': '/static/rickie_proud.svg', 'anchor': 'bottom-right',
-                          'scale': 0.44, 'rotate': 0}],
-            'tint': 'saturate(1.08)',
+            # Three of him, at different sizes and angles, peeking from three
+            # edges -- variety out of the art that already exists.
+            'overlays': [
+                {'src': '/static/rickie_happy.svg', 'anchor': 'bottom-left',
+                 'scale': 0.3, 'rotate': -12, 'bleed': 0.14},
+                {'src': '/static/rickie_proud.svg', 'anchor': 'bottom-right',
+                 'scale': 0.42, 'rotate': 8, 'bleed': 0.1},
+                {'src': '/static/rickie_curious.svg', 'anchor': 'top-right',
+                 'scale': 0.22, 'rotate': 16, 'bleed': 0.16},
+            ],
+            'vignette': {'strength': 0.28},
         },
     },
     {
-        'key': 'team_challenge', 'name': 'Team Challenge',
-        'blurb': 'For the ones you did together.',
+        'key': 'team_challenge', 'name': 'Challenge Won',
+        'blurb': 'Proof, for the people who doubted you.',
         'unlock': {'type': 'missions', 'value': 5},
         'render': {
-            'ribbon': {'text': 'TEAM CHALLENGE', 'position': 'top',
+            'burst': {'from': '#818cf8', 'to': '#e9d5ff', 'rays': 20, 'alpha': 0.45},
+            'ribbon': {'text': 'CHALLENGE WON', 'position': 'top',
                        'from': '#4338ca', 'to': '#7c3aed'},
-            'frame': {'from': '#4338ca', 'to': '#7c3aed', 'width': 0.028},
+            'overlays': [{'src': '/static/rickie_proud.svg', 'anchor': 'bottom-right',
+                          'scale': 0.36, 'rotate': -6, 'bleed': 0.08}],
+            'frame': {'from': '#4338ca', 'to': '#7c3aed', 'width': 0.026},
         },
     },
     {
@@ -3166,36 +3276,60 @@ PHOTO_FILTERS = [
         'blurb': 'Only for the day it actually happened.',
         'unlock': {'type': 'milestone', 'key': 'first_mission'},
         'render': {
-            'tint': 'sepia(0.25) saturate(1.3) brightness(1.05)',
-            'frame': {'from': '#fbbf24', 'to': '#f59e0b', 'width': 0.04},
+            # The old version's "gold" was a sepia tint nobody could see. Gold
+            # is now the burst and the frame, which actually read as gold.
+            'burst': {'from': '#fbbf24', 'to': '#fef3c7', 'rays': 24, 'alpha': 0.38},
+            'tint': 'saturate(1.35) contrast(1.06) brightness(1.05)',
+            'frame': {'from': '#fbbf24', 'to': '#f59e0b', 'width': 0.045},
+            'stat': {'show': ['missions'], 'position': 'bottom'},
             'overlays': [{'src': '/static/rickie_happy.svg', 'anchor': 'top-right',
-                          'scale': 0.26, 'rotate': 10}],
+                          'scale': 0.26, 'rotate': 12, 'bleed': 0.1}],
         },
     },
     {
         'key': 'golden_hour', 'name': 'Golden Hour',
-        'blurb': 'Warm and a little bit nostalgic.',
+        'blurb': 'Late afternoon light, any time of day.',
         'unlock': {'type': 'acorns', 'cost': 20},
-        'render': {'tint': 'sepia(0.35) saturate(1.25) contrast(1.05) brightness(1.04)'},
+        'render': {
+            # Previously a tint so faint it was indistinguishable from no filter
+            # -- a poor thing to charge 20 acorns for. Now it is a real look.
+            'tint': 'sepia(0.55) saturate(1.6) contrast(1.12) brightness(1.06) hue-rotate(-8deg)',
+            'vignette': {'strength': 0.5},
+        },
     },
     {
         'key': 'frosty', 'name': 'Frosty',
         'blurb': 'For cold mornings you went anyway.',
         'unlock': {'type': 'acorns', 'cost': 30},
         'render': {
-            'tint': 'saturate(0.9) brightness(1.06) hue-rotate(-12deg)',
-            'confetti': {'glyph': '\u2744\uFE0F', 'count': 20, 'size': 0.055},
+            'tint': 'saturate(0.75) brightness(1.1) contrast(1.05) hue-rotate(-20deg)',
+            'confetti': {'glyph': '\u2744\uFE0F', 'count': 22, 'size': 0.06},
             'frame': {'from': '#bfdbfe', 'to': '#60a5fa', 'width': 0.03},
+            'vignette': {'strength': 0.22},
         },
     },
     {
-        'key': 'goofy_specs', 'name': 'Goofy Specs',
-        'blurb': "Rickie's spare glasses. Somehow always slightly crooked.",
+        'key': 'sweat_mode', 'name': 'Sweat Mode',
+        'blurb': 'Rickie insists this counts as glowing.',
         'unlock': {'type': 'acorns', 'cost': 15},
         'render': {
+            # Replaces "Goofy Specs", whose name promised glasses on your face
+            # and delivered Rickie in a corner. This one does what it says.
+            'tint': 'saturate(1.2) contrast(1.1)',
+            'confetti': {'glyph': '\U0001F4A6', 'count': 16, 'size': 0.07},
             'overlays': [{'src': '/static/rickie_curious.svg', 'anchor': 'top-left',
-                          'scale': 0.3, 'rotate': -12}],
-            'tint': 'contrast(1.06)',
+                          'scale': 0.28, 'rotate': -14, 'bleed': 0.12}],
+        },
+    },
+    {
+        'key': 'night_owl', 'name': 'Night Owl',
+        'blurb': 'Moved after dark. Rickie respects it.',
+        'unlock': {'type': 'acorns', 'cost': 25},
+        'render': {
+            'tint': 'saturate(1.15) brightness(0.86) contrast(1.2) hue-rotate(200deg)',
+            'vignette': {'strength': 0.6},
+            'stat': {'show': ['streak'], 'position': 'bottom', 'dark': True},
+            'confetti': {'glyph': '\u2728', 'count': 18, 'size': 0.05},
         },
     },
 ]
@@ -3209,6 +3343,47 @@ def _acorns_available(user):
     return max(0, (user.acorns_total or 0) - (user.acorns_spent or 0))
 
 
+def _filter_context(missions, current_streak, best_streak, xp_total, acorns_total,
+                    brain_boosts=0):
+    """The plain numbers a filter's unlock rule is judged against.
+
+    Separated from the User row so the same rules can be evaluated for a state
+    the user is no longer in -- which is how "you just unlocked this" is worked
+    out, by asking the same question of the moment before the award.
+    """
+    return {
+        'missions': missions,
+        'current_streak': current_streak,
+        'best_streak': best_streak,
+        'level': xp_to_level(xp_total)['level'],
+        'xp_total': xp_total,
+        'acorns_total': acorns_total,
+        'brain_boosts': brain_boosts,
+    }
+
+
+def _filter_is_unlocked(spec, ctx, purchased_keys):
+    rule = spec['unlock']
+    kind = rule['type']
+    if kind == 'free':
+        return True
+    if kind == 'missions':
+        return ctx['missions'] >= rule['value']
+    if kind == 'streak':
+        return max(ctx['current_streak'], ctx['best_streak']) >= rule['value']
+    if kind == 'level':
+        return ctx['level'] >= rule['value']
+    if kind == 'milestone':
+        return _milestone_is_unlocked_for(ctx, rule['key'])
+    if kind == 'acorns':
+        return spec['key'] in purchased_keys
+    return False
+
+
+def _unlocked_filter_keys(ctx, purchased_keys):
+    return {f['key'] for f in PHOTO_FILTERS if _filter_is_unlocked(f, ctx, purchased_keys)}
+
+
 def _filter_unlock_state(user, stats, purchased_keys):
     """Resolve every filter's availability for this user.
 
@@ -3216,32 +3391,31 @@ def _filter_unlock_state(user, stats, purchased_keys):
     stored, so they can never drift from the thing that earned them and a new
     earned filter needs no backfill.
     """
-    level = xp_to_level(user.xp_total)['level']
+    ctx = _filter_context(stats['total_missions'], stats['current_streak'],
+                          stats['best_streak'], user.xp_total, user.acorns_total,
+                          stats['brain_boost_answers'])
+    level = ctx['level']
     out = []
     for spec in PHOTO_FILTERS:
         rule = spec['unlock']
         kind = rule['type']
-        unlocked, progress, requirement = False, None, None
+        unlocked = _filter_is_unlocked(spec, ctx, purchased_keys)
+        progress, requirement = None, None
 
         if kind == 'free':
-            unlocked, requirement = True, 'Always yours'
+            requirement = 'Always yours'
         elif kind == 'missions':
             progress = stats['total_missions']
-            unlocked = progress >= rule['value']
             requirement = f"Finish {rule['value']} mission{'s' if rule['value'] != 1 else ''}"
         elif kind == 'streak':
             progress = stats['current_streak']
-            unlocked = max(progress, stats['best_streak']) >= rule['value']
             requirement = f"Reach a {rule['value']}-day streak"
         elif kind == 'level':
             progress = level
-            unlocked = level >= rule['value']
             requirement = f"Reach level {rule['value']}"
         elif kind == 'milestone':
-            unlocked = _milestone_is_unlocked(user, stats, rule['key'])
             requirement = 'Unlock the ' + rule['key'].replace('_', ' ').title() + ' milestone'
         elif kind == 'acorns':
-            unlocked = spec['key'] in purchased_keys
             requirement = f"{rule['cost']} acorns"
 
         out.append({
@@ -3259,21 +3433,18 @@ def _filter_unlock_state(user, stats, purchased_keys):
     return out
 
 
-def _milestone_is_unlocked(user, stats, milestone_key):
+def _milestone_is_unlocked_for(ctx, milestone_key):
     spec = next((m for m in _MILESTONE_DEFINITIONS if m['key'] == milestone_key), None)
     if spec is None:
         return False
-    values = {
-        'missions_completed': stats['total_missions'],
-        'brain_boosts_answered': stats['brain_boost_answers'],
-        'xp_total': user.xp_total,
-        'acorns_total': user.acorns_total,
-        'level': xp_to_level(user.xp_total)['level'],
-    }
-    current = values.get(spec['metric'])
-    if current is None:
-        return False
-    return current >= spec['target']
+    current = {
+        'missions_completed': ctx['missions'],
+        'brain_boosts_answered': ctx['brain_boosts'],
+        'xp_total': ctx['xp_total'],
+        'acorns_total': ctx['acorns_total'],
+        'level': ctx['level'],
+    }.get(spec['metric'])
+    return current is not None and current >= spec['target']
 
 
 def _purchased_filter_keys(user_id):

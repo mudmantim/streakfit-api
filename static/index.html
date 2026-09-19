@@ -232,8 +232,17 @@
 
                 <p id="journey-message" class="journey-message"></p>
 
-                <button id="journey-memory-book-btn" class="journey-memory-book-btn"
-                        onclick="openMemoryBook()">Memory Book →</button>
+                <div class="journey-actions">
+                    <button id="journey-memory-book-btn" class="journey-memory-book-btn"
+                            onclick="openMemoryBook()">Memory Book →</button>
+                    <!-- Filters are earned by moving, so they cannot live only
+                         inside a team photo composer — a solo user would earn
+                         the best rewards in the product and never see them. -->
+                    <button id="journey-make-picture-btn" class="journey-memory-book-btn"
+                            onclick="startSoloPicture()">📸 Make a picture →</button>
+                    <input id="solo-photo-input" type="file" accept="image/*"
+                           capture="environment" class="visually-hidden">
+                </div>
             </section>
 
             <!-- Teams ─────────────────────────────────────────────── -->

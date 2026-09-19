@@ -176,7 +176,7 @@ def test_an_overlong_caption_is_rejected(client, family):
 # ── Filters are the server's decision, not the client's ────────────────────
 
 def test_a_locked_filter_cannot_be_used_just_because_the_client_asked(client, family):
-    resp = upload(client, family["kid"], family["team_id"], filter_key="rickie_proud")
+    resp = upload(client, family["kid"], family["team_id"], filter_key="rickie_crew")
 
     assert resp.status_code == 403
     assert resp.get_json()["error"] == "filter_not_unlocked"
@@ -197,8 +197,8 @@ def test_the_catalog_reports_what_is_locked_and_why(client, family):
     by_key = {f["key"]: f for f in body["filters"]}
 
     assert by_key["rickie_peek"]["unlocked"] is True
-    assert by_key["rickie_proud"]["unlocked"] is False
-    assert by_key["rickie_proud"]["requirement"] == "Reach level 5"
+    assert by_key["rickie_crew"]["unlocked"] is False
+    assert by_key["rickie_crew"]["requirement"] == "Reach level 5"
     assert by_key["golden_hour"]["cost"] == 20
     assert body["acorns_available"] == 0
 
@@ -226,7 +226,8 @@ def test_filter_render_specs_only_use_known_primitives():
     something else would silently render as nothing."""
     import app as appmod
 
-    known = {"tint", "overlays", "frame", "ribbon", "confetti"}
+    known = {"tint", "overlays", "frame", "ribbon", "confetti",
+             "vignette", "burst", "stat"}
     for spec in appmod.PHOTO_FILTERS:
         assert set(spec["render"]) <= known, f"{spec['key']}: {set(spec['render']) - known}"
         for overlay in spec["render"].get("overlays", []):
@@ -291,7 +292,7 @@ def test_cannot_buy_without_enough_acorns(client, family):
 def test_an_earned_filter_cannot_be_bought(client, family):
     _give_acorns("photo_kid", 500)
 
-    resp = client.post("/api/photo-filters/rickie_proud/unlock",
+    resp = client.post("/api/photo-filters/rickie_crew/unlock",
                        headers=auth_headers(family["kid"]))
 
     assert resp.status_code == 400

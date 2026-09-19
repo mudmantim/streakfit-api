@@ -331,6 +331,45 @@ def check_returning_user_is_acknowledged(b: Browser, base: str, app) -> None:
           f"got {final['xp']!r}")
 
 
+def check_first_mission_celebration(b: Browser, base: str, app) -> None:
+    """The biggest moment of a first day has to actually be on screen."""
+    print("\nA first mission — the payoff Olivia is here for")
+    _, token = make_user(app, "firstday")
+    b.goto(base + "/", wait=1.0)
+    b.js(f"localStorage.setItem('streakfit_token', {json.dumps(token)})")
+    b.goto(base + "/", wait=3.0)
+
+    for _ in range(4):
+        tap_and_read(b)
+        time.sleep(4.6)
+
+    b.js("""window.__tl = []; window.__t0 = Date.now();
+        window.__iv = setInterval(() => {
+            const t = document.getElementById('rickie-reaction');
+            window.__tl.push([Date.now() - window.__t0, t.hidden ? null :
+                document.getElementById('rickie-reaction-line').textContent,
+                document.getElementById('rickie-reaction-progress').hidden ? '' :
+                document.getElementById('rickie-reaction-progress').textContent]);
+        }, 150);""")
+    b.js("(()=>{const bs=[...document.querySelectorAll('button')]"
+         ".filter(b=>b.textContent.trim()==='I did this'); if(bs.length) bs[0].click(); return 1;})()")
+    time.sleep(9.0)
+    b.js("clearInterval(window.__iv)")
+    timeline = json.loads(b.js("JSON.stringify(window.__tl)") or "[]")
+
+    # How long the completion toast — the one carrying the XP — stayed up.
+    with_xp = [ms for ms, line, xp in timeline if xp and "XP" in xp]
+    held_ms = (max(with_xp) - min(with_xp)) if len(with_xp) > 1 else 0
+    check(held_ms >= 3000,
+          "the mission-complete celebration stays on screen long enough to read",
+          f"the +XP line was visible for only {held_ms}ms before something replaced it")
+
+    lines = {line for _, line, _ in timeline if line}
+    check(len(lines) >= 2,
+          "the milestone gets its own moment rather than stomping the completion",
+          f"only saw: {lines}")
+
+
 def check_guest_gets_the_celebration(b: Browser, base: str) -> None:
     print("\nGuest mode — the moment that has to earn the signup")
     b.goto(base + "/", wait=1.2)
@@ -591,6 +630,7 @@ def main() -> int:
         browser.goto(base + "/", wait=1.5)
         browser.reset_storage()
         check_returning_user_is_acknowledged(browser, base, flask_app)
+        check_first_mission_celebration(browser, base, flask_app)
         check_guest_gets_the_celebration(browser, base)
         check_team_witness(browser, base, flask_app)
         check_photo_sharing(browser, base, flask_app)
