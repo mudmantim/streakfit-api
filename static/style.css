@@ -3968,3 +3968,53 @@ body.theme-classic .theme-btn.active { background: rgba(79,70,229,.2); }
     font-weight: 600;
     color: var(--indigo-dark);
 }
+
+/* ── Rickie, roaming ────────────────────────────────────────────────────────
+   A band of empty space above the navigation that he lives in.
+
+   `position: fixed` so he can never shift the layout, and `pointer-events:
+   none` on both the band and the character so a tap always reaches whatever is
+   underneath. Those two properties are the structural guarantee behind "he
+   must never obstruct a control" — not carefulness about where he walks. */
+
+.rickie-roam-band {
+    position: fixed;
+    inset: 0;
+    /* Leaves the navigation alone at the bottom. */
+    bottom: calc(60px + env(safe-area-inset-bottom, 0px));
+    z-index: 15;            /* under the nav (20) and every modal */
+    pointer-events: none;
+    overflow: hidden;
+}
+
+.rickie-roam {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 56px;
+    height: 56px;
+    pointer-events: none;
+    will-change: transform;
+}
+
+.rickie-roam-img {
+    width: 100%;
+    height: 100%;
+    display: block;
+}
+
+/* Out of sight at the edge, for the moment before he peeks back. */
+.rickie-roam-hidden { opacity: 0; }
+
+/* Peeking: only the top of him clears the edge. */
+.rickie-roam-peeking { transform-origin: bottom center; }
+.rickie-roam-peeking .rickie-roam-img { transform: translateY(26%); }
+
+@media (prefers-reduced-motion: reduce) {
+    /* He stays, and stops travelling. The JS also refuses to schedule
+       movement — this is the belt to that braces, because a stylesheet is the
+       one place a reduced-motion preference cannot be forgotten. */
+    .rickie-roam { transition: none !important; }
+}
+
+.rickie-roam-still { transition: none !important; }

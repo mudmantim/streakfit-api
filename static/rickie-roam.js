@@ -1,0 +1,573 @@
+/* Rickie, roaming.
+ *
+ * He is a raccoon who lives in the app rather than a sticker stuck to it. He
+ * walks, sits, stretches, yawns, naps, turns up an acorn, peeks over the edge
+ * of things, and — often — does absolutely nothing, because resting is part of
+ * the character and a mascot that never stops moving is a mascot you turn off.
+ *
+ * THREE RULES THAT SHAPED EVERY DECISION HERE
+ *
+ * 1. He must never obstruct anything. Not exercise instructions, not safety
+ *    text, not a quiz option, not an input, not a button. This is enforced
+ *    structurally rather than by being careful: the layer is `position: fixed`
+ *    so it can never cause layout shift, `pointer-events: none` so a tap always
+ *    reaches what is underneath, and he is confined to a band of empty space
+ *    above the navigation that no content occupies. Confining him is a real
+ *    constraint and it is the honest trade — at 390px wide there are no margins
+ *    to roam in, and "he wanders anywhere and we check he misses things" is a
+ *    promise that breaks the first time somebody adds a card.
+ *
+ * 2. He must not be a loop. Behaviour is chosen by weight, with the last few
+ *    excluded, and the gap between actions is drawn from a range rather than
+ *    set to a constant. Watch him for five minutes and you should not be able
+ *    to predict the next thing.
+ *
+ * 3. He must be cheap. No animation frame runs while he is idle — and he is
+ *    idle most of the time. No timers fire while the tab is hidden. A walk is
+ *    a CSS transform transition the compositor handles, not a per-frame
+ *    JavaScript position update.
+ */
+(function () {
+    'use strict';
+
+    var POSES = {
+        neutral: '/static/rickie.svg',
+        walk_a: '/static/rickie_walk_a.svg',
+        walk_b: '/static/rickie_walk_b.svg',
+        hop: '/static/rickie_hop.svg',
+        sit: '/static/rickie_sit.svg',
+        stretch: '/static/rickie_stretch.svg',
+        yawn: '/static/rickie_yawn.svg',
+        peek: '/static/rickie_peek.svg',
+        acorn: '/static/rickie_acorn.svg',
+        rest: '/static/rickie_rest.svg',
+        cheer: '/static/rickie_cheer.svg',
+        happy: '/static/rickie_happy.svg',
+        curious: '/static/rickie_curious.svg',
+        proud: '/static/rickie_proud.svg'
+    };
+
+    /* The behaviour library.
+     *
+     * `weight` is relative, not a percentage — `doze` at 14 against `potter` at
+     * 18 means he rests nearly as often as he wanders, which is the intended
+     * character. `rare` entries sit at 1 and turn up perhaps once a session;
+     * they are deliberately NOT rewards, carry no XP, announce nothing, and
+     * cannot be sought out, because a rare animation somebody can farm is a
+     * reason to keep a child staring at an app.
+     */
+    var BEHAVIOURS = [
+        { id: 'potter',   weight: 18, run: potter },
+        { id: 'sit',      weight: 16, run: poseFor('sit', 4200, 9000) },
+        { id: 'doze',     weight: 14, run: poseFor('rest', 6000, 14000) },
+        { id: 'stretch',  weight: 10, run: poseFor('stretch', 1400, 2200) },
+        { id: 'yawn',     weight: 10, run: poseFor('yawn', 1500, 2400) },
+        { id: 'watch',    weight: 10, run: poseFor('curious', 2500, 5000) },
+        { id: 'acorn',    weight:  8, run: poseFor('acorn', 3000, 6000) },
+        { id: 'scamper',  weight:  7, run: scamper },
+        { id: 'peek',     weight:  6, run: peek },
+        { id: 'hopabout', weight:  5, run: hopAbout },
+        /* Rare. */
+        { id: 'tumble',   weight:  1, run: tumble },
+        { id: 'acornjuggle', weight: 1, run: acornJuggle }
+    ];
+
+    var REACTIONS = {
+        exercise_done: ['cheer_small', 'hop_cheer', 'proud_beat'],
+        mission_done: ['cheer_big', 'hop_cheer', 'cheer_small'],
+        answered_right: ['proud_beat', 'cheer_small'],
+        answered_wrong: ['curious_beat']
+    };
+
+    var el = null, img = null;
+    var state = {
+        x: 0.18,            /* 0..1 across the viewport */
+        y: 0.86,            /* 0..1 down the viewport */
+        facing: 1,          /* 1 right, -1 left */
+        busy: false,
+        paused: false,
+        suspended: false,
+        recent: [],         /* short-term repetition avoidance */
+        timer: null,
+        walkTimer: null,
+        pose: 'neutral'
+    };
+
+    function reducedMotion() {
+        try {
+            return window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+        } catch (e) { return false; }
+    }
+
+    function stored(key, fallback) {
+        try { var v = localStorage.getItem(key); return v === null ? fallback : v; }
+        catch (e) { return fallback; }
+    }
+
+    function rand(lo, hi) { return lo + Math.random() * (hi - lo); }
+
+    /* Staying out of the way.
+     *
+     * The band is fixed, so mid-scroll the page runs underneath it and he can
+     * end up drawn over an exercise row or the "I did this" button. Reserving
+     * space at the foot of the document only solves the bottom of the page.
+     *
+     * So he dodges. Before moving he works out which parts of the band are
+     * clear of anything that matters, and only goes there. When the whole band
+     * is busy — common on a full mission card — he leaves, by slipping off an
+     * edge rather than standing on top of what somebody is reading.
+     */
+    /* What counts as "in the way".
+     *
+     * Interactive things and things with words in them — NOT whole cards. A
+     * card's rect runs the full width of the screen including its padding, and
+     * treating that as occupied left literally zero clear positions on a 390px
+     * phone with a mission card open, which would have meant a roaming
+     * character who spends his whole life off-screen. Standing over 16px of
+     * card padding obstructs nothing; standing over the "I did this" button
+     * obstructs everything.
+     */
+    var IMPORTANT = 'button, a, input, select, textarea, .bb-option-btn, ' +
+                    '.daily-exercise-name, .daily-exercise-meta, .daily-exercise-thumb-btn, ' +
+                    '.exercise-link-row, .insight-text, .insight-category, ' +
+                    '.daily-effort-options, .pane-nav';
+
+    function occupiedRects() {
+        var s = stage();
+        var rects = [];
+        var nodes = document.querySelectorAll(IMPORTANT);
+        for (var i = 0; i < nodes.length; i++) {
+            var node = nodes[i];
+            if (!node.offsetParent) continue;
+            var r = node.getBoundingClientRect();
+            if (!r.width || !r.height) continue;
+            if (r.bottom < 0 || r.top > s.height || r.right < 0 || r.left > s.width) continue;
+            /* A little breathing room, so he stands beside a button rather
+             * than brushing it. */
+            rects.push({ left: r.left - 10, right: r.right + 10,
+                         top: r.top - 10, bottom: r.bottom + 10 });
+        }
+        return rects;
+    }
+
+    function isClear(x, y, rects) {
+        var s = stage();
+        var left = x * Math.max(1, s.width - SIZE);
+        var top = y * Math.max(1, s.height - SIZE);
+        var right = left + SIZE, bottom = top + SIZE;
+        for (var i = 0; i < rects.length; i++) {
+            var r = rects[i];
+            if (!(right < r.left || left > r.right || bottom < r.top || top > r.bottom)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /* Where he could stand without covering anything that matters.
+     *
+     * A grid over the whole viewport, not a strip along the bottom. A strip was
+     * the first design and it does not survive contact with a phone: at 390px
+     * a mission card runs edge to edge — thumbnail, name, button — and there is
+     * no horizontal line across the bottom of the screen that is reliably
+     * clear. Measured: zero free positions out of twenty-one. A character
+     * confined to a strip would have spent his entire life hidden off-screen.
+     *
+     * Lower spots are preferred, so he reads as being on the ground rather
+     * than floating, but he will go wherever is actually free.
+     */
+    function freeSpots() {
+        var rects = occupiedRects();
+        var spots = [];
+        for (var row = 0; row <= 8; row++) {
+            var y = 0.06 + (row / 8) * 0.86;
+            for (var col = 0; col <= 10; col++) {
+                var x = 0.03 + (col / 10) * 0.9;
+                if (isClear(x, y, rects)) spots.push({ x: x, y: y, weight: 1 + y * 3 });
+            }
+        }
+        return spots;
+    }
+
+    function somewhereClear() {
+        var spots = freeSpots();
+        if (!spots.length) return null;
+        var total = spots.reduce(function (sum, s) { return sum + s.weight; }, 0);
+        var roll = Math.random() * total;
+        for (var i = 0; i < spots.length; i++) {
+            roll -= spots[i].weight;
+            if (roll <= 0) return spots[i];
+        }
+        return spots[spots.length - 1];
+    }
+
+    function setPose(name) {
+        if (!img || state.pose === name) return;
+        state.pose = name;
+        img.src = POSES[name] || POSES.neutral;
+    }
+
+    var SIZE = 56;
+
+    function stage() {
+        return el.parentNode.getBoundingClientRect();
+    }
+
+    function place() {
+        if (!el) return;
+        var s = stage();
+        var left = state.x * Math.max(0, s.width - SIZE);
+        var top = state.y * Math.max(0, s.height - SIZE);
+        el.style.transform = 'translate(' + Math.round(left) + 'px,' + Math.round(top) + 'px)' +
+                             ' scaleX(' + state.facing + ')';
+    }
+
+    /* ── Behaviours ─────────────────────────────────────────────────────── */
+
+    function poseFor(name, lo, hi) {
+        return function (done) {
+            setPose(name);
+            setTimeout(function () { setPose('neutral'); done(); }, rand(lo, hi));
+        };
+    }
+
+    function walkTo(target, speedPxPerSec, onArrive) {
+        var s = stage();
+        var dx = (target.x - state.x) * Math.max(1, s.width - SIZE);
+        var dy = (target.y - state.y) * Math.max(1, s.height - SIZE);
+        var distance = Math.sqrt(dx * dx + dy * dy);
+        var ms = Math.max(300, (distance / speedPxPerSec) * 1000);
+        state.facing = target.x > state.x ? 1 : -1;
+        state.x = target.x;
+        state.y = target.y;
+
+        /* The step cycle is two frames swapped on a timer — the movement itself
+         * is one CSS transition, so the compositor does the work and no
+         * animation frame runs in JavaScript. */
+        var frame = 0;
+        clearInterval(state.walkTimer);
+        state.walkTimer = setInterval(function () {
+            frame = 1 - frame;
+            setPose(frame ? 'walk_a' : 'walk_b');
+        }, 190);
+
+        el.style.transition = 'transform ' + Math.round(ms) + 'ms linear';
+        place();
+        setTimeout(function () {
+            clearInterval(state.walkTimer);
+            el.style.transition = '';
+            setPose('neutral');
+            if (onArrive) onArrive();
+        }, ms + 40);
+    }
+
+    function potter(done) {
+        var target = somewhereClear();
+        if (target === null) return leaveTheScreen(done);
+        walkTo(target, rand(26, 42), function () {
+            /* Having arrived somewhere, he usually settles rather than
+             * immediately setting off again. */
+            if (Math.random() < 0.55) { poseFor('sit', 2500, 6000)(done); }
+            else { done(); }
+        });
+    }
+
+    function scamper(done) {
+        var target = somewhereClear();
+        if (target === null) return leaveTheScreen(done);
+        walkTo(target, rand(80, 130), function () {
+            setPose('curious');
+            setTimeout(function () { setPose('neutral'); done(); }, rand(900, 1800));
+        });
+    }
+
+    function hopAbout(done) {
+        var hops = Math.round(rand(2, 4));
+        (function next() {
+            if (!hops--) { setPose('neutral'); return done(); }
+            setPose('hop');
+            el.style.transition = 'transform 260ms ease-out';
+            var next = Math.min(0.92, Math.max(0.03, state.x + state.facing * rand(0.05, 0.13)));
+            if (isClear(next, state.y, occupiedRects())) state.x = next;
+            else state.facing = -state.facing;
+            place();
+            setTimeout(function () {
+                setPose('neutral');
+                setTimeout(next, rand(160, 320));
+            }, 260);
+        })();
+    }
+
+    function leaveTheScreen(done) {
+        var edge = { x: state.x < 0.5 ? 0.0 : 1.0, y: state.y };
+        walkTo(edge, 90, function () {
+            el.classList.add('rickie-roam-hidden');
+            setTimeout(function () {
+                var spot = somewhereClear();
+                if (spot) {
+                    state.x = spot.x;
+                    state.y = spot.y;
+                    el.style.transition = '';
+                    place();
+                    el.classList.remove('rickie-roam-hidden');
+                }
+                done();
+            }, rand(3000, 7000));
+        });
+    }
+
+    function peek(done) {
+        /* Slip to an edge, drop out of sight, then look back over. */
+        var edge = { x: Math.random() < 0.5 ? 0.0 : 1.0, y: state.y };
+        walkTo(edge, rand(60, 90), function () {
+            el.classList.add('rickie-roam-hidden');
+            setTimeout(function () {
+                setPose('peek');
+                el.classList.remove('rickie-roam-hidden');
+                el.classList.add('rickie-roam-peeking');
+                setTimeout(function () {
+                    el.classList.remove('rickie-roam-peeking');
+                    setPose('neutral');
+                    done();
+                }, rand(1800, 3200));
+            }, rand(500, 1100));
+        });
+    }
+
+    function tumble(done) {
+        /* Rare: trips, sits down heavily, looks around to check nobody saw. */
+        var target = somewhereClear();
+        if (target === null) return leaveTheScreen(done);
+        walkTo(target, 110, function () {
+            setPose('hop');
+            el.style.transition = 'transform 300ms ease-in';
+            el.style.transform += ' rotate(14deg)';
+            setTimeout(function () {
+                el.style.transition = '';
+                place();
+                setPose('sit');
+                setTimeout(function () {
+                    setPose('curious');
+                    setTimeout(function () { setPose('neutral'); done(); }, 1400);
+                }, 1200);
+            }, 320);
+        });
+    }
+
+    function acornJuggle(done) {
+        /* Rare: finds an acorn, hops with it, loses interest. */
+        setPose('acorn');
+        setTimeout(function () {
+            setPose('hop');
+            setTimeout(function () {
+                setPose('acorn');
+                setTimeout(function () { setPose('neutral'); done(); }, 1800);
+            }, 400);
+        }, 1800);
+    }
+
+    /* ── Reactions ──────────────────────────────────────────────────────── */
+
+    var REACTION_RUNNERS = {
+        cheer_small: poseFor('happy', 1600, 2200),
+        cheer_big: function (done) {
+            setPose('cheer');
+            setTimeout(function () { setPose('happy'); }, 1400);
+            setTimeout(function () { setPose('neutral'); done(); }, 3000);
+        },
+        hop_cheer: function (done) {
+            setPose('cheer');
+            setTimeout(function () { hopAbout(done); }, 700);
+        },
+        proud_beat: poseFor('proud', 1800, 2600),
+        curious_beat: poseFor('curious', 1500, 2200)
+    };
+
+    /* ── Choosing what to do next ───────────────────────────────────────── */
+
+    function pick(list, recentIds) {
+        var pool = list.filter(function (b) { return recentIds.indexOf(b.id) === -1; });
+        if (!pool.length) pool = list;
+        var total = pool.reduce(function (sum, b) { return sum + b.weight; }, 0);
+        var roll = Math.random() * total;
+        for (var i = 0; i < pool.length; i++) {
+            roll -= pool[i].weight;
+            if (roll <= 0) return pool[i];
+        }
+        return pool[pool.length - 1];
+    }
+
+    function remember(id) {
+        state.recent.push(id);
+        /* Three deep: long enough that he does not repeat himself, short enough
+         * that a favourite behaviour can still come round again. */
+        while (state.recent.length > 3) state.recent.shift();
+    }
+
+    function idleDelay() {
+        /* Wide and skewed long. A constant interval is the thing that makes a
+         * character read as a screensaver. */
+        return Math.random() < 0.25 ? rand(3000, 8000) : rand(9000, 34000);
+    }
+
+    function schedule(ms) {
+        clearTimeout(state.timer);
+        state.timer = setTimeout(step, ms === undefined ? idleDelay() : ms);
+    }
+
+    function step() {
+        if (state.paused || state.suspended || state.busy || document.hidden) {
+            return schedule(6000);
+        }
+        var behaviour = pick(BEHAVIOURS, state.recent);
+        remember(behaviour.id);
+        state.busy = true;
+        behaviour.run(function () { state.busy = false; schedule(); });
+    }
+
+    /* ── When he must stop ──────────────────────────────────────────────── */
+    //
+    // Anything that asks for the reader's attention suspends him: an open
+    // exercise modal, the coach panel, a revealed Brain Boost, a focused text
+    // input. He does not vanish — he sits down where he is, which is both
+    // cheaper and more in character than disappearing.
+
+    var ATTENTION_SELECTORS = [
+        '.exercise-modal:not([hidden])',
+        '.coach-panel:not([hidden])',
+        '.photo-composer:not([hidden])',
+        '.bb-options'
+    ];
+
+    function attentionWanted() {
+        for (var i = 0; i < ATTENTION_SELECTORS.length; i++) {
+            var node = document.querySelector(ATTENTION_SELECTORS[i]);
+            if (node && node.offsetParent) return true;
+        }
+        var active = document.activeElement;
+        if (active && /^(INPUT|TEXTAREA|SELECT)$/.test(active.tagName)) return true;
+        return false;
+    }
+
+    function updateSuspension() {
+        var want = attentionWanted();
+        if (want === state.suspended) return;
+        state.suspended = want;
+        if (want) {
+            clearInterval(state.walkTimer);
+            el.style.transition = '';
+            setPose('sit');
+        } else if (!state.busy) {
+            setPose('neutral');
+            schedule(rand(1200, 4000));
+        }
+    }
+
+    /* ── Public surface ─────────────────────────────────────────────────── */
+
+    function setPaused(paused) {
+        state.paused = !!paused;
+        try { localStorage.setItem('rickie_roam_paused', paused ? '1' : '0'); } catch (e) {}
+        if (el) el.classList.toggle('rickie-roam-still', state.paused);
+        if (paused) {
+            clearTimeout(state.timer);
+            clearInterval(state.walkTimer);
+            el.style.transition = '';
+            setPose('sit');
+        } else {
+            setPose('neutral');
+            schedule(1200);
+        }
+        var btn = document.getElementById('rickie-roam-toggle');
+        if (btn) {
+            btn.textContent = state.paused ? 'Let Rickie roam' : 'Ask Rickie to settle';
+            btn.setAttribute('aria-pressed', String(state.paused));
+        }
+    }
+
+    function react(event) {
+        if (!el || state.paused) return;
+        var options = REACTIONS[event];
+        if (!options) return;
+        /* A reaction always interrupts pottering — being congratulated is the
+         * one moment he should not be asleep for. */
+        clearTimeout(state.timer);
+        clearInterval(state.walkTimer);
+        el.style.transition = '';
+        state.busy = true;
+        var id = options[Math.floor(Math.random() * options.length)];
+        (REACTION_RUNNERS[id] || REACTION_RUNNERS.cheer_small)(function () {
+            state.busy = false;
+            schedule();
+        });
+    }
+
+    function mount() {
+        if (el || document.getElementById('rickie-roam-band')) return;
+        var band = document.createElement('div');
+        band.id = 'rickie-roam-band';
+        band.className = 'rickie-roam-band';
+        /* Decorative. He is never the only way to reach anything, so a screen
+         * reader has nothing to gain from him and plenty to lose. */
+        band.setAttribute('aria-hidden', 'true');
+
+        el = document.createElement('div');
+        el.className = 'rickie-roam';
+        img = document.createElement('img');
+        img.className = 'rickie-roam-img';
+        img.src = POSES.neutral;
+        img.alt = '';
+        el.appendChild(img);
+        band.appendChild(el);
+        document.body.appendChild(band);
+
+        place();
+        window.addEventListener('resize', place);
+        var scrollCheck = null;
+        window.addEventListener('scroll', function () {
+            clearTimeout(scrollCheck);
+            scrollCheck = setTimeout(function () {
+                if (state.busy || state.paused || state.suspended) return;
+                if (isClear(state.x, state.y, occupiedRects())) return;
+                var spot = somewhereClear();
+                if (!spot) return;
+                state.x = spot.x;
+                state.y = spot.y;
+                el.style.transition = 'transform 420ms ease-in-out';
+                place();
+            }, 220);
+        }, { passive: true });
+        document.addEventListener('visibilitychange', function () {
+            /* Nothing runs while the tab is hidden. */
+            if (document.hidden) { clearTimeout(state.timer); clearInterval(state.walkTimer); }
+            else if (!state.paused) schedule(rand(2000, 6000));
+        });
+        document.addEventListener('focusin', updateSuspension);
+        document.addEventListener('focusout', function () { setTimeout(updateSuspension, 50); });
+        setInterval(updateSuspension, 900);
+
+        if (reducedMotion()) {
+            /* He still exists and still reacts; he simply does not travel. */
+            state.paused = true;
+            setPose('sit');
+            return;
+        }
+        setPaused(stored('rickie_roam_paused', '0') === '1');
+    }
+
+    window.RickieRoam = {
+        mount: mount,
+        _freeSpots: freeSpots,
+        _isClear: isClear,
+        _occupiedRects: occupiedRects,
+        _somewhereClear: somewhereClear,
+        react: react,
+        setPaused: setPaused,
+        isPaused: function () { return state.paused; },
+        /* Exposed for the browser checks: which behaviours ran, in order. */
+        _state: state,
+        _behaviours: BEHAVIOURS,
+        _pick: pick,
+        _step: step
+    };
+})();

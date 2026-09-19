@@ -728,6 +728,7 @@ def check_panes_and_solo_first(b: Browser, base: str, app) -> None:
     # and is visible from Today.
     go_to_pane(b, "today")
     b.js("(()=>{const x=[...document.querySelectorAll('button')]"
+         ".filter(e=>e.offsetParent && e.id!=='rickie-roam-toggle')"
          ".find(e=>/Rickie|Ask|Coach/i.test(e.textContent)); if(x) x.click(); return 1;})()")
     time.sleep(1.2)
     check(bool(b.js("(()=>{const p=document.querySelector('.coach-panel');"
@@ -948,6 +949,108 @@ def check_discovery_types_reach_a_reader(b: Browser, base: str, app) -> None:
              " if(c) c.remove(); return 1;})()")
 
 
+def check_rickie_roams(b: Browser, base: str, app) -> None:
+    """Rickie, moving, and never in the way.
+
+    The obstruction rule is checked against the real page rather than against
+    the engine's model of it: he is placed where the engine says is clear, and
+    then every visible control and every piece of exercise text is measured to
+    confirm none of them is under him. A character that dodges according to its
+    own map is not the same as a character that dodges.
+    """
+    print("\nRickie — roaming")
+    _, token = make_user(app, "roam")
+    b.goto(base + "/", wait=1.0)
+    b.js(f"localStorage.setItem('streakfit_token', {json.dumps(token)})")
+    b.goto(base + "/", wait=3.0)
+
+    if not check(bool(b.js("!!window.RickieRoam && !!document.getElementById('rickie-roam-band')")),
+                 "he is on the dashboard"):
+        return
+    check(b.js("getComputedStyle(document.querySelector('.rickie-roam-band')).position") == "fixed",
+          "his layer is fixed, so he can never shift the layout")
+    check(b.js("getComputedStyle(document.querySelector('.rickie-roam-band')).pointerEvents") == "none",
+          "and never swallows a tap")
+
+    # Variety: a weighted pick with the last three excluded.
+    ids = (b.js("""(()=>{const out=[];const st=RickieRoam._state;const keep=st.recent.slice();
+      for(let i=0;i<60;i++){const bh=RickieRoam._pick(RickieRoam._behaviours, st.recent);
+        out.push(bh.id); st.recent.push(bh.id); while(st.recent.length>3) st.recent.shift();}
+      st.recent=keep; return out.join(',');})()""") or "").split(",")
+    distinct = len(set(ids))
+    longest, run = 1, 1
+    for i in range(1, len(ids)):
+        run = run + 1 if ids[i] == ids[i - 1] else 1
+        longest = max(longest, run)
+    check(distinct >= 9, f"he has at least nine things he might do ({distinct} in 60 draws)")
+    check(longest == 1, f"and never does the same one twice running (longest run {longest})")
+    check(any(i in ("tumble", "acornjuggle") for i in ids),
+          "the rare behaviours are reachable")
+    resting = sum(1 for i in ids if i in ("sit", "doze"))
+    check(resting >= 12, f"and he rests a good deal of the time ({resting}/60)")
+
+    # Obstruction, measured on the page.
+    spots = b.js("RickieRoam._freeSpots().length")
+    if not check(spots > 0, "there is somewhere clear for him to stand", f"{spots} free"):
+        return
+    blocked = []
+    b.js("RickieRoam.setPaused(true)")   # he must hold still to be measured
+    for _ in range(8):
+        b.js("""(()=>{const s=RickieRoam._somewhereClear(); if(!s) return 0;
+          const e=document.querySelector('.rickie-roam');
+          const st=e.parentNode.getBoundingClientRect();
+          e.style.transform='translate('+Math.round(s.x*(st.width-56))+'px,'+
+            Math.round(s.y*(st.height-56))+'px)'; return 1;})()""")
+        hit = b.js("""(()=>{const r=document.querySelector('.rickie-roam').getBoundingClientRect();
+          const bad=[];
+          for(const el of document.querySelectorAll(
+              'button,a,input,select,textarea,.daily-exercise-name,.daily-exercise-meta,.bb-option-btn')){
+            if(!el.offsetParent) continue;
+            const q=el.getBoundingClientRect();
+            if(!q.width) continue;
+            if(!(q.right<r.left||q.left>r.right||q.bottom<r.top||q.top>r.bottom))
+              bad.push((el.id||el.className||el.tagName).toString().slice(0,30));
+          } return bad.join('|');})()""")
+        if hit:
+            blocked.append(hit)
+    b.js("RickieRoam.setPaused(false)")
+    check(not blocked, "eight clear positions, none covering a control or exercise text",
+          "; ".join(blocked[:3]))
+
+    # A tap at his position reaches the page underneath.
+    under = b.js("""(()=>{const q=document.querySelector('.rickie-roam').getBoundingClientRect();
+      const hit=document.elementFromPoint(q.left+q.width/2, q.top+q.height/2);
+      return hit ? (hit.className||hit.tagName).toString().slice(0,40) : 'nothing';})()""")
+    check("rickie" not in (under or "").lower(),
+          "a tap where he stands reaches the page, not him", str(under))
+
+    # He stops while somebody is typing.
+    b.js("""(()=>{const i=document.createElement('input'); i.id='roamcheck-input';
+      i.style.cssText='position:fixed;top:8px;left:8px;z-index:99';
+      document.body.appendChild(i); i.focus(); return 1;})()""")
+    time.sleep(1.3)
+    check(bool(b.js("RickieRoam._state.suspended")), "he settles while a field is focused")
+    b.js("(()=>{const i=document.getElementById('roamcheck-input'); i.blur(); i.remove(); return 1;})()")
+    time.sleep(1.3)
+    check(not b.js("RickieRoam._state.suspended"), "and carries on afterwards")
+
+    # The pause control, which must be reachable without a mouse.
+    b.js("RickieRoam.setPaused(true)")
+    time.sleep(0.3)
+    check(bool(b.js("RickieRoam.isPaused()")), "roaming can be paused")
+    label = (b.js("(document.getElementById('rickie-roam-toggle')||{}).textContent") or "").strip()
+    check("roam" in label.lower(), "and the control says what it will do", label)
+    check(b.js("(document.getElementById('rickie-roam-toggle')||{}).getAttribute('aria-pressed')") == "true",
+          "with its state exposed to assistive tech")
+    b.js("RickieRoam.setPaused(false)")
+
+    # Reactions vary rather than replaying one animation.
+    poses = (b.js("""(()=>{const seen=[];for(let i=0;i<24;i++){
+      RickieRoam._state.busy=false; RickieRoam.react('mission_done');
+      seen.push(RickieRoam._state.pose);} return seen.join(',');})()""") or "").split(",")
+    check(len(set(poses)) >= 2, f"a celebration is not always the same one ({sorted(set(poses))})")
+
+
 def check_page_is_clean(b: Browser, base: str, app) -> None:
     print("\nThe page itself, at phone width")
     _, token = make_user(app, "clean")
@@ -1045,6 +1148,7 @@ def main() -> int:
         check_someone_can_actually_sign_up(browser, base, flask_app)
         check_coming_back_after_a_while(browser, base, flask_app)
         check_discovery_types_reach_a_reader(browser, base, flask_app)
+        check_rickie_roams(browser, base, flask_app)
         check_page_is_clean(browser, base, flask_app)
     except Exception as exc:  # a crash must never read as a pass
         bad(f"check run crashed: {type(exc).__name__}: {exc}")

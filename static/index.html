@@ -104,6 +104,19 @@
                             <option value="custom" disabled>Custom</option>
                         </select>
                     </div>
+                    <!-- Pausing his roaming leaves everything else about him
+                         intact: he still reacts, still talks, still has a face.
+                         An accessible way to stop the movement without removing
+                         the character. -->
+                    <div class="settings-row" id="settings-row-roam">
+                        <label class="settings-label" for="rickie-roam-toggle">Rickie's roaming</label>
+                        <button id="rickie-roam-toggle" type="button" class="btn-secondary"
+                                aria-pressed="false"
+                                onclick="window.RickieRoam &amp;&amp; window.RickieRoam.setPaused(!window.RickieRoam.isPaused())">
+                            Ask Rickie to settle
+                        </button>
+                    </div>
+
                     <div class="settings-row" id="settings-row-rickie">
                         <label class="settings-label" for="rickie-mode-select">Rickie</label>
                         <select id="rickie-mode-select" class="skill-select" title="How much of Rickie's personality you want"
@@ -338,6 +351,7 @@
         </div>
     </div>
 
+    <script src="/static/rickie-roam.js"></script>
     <script src="/static/app.js"></script>
 </body>
 </html>

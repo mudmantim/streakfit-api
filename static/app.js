@@ -3124,6 +3124,12 @@ var _rickieToastPlaying = false;
 function showRickieReaction(line, summary) {
     _rickieToastQueue.push({ line: line, summary: summary || {} });
     if (!_rickieToastPlaying) _playNextRickieToast();
+    // The roaming Rickie reacts too, and picks a different celebration each
+    // time. Same event, same moment, two different bits of him.
+    if (window.RickieRoam) {
+        window.RickieRoam.react((summary && summary.perfectMission)
+            ? 'mission_done' : 'exercise_done');
+    }
 }
 
 function _playNextRickieToast() {
@@ -3691,6 +3697,9 @@ document.addEventListener('click', function (e) {
 function showView(name) {
     document.getElementById('auth-view').hidden      = (name !== 'auth');
     document.getElementById('dashboard-view').hidden = (name !== 'dashboard');
+    // Rickie lives on the dashboard. He has no business on the sign-up form,
+    // where the only thing that matters is the two fields in front of you.
+    if (name === 'dashboard' && window.RickieRoam) window.RickieRoam.mount();
 }
 
 // ── Settings menu ─────────────────────────────────────────────────────────────
@@ -4626,6 +4635,10 @@ function renderBrainBoostQuestion(brainBoost) {
                 if ((summary.xp > 0 || summary.acorns > 0) && _rickieMode() === 'full') {
                     var poolKey = result.data.correct ? 'brainBoostCorrect' : 'brainBoostIncorrect';
                     showRickieReaction(_pickRickieLine(poolKey), summary);
+                    if (window.RickieRoam) {
+                        window.RickieRoam.react(result.data.correct
+                            ? 'answered_right' : 'answered_wrong');
+                    }
                     // Only "correct" has a defined expression mapping — incorrect
                     // answers leave the current expression as-is rather than
                     // inventing an unspecified one.
