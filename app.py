@@ -1543,18 +1543,31 @@ class CoachTurn(db.Model):
 
 
 class CoachNote(db.Model):
-    """One small, server-maintained 'Coach Notes' record per user. Holds only
-    factual, structured information the user stated explicitly (goals,
-    preferences, ongoing context) — never emotional interpretations, diagnoses,
-    or speculation. Populated by deterministic server-side extraction, never by
-    Rickie. Each field is a JSON list of short strings (Text column, matching the
-    repo's existing Text-JSON convention)."""
+    """What Rickie is allowed to remember between conversations.
+
+    This is an ALLOW-LIST, and the important property is structural: **no user
+    text is ever stored here.** Every value is a canonical token drawn from a
+    closed vocabulary (COACH_NOTE_TAXONOMY) — "walking", "morning", "short".
+    Extraction recognises a token or it stores nothing.
+
+    That is the whole defence. The previous design matched broad phrases ("my
+    goal is X", "I prefer X", "just so you know X") and persisted whatever
+    followed, which meant a child typing "my goal is to lose 10 pounds" or
+    "I prefer not eating lunch" had it stored verbatim and re-injected into
+    every future conversation. A deny-list of dangerous phrases would have been
+    an endless game; having no path from free text to storage ends it.
+
+    Consequence worth stating plainly: StreakFit cannot remember most of what
+    you tell it, on purpose. Rickie still SEES the last ten turns of the current
+    conversation — this is only about what outlives it.
+    """
     __tablename__ = 'coach_note'
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False, unique=True)
-    goals = db.Column(db.Text, nullable=False, default='[]')
-    preferences = db.Column(db.Text, nullable=False, default='[]')
-    notes = db.Column(db.Text, nullable=False, default='[]')  # ongoing context
+    # JSON lists of canonical tokens only. Never free text.
+    activities = db.Column(db.Text, nullable=False, default='[]')
+    avoid_movements = db.Column(db.Text, nullable=False, default='[]')
+    session_prefs = db.Column(db.Text, nullable=False, default='[]')
     updated_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow,
                            onupdate=datetime.utcnow)
 
@@ -2403,9 +2416,9 @@ def export_my_data():
             {"role": r, "content": c, "at": t.isoformat()} for r, c, t in coach_turns
         ],
         "coach_notes": {
-            "goals": json.loads(note.goals) if note else [],
-            "preferences": json.loads(note.preferences) if note else [],
-            "notes": json.loads(note.notes) if note else [],
+            "activities": _json_list(note.activities) if note else [],
+            "avoid_movements": _json_list(note.avoid_movements) if note else [],
+            "session_prefs": _json_list(note.session_prefs) if note else [],
         },
         "photos_shared": [
             {"id": p, "team_id": t, "caption": c,
@@ -4998,43 +5011,163 @@ def _build_rickie_context(user):
 #   • coach_turn — a rolling window of the last 10 conversation turns per user,
 #     so continuity survives across sessions/devices and Rickie sees his own
 #     recent replies (which is what actually stops repeated phrasing).
-#   • coach_note — one small record of FACTUAL, user-stated info (goals,
-#     preferences, ongoing context), extracted by high-precision regex on the
-#     user's own words only. No inference, no emotion, no diagnoses. Rickie is
-#     never allowed to update memory; it's injected as background context only.
+#   • coach_note — a handful of canonical tokens from a closed vocabulary
+#     (which movement they like, which they'd rather avoid, when they train).
+#     No user text is stored, so there is nothing for a paraphrase to smuggle
+#     through. Rickie is never allowed to update memory; it's injected as
+#     background context only. See COACH_NOTE_TAXONOMY below.
 
 _COACH_MEMORY_WINDOW = 10       # max stored turns per user
 _COACH_TURN_MAX_LEN = 1000      # cap stored turn content
 _COACH_TURN_PROMPT_LEN = 600    # cap when threading into the model context
-_COACH_NOTE_MAX_ITEMS = 5       # per category (goals/preferences/notes)
-_COACH_NOTE_MAX_LEN = 140       # per fact
-_COACH_NOTE_MIN_LEN = 3
 
-# High-precision extraction — only explicit statements. Low recall on purpose:
-# better to store a few accurate facts than to speculate.
-_GOAL_PATTERNS = [
-    re.compile(r"\bmy goal is (?:to )?(.+)", re.I),
-    re.compile(r"\bi'?m training for (.+)", re.I),
-    re.compile(r"\bi want to be able to (.+)", re.I),
-    re.compile(r"\bi'?d like to be able to (.+)", re.I),
-]
-_PREFERENCE_PATTERNS = [
-    re.compile(r"\bi prefer (.+)", re.I),
-    re.compile(r"\bi'?d rather (.+)", re.I),
-]
-_NOTE_PATTERNS = [
-    re.compile(r"\bremember that (.+)", re.I),
-    re.compile(r"\bjust so you know,?\s*(.+)", re.I),
-]
-_COACH_NOTE_CATEGORIES = (
-    ("goals", _GOAL_PATTERNS),
-    ("preferences", _PREFERENCE_PATTERNS),
-    ("notes", _NOTE_PATTERNS),
-)
+# ── What Rickie is allowed to remember between conversations ─────────────────
+#
+# A CLOSED VOCABULARY, not a phrase filter. Extraction maps a message onto one
+# of the canonical tokens below, or it stores nothing at all. No user text ever
+# reaches the database, so a paraphrase cannot get through: there is nothing to
+# get through. "I prefer not eating lunch" contains no token in this table, so
+# the result is the empty set — exactly as it would be for "asdf".
+#
+# Adding a slot here is a deliberate act with a safety consequence.
+# test_coach_notes.py::test_the_taxonomy_itself_contains_nothing_sensitive
+# refuses medical, body, food and mood vocabulary outright, so a careless
+# addition fails the suite rather than shipping.
+
+COACH_NOTE_TAXONOMY = {
+    # Movement the person enjoys. Useful — Rickie can lean towards the kind of
+    # thing they already like. Harmless — it says nothing about their body,
+    # health or life.
+    "activities": {
+        "walking":     ("walk", "walks", "walking"),
+        "running":     ("run", "runs", "running", "jog", "jogging"),
+        "cycling":     ("cycle", "cycling", "biking", "bike rides", "riding my bike"),
+        "swimming":    ("swim", "swimming"),
+        "dancing":     ("dance", "dancing"),
+        "stretching":  ("stretch", "stretches", "stretching", "mobility"),
+        "yoga":        ("yoga",),
+        "strength":    ("strength training", "lifting", "weights", "press ups", "push ups"),
+        "outdoors":    ("outdoors", "outside", "fresh air", "in the garden"),
+        "team sports": ("football", "soccer", "basketball", "netball", "hockey",
+                        "tennis", "team sports"),
+    },
+    # Movement they would rather not be given. Stored as the MOVEMENT ONLY,
+    # never the reason. "I can't do jumping because of my knee" stores
+    # "jumping" and discards the rest: a reason is health information, and
+    # health information is not ours to keep.
+    "avoid_movements": {
+        "jumping":    ("jumping", "jumps", "jump", "hopping", "high impact"),
+        "running":    ("running", "jogging"),
+        "floor work": ("floor work", "floor exercises", "on the floor",
+                       "getting down on the floor", "lying down"),
+        "overhead":   ("overhead", "above my head", "arms up"),
+    },
+    # When, and how long. Scheduling, not personal information.
+    "session_prefs": {
+        "mornings":   ("morning", "mornings", "first thing", "before work",
+                       "before school"),
+        "afternoons": ("afternoon", "afternoons", "lunchtime"),
+        "evenings":   ("evening", "evenings", "at night", "after dinner",
+                       "before bed"),
+        "short":      ("short", "quick", "brief", "five minutes", "ten minutes"),
+        "longer":     ("longer", "long sessions", "more time"),
+    },
+}
+
+# Slots are ordered so the person's phrasing decides which one a shared word
+# lands in: "I can't do running" is an avoid, "I love running" is an activity.
+_COACH_NOTE_SLOTS = ("activities", "avoid_movements", "session_prefs")
+
+# A word only counts when it is being offered as a preference, not merely
+# mentioned. "I like walking" stores something. "Walking to the shop took
+# ages" does not.
+_LIKE_CUE = re.compile(
+    r"\b(i (really |kind of |sort of )?(like|love|enjoy|prefer|fancy)"
+    r"|i'?m into|my favou?rite|i'?d rather|i always do|i like doing"
+    r"|works best for me|i'?m best at)\b", re.I)
+
+_AVOID_CUE = re.compile(
+    r"\b(i (can'?t|cannot|can not|don'?t|do not|won'?t|will not)"
+    r"|i'?d rather not|i would rather not|no more|please (no|avoid)|avoid"
+    r"|not a fan of|i hate|i'?m not able to|i struggle with)\b", re.I)
+
+_WHEN_CUE = re.compile(
+    r"\b(i (usually|normally|generally|tend to|like to|prefer to|always|only)"
+    r"|works best|best time|suits me|i'?m a|i do (them|it|this|my)"
+    r"|keep (it|them)|make (it|them))\b", re.I)
+
+_CUE_FOR_SLOT = {
+    "activities": _LIKE_CUE,
+    "avoid_movements": _AVOID_CUE,
+    "session_prefs": re.compile(_WHEN_CUE.pattern + "|" + _LIKE_CUE.pattern, re.I),
+}
+
+# Belt AND braces — emphatically NOT the mechanism. The allow-list already makes
+# sensitive storage impossible on its own. This throws away the whole message as
+# well, so a sentence pairing a disclosure with an innocuous token ("I skip
+# meals, then I like to go for a walk") contributes nothing rather than half.
+# If this list is incomplete it costs a stored "walking", not a stored
+# disclosure — which is the entire point of putting the allow-list first.
+_SENSITIVE_VETO = re.compile(
+    r"\b(fat|thin|skinny|chubby|overweight|obese|weight|weigh|pounds?|kilos?|kg|lbs"
+    r"|calor\w*|diet|dieting|anorexi\w*|bulimi\w*|purge|purging|starv\w*|fast(ing)?"
+    r"|skip(ping)? (a |my )?meals?|not eating|don'?t eat|stopped eating|binge\w*"
+    r"|belly|abs|thighs|my body|ugly|disgusting|hate myself"
+    r"|depress\w*|anxiet\w*|anxious|panic attacks?|suicid\w*|self.?harm|cutting"
+    r"|therapy|therapist|counsell?or|psychiatr\w*"
+    r"|medication|meds|pills|tablets|inhaler|doctor|gp|hospital|diagnos\w*"
+    r"|injur\w*|surgery|operation|asthma|diabet\w*|epilep\w*|arthrit\w*"
+    r"|disorder|disability|disabled|chronic|condition|syndrome|pregnan\w*"
+    r"|gay|lesbian|bisexual|trans|transgender|queer|sexuality|orientation)\b", re.I)
+
+_COACH_NOTE_MAX_PER_SLOT = 4
+
+
+def _coach_note_extract(message):
+    """Map the USER's message onto canonical tokens from COACH_NOTE_TAXONOMY.
+
+    Returns {slot: [token, ...]} — every returned string is guaranteed to be a
+    key that already exists in the taxonomy, so this function structurally
+    cannot return anything the person typed. Empty lists when nothing in the
+    closed vocabulary was expressed as a preference, which is the common case
+    and is fine: Rickie remembering nothing is the safe default, and the
+    conversation itself still carries full context within a session.
+
+    Never called on Rickie's output.
+    """
+    found = {slot: [] for slot in _COACH_NOTE_SLOTS}
+    text = (message or "").strip()
+    if not text or _SENSITIVE_VETO.search(text):
+        return found
+
+    low = " " + " ".join(text.lower().split()) + " "
+    for slot in _COACH_NOTE_SLOTS:
+        if not _CUE_FOR_SLOT[slot].search(text):
+            continue
+        for canonical, synonyms in COACH_NOTE_TAXONOMY[slot].items():
+            for synonym in synonyms:
+                if re.search(r"\b" + re.escape(synonym) + r"\b", low):
+                    if canonical not in found[slot]:
+                        found[slot].append(canonical)
+                    break
+
+    # "I can't do running" is an avoid, not a favourite. When both readings fire
+    # on the same token, the avoid wins — the cost of being wrong is asymmetric.
+    for token in found["avoid_movements"]:
+        if token in found["activities"]:
+            found["activities"].remove(token)
+    return found
+
+
+def _coach_note_log_summary(tokens):
+    """Log-safe summary. Tokens come from a closed vocabulary, so logging them
+    verbatim cannot leak anything the user typed."""
+    return ",".join("%s=%s" % (slot, "|".join(tokens.get(slot, [])) or "-")
+                    for slot in _COACH_NOTE_SLOTS)
 
 
 def _json_list(raw):
-    """Parse a stored JSON list of strings; anything malformed becomes []."""
+    """Parse a stored JSON list of tokens; anything malformed becomes []."""
     try:
         val = json.loads(raw or "[]")
         return [str(x) for x in val] if isinstance(val, list) else []
@@ -5042,37 +5175,19 @@ def _json_list(raw):
         return []
 
 
-def _clean_fact(text):
-    """First clause only, whitespace-collapsed, trimmed, length-capped."""
-    text = re.split(r"[.!?\n]", text, maxsplit=1)[0]
-    text = " ".join(text.split()).strip(" ,;:-")
-    return text[:_COACH_NOTE_MAX_LEN]
+def _merge_note_tokens(slot, existing, new):
+    """Union of old and new tokens, most recent last, capped.
 
-
-def _coach_note_extract(message):
-    """Deterministic, high-precision extraction of factual statements from the
-    USER's message. Returns {goals, preferences, notes} lists (possibly empty).
-    Never called on Rickie's output."""
-    found = {"goals": [], "preferences": [], "notes": []}
-    for key, patterns in _COACH_NOTE_CATEGORIES:
-        for pat in patterns:
-            m = pat.search(message or "")
-            if m:
-                fact = _clean_fact(m.group(1))
-                if len(fact) >= _COACH_NOTE_MIN_LEN and fact not in found[key]:
-                    found[key].append(fact)
-    return found
-
-
-def _merge_note_list(existing, new):
-    """Append new facts, dedup case-insensitively, keep the most recent N."""
-    out = list(existing)
-    seen = {x.lower() for x in out}
-    for f in new:
-        if f.lower() not in seen:
-            out.append(f)
-            seen.add(f.lower())
-    return out[-_COACH_NOTE_MAX_ITEMS:]
+    Re-filters `existing` against the live taxonomy, so a token that a future
+    edit removes from the allow-list stops being used the moment the code
+    changes — no migration required for the narrowing case.
+    """
+    allowed = COACH_NOTE_TAXONOMY[slot]
+    out = [t for t in existing if t in allowed]
+    for token in new:
+        if token in allowed and token not in out:
+            out.append(token)
+    return out[-_COACH_NOTE_MAX_PER_SLOT:]
 
 
 def _find_coach_note(user_id):
@@ -5090,7 +5205,8 @@ def _get_or_create_coach_note(user_id):
         return note
     try:
         with db.session.begin_nested():   # SAVEPOINT — rolled back on conflict
-            note = CoachNote(user_id=user_id, goals='[]', preferences='[]', notes='[]')
+            note = CoachNote(user_id=user_id, activities='[]',
+                             avoid_movements='[]', session_prefs='[]')
             db.session.add(note)
         return note
     except IntegrityError:
@@ -5098,28 +5214,29 @@ def _get_or_create_coach_note(user_id):
         return _find_coach_note(user_id)
 
 
-def _stage_coach_note(user_id, facts):
-    """Merge pre-extracted facts into the user's Coach Notes. STAGES only (flush) —
+def _stage_coach_note(user_id, tokens):
+    """Merge extracted tokens into the user's Coach Notes. STAGES only (flush) —
     the caller owns the commit."""
     note = _get_or_create_coach_note(user_id)
-    for key, _patterns in _COACH_NOTE_CATEGORIES:
-        merged = _merge_note_list(_json_list(getattr(note, key)), facts[key])
-        setattr(note, key, json.dumps(merged))
+    for slot in _COACH_NOTE_SLOTS:
+        merged = _merge_note_tokens(slot, _json_list(getattr(note, slot)),
+                                    tokens.get(slot, []))
+        setattr(note, slot, json.dumps(merged))
     db.session.flush()
 
 
 def _update_coach_note(user_id, message):
-    """Extract explicit facts from the user's message and persist them. No-op when
-    nothing factual was stated. Self-committing convenience wrapper for direct/CLI/
-    test use; the coach request path uses _persist_coach_interaction for one atomic
-    transaction instead."""
-    facts = _coach_note_extract(message)
-    if not any(facts.values()):
+    """Extract allow-listed tokens from the user's message and persist them. No-op
+    when the message expressed nothing in the vocabulary, which is most messages.
+    Self-committing convenience wrapper for direct/CLI/test use; the coach request
+    path uses _persist_coach_interaction for one atomic transaction instead."""
+    tokens = _coach_note_extract(message)
+    if not any(tokens.values()):
         return
-    _stage_coach_note(user_id, facts)
+    _stage_coach_note(user_id, tokens)
     db.session.commit()
-    app.logger.info("event=coach_note_extract user_id=%s goals=%d prefs=%d notes=%d",
-                    user_id, len(facts['goals']), len(facts['preferences']), len(facts['notes']))
+    app.logger.info("event=coach_note_extract user_id=%s tokens=%s",
+                    user_id, _coach_note_log_summary(tokens))
 
 
 def _load_coach_note_block(user_id):
@@ -5129,19 +5246,21 @@ def _load_coach_note_block(user_id):
     note = CoachNote.query.filter_by(user_id=user_id).first()
     if note is None:
         return ""
-    goals, prefs, ctx = _json_list(note.goals), _json_list(note.preferences), _json_list(note.notes)
-    if not (goals or prefs or ctx):
+    likes = _json_list(note.activities)
+    avoid = _json_list(note.avoid_movements)
+    when = _json_list(note.session_prefs)
+    if not (likes or avoid or when):
         return ""
     lines = [
         "What you quietly know about this user (background only — weave in "
         "naturally when it helps; never say \"I remember,\" never list these back):"
     ]
-    if goals:
-        lines.append("- Goals: " + "; ".join(goals))
-    if prefs:
-        lines.append("- Preferences: " + "; ".join(prefs))
-    if ctx:
-        lines.append("- Ongoing: " + "; ".join(ctx))
+    if likes:
+        lines.append("- Movement they enjoy: " + ", ".join(likes))
+    if avoid:
+        lines.append("- Movement to steer away from: " + ", ".join(avoid))
+    if when:
+        lines.append("- How they like sessions: " + ", ".join(when))
     return "\n".join(lines)
 
 
@@ -5203,21 +5322,21 @@ def _persist_coach_interaction(user_id, user_msg, reply):
     try:
         pruned = _stage_coach_exchange(user_id, user_msg, reply)
         try:
-            facts = _coach_note_extract(user_msg)
+            tokens = _coach_note_extract(user_msg)
         except Exception:
             app.logger.warning("coach note extraction failed", exc_info=True)
-            facts = None
-        noted = bool(facts and any(facts.values()))
+            tokens = None
+        noted = bool(tokens and any(tokens.values()))
         if noted:
-            _stage_coach_note(user_id, facts)
+            _stage_coach_note(user_id, tokens)
         db.session.commit()
     except Exception:
         db.session.rollback()
         raise
     app.logger.info("event=coach_turn_saved user_id=%s pruned=%d", user_id, pruned)
     if noted:
-        app.logger.info("event=coach_note_extract user_id=%s goals=%d prefs=%d notes=%d",
-                        user_id, len(facts['goals']), len(facts['preferences']), len(facts['notes']))
+        app.logger.info("event=coach_note_extract user_id=%s tokens=%s",
+                        user_id, _coach_note_log_summary(tokens))
 
 
 def _forget_coach_memory(user_id):
