@@ -29,7 +29,11 @@ services:
     # Migrations run first (a failure short-circuits via && and gunicorn never starts).
     # STREAKFIT_ENFORCE_DB_HEAD=1 is set INLINE on gunicorn ONLY — it must NOT be a global
     # env var, or the boot guard would fire during `flask db upgrade` and deadlock the deploy.
-    startCommand: flask db upgrade && STREAKFIT_ENFORCE_DB_HEAD=1 gunicorn app:app
+    # STREAKFIT_RETENTION_SWEEPER=1 starts the in-process thread that deletes
+    # expired coach turns on a timer, so retention does not depend on somebody
+    # using the app. Inline like the DB-head guard: neither may be a global env
+    # var, or both would fire during `flask db upgrade`.
+    startCommand: flask db upgrade && STREAKFIT_ENFORCE_DB_HEAD=1 STREAKFIT_RETENTION_SWEEPER=1 gunicorn app:app
     healthCheckPath: /health
     envVars:
       # Secrets — set in the dashboard, never committed. `sync: false` = Render won't
@@ -50,3 +54,37 @@ services:
       #   sync: false
     # Single worker today. Scaling out requires shared rate-limit storage + weather-cache
     # decision first — see docs/operations/production-readiness.md.
+
+  # ── Retention, when the web service is not running ────────────────────────
+  #
+  # The in-process thread above covers a live service. It cannot cover a service
+  # that is down, mid-deploy, or crash-looping — and "we delete your child's
+  # conversations after 30 days" should not quietly depend on our uptime.
+  #
+  # This cron runs the same sweep on its own schedule, from the same code path
+  # (`flask coach-prune`), so the promise holds whatever the web service is
+  # doing. Daily at 03:17 UTC — an odd minute on purpose, to avoid the top-of-
+  # hour crowd on shared infrastructure.
+  #
+  # ⚠️ Like the rest of this file, this is PROPOSED. A cron declared here does
+  # nothing until the service is created from / linked to this Blueprint. Until
+  # then the thread is the only automatic sweep, and it stops when the web
+  # service does. See docs/operations/privacy-retention.md.
+  - type: cron
+    name: streakfit-retention-sweep
+    runtime: python
+    region: oregon          # VERIFY against dashboard — must match the web service
+    plan: starter           # VERIFY against dashboard
+    branch: main
+    schedule: "17 3 * * *"
+    buildCommand: pip install -r requirements.txt
+    startCommand: flask coach-prune
+    envVars:
+      # The same database the web service uses. Nothing else is needed: the
+      # command touches coach_turn only and sends nothing to any model.
+      - key: DATABASE_URL
+        sync: false
+      - key: SECRET_KEY
+        sync: false
+      - key: JWT_SECRET_KEY
+        sync: false

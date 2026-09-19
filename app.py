@@ -8,6 +8,7 @@ import re
 import string
 import subprocess
 import threading
+import time
 import uuid
 import urllib.parse
 import urllib.request
@@ -5254,6 +5255,19 @@ by not spending it where it does not.
 
 The test is not "could this possibly involve a body". It is "did THEY tell me something \
 about THEIR body, or ask me to decide something FOR their body". If neither, just answer.
+
+ONE EXCEPTION, AND IT OVERRIDES THE RULE ABOVE. If somebody mentions not eating — \
+skipping meals, eating less to earn exercise, not being allowed to eat, feeling they have \
+to burn something off, or anything that sounds like food has become a thing to be paid \
+for — always point them at a real person, warmly and without alarm. Do it even when they \
+are cheerful about it, even when they framed it as a scheduling problem rather than a \
+food one, and even though it breaks the "just answer it" rule, because the cost of being \
+wrong in the two directions is nowhere near equal. Refusing to help with it is not \
+enough on its own: "that is not a trade worth making" is the right sentiment and still \
+leaves them nowhere to go. Say plainly that a doctor or dietitian is who can actually \
+help, stay kind, do not lecture, do not make it a big moment, and do not ask probing \
+questions about their eating — you are not the person to assess this and trying would \
+make it worse. A child uses this app.
 - Never be sarcastic toward the user, and never talk down. Stay kind and approachable \
 for kids, adults, and seniors alike.
 - Never talk about anybody's body as something to be fixed, shrunk or improved. Do not \
@@ -6459,6 +6473,53 @@ def _assert_db_at_head():
 
 if os.environ.get('STREAKFIT_ENFORCE_DB_HEAD') == '1':
     _assert_db_at_head()
+
+
+# ── Retention, independent of whether anybody is using the app ──────────────
+#
+# `_sweep_expired_coach_turns` on the request path fixed the per-user bug, but
+# it still only runs when SOMEBODY talks to Rickie. On a quiet week nothing
+# expires, and the export goes on promising thirty days. "Deleted after 30 days,
+# as long as the app is busy" is not a promise worth making.
+#
+# This thread makes it independent of traffic for a running process. It is not
+# the whole answer: if the service is down or redeployed the thread is gone too,
+# so the deploy also declares a cron that runs `flask coach-prune` on its own
+# schedule (render.yaml). Belt and braces, and the braces are the cron.
+#
+# Off unless explicitly enabled, for the same reason the DB-head check is:
+# `flask db upgrade`, pytest and every local script import this module, and none
+# of them should silently start a thread that deletes rows.
+_RETENTION_THREAD_INTERVAL_S = int(os.environ.get('STREAKFIT_RETENTION_INTERVAL_S', '3600'))
+
+
+def _retention_sweeper_loop():
+    while True:
+        time.sleep(_RETENTION_THREAD_INTERVAL_S)
+        try:
+            with app.app_context():
+                deleted = _sweep_expired_coach_turns(force=True)
+                db.session.commit()
+                if deleted:
+                    app.logger.info('event=retention_sweep deleted=%d', deleted)
+        except Exception as exc:
+            # Type only, never the text: this is deleting conversation rows and
+            # a database error can carry one back in its message.
+            db.session.rollback()
+            app.logger.warning('retention sweep failed: %s', type(exc).__name__)
+
+
+def _start_retention_sweeper():
+    thread = threading.Thread(target=_retention_sweeper_loop,
+                              name='streakfit-retention', daemon=True)
+    thread.start()
+    app.logger.info('event=retention_sweeper_started interval_s=%d',
+                    _RETENTION_THREAD_INTERVAL_S)
+    return thread
+
+
+if os.environ.get('STREAKFIT_RETENTION_SWEEPER') == '1':
+    _start_retention_sweeper()
 
 
 if __name__ == '__main__':

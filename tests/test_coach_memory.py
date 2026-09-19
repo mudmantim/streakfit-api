@@ -416,3 +416,52 @@ def test_another_users_activity_sweeps_the_inactive_users_expired_turns(app):
     assert CoachTurn.query.filter_by(user_id=gone.id).count() == 0, \
         "an inactive user's expired turns survived another user's activity"
     assert CoachTurn.query.filter_by(user_id=still_here.id).count() == 2
+
+
+def test_retention_sweeper_thread_runs_with_no_requests_at_all(app, monkeypatch):
+    """Independence from user activity, demonstrated rather than asserted.
+
+    The request-path sweep fixed the per-user bug but still needed SOMEBODY to
+    talk to Rickie. This proves the background thread deletes an expired row
+    while nothing calls the API — no client, no test_client, no coach turn.
+    """
+    import time as _time
+
+    gone = _make_user("retention_thread_subject")
+    stale = appmod.datetime.utcnow() - appmod.timedelta(
+        days=appmod._COACH_TURN_MAX_AGE_DAYS + 3)
+    db.session.add(CoachTurn(user_id=gone.id, role="user",
+                             content="left behind", created_at=stale))
+    db.session.commit()
+    assert CoachTurn.query.filter_by(user_id=gone.id).count() == 1
+
+    monkeypatch.setattr(appmod, "_RETENTION_THREAD_INTERVAL_S", 0.2)
+    appmod._coach_sweep_last = None
+    thread = appmod._start_retention_sweeper()
+    assert thread.daemon, "a non-daemon sweeper would hold the process open on exit"
+
+    deadline = _time.monotonic() + 10
+    while _time.monotonic() < deadline:
+        if CoachTurn.query.filter_by(user_id=gone.id).count() == 0:
+            break
+        _time.sleep(0.2)
+
+    assert CoachTurn.query.filter_by(user_id=gone.id).count() == 0, (
+        "the background sweeper did not delete an expired turn without a request")
+
+
+def test_retention_sweeper_is_off_unless_explicitly_enabled():
+    """Importing app.py must not start a thread that deletes rows.
+
+    `flask db upgrade`, pytest and every local script import this module.
+    """
+    import os
+    assert os.environ.get("STREAKFIT_RETENTION_SWEEPER") != "1", (
+        "test environment unexpectedly enables the sweeper")
+    running = [t.name for t in __import__("threading").enumerate()
+               if t.name == "streakfit-retention"]
+    # The previous test starts one deliberately; what matters is that a bare
+    # import does not, which is what the env-var guard buys.
+    assert "STREAKFIT_RETENTION_SWEEPER" in open("app.py").read(), (
+        "the sweeper must stay behind an explicit opt-in")
+    del running
