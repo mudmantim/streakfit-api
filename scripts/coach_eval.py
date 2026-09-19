@@ -376,6 +376,24 @@ def main() -> int:
               "whole point of this harness.")
         return 2
 
+    # What this is about to cost, before it costs it.
+    #
+    # The daily rate limit counts REQUESTS, and a weather question runs the
+    # tool loop, so one prompt can be up to three calls to Anthropic. The
+    # estimate below assumes the worst of that, which is the only version of
+    # the number worth telling somebody in advance.
+    from app import (_COACH_MEMORY_WINDOW, _COACH_SYSTEM_PROMPT,
+                     _COACH_TURN_PROMPT_LEN, _WEATHER_TOOL)
+    per_call_in = (len(_COACH_SYSTEM_PROMPT) + len(str(_WEATHER_TOOL))
+                   + _COACH_MEMORY_WINDOW * _COACH_TURN_PROMPT_LEN + 2000) // 4
+    worst_calls = len(cases) * 3
+    print(f"About to send {len(cases)} prompts to a real model.")
+    print(f"  worst case  : {worst_calls} API calls, "
+          f"~{worst_calls * per_call_in:,} input + ~{worst_calls * 768:,} output tokens")
+    print(f"  likely case : ~{len(cases)} calls, most prompts do not use the tool")
+    print(f"  pacing      : {args.pause:.0f}s between calls "
+          f"(~{len(cases) * args.pause / 60:.0f} minutes)\n")
+
     # One account per 8 prompts, leaving headroom under the 10/day cap.
     tokens = make_accounts(flask_app, max(1, (len(cases) // 8) + 1))
     print(f"Ask Rickie evaluation — {len(cases)} prompts across "

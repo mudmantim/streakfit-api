@@ -69,6 +69,13 @@ app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
     'pool_pre_ping': True,
     'pool_recycle': 280,
+    # A database error normally carries the bound parameters into its message —
+    # "[parameters: ('I think I am fat', ...)]" — and anything that then logs
+    # that exception with a traceback writes a child's words into the
+    # application log. The Coach Notes allow-list cannot help here: this is the
+    # ORM, not the feature. Turning it off costs some debugging convenience and
+    # removes a whole class of leak.
+    'hide_parameters': True,
 }
 _secret_key = os.environ.get('SECRET_KEY')
 if not _secret_key:
@@ -3026,6 +3033,24 @@ def export_my_data():
             "acorns_earned": user.acorns_total,
             "acorns_spent": user.acorns_spent,
         },
+        # What is kept, and for how long. An export that lists rows without
+        # saying when they go is only half an answer, and the half it leaves
+        # out is the one somebody worried about their child would ask first.
+        "retention": {
+            "coach_conversation_days": _COACH_TURN_MAX_AGE_DAYS,
+            "coach_conversation_turns": _COACH_MEMORY_WINDOW,
+            "coach_notes": "kept until you clear them; canonical tags only, never your words",
+            "everything_else": "kept while the account exists",
+            "clear_conversations": "Settings → Forget our conversations",
+            "delete_everything": "Settings → Delete my account",
+        },
+        "shared_with": {
+            "anthropic": "Your Ask Rickie messages, Rickie's replies from the last "
+                         "%d turns, your username, and your streak and level "
+                         "numbers are sent to Anthropic to generate each reply. "
+                         "Nothing else in this file is sent anywhere."
+                         % _COACH_MEMORY_WINDOW,
+        },
         "not_collected": [
             "email address", "real name", "phone number", "date of birth",
             "location (photo GPS data is stripped before storage)",
@@ -5760,6 +5785,17 @@ _COACH_MEMORY_WINDOW = 10       # max stored turns per user
 _COACH_TURN_MAX_LEN = 1000      # cap stored turn content
 _COACH_TURN_PROMPT_LEN = 600    # cap when threading into the model context
 
+# A COUNT is not a RETENTION POLICY, and the two were being confused. Pruning
+# to the last ten turns only happens when an eleventh is written, so somebody
+# who told Rickie something difficult and never opened the app again kept that
+# message for as long as the account existed. Ten turns is a context window;
+# this is the part that says "and not forever".
+#
+# OWNER DECISION: thirty days is a placeholder chosen to be clearly better than
+# unbounded, not a considered policy. The right number for a product used by
+# children is a decision for Tim, and possibly not only for Tim.
+_COACH_TURN_MAX_AGE_DAYS = 30
+
 # ── What Rickie is allowed to remember between conversations ─────────────────
 #
 # A CLOSED VOCABULARY, not a phrase filter. Extraction maps a message onto one
@@ -6006,7 +6042,16 @@ def _load_coach_note_block(user_id):
 def _load_coach_messages(user_id):
     """Load the rolling window as an alternation-safe message list (server is the
     single source of truth for conversation history — the client never supplies
-    history that reaches the model)."""
+    history that reaches the model).
+
+    Expires anything past the retention window first. Doing it here as well as
+    on write is what makes the bound real for somebody who stopped talking:
+    every turn also gets re-sent to Anthropic while it survives, so an expiry
+    that only fires on the next message is an expiry that never fires for the
+    person it matters most for.
+    """
+    if _expire_old_coach_turns(user_id):
+        db.session.commit()
     # Fetch only the last window (newest-first LIMIT), then restore chronological
     # order — avoids scanning the user's whole turn history on every coach call.
     rows = (CoachTurn.query.filter_by(user_id=user_id)
@@ -6024,21 +6069,41 @@ def _load_coach_messages(user_id):
     return msgs
 
 
+def _expire_old_coach_turns(user_id):
+    """Delete this user's turns older than the retention window. STAGES only.
+
+    Deliberately called on READ as well as on write. Pruning only on write
+    means a person who says something difficult and never comes back keeps it
+    forever — which is precisely the person it matters most for.
+    """
+    cutoff = datetime.utcnow() - timedelta(days=_COACH_TURN_MAX_AGE_DAYS)
+    return db.session.query(CoachTurn).filter(
+        CoachTurn.user_id == user_id,
+        CoachTurn.created_at < cutoff,
+    ).delete(synchronize_session=False)
+
+
 def _stage_coach_exchange(user_id, user_msg, reply):
-    """Stage the turn pair and prune the window to the last 10. STAGES only (flush) —
-    the caller owns the commit. Returns the number of pruned turns."""
+    """Stage the turn pair and prune the window. STAGES only (flush) — the
+    caller owns the commit. Returns the number of pruned turns.
+
+    Two separate bounds, because they answer different questions: the last ten
+    turns are how much context Rickie gets, and the age limit is how long
+    anything is kept at all.
+    """
     db.session.add(CoachTurn(user_id=user_id, role='user',
                              content=(user_msg or '')[:_COACH_TURN_MAX_LEN]))
     db.session.add(CoachTurn(user_id=user_id, role='assistant',
                              content=(reply or '')[:_COACH_TURN_MAX_LEN]))
     db.session.flush()
+    expired = _expire_old_coach_turns(user_id)
     stale = (CoachTurn.query.filter_by(user_id=user_id)
              .order_by(CoachTurn.id.desc())
              .offset(_COACH_MEMORY_WINDOW).all())
     for r in stale:
         db.session.delete(r)
     db.session.flush()
-    return len(stale)
+    return len(stale) + expired
 
 
 def _record_coach_exchange(user_id, user_msg, reply):
@@ -6062,8 +6127,11 @@ def _persist_coach_interaction(user_id, user_msg, reply):
         pruned = _stage_coach_exchange(user_id, user_msg, reply)
         try:
             tokens = _coach_note_extract(user_msg)
-        except Exception:
-            app.logger.warning("coach note extraction failed", exc_info=True)
+        except Exception as exc:
+            # Type only. The message is a local in the frame this raised
+            # from, and the extractor exists precisely to handle text nobody
+            # should be keeping.
+            app.logger.warning("coach note extraction failed: %s", type(exc).__name__)
             tokens = None
         noted = bool(tokens and any(tokens.values()))
         if noted:
@@ -6485,12 +6553,30 @@ def coach():
         if user is not None and reply:
             try:
                 _persist_coach_interaction(user.id, message, reply)
-            except Exception:
-                # Rollback already happened inside _persist_coach_interaction; the
-                # reply still returns. Logged, not silently swallowed.
-                app.logger.warning('coach memory persist failed', exc_info=True)
+            except Exception as exc:
+                # Rollback already happened inside _persist_coach_interaction;
+                # the reply still returns.
+                #
+                # The exception TYPE only, never the traceback. A database
+                # error raised while inserting a coach turn carries the row it
+                # was inserting, and exc_info=True would write a child's own
+                # words into the application log. `hide_parameters` on the
+                # engine already strips the values; this is the second lock on
+                # the same door, because the cost of being wrong here is not
+                # symmetrical with the cost of a thinner stack trace.
+                app.logger.warning('coach memory persist failed: %s',
+                                   type(exc).__name__)
         return jsonify({"reply": reply}), 200
-    except Exception:
+    except Exception as exc:
+        # Was swallowed entirely. A live evaluation that starts returning 503s
+        # left nothing behind to say whether it was the key, the network, the
+        # rate limit at the other end or a bad request — and the eval is the
+        # one situation where that answer matters most.
+        #
+        # Type only, and never the exception text: an SDK error can echo the
+        # request body back, and the request body is the person's message.
+        app.logger.warning("event=coach_call_failed user_id=%s error=%s",
+                           getattr(user, 'id', None), type(exc).__name__)
         return jsonify({"error": "coach_unavailable"}), 503
 
 
