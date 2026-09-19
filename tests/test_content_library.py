@@ -7,6 +7,7 @@ never strays into bodies, diets, or medical advice.
 """
 import datetime
 import re
+from pathlib import Path
 
 
 import app as appmod
@@ -338,10 +339,12 @@ def test_the_library_speaks_one_dialect_and_one_set_of_units():
     """The 180-entry expansion arrived in British English with metric units and
     the original 90 was American with imperial, so the same library said both
     'color' and 'colour' and gave one fact in miles and again in kilometers."""
-    british = re.compile(
-        r"\b(colour\w*|centre|fibre\w*|practis\w*|recognis\w*|stabilis\w*|favourite"
-        r"|behaviour\w*|realis\w*|neighbour\w*|apologis\w*|metres?|kilometres?"
-        r"|litres?|grey|kerbs?)\b", re.I)
+    # Imported, not copied. This regex existed here AND in validate.py, they
+    # drifted, and the copy here went on flagging "realistic" as a Briticism
+    # after the validator's was fixed. One list.
+    import sys
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts" / "content"))
+    from validate import BRITISH as british
     offenders = [f"{kind}: {m.group(0)!r} in {text[:60]!r}"
                  for kind, text in _all_text() for m in british.finditer(text)]
     assert not offenders, "mixed dialect:\n" + "\n".join(offenders[:8])
