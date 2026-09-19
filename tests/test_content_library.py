@@ -193,3 +193,112 @@ def test_no_duplicate_content():
 def test_insights_stay_short_enough_to_read_on_a_phone(field, limit):
     too_long = [e["text"] for e in appmod.INSIGHT_LIBRARY if len(e[field]) > limit]
     assert not too_long, f"{len(too_long)} insights are over {limit} chars: {too_long[:2]}"
+
+
+# ── Guessability: the answer must not be findable without knowing anything ──
+#
+# These exist because the position test found only half the problem. "Always
+# pick the second option" used to score 75%; so did "always pick the longest",
+# and nothing was watching. They are guards, not a definition of good content:
+# a library could pass every one of them and still be dull or wrong. What they
+# catch is the specific failure of writing a real explanation as the answer and
+# three dismissals as the distractors, which is the shape the library drifted
+# into twice.
+
+def _correct(q):
+    return q["options"][q["correct_index"]]
+
+
+def _distractors(q):
+    return [o for i, o in enumerate(q["options"]) if i != q["correct_index"]]
+
+
+def test_the_correct_answer_is_not_usually_the_longest_option():
+    """It was the longest in 143 of 190 questions, so 'pick the longest' scored
+    75% with no knowledge at all."""
+    longest = [q["question"] for q in appmod.BRAIN_BOOST_LIBRARY
+               if len(_correct(q)) == max(len(o) for o in q["options"])]
+    share = len(longest) / len(appmod.BRAIN_BOOST_LIBRARY)
+    assert share < 0.45, (
+        f"the correct option is the longest in {share:.0%} of questions "
+        f"(chance is 25%); e.g. {longest[:3]}"
+    )
+
+
+def test_no_question_gives_the_answer_away_by_length_alone():
+    """The stricter half: a visibly longer option is a tell a reader can use on
+    a phone, where a few characters' difference is invisible but a whole extra
+    clause is not."""
+    obvious = []
+    for q in appmod.BRAIN_BOOST_LIBRARY:
+        longest_wrong = max(len(o) for o in _distractors(q))
+        if len(_correct(q)) - longest_wrong > 12:
+            obvious.append(f"{q['question']} (+{len(_correct(q)) - longest_wrong})")
+    assert not obvious, "correct option stands out by length:\n" + "\n".join(obvious[:5])
+
+
+def test_the_correct_answer_is_not_systematically_the_shortest_either():
+    """The obvious overcorrection: pad every distractor and the tell inverts."""
+    shortest = [q for q in appmod.BRAIN_BOOST_LIBRARY
+                if len(_correct(q)) == min(len(o) for o in q["options"])]
+    share = len(shortest) / len(appmod.BRAIN_BOOST_LIBRARY)
+    assert share < 0.45, f"the correct option is the shortest in {share:.0%} of questions"
+
+
+def test_no_distractor_is_a_bare_dismissal():
+    """'Nothing at all', 'No effect', 'Never' are never the answer, and a
+    regular player learns to eliminate them on sight — which is three options
+    reduced to two."""
+    bare = re.compile(
+        r"^(nothing( at all| measurable)?|no effect|none|never|no real benefit"
+        r"|it doesn'?t matter|it'?s a myth|not at all)\.?$", re.I)
+    offenders = [f"{q['question']} -> {o!r}"
+                 for q in appmod.BRAIN_BOOST_LIBRARY
+                 for o in _distractors(q) if bare.match(o.strip())]
+    assert not offenders, "\n".join(offenders[:8])
+
+
+def test_no_option_instructs_an_action_a_child_could_be_hurt_copying():
+    """A wrong answer may state a harmful BELIEF so the explanation can take it
+    apart. It may not read as an instruction to do something dangerous, which
+    is different: 'Hold your breath as long as possible' and 'Close both eyes
+    while walking fast' were both sitting in a list of things to try at home.
+
+    Where a genuinely dangerous idea does appear as an option, the explanation
+    has to name it and say why — a distractor nobody corrects is just a bad
+    idea printed in an app.
+    """
+    dangerous = re.compile(
+        r"hold\w* (your |the )?breath|breath.?hold\w*"
+        r"|eyes (closed|shut) while (walking|running)"
+        r"|skip(ping)? (a |your |my )?(next )?meals?|stop(ping)? eating", re.I)
+    offenders = []
+    for q in appmod.BRAIN_BOOST_LIBRARY:
+        for o in _distractors(q):
+            if dangerous.search(o) and not dangerous.search(q["explanation"]):
+                offenders.append(f"{q['question']} -> {o!r} (explanation never addresses it)")
+    assert not offenders, "\n".join(offenders[:5])
+
+
+def test_the_library_speaks_one_dialect_and_one_set_of_units():
+    """The 180-entry expansion arrived in British English with metric units and
+    the original 90 was American with imperial, so the same library said both
+    'color' and 'colour' and gave one fact in miles and again in kilometers."""
+    british = re.compile(
+        r"\b(colour\w*|centre|fibre\w*|practis\w*|recognis\w*|stabilis\w*|favourite"
+        r"|behaviour\w*|realis\w*|neighbour\w*|apologis\w*|metres?|kilometres?"
+        r"|litres?|grey|kerbs?)\b", re.I)
+    offenders = [f"{kind}: {m.group(0)!r} in {text[:60]!r}"
+                 for kind, text in _all_text() for m in british.finditer(text)]
+    assert not offenders, "mixed dialect:\n" + "\n".join(offenders[:8])
+
+
+def test_every_question_asks_something_rather_than_asserting_it():
+    """'True or false: it's okay to ask for help when you're struggling' was a
+    question in name only. A yes/no framing is fine when the answer is a fact
+    people get wrong; it is not fine when the answer is simply the kind one."""
+    for q in appmod.BRAIN_BOOST_LIBRARY:
+        assert q["question"].strip().endswith("?"), q["question"]
+        assert not q["question"].lower().startswith("true or false"), (
+            f"{q['question']!r} — if the fact is worth asking about, ask about the fact"
+        )
