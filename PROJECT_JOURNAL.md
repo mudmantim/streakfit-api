@@ -730,3 +730,81 @@ like total failure" got flagged as shaming — when it is the *correct answer* t
 why all-or-nothing plans collapse, and among the most on-brand content in the
 library. The tests were fixed, not the content. Worth remembering: a
 never-negative rule enforced bluntly will start deleting the good stuff.
+
+---
+
+# Session 7 (2026-09-18) — the design pass
+
+Tim's brief: stop adding mechanics, make what exists feel like one product
+designed by one person. Final pre-Olivia quality pass.
+
+## What was actually wrong
+
+The home screen was six white cards of identical weight — mission, permission
+ask, progress, teams, install, side quests. Nothing outranked anything. There
+was one heading size, one body size, uniform gaps, and a single shadow, so the
+page had no way to say "this matters more than that". It read as a settings
+list containing a fitness app.
+
+The foundation came first: a type scale, a 4px spacing rhythm, and three
+elevation levels. Everything after that was arrangement.
+
+## The streak was being said three times
+
+A badge inside the mission card, a helper line under the progress bar, and a
+stats row — for the same number, on the same screen, in small text. An
+eleven-day streak deserves better than that. It is now stated once, in a warm
+gradient at 2.1rem, beside Rickie, above everything else.
+
+## Rickie's expression language was invisible
+
+The most interesting bug of the session. R1.5.2 built a whole expression engine:
+Rickie goes happy on a completion, celebrating on a first perfect mission, and
+it applied correctly every time. Then `loadDailyExercises` ran 480ms later and
+reset him to `idle_dashboard` → neutral. **Every completion, for months.** The
+character had four faces and the dashboard was wiping them before anyone could
+see one.
+
+A celebration now holds his face for six seconds, and the resting expression is
+state-aware — finished today means a proud Rickie for the rest of it. Same four
+drawings, finally doing their job.
+
+He was also contradicting himself at the best moment of the day: the greeting
+was written for before the mission with a completion clause stapled on, which
+produced "The day's not over yet. That's today done."
+
+## Five identical buttons is a wall
+
+The mission was five rows of identical indigo "I did this". Only the next
+undone one keeps the solid button now, with a small gradient accent bar; the
+rest step back to an outline. Everything stays tappable in any order — this is
+guidance, not a restriction, and that distinction matters in a product whose
+first rule is never to punish anyone.
+
+## "Am I getting anywhere" needed evidence, not a claim
+
+A level number and an XP bar are assertions. Seven dots showing the last seven
+days are evidence, and the data was already there. Days that happened glow;
+days that did not are plain — never red, never crossed out, never counted. The
+caption says "6 days moved this week", or "This week is a fresh page" when
+there are none, because there is no version of this product that tells someone
+how many days they missed.
+
+## Something happened while I was away
+
+A dot and "New since you were here" — never a count, because a rising number is
+an anxiety mechanic. Read state lives in localStorage on the device rather than
+the server tracking who has looked at what, which a family app should not
+quietly start doing.
+
+It shipped permanently switched on, because the server sends naive UTC and the
+browser was reading it as local time. The same bug I had already fixed in
+`_momentWhen` and not applied here. There is now one `_parseServerTime` and
+both call it.
+
+## What the personas showed
+
+Four personas at 390×844: first day, solo with a streak, teen on a team, and
+someone back after a week away. The returning user is the one that matters
+most, and it holds up — Rise Again, "This week is a fresh page", their best
+streak and total missions still on display, and not one mention of the gap.
