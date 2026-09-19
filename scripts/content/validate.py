@@ -66,7 +66,10 @@ DANGEROUS = re.compile(
     r"|skip(ping)? (a |your |my )?(next )?meals?|stop(ping)? eating", re.I)
 BRITISH = re.compile(
     r"\b(colour\w*|centre|fibre\w*|practis\w*|recognis\w*|stabilis\w*|favourite"
-    r"|behaviour\w*|realis\w*|neighbour\w*|apologis\w*|metres?|kilometres?"
+    # realis\w* also matched "realistic", "realism" and "realist", which are
+    # American English too — it flagged ordinary copy as a Briticism. Bounded to
+    # the verb forms that are actually British.
+    r"|behaviour\w*|realis(e|es|ed|ing)\b|neighbour\w*|apologis\w*|metres?|kilometres?"
     r"|litres?|grey|kerbs?)\b", re.I)
 BARE = re.compile(
     r"^(nothing( at all| measurable)?|no effect|none|never|no real benefit"
