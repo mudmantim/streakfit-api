@@ -1492,6 +1492,25 @@ class VerificationRun(db.Model):
     results_json = db.Column(db.Text, nullable=True)
 
 
+class RetentionRun(db.Model):
+    """A record that the retention sweep actually happened.
+
+    Without this, "conversations are deleted after 30 days" is unfalsifiable
+    from inside the product: a cron job that silently stops running looks
+    exactly like one that runs and finds nothing to do. Both print nothing and
+    both leave the database unchanged on a quiet week.
+
+    Append-only and tiny — one short row per sweep. It is the evidence behind a
+    privacy claim, so it is kept even when the sweep deleted nothing: "it ran
+    and there was nothing expired" is the answer that matters most often.
+    """
+    __tablename__ = 'retention_run'
+    id = db.Column(db.Integer, primary_key=True)
+    ran_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, index=True)
+    deleted = db.Column(db.Integer, nullable=False, default=0)
+    source = db.Column(db.String(24), nullable=False)   # cron | thread | request
+
+
 class CoachTurn(db.Model):
     """Cross-session memory for Rickie: a rolling window of the last few coach
     conversation turns per user, so continuity survives across sessions and
@@ -1838,6 +1857,41 @@ def verification_self():
         "Schema currency is unconfirmed, so every data-dependent result is weaker.",
         limitations=None if migration['state'] == 'ok' else
         "Says nothing about whether the schema is correct — only that it could not be read."))
+
+    # Retention. A privacy promise nobody can check is not a promise, and a
+    # scheduled sweep that quietly stops looks identical to one with nothing to
+    # do — so the check is about the RUN, not the row count.
+    try:
+        last = (RetentionRun.query.order_by(RetentionRun.ran_at.desc()).first())
+        if last is None:
+            state, evidence, observed = "UNKNOWN", "UNKNOWN", "no sweep has ever been recorded"
+        else:
+            age_h = (datetime.utcnow() - last.ran_at).total_seconds() / 3600
+            # A daily cron plus an hourly in-process sweep; 48h means both have
+            # been silent for two cycles, which is a real signal rather than a
+            # blip.
+            state = "PASS" if age_h <= 48 else "FAIL"
+            evidence = "VERIFIED" if state == "PASS" else "OBSERVED"
+            observed = (f"last swept {age_h:.1f}h ago via {last.source}, "
+                        f"{last.deleted} deleted")
+        checks.append(_self_check(
+            "retention.recent", "Conversation retention is running",
+            f"Expired conversation turns are being deleted on schedule "
+            f"({_COACH_TURN_MAX_AGE_DAYS}-day window).",
+            "Read the most recent retention_run record and check its age.",
+            state, evidence, observed,
+            failure_reason=None if state == "PASS" else
+            "Nothing has swept expired conversations recently, so the stated "
+            "30-day retention is not being honored.",
+            limitations="Says a sweep ran, not that every expired row is gone; "
+                        "deletion does not reach database backups."))
+    except Exception as exc:
+        checks.append(_self_check(
+            "retention.recent", "Conversation retention is running",
+            "Expired conversation turns are being deleted on schedule.",
+            "Read the most recent retention_run record and check its age.",
+            "UNKNOWN", "UNKNOWN", f"{type(exc).__name__}",
+            failure_reason="The retention record could not be read."))
 
     # The content store is a deploy artefact: files on disk that must ship with
     # the build. An app that starts with an empty library looks entirely healthy
@@ -5844,7 +5898,7 @@ _coach_sweep_last = None
 _coach_sweep_lock = threading.Lock()
 
 
-def _sweep_expired_coach_turns(force=False):
+def _sweep_expired_coach_turns(force=False, source='request'):
     """Delete EVERY user's expired turns, not just the caller's. STAGES only.
 
     `_expire_old_coach_turns` is per-user and runs on that user's read and that
@@ -5872,14 +5926,17 @@ def _sweep_expired_coach_turns(force=False):
             return None
         _coach_sweep_last = now
     cutoff = now - timedelta(days=_COACH_TURN_MAX_AGE_DAYS)
-    return db.session.query(CoachTurn).filter(
+    deleted = db.session.query(CoachTurn).filter(
         CoachTurn.created_at < cutoff).delete(synchronize_session=False)
+    # Recorded even when it deleted nothing — see RetentionRun.
+    db.session.add(RetentionRun(ran_at=now, deleted=deleted, source=source))
+    return deleted
 
 
 @app.cli.command("coach-prune")
 def coach_prune_command():
     """Delete expired coach turns for every user. For a scheduled run."""
-    deleted = _sweep_expired_coach_turns(force=True)
+    deleted = _sweep_expired_coach_turns(force=True, source='cron')
     db.session.commit()
     print(f"deleted {deleted} coach turns older than "
           f"{_COACH_TURN_MAX_AGE_DAYS} days")
@@ -6245,6 +6302,33 @@ def _weather_tool_result(city):
         )
 
 
+_COACH_PROMPT_CACHE = os.environ.get('STREAKFIT_COACH_CACHE') == '1'
+
+
+def _coach_system_param(volatile):
+    """The `system` argument, optionally split for prompt caching.
+
+    OFF by default. Caching is not free: a cache entry lives about five minutes
+    and a WRITE costs ~1.25x input, so at low traffic most requests arrive cold,
+    pay the premium, and cost MORE than they do today. Whether it pays is a
+    question about this app's real request spacing, which is why it is a flag
+    that can be measured rather than an assumption baked in.
+
+    The split matters. Caching is a PREFIX match and the render order is
+    tools -> system -> messages, so only the frozen personality prompt can be
+    the cached prefix: everything appended afterwards (this user's streak, their
+    Coach Notes, today's insight, a joke sample) changes per request and would
+    invalidate the entry on every call if it sat inside it.
+    """
+    if not _COACH_PROMPT_CACHE:
+        return _COACH_SYSTEM_PROMPT + volatile
+    blocks = [{"type": "text", "text": _COACH_SYSTEM_PROMPT,
+               "cache_control": {"type": "ephemeral"}}]
+    if volatile:
+        blocks.append({"type": "text", "text": volatile})
+    return blocks
+
+
 @app.route('/api/coach', methods=['POST'])
 @jwt_required()
 @limiter.limit("10 per day", key_func=user_or_ip_key)
@@ -6265,7 +6349,11 @@ def coach():
     if not _anthropic_api_key:
         return jsonify({"error": "coach_unavailable"}), 503
 
-    system = _COACH_SYSTEM_PROMPT
+    # `system` accumulates the volatile parts below (who this user is, their
+    # Coach Notes, today's insight, a joke sample). The FROZEN personality
+    # prompt is held separately so it can be a stable cache prefix — see
+    # _coach_system_param.
+    system = ""
 
     # Context-awareness: give Rickie a trustworthy, server-derived snapshot of
     # who he's talking to (name, streak, level, pre-computed milestone math).
@@ -6328,7 +6416,7 @@ def coach():
                 # the character doesn't need. If a future capability needs reasoning,
                 # turn it on per-path.
                 thinking={"type": "disabled"},
-                system=system,
+                system=_coach_system_param(system),
                 messages=messages,
                 tools=[_WEATHER_TOOL],
             )
@@ -6498,7 +6586,7 @@ def _retention_sweeper_loop():
         time.sleep(_RETENTION_THREAD_INTERVAL_S)
         try:
             with app.app_context():
-                deleted = _sweep_expired_coach_turns(force=True)
+                deleted = _sweep_expired_coach_turns(force=True, source='thread')
                 db.session.commit()
                 if deleted:
                     app.logger.info('event=retention_sweep deleted=%d', deleted)

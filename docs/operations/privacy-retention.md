@@ -46,11 +46,51 @@ idempotent, so overlapping sweeps are harmless.
 or crash-looping, the thread is not running and nothing is being swept. The cron
 exists precisely for that case — but see the next point.
 
-**The cron in `render.yaml` is not live.** That file is marked PROPOSED: Render
-applies a Blueprint only when the service is created from or linked to one, and
-StreakFit's live service is configured in the dashboard. **Until somebody links
-the Blueprint or adds the cron job by hand, layer 4 does not exist**, and
-retention depends on the web service staying up.
+**The cron in `render.yaml` is NOT live, and cannot become live by editing that
+file.** Confirmed against `docs/operations/setup.md`: the production service is
+**configured in the Render dashboard and git-linked to `main`** — `git push
+origin main` builds and deploys it. It was never created from a Blueprint, so
+Render does not read `render.yaml` at all. The cron declared there is
+documentation of intent, nothing more.
+
+**Until the cron job below is created, layer 4 does not exist** and retention
+depends on the web service staying up.
+
+### Creating it (needs dashboard access — not doable from this repo)
+
+A Render **Cron Job** is a separate service from the web service. In the Render
+dashboard:
+
+1. **New → Cron Job**, connected to the same repository, branch `main`.
+2. Runtime **Python** (it picks up `runtime.txt` → 3.12.7).
+3. **Build command:** `pip install -r requirements.txt`
+4. **Command:** `flask coach-prune`
+5. **Schedule:** `17 3 * * *` (daily, 03:17 UTC — an odd minute to avoid the
+   top-of-hour crowd).
+6. **Environment:** `DATABASE_URL` pointing at the *same* database as the web
+   service, plus `SECRET_KEY`, `JWT_SECRET_KEY` (app.py raises at import
+   without them) and `FLASK_APP=app`. It does **not** need
+   `ANTHROPIC_API_KEY` — the command makes no model calls.
+
+Verified locally that this exact command works standalone with no web process
+running and no user request: it deleted the expired turn, left the fresh one,
+was idempotent on a second run, and exited 0.
+
+### Knowing whether it is actually running
+
+A scheduled sweep that silently stops looks identical to one that runs and finds
+nothing expired — both print nothing and change nothing. So every sweep writes a
+`retention_run` row (even a sweep that deleted nothing), and
+`GET /api/verification/self` reports `retention.recent`:
+
+- **PASS** — a sweep is recorded within the last 48 hours, naming its source
+  (`cron`, `thread` or `request`)
+- **FAIL** — nothing has swept for over 48 hours; the 30-day claim is not being
+  honored
+- **UNKNOWN** — nothing has ever swept
+
+48 hours because a daily cron plus an hourly in-process sweep means two full
+cycles of silence, which is a signal rather than a blip.
 
 **Deletion does not reach backups.** Deleting a row removes it from the live
 database. A backup taken beforehand still contains it until that backup ages

@@ -66,10 +66,16 @@ services:
   # doing. Daily at 03:17 UTC — an odd minute on purpose, to avoid the top-of-
   # hour crowd on shared infrastructure.
   #
-  # ⚠️ Like the rest of this file, this is PROPOSED. A cron declared here does
-  # nothing until the service is created from / linked to this Blueprint. Until
-  # then the thread is the only automatic sweep, and it stops when the web
-  # service does. See docs/operations/privacy-retention.md.
+  # ⚠️ THIS CRON IS INERT, and editing this file will not change that.
+  # CONFIRMED against docs/operations/setup.md: the live service is configured
+  # in the Render DASHBOARD and git-linked to main. It was not created from a
+  # Blueprint, so Render never reads this file. A cron declared here is a
+  # statement of intent.
+  #
+  # To make it real, create a Render Cron Job in the dashboard with the command
+  # and schedule below — the exact steps are in
+  # docs/operations/privacy-retention.md. Until then the in-process thread is
+  # the only automatic sweep, and it stops when the web service does.
   - type: cron
     name: streakfit-retention-sweep
     runtime: python

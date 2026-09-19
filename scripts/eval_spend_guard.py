@@ -24,6 +24,7 @@ import json
 import os
 import sys
 import threading
+import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -52,6 +53,7 @@ class SpendMeter:
         self.calls = 0
         self.input_tokens = 0
         self.output_tokens = 0
+        self.per_call: list = []
         if state_path.exists():
             try:
                 prior = json.loads(state_path.read_text())
@@ -59,6 +61,7 @@ class SpendMeter:
                 self.calls = int(prior.get("calls", 0))
                 self.input_tokens = int(prior.get("input_tokens", 0))
                 self.output_tokens = int(prior.get("output_tokens", 0))
+                self.per_call = list(prior.get("per_call", []))
                 print(f"[budget] resuming from {state_path.name}: "
                       f"${self.spent:.4f} already spent over {self.calls} calls")
             except Exception:
@@ -72,20 +75,44 @@ class SpendMeter:
                     f"spend ceiling reached: ${self.spent:.4f} of ${self.budget:.2f}"
                 )
 
-    def record(self, model: str, usage) -> None:
+    def record(self, model: str, usage) -> None:   # noqa: C901
         pin, pout = PRICES.get(model, DEFAULT_PRICE)
-        cost = (usage.input_tokens / 1e6 * pin) + (usage.output_tokens / 1e6 * pout)
+        write = getattr(usage, "cache_creation_input_tokens", 0) or 0
+        read = getattr(usage, "cache_read_input_tokens", 0) or 0
+        # A cache write is ~1.25x input, a read ~0.10x. Pricing them as plain
+        # input would make caching look free, which is the thing being tested.
+        cost = ((usage.input_tokens / 1e6 * pin)
+                + (write / 1e6 * pin * 1.25)
+                + (read / 1e6 * pin * 0.10)
+                + (usage.output_tokens / 1e6 * pout))
         with self.lock:
             self.calls += 1
             self.input_tokens += usage.input_tokens
             self.output_tokens += usage.output_tokens
             self.spent += cost
+            # Per-call detail, including the cache fields. The app deliberately
+            # does not return usage to the client — it is a product endpoint,
+            # not a telemetry one — so the meter that already sees every reply
+            # is the right place to observe from.
+            self.per_call.append({
+                "n": self.calls,
+                "at": round(time.time(), 3),
+                "model": model,
+                "input_tokens": usage.input_tokens,
+                "output_tokens": usage.output_tokens,
+                "cache_creation_input_tokens":
+                    getattr(usage, "cache_creation_input_tokens", 0) or 0,
+                "cache_read_input_tokens":
+                    getattr(usage, "cache_read_input_tokens", 0) or 0,
+                "cost": round(cost, 6),
+            })
             self.state_path.write_text(json.dumps({
                 "budget_usd": self.budget,
                 "spent_usd": round(self.spent, 6),
                 "calls": self.calls,
                 "input_tokens": self.input_tokens,
                 "output_tokens": self.output_tokens,
+                "per_call": self.per_call,
             }, indent=2))
             pct = 100 * self.spent / self.budget if self.budget else 0
             print(f"[budget] call {self.calls}: {model} "

@@ -465,3 +465,51 @@ def test_retention_sweeper_is_off_unless_explicitly_enabled():
     assert "STREAKFIT_RETENTION_SWEEPER" in open("app.py").read(), (
         "the sweeper must stay behind an explicit opt-in")
     del running
+
+
+# ── Evidence that the sweep ran, not just that rows are gone ────────────────
+
+def test_every_sweep_records_that_it_ran_even_when_nothing_expired(app):
+    """A cron that silently stopped looks exactly like one with nothing to do.
+
+    So the record is written on an empty sweep too — "it ran, nothing was
+    expired" is the answer needed most often.
+    """
+    from app import RetentionRun
+    before = RetentionRun.query.count()
+    appmod._coach_sweep_last = None
+    deleted = appmod._sweep_expired_coach_turns(force=True, source="cron")
+    db.session.commit()
+    assert deleted == 0
+    rows = RetentionRun.query.order_by(RetentionRun.id.desc()).all()
+    assert len(rows) == before + 1, "an empty sweep left no evidence it happened"
+    assert rows[0].source == "cron"
+
+
+def test_self_check_fails_when_the_sweep_has_gone_quiet(app, client):
+    """The check must notice a stopped cron, not just report row counts."""
+    from app import RetentionRun
+
+    RetentionRun.query.delete()
+    db.session.add(RetentionRun(
+        ran_at=appmod.datetime.utcnow() - appmod.timedelta(hours=72),
+        deleted=0, source="cron"))
+    db.session.commit()
+    checks = {c["id"]: c for c in client.get("/api/verification/self").get_json()["checks"]}
+    assert checks["retention.recent"]["status"] == "FAIL", (
+        "a sweep that last ran 72 hours ago was reported as healthy")
+
+    RetentionRun.query.delete()
+    db.session.add(RetentionRun(ran_at=appmod.datetime.utcnow(), deleted=3, source="cron"))
+    db.session.commit()
+    checks = {c["id"]: c for c in client.get("/api/verification/self").get_json()["checks"]}
+    assert checks["retention.recent"]["status"] == "PASS"
+
+
+def test_self_check_is_unknown_not_pass_when_nothing_ever_swept(app, client):
+    from app import RetentionRun
+    RetentionRun.query.delete()
+    db.session.commit()
+    checks = {c["id"]: c for c in client.get("/api/verification/self").get_json()["checks"]}
+    assert checks["retention.recent"]["status"] == "UNKNOWN", (
+        "never having swept must not read as healthy")

@@ -1,0 +1,156 @@
+[
+  {
+    "pattern": "burst",
+    "n": 1,
+    "kind": "WRITE",
+    "fresh": 306,
+    "write": 4988,
+    "read": 0,
+    "out": 35,
+    "cost": 0.013432,
+    "label": "cache-on"
+  },
+  {
+    "pattern": "burst",
+    "n": 2,
+    "kind": "HIT",
+    "fresh": 349,
+    "write": 0,
+    "read": 4988,
+    "out": 107,
+    "cost": 0.002766,
+    "label": "cache-on"
+  },
+  {
+    "pattern": "burst",
+    "n": 3,
+    "kind": "HIT",
+    "fresh": 467,
+    "write": 0,
+    "read": 4988,
+    "out": 93,
+    "cost": 0.002862,
+    "label": "cache-on"
+  },
+  {
+    "pattern": "spaced",
+    "n": 1,
+    "kind": "HIT",
+    "fresh": 306,
+    "write": 0,
+    "read": 4988,
+    "out": 35,
+    "cost": 0.00196,
+    "label": "cache-on"
+  },
+  {
+    "pattern": "spaced",
+    "n": 2,
+    "kind": "HIT",
+    "fresh": 349,
+    "write": 0,
+    "read": 4988,
+    "out": 89,
+    "cost": 0.002586,
+    "label": "cache-on"
+  },
+  {
+    "pattern": "cold",
+    "n": 1,
+    "kind": "HIT",
+    "fresh": 306,
+    "write": 0,
+    "read": 4988,
+    "out": 22,
+    "cost": 0.00183,
+    "label": "cache-on"
+  },
+  {
+    "pattern": "cold",
+    "n": 2,
+    "kind": "WRITE",
+    "fresh": 336,
+    "write": 4988,
+    "read": 0,
+    "out": 57,
+    "cost": 0.013712,
+    "label": "cache-on"
+  },
+  {
+    "pattern": "burst",
+    "n": 1,
+    "kind": "plain",
+    "fresh": 5294,
+    "write": 0,
+    "read": 0,
+    "out": 34,
+    "cost": 0.010928,
+    "label": "cache-off"
+  },
+  {
+    "pattern": "burst",
+    "n": 2,
+    "kind": "plain",
+    "fresh": 5336,
+    "write": 0,
+    "read": 0,
+    "out": 116,
+    "cost": 0.011832,
+    "label": "cache-off"
+  },
+  {
+    "pattern": "burst",
+    "n": 3,
+    "kind": "plain",
+    "fresh": 5463,
+    "write": 0,
+    "read": 0,
+    "out": 73,
+    "cost": 0.011656,
+    "label": "cache-off"
+  },
+  {
+    "pattern": "spaced",
+    "n": 1,
+    "kind": "plain",
+    "fresh": 5294,
+    "write": 0,
+    "read": 0,
+    "out": 35,
+    "cost": 0.010938,
+    "label": "cache-off"
+  },
+  {
+    "pattern": "spaced",
+    "n": 2,
+    "kind": "plain",
+    "fresh": 5337,
+    "write": 0,
+    "read": 0,
+    "out": 90,
+    "cost": 0.011574,
+    "label": "cache-off"
+  },
+  {
+    "pattern": "cold",
+    "n": 1,
+    "kind": "plain",
+    "fresh": 5294,
+    "write": 0,
+    "read": 0,
+    "out": 35,
+    "cost": 0.010938,
+    "label": "cache-off"
+  },
+  {
+    "pattern": "cold",
+    "n": 2,
+    "kind": "plain",
+    "fresh": 5337,
+    "write": 0,
+    "read": 0,
+    "out": 105,
+    "cost": 0.011724,
+    "label": "cache-off"
+  }
+]

@@ -6,9 +6,10 @@ measured numbers instead of guesses. The suggested 20 / 300 allowances and the
 $1.99-per-100 pack were explicitly not approved, and the audit below says why at
 least one of them cannot work as stated.
 
-Scope note: this is planning. It has not diverted work from the core product —
-the audit is arithmetic over usage already recorded, and `scripts/rickie_cost_audit.py`
-makes no API calls.
+Scope note: this is planning. The cost audit is arithmetic over usage already
+recorded (`scripts/rickie_cost_audit.py` makes no API calls). Prompt caching was
+additionally measured against live traffic patterns for $0.12 — see 1b; it is
+implemented behind a default-off flag and nothing about pricing is implemented.
 
 ---
 
@@ -49,22 +50,38 @@ from $0.0085 to $0.0110 — +29% — purely because the system prompt went from
 added to Rickie is billed on every reply every user ever sends. Prompt size is
 now a product cost decision, not just a quality one.
 
-**(b) Prompt caching is the single big lever, and it is conditional.** The
-stable prefix (system prompt + tool schema) is ~4,078 tokens, byte-identical on
-every call. Cache reads price at ~10% of input:
+**(b) Prompt caching — MEASURED, not modelled.** Implemented behind
+`STREAKFIT_COACH_CACHE=1` (default off) and probed with real requests at three
+spacings: `scripts/coach_cache_probe.py`, 14 paid replies, $0.12.
 
-| | Cost/reply | vs today |
+| | Cost/reply | vs uncached |
 |---|---|---|
-| Cache **hit** | $0.0026 | **74% cheaper** |
-| Cache **miss** | $0.0120 | **21% dearer** |
-| Breakeven | hits must exceed **22%** of requests | |
+| Uncached baseline (n=7) | **$0.01137** | — |
+| Cache **hit** | **$0.00240** | **79% cheaper** |
+| Cache **write** (miss) | **$0.01357** | **19% dearer** |
+| Cached run overall (n=7, 5 hits) | $0.00559 | 51% cheaper |
 
-A cache entry lives ~5 minutes (1 hour on the paid tier) and a write costs
-~1.25× input. **At StreakFit's current traffic most requests would arrive cold
-and cost more than they do today.** Caching pays only once requests arrive
-closer together than the TTL. So it is not a free win to assume in pricing — it
-is a thing to implement, measure with `usage.cache_read_input_tokens`, and only
-then price against.
+**Breakeven: 20% of requests must hit a warm cache.**
+
+The finding that decides it: **the cached prefix is identical for every user**,
+so any one user's request warms the cache for everybody. The hit rate depends on
+*app-wide* request spacing, not per-user habits. The probe confirmed the TTL
+directly — a hit after a 90-second gap, a write after 330 seconds.
+
+Treating arrivals as Poisson, 20% breakeven needs roughly **63 Rickie replies
+per day app-wide**. Below that most requests arrive cold, pay the write premium,
+and **caching costs about 19% MORE than doing nothing**.
+
+Real traffic is bursty rather than uniform, which raises the hit rate for a given
+daily volume, so 63/day is a conservative crossover. The 1-hour TTL does not
+rescue the low-traffic case: its write costs ~2x input, and at ~10 replies/day
+the arithmetic still lands worse than no caching.
+
+**What this means right now:** at pre-launch traffic — Tim and Olivia, a handful
+of replies a day — turning caching on would *increase* cost. It stays off until
+the app is doing roughly 60+ replies/day, at which point it is a large win. The
+flag makes that switch one environment variable, and the spend guard's per-call
+record reports the real hit rate once there is traffic to measure.
 
 ---
 
@@ -142,9 +159,11 @@ second-class, which defeats the feature. The economics work at the *household*
 level, not per sponsored seat, and that is the right frame: a sponsor is buying
 six seats for $9.94.
 
-**Revisit trigger:** once prompt caching is live and the measured cache-hit rate
-is known, recompute and raise. 300 is reachable at a sustained hit rate above
-~60%.
+**Revisit trigger:** caching is now measured (section 1b) and the crossover is
+about **63 Rickie replies/day app-wide**. Below that, turning it on makes things
+worse. Once real traffic is above it, recompute these allowances against the
+observed hit rate — at a sustained 70% hit rate the effective cost is
+~$0.0047/reply and 300 for Plus becomes comfortable.
 
 Free at 15 is enough to meet Rickie properly (a real conversation is 3-6 turns)
 without making the free tier the product. It costs $0.22/month per active free
