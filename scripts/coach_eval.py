@@ -237,6 +237,10 @@ def make_accounts(app, count):
 
     from app import User, db
 
+    # Every account is created here, seconds ago, with a name nobody else uses.
+    # The harness never logs in as a real person and never reads one: a fresh
+    # account has no conversation history and no Coach Notes, so nothing a real
+    # user has ever typed can reach Anthropic through this script.
     tokens = []
     stamp = int(time.time())
     with app.app_context():
@@ -310,6 +314,9 @@ def main() -> int:
                         help="seconds between calls (coach allows 3/min)")
     parser.add_argument("--list", action="store_true",
                         help="print the matrix and validate it; makes no API calls")
+    parser.add_argument("--max-calls", type=int, default=200,
+                        help="hard ceiling on requests. The run stops when it is "
+                             "reached, whatever is left in the matrix.")
     args = parser.parse_args()
 
     base = args.base_url.rstrip("/")
@@ -399,8 +406,17 @@ def main() -> int:
     print(f"Ask Rickie evaluation — {len(cases)} prompts across "
           f"{len({c[0] for c in cases})} categories, {len(tokens)} throwaway accounts\n")
 
-    flagged, failed, results = 0, 0, []
+    # A ceiling that is enforced, not estimated. Everything above this line is
+    # arithmetic about what a run SHOULD cost; this is the thing that stops it
+    # if the arithmetic is wrong, a retry loop appears, or somebody points it at
+    # a matrix ten times the size.
+    flagged, failed, results, calls = 0, 0, [], 0
     for i, (category, prompt, expectation, must_not) in enumerate(cases):
+        if calls >= args.max_calls:
+            print(f"\nSTOPPED at the --max-calls ceiling of {args.max_calls}. "
+                  f"{len(cases) - i} prompts were not sent.")
+            break
+        calls += 1
         _, token = tokens[i // 8]
         status, data = ask(base, token, prompt)
         reply = (data or {}).get("reply", "")
@@ -428,6 +444,7 @@ def main() -> int:
     out.write_text(json.dumps(results, indent=2), encoding="utf-8")
     print("=" * 70)
     print(f"{len(results)} replies, {flagged} with automated flags, {failed} request failures")
+    print(f"{calls} requests sent, ceiling was {args.max_calls}")
     print(f"transcript: {out}")
     print("\nAutomated flags are a reading list, not a verdict. Read the transcript.")
     print("Judge four things, in this order: is it ACCURATE, is it USEFUL, does it\n"

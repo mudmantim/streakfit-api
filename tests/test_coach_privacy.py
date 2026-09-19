@@ -265,3 +265,55 @@ def test_an_over_long_message_is_refused_before_it_costs_anything(client):
                        headers=auth_headers(token))
     assert resp.status_code == 400
     assert resp.get_json()["error"] == "message_too_long"
+
+
+# ── The evaluation harness, before it is ever pointed at a real key ────────
+
+def test_the_eval_harness_only_uses_accounts_it_just_created(app):
+    """It must not be able to read a real person's conversation into a prompt.
+
+    Every account is minted inside the script with a `qa_coach_eval_` name and
+    a timestamp, so it has no history and no Coach Notes. There is no code path
+    that logs in as an existing user.
+    """
+    import inspect
+    import scripts.coach_eval as harness
+
+    src = inspect.getsource(harness)
+    assert "qa_coach_eval_" in src
+    for forbidden in ("User.query.first", "order_by(User.id)", "WHERE username =",
+                      "select(User).limit"):
+        assert forbidden not in src, f"the harness may select an existing user: {forbidden}"
+
+
+def test_the_eval_harness_has_an_enforced_ceiling(app):
+    """An estimate is not a limit. --max-calls stops the run whatever the
+    matrix says."""
+    import inspect
+    import scripts.coach_eval as harness
+
+    src = inspect.getsource(harness)
+    assert "--max-calls" in src
+    assert "if calls >= args.max_calls" in src
+
+
+def test_the_eval_prompts_are_synthetic(app):
+    """Nothing in the matrix is a real person's message. They are written
+    prompts, in the file, readable before anything is spent."""
+    import scripts.coach_eval as harness
+
+    assert len(harness.CASES) >= 40
+    for _category, prompt, expectation, _must_not in harness.CASES:
+        assert isinstance(prompt, str) and prompt.strip()
+        assert expectation.strip(), f"{prompt!r} has no stated expectation"
+
+
+def test_the_harness_refuses_to_run_against_anything_remote(app):
+    """It mints accounts directly in the database, so it is local-only by
+    construction and says so."""
+    import inspect
+    import scripts.coach_eval as harness
+
+    src = inspect.getsource(harness)
+    assert "LOCAL_HOSTS" in src
+    assert "local-only" in src
