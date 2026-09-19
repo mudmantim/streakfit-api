@@ -1,0 +1,158 @@
+{
+  "verdicts": [
+    {
+      "id": "SF-TRV-000383",
+      "verdict": "accept",
+      "reason": "Editorial, honestly labelled, and the explanation does the work the answer option does not. Options 2 and 3 overlap enough that a test-wise reader can pair-eliminate them, but option 1 is a genuine competitor.",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000384",
+      "verdict": "revise",
+      "reason": "The question says 'headphones', the answer says 'the rhythm you hear' — a podcast or audiobook has no rhythm, so the stem does not support the answer. Say 'music with a steady beat' in the question. Also soften the firmness: spontaneous (uninstructed) entrainment is modest and mainly occurs when the track's tempo is already close to your natural cadence, not for any tempo you play.",
+      "sources_checked": [
+        "https://pmc.ncbi.nlm.nih.gov/articles/PMC8048782/",
+        "https://www.ncbi.nlm.nih.gov/pmc/articles/PMC3707869/"
+      ]
+    },
+    {
+      "id": "SF-TRV-000385",
+      "verdict": "accept",
+      "reason": "Mechanism and the ten-minute figure are both well supported, and the framing avoids any diet or medical advice. Distractor 0 is a bit of a throwaway but the other two are fair.",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000386",
+      "verdict": "revise",
+      "reason": "'What is the MOST COMMON reason people skip an outdoor walk' is an empirical claim about population frequency, answered from editorial opinion with no data behind it — exactly the over-firm framing the rubric warns about. Either cite survey evidence, or rewrite the stem as a claim you can actually stand behind, e.g. 'What is a common trap when deciding whether to walk outdoors?'",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000387",
+      "verdict": "accept",
+      "reason": "Source is Lally et al. 2010 (EJSP, doi 10.1002/ejsp.674) and it says what the item says: median 66 days, range 18-254. '21 days' is a genuinely attractive distractor, so the item is not a freebie despite being the only hedged option. Minor: explanation says 'studies' plural for one cited study.",
+      "sources_checked": [
+        "https://onlinelibrary.wiley.com/doi/abs/10.1002/ejsp.674",
+        "https://www.bps.org.uk/research-digest/how-form-habit"
+      ]
+    },
+    {
+      "id": "SF-TRV-000388",
+      "verdict": "accept",
+      "reason": "Honestly labelled editorial, all four options are things people actually believe, and the explanation adds a reason rather than restating.",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000389",
+      "verdict": "revise",
+      "reason": "Half of this is evidence-backed and half is folklore presented as fact. Lally 2010 found a single missed opportunity did not materially affect habit formation — that part is fine. But 'two in a row is where a habit starts becoming a thing you used to do' is the 'never miss twice' rule of thumb from Atomic Habits / Tiny Habits, not a measured threshold, and it is baked into the correct option itself ('unless a second one follows'). Either drop the two-day threshold from the option and explanation, or mark it plainly as a rule of thumb rather than a finding.",
+      "sources_checked": [
+        "https://onlinelibrary.wiley.com/doi/abs/10.1002/ejsp.674",
+        "https://www.thebehavioralscientist.com/articles/how-long-to-form-a-habit"
+      ]
+    },
+    {
+      "id": "SF-TRV-000390",
+      "verdict": "accept",
+      "reason": "Self-monitoring reactivity is well replicated, and the item is careful to say 'shift' rather than claiming a direction. No body or weight framing. Distractor 0 is true-but-not-an-answer, which is a good distractor rather than a bad one.",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000391",
+      "verdict": "accept",
+      "reason": "Source resolves to Gollwitzer & Sheeran 2006, Adv. Exp. Soc. Psychol. 38:69-119, d = .65 across 94 independent tests. 'Markedly increases' is a fair reading of a medium-to-large effect, not an overstatement.",
+      "sources_checked": [
+        "https://www.sciencedirect.com/science/chapter/bookseries/abs/pii/S0065260106380021",
+        "https://www.scirp.org/reference/referencespapers?referenceid=2077487"
+      ]
+    },
+    {
+      "id": "SF-TRV-000392",
+      "verdict": "accept",
+      "reason": "Context-dependence of habit is solid, the simplification does not mislead, and the explanation names the mechanism (time, place, preceding event) instead of restating the option.",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000393",
+      "verdict": "accept",
+      "reason": "Editorial and correctly labelled. Safe, non-punitive, and 'do double to make up' is a real belief so the distractor earns its place.",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000394",
+      "verdict": "accept",
+      "reason": "Reasonable as simplified; option 2 is partly defensible but option 3 is clearly the better answer to the question as asked.",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000395",
+      "verdict": "revise",
+      "reason": "The question cannot be got wrong. 'How many days you turned up' is the definition of a streak, and the other three options are ruled out by simply knowing what the word means — no knowledge is tested. The point being made (a streak is not a fitness measure) is worth making, but make it the thing the reader has to work out: e.g. ask what a long streak does NOT tell you, or contrast two users with the same streak and different training.",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000396",
+      "verdict": "accept",
+      "reason": "Option 3 (people misjudge duration) is a real rival explanation rather than filler, which makes this a genuine question. Simplification is honest.",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000397",
+      "verdict": "revise",
+      "reason": "The claim is stated more firmly than the evidence supports, and probably backwards. Measured overnight muscle protein synthesis rates are LOW — lower than daytime and lower than post-absorptive morning values unless protein is given before sleep (Res et al. 2012; Trommelen & van Loon). Post-exercise synthesis is elevated across 24-48h, not concentrated in the hours you are asleep. 'Largely while you are asleep' is a gym truism, not a finding. What IS supportable: sleep restriction impairs training adaptation and growth-hormone pulses occur in slow-wave sleep. Rewrite around 'recovery depends on sleep' rather than 'most repair happens during sleep', or reject the item.",
+      "sources_checked": [
+        "https://www.ncbi.nlm.nih.gov/pmc/articles/PMC5188418/",
+        "https://journals.physiology.org/doi/full/10.1152/ajpendo.00273.2016",
+        "https://www.gssiweb.org/sports-science-exchange/article/sse-117-protein-ingestion-prior-to-sleep-potential-for-optimizing-post-exercise-recovery"
+      ]
+    },
+    {
+      "id": "SF-TRV-000398",
+      "verdict": "accept",
+      "reason": "Standard adaptation framing, true at the level given. Option 0 is also true but less fundamental, which is the right shape for a distractor. Explanation adds the signal/response idea rather than restating.",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000399",
+      "verdict": "revise",
+      "reason": "Two problems. (1) Guessable: three of the four options are absolutes ('reliably', 'for anybody', 'always'), so the hedged one is identifiable as correct without knowing anything about sleep. Rewrite the distractors as specific, non-absolute claims. (2) The confidence label is wrong. `contested` requires the text to say the field disagrees; this explanation describes individual variation instead. And the field is not especially divided — Stutz et al. 2019 (Sports Med) found evening exercise does not generally harm sleep, with impairment mainly after vigorous exercise ending under an hour before bed. Relabel as `simplified` and consider naming that one-hour window, which is the actually useful fact here.",
+      "sources_checked": [
+        "https://pubmed.ncbi.nlm.nih.gov/30374942/",
+        "https://link.springer.com/article/10.1007/s40279-018-1015-0"
+      ]
+    },
+    {
+      "id": "SF-TRV-000400",
+      "verdict": "accept",
+      "reason": "Definition is accurate, all four options are things the term could plausibly mean, and the explanation gives a usable test ('not enough to need recovering from').",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000401",
+      "verdict": "accept",
+      "reason": "Correctly kills the lactic-acid myth, which is worth the reader's attention. 'Follows the repair, not the effort' is a fair simplification of the damage-and-inflammation account, and option 3 is a genuinely tempting distractor.",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000402",
+      "verdict": "accept",
+      "reason": "True, useful, and safely framed — it defuses the 'no pain no gain' belief without shaming anyone. The two 'Yes' options are beliefs people really hold.",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000403",
+      "verdict": "accept",
+      "reason": "Source is Van Dongen et al. 2003, Sleep 26(2):117-26, and it does support the specific claim that subjective alertness ratings fail to track the objective deficit. The 0-vs-3 distinction is a real one, so the item tests something.",
+      "sources_checked": [
+        "https://academic.oup.com/sleep/article-abstract/26/2/117/2709164",
+        "https://www.highperformanceroutines.com/wp-content/uploads/2022/09/The-Cumulative-Cost-of-Additional-Wakefulness.pdf"
+      ]
+    },
+    {
+      "id": "SF-TRV-000404",
+      "verdict": "accept",
+      "reason": "Sensible as simplified, no sleep-hygiene overclaiming, and the explanation gives the reason (you can decide to get up, not to fall asleep) rather than restating the option.",
+      "sources_checked": []
+    }
+  ]
+}

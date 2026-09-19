@@ -29,3 +29,9 @@ static/exercise_samples/
 # it was not, so a run left it staged.
 coach_eval_results.json
 eval_spend.json
+
+# Review packets are derived from the store — regenerate with
+# `review_queue.py --emit`. The ledger and the verdicts are evidence and ARE
+# tracked: they are the record of who decided what, and why.
+content/reviews/packets/
+rickie_scenarios_results.json

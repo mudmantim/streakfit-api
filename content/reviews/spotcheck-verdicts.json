@@ -1,0 +1,88 @@
+{
+  "verdicts": [
+    {
+      "id": "SF-TRV-000393",
+      "verdict": "revise",
+      "reason": "Stem is ungrammatical/ambiguous: 'the day after missing one' has no antecedent — missing one what? A nine-year-old reading this cold has to guess it means 'one day of the habit'. Guessability is also poor: two of three distractors ('Restart the habit from the beginning', 'Take a second day off to reset properly') are self-evidently wrong to any reader, leaving a near-binary choice. The claim itself is sound and correctly marked editorial.",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000323",
+      "verdict": "revise",
+      "reason": "No option in the set respects a stated 'no'. Someone says they are too tired; 'Leaving them out and not mentioning it again' and 'Asking them to commit to tomorrow instead' are both marked wrong, so the only sanctioned response is to counter-offer a smaller ask. The explanation concedes the tiredness 'usually is' real and still recommends negotiating past it. In an app used by children, this teaches mild social pressure on a family member's stated limit, and it sits badly against the product's own anti-pressure framing. Needs either an option that simply accepts the no, or a stem that asks what keeps the invitation open rather than what 'helps most'.",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000379",
+      "verdict": "accept",
+      "reason": "",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000339",
+      "verdict": "revise",
+      "reason": "Zero-information item: it is a Safety-category question in a children's app where the correct option is the only one that says stop and the other three all counsel continuing through sharp pain. No knowledge is required to answer. Secondary issue: 'find out why later' gives a nine-year-old no actual next step (tell an adult, get it looked at), which is the one place this item could have taught something. The sharp-vs-dull distinction in the explanation is good and should survive any rewrite.",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000378",
+      "verdict": "accept",
+      "reason": "",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000347",
+      "verdict": "accept",
+      "reason": "",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000367",
+      "verdict": "accept",
+      "reason": "",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000364",
+      "verdict": "revise",
+      "reason": "Textbook form-tell: all four options share the frame 'It will...', and the correct one is the only hedged, non-absolute option ('will probably... slightly'). The other three are absolutes ('will resolve', 'will make you enjoy', 'will have no effect unless'). A reader who knows nothing about the topic picks the hedged option and is right. The underlying claim is true, safe and well-judged; the option set has to be rebuilt so at least two distractors are also hedged.",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000402",
+      "verdict": "accept",
+      "reason": "",
+      "sources_checked": [
+        "https://pubmed.ncbi.nlm.nih.gov/12453160/",
+        "https://biolayne.com/articles/training/doms-repeated-bout-effect/"
+      ]
+    },
+    {
+      "id": "SF-TRV-000357",
+      "verdict": "revise",
+      "reason": "Stated more firmly than the evidence supports, on the sample's most clinically adjacent topic, with no source. Two points: (a) 'Analyzing it until it resolves' is marked flatly wrong, but the brooding/reflection distinction is real and reflective, problem-focused processing does have support — the distractor is partly true, which makes the item misleading rather than simplified; (b) the evidence for gentle distraction is short-term relief, not that rumination 'responds to' it, and the item offers no signal that persistent rumination is worth telling someone about. At min_age 9 this reads as a settled answer to a question that is not settled.",
+      "sources_checked": [
+        "https://pmc.ncbi.nlm.nih.gov/articles/PMC12383120/",
+        "https://www.crd.york.ac.uk/PROSPEROFILES/52402_PROTOCOL_20161128.pdf"
+      ]
+    },
+    {
+      "id": "SF-TRV-000385",
+      "verdict": "revise",
+      "reason": "Claim verified and correctly hedged ('helps steady the rise'), but the option set gives it away: it is the only on-topic answer. 'It makes the meal digest completely' is nonsense, 'It prevents discomfort from eating too quickly' is a non sequitur, and 'It is the best time of day for exercise' does not answer the question asked. Also miscategorized — a postprandial glucose item is filed under 'Outdoors'.",
+      "sources_checked": [
+        "https://pmc.ncbi.nlm.nih.gov/articles/PMC12216464/",
+        "https://www.ncbi.nlm.nih.gov/pmc/articles/PMC8912639/"
+      ]
+    },
+    {
+      "id": "SF-TRV-000343",
+      "verdict": "accept",
+      "reason": "",
+      "sources_checked": [
+        "https://pmc.ncbi.nlm.nih.gov/articles/PMC9140806/",
+        "https://pubmed.ncbi.nlm.nih.gov/16679062/"
+      ]
+    }
+  ]
+}

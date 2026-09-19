@@ -450,7 +450,7 @@ TRIVIA = [
      "Your knee clicks but does not hurt. What does that usually mean?",
      ["It is a warning that pain is coming",
       "It means the joint needs more rest",
-      "Painless joint noise is usually ordinary",
+      "It is usually nothing worth worrying about",
       "It indicates the movement is being done wrong"],
      2,
      "Joints make noise. Painless clicking is very common and usually means "
@@ -929,7 +929,7 @@ TRIVIA = [
     ("Sleep & Recovery",
      "Why is a rest day part of training rather than a break from it?",
      ["It lets you train harder the following day",
-      "The adaptation happens during the rest",
+      "It is when the adaptation happens",
       "It prevents boredom with the routine",
       "It gives the mind time to recover too"],
      1,

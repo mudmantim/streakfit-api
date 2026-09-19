@@ -1,0 +1,160 @@
+{
+  "verdicts": [
+    {
+      "id": "SF-TRV-000311",
+      "verdict": "revise",
+      "reason": "Guessable by elimination: the three distractors are all physiological absurdities ('talking makes your muscles work less hard', 'walking together uses a different set of muscles', 'two people always walk faster than one' — note the giveaway 'always'), so the correct option is the only one that is even about how effort feels. Replace at least two distractors with plausible psychological mechanisms (e.g. 'you stop keeping track of how far you have gone', 'you set off before you can talk yourself out of it') so the reader has to know which one is right.",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000312",
+      "verdict": "revise",
+      "reason": "Distractor quality. 'Everyone gets the same amount of benefit from it' is plainly false, 'It only works if everyone does the same activity' is defeated by its own 'only', and 'The youngest person sets the pace' is unrelated to the question asked. The correct option is also the only figuratively phrased one, which makes it stand out visually. Also overlaps heavily with SF-TRV-000320, which teaches the same time-anchoring point in the same slice — keep one.",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000313",
+      "verdict": "revise",
+      "reason": "Textbook answer-shape giveaway: the options are 'Only A', 'Only B', 'Both', 'Neither', and 'Both' is the correct one. In an app whose whole voice is that everyone's effort counts, a nine-year-old will pick it without knowing anything about relative effort. The teaching point is good — keep it, but rewrite the options so the inclusive answer is not the only kind one (e.g. make a distractor 'Both, but only once they are out of breath', which is also inclusive and still wrong).",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000314",
+      "verdict": "revise",
+      "reason": "Two defensible answers. Option 1, 'Other people remind you more often than you remember', is a real and well-documented mechanism for why shared habits stick, so marking it wrong makes the item feel arbitrary. Either make that distractor clearly inadequate or rewrite the stem to ask specifically why it holds up even when nobody reminds you. Separately, the explanation ('skipping it is a small thing you would be doing to them too') leans on obligation to others in a way that sits awkwardly against the app's no-shame rule — consider framing it as shared rather than owed.",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000315",
+      "verdict": "revise",
+      "reason": "A judgement call presented as having one right answer. 'Say nothing about the gap and get straight on with it' and 'Remind them how well they were doing before' are both things thoughtful people genuinely do, and the explanation asserts the chosen option 'beats both silence and a post-mortem' without any basis offered. `editorial` confidence is fine for an opinion, but a trivia item marks three defensible choices as errors. Either reframe as a Rickie aside rather than a quiz, or make the distractors things that are actually unhelpful (e.g. 'Ask them to promise it will not happen again').",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000316",
+      "verdict": "accept",
+      "reason": "True (inter-individual variability in training response is well documented), safe, non-comparative, and all four options are beliefs people actually hold. The explanation adds information rather than restating the option.",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000317",
+      "verdict": "revise",
+      "reason": "Firmness: 'Watching somebody do a thing ordinarily is the most reliable teaching there is' is a superlative the evidence does not support — parental modelling is associated with children's activity, it is not established as the single most reliable form of teaching. Soften to something like 'is a large part of how children learn'. Also two of the distractors ('It guarantees the child is doing it correctly', 'Children need supervision for most kinds of movement') do not answer the question asked, which narrows the field to two before the reader thinks.",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000318",
+      "verdict": "revise",
+      "reason": "States one side of a genuinely mixed picture as fact. A visibly stronger partner can also raise effort and motivation (the Köhler effect is well replicated), so 'It motivates the other person to catch up' is not simply wrong, and 'The stronger person gets a poorer workout from it' is often true as well. The stem says 'tends to happen', which claims a direction the literature does not settle. Mark `contested` and say so in the text, or narrow the stem to the specific case the explanation is really about (a mismatch neither person can ignore).",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000319",
+      "verdict": "revise",
+      "reason": "Only one option is on topic. The question asks about consistency; three of the four options are about distance or effort, so the reader can select the right answer purely by matching subject matter without knowing anything about dogs or commitment. Rewrite the distractors as competing explanations for consistency (e.g. 'the dog is pleased to see you go', 'the walk happens at the same time each day').",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000320",
+      "verdict": "revise",
+      "reason": "Two throwaway distractors — 'Making sure nobody notices that they stopped' and 'Choosing an activity that person was never keen on' are not things anyone would propose — leaving one real alternative. It is also a near-duplicate of SF-TRV-000312: both items' correct answer is 'anchor the routine to a time, not a person'. Cut one of the two or give this one a distinct angle.",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000321",
+      "verdict": "revise",
+      "reason": "Overstated for a `simplified` item with no source. Choice and autonomy do improve adherence, but 'far more likely to turn up' and 'The activity matters much less than whose idea it was' are much firmer than the evidence, which shows a modest effect. Soften to 'more likely', drop the second sentence's comparative claim, or cite a self-determination-theory source and promote to `established`.",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000322",
+      "verdict": "accept",
+      "reason": "Well hedged ('can turn', 'sometimes useful and sometimes'), teaches a real and non-obvious idea, and the explanation gives both sides rather than restating the option. Distractor 'Targets work better for groups than for individuals' is genuinely tempting.",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000323",
+      "verdict": "accept",
+      "reason": "Safe and on-rubric — it explicitly rejects 'push through it anyway' and treats the tiredness as real rather than as something to argue with. Age-appropriate and genuinely useful.",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000324",
+      "verdict": "accept",
+      "reason": "Soft, hedged ('often'), harmless, and teaches a real framing effect. 'Without noticing' in the stem does enough work to separate it from the 'more energy when rested' distractor.",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000325",
+      "verdict": "revise",
+      "reason": "The stem telegraphs the answer. 'if nothing is done about it' signals that the right option is the one mentioning what happens when something IS done, and only option 2 does — it is also the longest. The underlying claim is sound, so this is purely an options fix: drop the qualifier from the stem, or move 'practicing it slows that down' into the explanation and make the options compete on what actually happens to balance.",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000326",
+      "verdict": "revise",
+      "reason": "THE CITATION IS WRONG. This is the only `established` item in the slice and its sole source, PMID 2360822, is 'Pentoxifylline modulates meningeal inflammation in experimental bacterial meningitis' (Antimicrob Agents Chemother, 1990) — nothing to do with strength training. The paper the explanation is describing is Fiatarone et al., 'High-intensity strength training in nonagenarians', JAMA 1990, which is PMID 2342214. The claim is true and the item is otherwise good; swap the source to https://pubmed.ncbi.nlm.nih.gov/2342214/ and re-check every other `established` citation in this batch, because the validator only checks that `sources` is non-empty, not that the URL resolves to the right paper.",
+      "sources_checked": [
+        "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi?db=pubmed&id=2360822,2342214&retmode=json",
+        "https://pubmed.ncbi.nlm.nih.gov/2342214/",
+        "https://jamanetwork.com/journals/jama/article-abstract/382128"
+      ]
+    },
+    {
+      "id": "SF-TRV-000327",
+      "verdict": "revise",
+      "reason": "Stated far more firmly than the evidence supports. 'Adolescent awkwardness' is poorly supported and actively disputed: a systematic review of sensorimotor function in adolescence found inconsistent results, several longitudinal studies aligned on peak height velocity found no decline (strength, speed and flexibility rose through the growth spurt), and a 2025 narrative review concludes there is no consensus definition and limited empirical evidence for the phenomenon at all. The 'brain holds an out-of-date map of your limb length' mechanism is a popular explanation, not an established one. Either mark `contested` and say in the text that it is argued over, or cut the item. Do not ship it as `simplified` fact to teenagers who will read it as a description of themselves.",
+      "sources_checked": [
+        "https://pmc.ncbi.nlm.nih.gov/articles/PMC4157222/",
+        "https://journals.sagepub.com/doi/10.1177/17479541251364101",
+        "https://www.ncbi.nlm.nih.gov/pmc/articles/PMC7226109/"
+      ]
+    },
+    {
+      "id": "SF-TRV-000328",
+      "verdict": "accept",
+      "reason": "True and well supported, and the explanation earns its place by naming what independence concretely means (getting out of a chair, carrying shopping) rather than restating the option. Minor: 'It keeps everyday independence' reads slightly clipped.",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000329",
+      "verdict": "revise",
+      "reason": "Formatting tell — the correct option is the only one beginning 'No —' and the only one containing a dash, so it is visually distinct before it is read. Combined with 'Children only benefit from organized sport', which its own 'only' defeats, the field collapses to two. Rephrase the correct option to match the others' shape and make the sport distractor plausible (e.g. 'Organised sport covers it more completely than play does').",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000330",
+      "verdict": "revise",
+      "reason": "The correct option is conspicuously the only hedged, two-clause, nuanced one, which is the standard tell — readers learn to pick the careful-sounding answer. 'It is fixed from birth and never changes' is also a throwaway nobody would choose. Additionally, 'less so in active people' is largely cross-sectional evidence and is stated here as settled causation; soften to something like 'and people who keep doing quick-response things tend to slow less', or source it.",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000331",
+      "verdict": "revise",
+      "reason": "The question's premise is not established and recent evidence points the other way. A 2025 systematic review, meta-analysis and meta-regression found advancing age is NOT associated with greater exercise-induced muscle damage, and that older adults reported substantially less soreness at 48 and 72 hours than younger ones; a 2023 scoping review on recovery from resistance exercise in older adults concluded the findings are too inconsistent to support clear recommendations. This item asserts 'recovery tends to take longer as you get older' in the stem as settled fact and then gives training advice built on it. Rewrite the stem so it does not presuppose the effect, mark `contested`, and say in the text that it is argued over — or cut the item. Two of the distractors ('Muscles become permanently more fragile', 'The body stops repairing muscle after middle age') are throwaways regardless.",
+      "sources_checked": [
+        "https://pubmed.ncbi.nlm.nih.gov/40174882/",
+        "https://www.ncbi.nlm.nih.gov/pmc/articles/PMC10317890/",
+        "https://www.sciencedaily.com/releases/2025/04/250402122338.htm"
+      ]
+    },
+    {
+      "id": "SF-TRV-000332",
+      "verdict": "revise",
+      "reason": "The claim is true, but the item is unguessable-proof in the wrong direction: 'There is no age at which starting stops helping' is the answer this app always gives, and 'It depends entirely on your family history' is defeated by its own 'entirely'. It is also redundant with SF-TRV-000326 in the same slice, which already makes the never-too-late point with better distractors and an actual study behind it. Cut this one or give it a specific, checkable payload (what late starters actually gain, and how fast).",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000333",
+      "verdict": "accept",
+      "reason": "Mechanism question that genuinely requires knowing the answer, and 'Pressure forces minerals into the bone from the blood' is a properly tempting distractor. Claim (bone remodels in response to mechanical load) is solidly established and the explanation explains rather than restates.",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000334",
+      "verdict": "revise",
+      "reason": "The correct option is the grammatical odd one out: three options open 'A rule... / The idea... / A gradual loss...' and the fourth opens 'Tissue kept...', so it can be picked on shape alone. 'The idea that rest is always harmful' is also a throwaway. Separately, 'Tissue kept in proportion to its demand' is abstract phrasing for a stated min_age of 9 — the explanation is clearer than the option it explains, which suggests the option should be rewritten in the explanation's language.",
+      "sources_checked": []
+    }
+  ]
+}

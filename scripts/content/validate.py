@@ -183,11 +183,33 @@ def check_shape(item: dict) -> list[str]:
 
 def check_provenance(item: dict) -> list[str]:
     """The one rule that stops the library drifting back to confident nonsense."""
+    errs = []
     if item.get("confidence") == "established" and not item.get("sources"):
-        return ["confidence 'established' with no sources"]
+        errs.append("confidence 'established' with no sources")
     if item.get("confidence") == "editorial" and item.get("sources"):
-        return ["editorial content does not need sources — is the confidence wrong?"]
-    return []
+        errs.append("editorial content does not need sources — is the confidence wrong?")
+
+    # A NON-EMPTY sources list is not a checked one. Batch 0003 shipped two
+    # `established` items whose citations were fabricated: one PMID resolved to
+    # a 1990 paper on bacterial meningitis, another to a report on a natural-gas
+    # pipeline. Both claims happened to be true and both citations were
+    # authoritative-looking nonsense, and this function passed them, because all
+    # it asked was whether the list had something in it.
+    #
+    # Nothing here can fetch a URL and read it. What it CAN do is refuse to let
+    # an `established` claim reach a reader unless a review recorded that it was
+    # checked AT SOURCE — `depth: sourced` is the reviewer asserting they
+    # resolved the citation, and it is a different claim from having read the
+    # item. Anything weaker belongs at `simplified`, which needs no source.
+    if item.get("confidence") == "established" and item.get("stage") == "accepted":
+        depth = (item.get("review") or {}).get("depth")
+        if depth != "sourced":
+            errs.append(
+                f"'established' accepted with review depth {depth!r} — an "
+                "established claim may only be served if a reviewer recorded "
+                "that they resolved the source (depth 'sourced'); a non-empty "
+                "sources list is not a checked one")
+    return errs
 
 
 def check_language(item: dict) -> tuple[list[str], list[str]]:
