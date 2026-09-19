@@ -1026,6 +1026,21 @@ def check_display_name_can_be_set_changed_and_cleared(b: Browser, base: str, app
     check(b.js("document.getElementById('display-name-input').value") == "Olivia",
           "and it survives a reload")
 
+    # The placeholder must actually fit. It read "Leave blank fo" on a phone,
+    # which looks like a broken field rather than a hint.
+    fits = b.js("(()=>{const i=document.getElementById('display-name-input');"
+                " if(!i) return false; const c=document.createElement('canvas')"
+                ".getContext('2d'); c.font=getComputedStyle(i).font;"
+                " return c.measureText(i.placeholder).width <= i.clientWidth - 12;})()")
+    check(bool(fits), "its placeholder fits the box at phone width")
+
+    # And the name reaches the app, not just the chat prompt it was built for.
+    set_name("Olivia")
+    b.goto(base + "/", wait=2.5)
+    reaches = b.js("(()=>{return typeof _withName==='function' && "
+                   "/Olivia/.test(_withName('Morning.'));})()")
+    check(bool(reaches), "the name is actually used by the app's own greeting")
+
     # A guest has no account to store it on.
     b.reset_storage()
     b.goto(base + "/", wait=1.5)

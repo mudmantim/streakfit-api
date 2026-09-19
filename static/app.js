@@ -2710,6 +2710,26 @@ async function _sendPhoto(teamId, canvas, caption, sendBtn, objectUrl) {
 // streak deserves. It replaces a bordered notice inside the mission card, and
 // it is the first thing on the page for a reason — what can I do now, and how
 // am I doing, answered before any scrolling.
+// Put the person's name on a greeting, sometimes.
+//
+// The display name setting shipped with nowhere to show itself: it reached only
+// the Ask Rickie system prompt, so somebody could type their name, save it, and
+// never once see the app use it. An independent review called that "reads as
+// broken", and it was right — a setting that changes nothing observable is
+// worse than no setting.
+//
+// Sometimes, not always. A companion who opens every single greeting with your
+// name is a salesperson. Deterministic per day rather than random, so it does
+// not flicker between re-renders of the same screen.
+function _withName(line) {
+    if (!line || isGuest) return line;
+    var name = currentUser && currentUser.rickie_calls_you;
+    if (!name) return line;                       // no safe name: use none
+    var day = Math.floor(Date.now() / 86400000);
+    if (day % 3 !== 0) return line;
+    return line.replace(/[.!?]?$/, ', ' + name + '.');
+}
+
 function _renderTodayStrip(daily) {
     var greetingEl = document.getElementById('today-greeting');
     if (greetingEl) {
@@ -2720,7 +2740,7 @@ function _renderTodayStrip(daily) {
         } else {
             if (!_cachedGreetingLine) {
                 var pool = isGuest ? 'guest' : _rickieTimeOfDayPool();
-                _cachedGreetingLine = _pickRickieLine(pool);
+                _cachedGreetingLine = _withName(_pickRickieLine(pool));
             }
             // A separate line once the mission is done. Appending to the
             // pre-mission greeting produced things like "The day's not over

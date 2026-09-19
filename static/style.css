@@ -4030,8 +4030,12 @@ body.theme-classic .theme-btn.active { background: rgba(79,70,229,.2); }
     padding: .35rem .6rem;
     min-height: 44px;
     font-size: .95rem;      /* >=16px equivalent keeps iOS from zooming on focus */
-    max-width: 11rem;
-    flex: 0 1 11rem;
+    /* "Leave blank for no name" did not fit and rendered as "Leave blank fo",
+     * which reads as a broken field. The sentence belongs in the help line
+     * under it, which has the room; the box just says "Optional". */
+    max-width: 12rem;
+    flex: 1 1 8rem;
+    min-width: 7rem;
 }
 .display-name-input:focus-visible {
     outline: 2px solid var(--indigo-500, #6366f1);
