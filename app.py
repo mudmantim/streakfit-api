@@ -1194,6 +1194,10 @@ def get_daily5_streak(user_id):
 class User(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(80), unique=True, nullable=False)
+    # What Rickie calls them. Optional, and separate from `username` on purpose:
+    # a username is a login credential that people fill with email addresses and
+    # handles they would not want said back to them out loud.
+    display_name = db.Column(db.String(40), nullable=True)
     password_hash = db.Column(db.String(256), nullable=False)
     skill_level  = db.Column(db.String(20), nullable=False, default='beginner')
     display_mode = db.Column(db.String(20), nullable=False, default='game')
@@ -2428,6 +2432,8 @@ def get_me():
     return jsonify({
         "id": user.id,
         "username": user.username,
+        "display_name": user.display_name,
+        "rickie_calls_you": _safe_display_name(user),
         "skill_level": user.skill_level,
         "display_mode": user.display_mode,
         "rickie_mode": user.rickie_mode,
@@ -2451,8 +2457,15 @@ def get_me():
 @jwt_required()
 def update_me():
     data = request.get_json()
-    if not data or ('skill_level' not in data and 'display_mode' not in data and 'rickie_mode' not in data):
-        return jsonify({"error": "Provide skill_level, display_mode, and/or rickie_mode"}), 400
+    fields = ('skill_level', 'display_mode', 'rickie_mode', 'display_name')
+    if not data or not any(f in data for f in fields):
+        return jsonify({"error": "Provide skill_level, display_mode, rickie_mode, "
+                                 "and/or display_name"}), 400
+
+    if 'display_name' in data:
+        ok, cleaned = _validate_display_name(data['display_name'])
+        if not ok:
+            return jsonify({"error": cleaned}), 400
 
     if 'skill_level' in data and data['skill_level'] not in VALID_SKILL_LEVELS:
         return jsonify({"error": "Invalid skill_level. Must be one of: beginner, intermediate, advanced, custom"}), 400
@@ -2474,12 +2487,17 @@ def update_me():
         user.display_mode = data['display_mode']
     if 'rickie_mode' in data:
         user.rickie_mode = data['rickie_mode']
+    if 'display_name' in data:
+        _, cleaned = _validate_display_name(data['display_name'])
+        user.display_name = cleaned
 
     db.session.commit()
     stats = get_user_stats(user_id)
     return jsonify({
         "id": user.id,
         "username": user.username,
+        "display_name": user.display_name,
+        "rickie_calls_you": _safe_display_name(user),
         "skill_level": user.skill_level,
         "display_mode": user.display_mode,
         "rickie_mode": user.rickie_mode,
@@ -2617,6 +2635,18 @@ def export_my_data():
             "everything_else": "kept while the account exists",
             "clear_conversations": "Settings → Forget our conversations",
             "delete_everything": "Settings → Delete my account",
+            # Deleting a row deletes it from the live database. It does not
+            # reach into a backup taken before you asked, and saying "deleted"
+            # without saying that is a promise the product cannot keep. The
+            # window is the hosting provider's backup retention, which is
+            # tracked as an open item in docs/operations/production-readiness.md
+            # — until it is confirmed and a restore is tested, the honest answer
+            # is that we do not know it, not a number we guessed.
+            "backups": "Deleting removes data from the live database "
+                       "immediately. Copies inside routine encrypted database "
+                       "backups age out with those backups; they are not "
+                       "searched or used to answer anything, and nobody reads "
+                       "them except to restore the service after a failure.",
         },
         "shared_with": {
             "anthropic": "Your Ask Rickie messages, Rickie's replies from the last "
@@ -5204,6 +5234,26 @@ missions completed, or simply avoid numbers altogether.
 - Never diagnose a condition, assess an injury, or imply medical, training, or \
 nutrition expertise. If something needs a real professional, say so warmly and point \
 them there — in your own voice, not a brush-off.
+
+WHEN TO SEND SOMEBODY TO A PROFESSIONAL, AND WHEN NOT TO. Point at a doctor, \
+physiotherapist or dietitian when the question is about THIS PERSON'S body or safety: \
+a symptom (pain, dizziness, breathlessness that worries them, a joint that gives way), \
+an injury, a diagnosed condition, medication or supplements, a prescriptive eating or \
+training plan, or anything that could hurt them if you guessed. Say it warmly, once, \
+and never as a way of getting out of the conversation — in those moments it is the most \
+useful thing you have.
+
+Do NOT attach that caveat to an ordinary question. "What's the difference between a \
+squat and a lunge?", "what muscles do push-ups work?", "is walking actually exercise?", \
+"does sweating mean anything?", "is soreness from lactic acid?" — these are general \
+knowledge, they are the same answer for everybody, and they are exactly what you are \
+for. Answer them. A caveat stapled to a question that did not need one teaches somebody \
+that you hedge everything, and the next time you say "this one really is worth asking a \
+doctor about" it will land as more of the same noise. Spend the warning where it counts \
+by not spending it where it does not.
+
+The test is not "could this possibly involve a body". It is "did THEY tell me something \
+about THEIR body, or ask me to decide something FOR their body". If neither, just answer.
 - Never be sarcastic toward the user, and never talk down. Stay kind and approachable \
 for kids, adults, and seniors alike.
 - Never talk about anybody's body as something to be fixed, shrunk or improved. Do not \
@@ -5349,6 +5399,63 @@ you nothing; being confidently wrong costs you the user.\
 _RICKIE_MILESTONES = (7, 14, 30, 100)
 
 
+_DISPLAY_NAME_MAX = 40
+# Shapes a login identifier takes that must never be spoken back to somebody.
+# An email address is the one that matters; the rest are handles that read as
+# machine output ("qa_coach_eval_1789836556_2") rather than as a person's name.
+_UNSAFE_NAME = re.compile(
+    r"@"                      # any email address, anywhere in the string
+    r"|^\s*$"                 # blank
+    r"|\d{4,}"                # long digit runs: timestamps, ids, birth years
+    r"|^(qa|test|tmp|temp|user|admin|guest|anon)[-_]"   # machine/role prefixes
+    r"|https?://|www\.",
+    re.I)
+
+
+def _validate_display_name(value):
+    """(ok, cleaned_or_error). `None` / "" clears it and falls back."""
+    if value is None or (isinstance(value, str) and not value.strip()):
+        return True, None
+    if not isinstance(value, str):
+        return False, "display_name must be text"
+    cleaned = " ".join(value.split())
+    if len(cleaned) > _DISPLAY_NAME_MAX:
+        return False, f"display_name can be at most {_DISPLAY_NAME_MAX} characters"
+    if "@" in cleaned:
+        return False, ("display_name can't be an email address — it's what Rickie "
+                       "calls you out loud")
+    if _UNSAFE_NAME.search(cleaned):
+        return False, "display_name can't contain a web address or a long run of digits"
+    return True, cleaned
+
+
+def _safe_display_name(user):
+    """What Rickie may call this person, or None to use no name at all.
+
+    Rickie used to be handed `user.username` as "Name" and would say it back in
+    conversation — which produced "Be a little gentle with yourself right now,
+    qa_coach_eval_1789836556_2" in the September evaluation, and would have read
+    a real email address aloud for anyone who registered with one.
+
+    So: an explicit display name wins; a username is used only if it already
+    looks like something a person would answer to; otherwise Rickie uses no name.
+    Addressing somebody by no name at all is warm. Addressing them by their login
+    is not.
+    """
+    if user is None:
+        return None
+    # getattr, not attribute access: the context builder is also called with
+    # duck-typed stand-ins in tests, and a name lookup is not worth breaking
+    # Rickie's whole context over.
+    chosen = (getattr(user, "display_name", None) or "").strip()
+    if chosen:
+        return chosen
+    username = (getattr(user, "username", None) or "").strip()
+    if not username or len(username) > 20 or _UNSAFE_NAME.search(username):
+        return None
+    return username
+
+
 def _build_rickie_context(user):
     """A trustworthy, server-derived snapshot of the user for Rickie's system prompt.
 
@@ -5365,11 +5472,18 @@ def _build_rickie_context(user):
     # Pre-computed arithmetic (Rickie must never calculate these himself).
     next_ms = next((m for m in _RICKIE_MILESTONES if m > cs), None)
 
+    # No name line at all when there is no safe name — rather than handing
+    # Rickie a login identifier and hoping he does not use it.
+    safe_name = _safe_display_name(user)
+    name_line = ([f"- Name: {safe_name}"] if safe_name else
+                 ["- You do not know their name. Do not ask for it and do not "
+                  "guess one; just talk to them without using a name."])
+
     lines = [
         "What you know about this user right now. These numbers are exact — use "
         "only them. Never calculate, estimate, or invent any number about the "
         "user's progress; if the fact you need isn't here, say you're not sure.",
-        f"- Name: {user.username}",
+        *name_line,
         f"- Current streak: {cs} day(s)",
         f"- Best streak ever: {bs} day(s)",
         f"- Total missions completed: {tm}",
@@ -5711,6 +5825,52 @@ def _expire_old_coach_turns(user_id):
     ).delete(synchronize_session=False)
 
 
+_COACH_SWEEP_INTERVAL = timedelta(hours=1)
+_coach_sweep_last = None
+_coach_sweep_lock = threading.Lock()
+
+
+def _sweep_expired_coach_turns(force=False):
+    """Delete EVERY user's expired turns, not just the caller's. STAGES only.
+
+    `_expire_old_coach_turns` is per-user and runs on that user's read and that
+    user's write. So the retention window was only honored for people who came
+    back — and the person it exists for is the one who said something difficult
+    and never opened the app again. Nobody read their rows, nobody wrote them,
+    nothing swept on their behalf, and the data export went on promising
+    `coach_conversation_days: 30` about rows that were never going to expire.
+
+    Rate-limited rather than scheduled, because this app has no scheduler: a
+    single indexed DELETE at most once an hour, on a request path that is
+    already talking to a model over the network. Returns the number of rows
+    deleted, or None when the interval said not yet.
+
+    The honest limitation: this sweeps when SOMEBODY uses the app. If nothing
+    touches the coach for a month, nothing expires for a month. For a hard
+    guarantee independent of traffic, run `flask coach-prune` from a scheduler
+    — see docs/operations/privacy.md.
+    """
+    global _coach_sweep_last
+    now = datetime.utcnow()
+    with _coach_sweep_lock:
+        if not force and _coach_sweep_last is not None \
+                and now - _coach_sweep_last < _COACH_SWEEP_INTERVAL:
+            return None
+        _coach_sweep_last = now
+    cutoff = now - timedelta(days=_COACH_TURN_MAX_AGE_DAYS)
+    return db.session.query(CoachTurn).filter(
+        CoachTurn.created_at < cutoff).delete(synchronize_session=False)
+
+
+@app.cli.command("coach-prune")
+def coach_prune_command():
+    """Delete expired coach turns for every user. For a scheduled run."""
+    deleted = _sweep_expired_coach_turns(force=True)
+    db.session.commit()
+    print(f"deleted {deleted} coach turns older than "
+          f"{_COACH_TURN_MAX_AGE_DAYS} days")
+
+
 def _stage_coach_exchange(user_id, user_msg, reply):
     """Stage the turn pair and prune the window. STAGES only (flush) — the
     caller owns the commit. Returns the number of pruned turns.
@@ -5725,6 +5885,9 @@ def _stage_coach_exchange(user_id, user_msg, reply):
                              content=(reply or '')[:_COACH_TURN_MAX_LEN]))
     db.session.flush()
     expired = _expire_old_coach_turns(user_id)
+    # Everybody else's expired rows too, at most hourly. Without this the
+    # retention window is only honored for people who keep showing up.
+    expired += _sweep_expired_coach_turns() or 0
     stale = (CoachTurn.query.filter_by(user_id=user_id)
              .order_by(CoachTurn.id.desc())
              .offset(_COACH_MEMORY_WINDOW).all())

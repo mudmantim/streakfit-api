@@ -349,3 +349,70 @@ def test_direct_helpers_still_self_commit(app):
     assert CoachTurn.query.filter_by(user_id=u.id).count() == 2
     assert json.loads(
         CoachNote.query.filter_by(user_id=u.id).first().activities) == ["swimming"]
+
+
+# ── Retention actually expiring for accounts that never come back ────────────
+#
+# The data export promises `coach_conversation_days: 30`. That promise was only
+# kept for users who returned: _expire_old_coach_turns runs on this user's read
+# and on this user's write, so the person who says something difficult and never
+# opens the app again — precisely the person the window is for — kept it
+# forever. Nothing swept on their behalf.
+
+def test_inactive_user_turns_are_swept_by_the_global_sweep(app):
+    """A user who never comes back must still have old turns deleted."""
+    gone = _make_user("retention_never_returns")
+    stale = appmod.datetime.utcnow() - appmod.timedelta(
+        days=appmod._COACH_TURN_MAX_AGE_DAYS + 5)
+    for role, content in (("user", "something difficult"), ("assistant", "a reply")):
+        db.session.add(CoachTurn(user_id=gone.id, role=role,
+                                 content=content, created_at=stale))
+    db.session.commit()
+    assert CoachTurn.query.filter_by(user_id=gone.id).count() == 2
+
+    # The sweep is global: it is not given this user's id, because nobody is
+    # acting on their behalf. That is the entire point.
+    deleted = appmod._sweep_expired_coach_turns(force=True)
+    db.session.commit()
+
+    assert deleted == 2
+    assert CoachTurn.query.filter_by(user_id=gone.id).count() == 0
+
+
+def test_global_sweep_leaves_fresh_turns_alone(app):
+    fresh = _make_user("retention_recent")
+    db.session.add(CoachTurn(user_id=fresh.id, role="user", content="today"))
+    db.session.commit()
+    appmod._sweep_expired_coach_turns(force=True)
+    db.session.commit()
+    assert CoachTurn.query.filter_by(user_id=fresh.id).count() == 1
+
+
+def test_global_sweep_is_rate_limited_so_it_is_cheap_on_every_request(app):
+    """Called on the request path, so it must not run a DELETE every time."""
+    appmod._sweep_expired_coach_turns(force=True)
+    db.session.commit()
+    # Immediately after a forced sweep, an unforced one should decline to run.
+    assert appmod._sweep_expired_coach_turns() is None
+
+
+def test_another_users_activity_sweeps_the_inactive_users_expired_turns(app):
+    """End-to-end: the real write path, not the sweep helper directly.
+
+    This is the scenario the retention promise is actually about. The person
+    who left is not doing anything; somebody else is.
+    """
+    appmod._coach_sweep_last = None          # allow the hourly sweep to run
+    gone = _make_user("retention_left_for_good")
+    stale = appmod.datetime.utcnow() - appmod.timedelta(
+        days=appmod._COACH_TURN_MAX_AGE_DAYS + 1)
+    db.session.add(CoachTurn(user_id=gone.id, role="user",
+                             content="a thing they regret typing", created_at=stale))
+    still_here = _make_user("retention_still_here")
+    db.session.commit()
+
+    appmod._record_coach_exchange(still_here.id, "hey Rickie", "hey yourself")
+
+    assert CoachTurn.query.filter_by(user_id=gone.id).count() == 0, \
+        "an inactive user's expired turns survived another user's activity"
+    assert CoachTurn.query.filter_by(user_id=still_here.id).count() == 2
