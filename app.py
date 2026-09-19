@@ -3762,6 +3762,27 @@ def list_teams():
 
     witness = _witness_for_ids(m.user_id for m in all_memberships)
 
+    # Open challenges, so a challenge waiting for you is visible from the
+    # dashboard instead of only inside the team panel's chat tab. A reason to
+    # come back should not need three taps to discover.
+    now = datetime.utcnow()
+    open_rows = db.session.execute(
+        db.select(TeamChallenge.id, TeamChallenge.team_id)
+        .where(TeamChallenge.team_id.in_(team_ids),
+               db.or_(TeamChallenge.expires_at.is_(None), TeamChallenge.expires_at > now))
+    ).all()
+    mine = set()
+    if open_rows:
+        mine = {cid for (cid,) in db.session.execute(
+            db.select(TeamChallengeCompletion.challenge_id).where(
+                TeamChallengeCompletion.user_id == user_id,
+                TeamChallengeCompletion.challenge_id.in_([r.id for r in open_rows]))
+        ).all()}
+    open_by_team = {}
+    for row in open_rows:
+        if row.id not in mine:
+            open_by_team[row.team_id] = open_by_team.get(row.team_id, 0) + 1
+
     result = []
     for team_id in team_ids:
         team = teams.get(team_id)
@@ -3781,6 +3802,7 @@ def list_teams():
                 1 for uid in member_ids
                 if witness.get(uid, {}).get('completed_today')
             ),
+            "open_challenges": open_by_team.get(team_id, 0),
         })
 
     return jsonify(result), 200

@@ -288,3 +288,54 @@ def test_completions_are_one_per_person(client, team_of_two):
         .where(TeamChallengeCompletion.challenge_id == row.id)).scalar()
 
     assert count == 1
+
+
+# ── A waiting challenge is visible without digging ─────────────────────────
+
+def test_a_waiting_challenge_shows_on_the_teams_list(client, team_of_two):
+    """The best honest reason to open the app tomorrow should not need three
+    taps to discover."""
+    start(client, team_of_two["parent"], team_of_two["team_id"])
+
+    listing = client.get("/api/teams", headers=auth_headers(team_of_two["kid"])).get_json()
+    row = next(r for r in listing if r["id"] == team_of_two["team_id"])
+
+    assert row["open_challenges"] == 1
+
+
+def test_a_challenge_you_have_done_stops_waiting_for_you(client, team_of_two):
+    ch = start(client, team_of_two["parent"], team_of_two["team_id"]).get_json()["challenge"]
+    client.post(f"/api/teams/{team_of_two['team_id']}/challenges/{ch['public_id']}/complete",
+                headers=auth_headers(team_of_two["kid"]))
+
+    listing = client.get("/api/teams", headers=auth_headers(team_of_two["kid"])).get_json()
+    row = next(r for r in listing if r["id"] == team_of_two["team_id"])
+
+    assert row["open_challenges"] == 0
+    # ...but it is still waiting for the person who has not done it.
+    theirs = client.get("/api/teams", headers=auth_headers(team_of_two["parent"])).get_json()
+    assert next(r for r in theirs if r["id"] == team_of_two["team_id"])["open_challenges"] == 1
+
+
+def test_an_expired_challenge_stops_waiting_for_everyone(client, team_of_two):
+    ch = start(client, team_of_two["parent"], team_of_two["team_id"]).get_json()["challenge"]
+    row = db.session.execute(
+        db.select(TeamChallenge).where(TeamChallenge.public_id == ch["public_id"])).scalar_one()
+    row.expires_at = datetime.datetime.utcnow() - datetime.timedelta(seconds=1)
+    db.session.commit()
+
+    listing = client.get("/api/teams", headers=auth_headers(team_of_two["kid"])).get_json()
+
+    assert next(r for r in listing if r["id"] == team_of_two["team_id"])["open_challenges"] == 0
+
+
+def test_the_teams_list_does_not_scale_queries_with_challenges(client, team_of_two):
+    from test_team_witness import count_queries
+
+    for _ in range(6):
+        start(client, team_of_two["parent"], team_of_two["team_id"], preset="walk_10")
+
+    with count_queries() as n:
+        client.get("/api/teams", headers=auth_headers(team_of_two["kid"]))
+
+    assert n[0] <= 10, f"query count {n[0]} grows with challenges"

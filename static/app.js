@@ -481,9 +481,19 @@ function _buildTeamCard(team) {
     }
     card.appendChild(moved);
 
+    // A challenge waiting is the single best reason to open the app tomorrow,
+    // so it says so here rather than hiding two taps inside the chat tab.
+    if (team.open_challenges > 0) {
+        var waiting = document.createElement('p');
+        waiting.className = 'team-card-challenge';
+        waiting.textContent = '\u26A1 ' + team.open_challenges
+            + (team.open_challenges === 1 ? ' challenge waiting' : ' challenges waiting');
+        card.appendChild(waiting);
+    }
+
     var openBtn = document.createElement('button');
     openBtn.className = 'team-card-open-btn team-card-open-btn-active';
-    openBtn.textContent = 'Open';
+    openBtn.textContent = team.open_challenges > 0 ? 'Take it on' : 'Open';
     openBtn.addEventListener('click', function () { openTeamPanel(team); });
     card.appendChild(openBtn);
 

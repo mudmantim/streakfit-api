@@ -3370,3 +3370,11 @@ body.theme-classic .theme-btn.active { background: rgba(79,70,229,.2); }
     .team-panel-reaction-btn:active, .photo-filter-chip:active,
     .team-panel-tab:active { transform: none; }
 }
+
+/* A challenge waiting: the best honest reason to open the app tomorrow. */
+.team-card-challenge {
+    margin: 0 0 .7rem;
+    font-size: .82rem;
+    font-weight: 700;
+    color: var(--indigo);
+}
