@@ -302,3 +302,59 @@ def test_every_question_asks_something_rather_than_asserting_it():
         assert not q["question"].lower().startswith("true or false"), (
             f"{q['question']!r} — if the fact is worth asking about, ask about the fact"
         )
+
+
+def test_no_question_is_answerable_from_the_grammar_alone():
+    """The tell the length tests could not see.
+
+    When three distractors open with the same word and the correct option does
+    not, the answer is the odd one out and no knowledge is required to spot it.
+    Nine questions had this — "What is reaction time?" had three options
+    beginning "How" and an answer beginning "The" — and every one of them
+    passed the position and length checks.
+
+    This is a guard, not a definition of good content: a question can satisfy
+    it and still be dull, wrong or unkind. Those are read by a person.
+    """
+    offenders = []
+    for q in appmod.BRAIN_BOOST_LIBRARY:
+        firsts = [o.split()[0].lower().strip('",') for o in _distractors(q) if o.split()]
+        answer_first = _correct(q).split()[0].lower().strip('",')
+        if len(set(firsts)) == 1 and answer_first != firsts[0]:
+            offenders.append(f"{q['question']} — distractors all start {firsts[0]!r}")
+    assert not offenders, "answer is the odd one out by grammar:\n" + "\n".join(offenders[:6])
+
+
+def test_no_question_asserts_the_answer_in_the_asking():
+    """"What's wrong with 'no pain, no gain'?" told the reader that something
+    was wrong with it, which ruled out the option saying nothing was."""
+    leading = re.compile(r"\b(what'?s (wrong|missing)|why (is|does).{0,30}\bfail|"
+                         r"what does .{0,30} get wrong)\b", re.I)
+    offenders = [q["question"] for q in appmod.BRAIN_BOOST_LIBRARY
+                 if leading.search(q["question"])]
+    assert not offenders, "the question answers itself:\n" + "\n".join(offenders[:5])
+
+
+def test_no_two_entries_say_the_same_thing():
+    """Insight-to-insight, question-to-question and across the two: a person
+    who reads both surfaces should not be told one fact twice."""
+    import itertools
+
+    stop = set("a an the of to in and or is are it its you your on for that this with as at be "
+               "by from not what which how why does do can if than then more most some their "
+               "they them we our but".split())
+
+    def words(t):
+        return {w for w in re.findall(r"[a-z]+", t.lower()) if w not in stop and len(w) > 3}
+
+    entries = [(q["question"], words(q["options"][q["correct_index"]] + " " + q["explanation"]))
+               for q in appmod.BRAIN_BOOST_LIBRARY]
+    entries += [(e["text"], words(e["text"])) for e in appmod.INSIGHT_LIBRARY]
+
+    dupes = []
+    for (ta, wa), (tb, wb) in itertools.combinations(entries, 2):
+        if not wa or not wb:
+            continue
+        if len(wa & wb) / len(wa | wb) >= 0.40:
+            dupes.append(f"{ta[:60]!r}\n    ~ {tb[:60]!r}")
+    assert not dupes, "near-duplicate content:\n" + "\n".join(dupes[:5])

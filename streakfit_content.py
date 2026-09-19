@@ -23,7 +23,7 @@ EXTRA_INSIGHTS = [
      'category': 'MOVEMENT'},
     {'text': 'Carrying a bag on one shoulder makes the muscles down the other side of your body work harder to keep you upright.',
      'category': 'MOVEMENT'},
-    {'text': "The first minute of anything physical feels the hardest because your body hasn't finished ramping up blood flow to the muscles yet.",
+    {'text': 'The first few minutes of exercise feel harder than they should. Your muscles want oxygen immediately and your heart and lungs take a couple of minutes to catch up.',
      'category': 'MOVEMENT'},
     {'text': 'Pushing a heavy door, standing up from a low couch, lifting a kid — those are presses and squats your body already knows how to do.',
      'category': 'MOVEMENT'},
@@ -347,7 +347,7 @@ EXTRA_INSIGHTS = [
      'category': 'FUN FACTS'},
     {'text': "Your eyes never truly hold still. Even when you're staring at one spot, they're making tiny jumps you can't feel.",
      'category': 'FUN FACTS'},
-    {'text': 'Your left lung is slightly smaller than your right one, to leave room for your heart.',
+    {'text': "Your left lung has two lobes and your right has three. The left gave up a lobe's worth of space to the heart.",
      'category': 'FUN FACTS'},
     {'text': 'A drop of blood makes a full circuit of your body in about a minute.',
      'category': 'FUN FACTS'},
@@ -369,7 +369,7 @@ EXTRA_INSIGHTS = [
      'category': 'FUN FACTS'},
     {'text': "Astronauts grow an inch or two in orbit. There's plenty of gravity up there — they're just falling around the Earth, so nothing is pressing their spine together.",
      'category': 'FUN FACTS'},
-    {'text': "Humans are among the best long-distance runners in the animal kingdom. We're slow, but almost nothing else can keep going as far.",
+    {'text': "Humans are the best long-distance runners in the animal kingdom. Not because we're fast — because we sweat, and most animals can only cool down by panting, which they can't do while galloping.",
      'category': 'FUN FACTS'},
     {'text': 'Fingernails grow faster than toenails, and the nails on your dominant hand grow fastest of all.',
      'category': 'FUN FACTS'},
@@ -725,17 +725,6 @@ EXTRA_BRAIN_BOOST = [
                      ' happens when they disagree — your inner ear says moving, your eyes say the'
                      ' cabin is still.'),
      'category': 'Everyday Movement'},
-    {'question': 'Which is true about breaking up long stretches of sitting?',
-     'options': ['Standing and moving briefly is worth doing in its own right',
-                 'It matters far less than getting one proper workout in',
-                 'It helps only if the break lasts several minutes',
-                 'Sitting and standing put much the same demand on the body'],
-     'correct_index': 0,
-     'explanation': ('Your leg muscles act as a pump for blood returning to your heart, and they'
-                     ' only pump when they move. Breaking up sitting shows up in the measurements'
-                     " somewhat separately from how much you exercise — the evening session doesn't"
-                     ' replace it.'),
-     'category': 'Everyday Movement'},
     {'question': 'Why does walking feel effortless to most adults?',
      'options': ['Your brain automated it years ago, with practice',
                  'Walking genuinely takes very little muscle work',
@@ -947,7 +936,7 @@ EXTRA_BRAIN_BOOST = [
                      ' rather than character.'),
      'category': 'Sleep & Recovery'},
     {'question': 'What does keeping roughly the same sleep and wake time help with?',
-     'options': ['Your body clock settles into a rhythm it can anticipate',
+     'options': ['It lets your body clock settle into a rhythm it can predict',
                  'It mainly helps you fall asleep faster on the first night',
                  'It matters for athletes but makes little difference otherwise',
                  'It makes mornings harder, by removing the chance to catch up'],
@@ -1164,11 +1153,11 @@ EXTRA_BRAIN_BOOST = [
                      " spread the fluid where it's needed. Nothing at all happens while you sit"
                      ' still, which is most of why stiffness eases a few minutes into a walk.'),
      'category': 'Warm-Up & Soreness'},
-    {'question': 'What\'s wrong with "no pain, no gain"?',
-     'options': ['A great deal of progress happens without any pain at all',
-                 "Nothing — it's a fair summary of how bodies adapt",
-                 "It's true for strength but not for flexibility",
-                 'It applies only to people who are already experienced'],
+    {'question': 'How much does getting fitter depend on a session hurting?',
+     'options': ['Hardly at all — most progress happens without any pain',
+                 'A great deal — discomfort is the signal that something changed',
+                 'It depends: strength needs pain, flexibility does not',
+                 'Only for beginners, who have the most adapting to do'],
      'correct_index': 0,
      'explanation': ('Steady, unremarkable sessions build more over a year than occasional punishing'
                      " ones. Effort and pain aren't the same currency, and treating them as one is"
@@ -1325,7 +1314,7 @@ EXTRA_BRAIN_BOOST = [
                      " bit more than one you can't."),
      'category': 'Brain & Movement'},
     {'question': "What's the largest organ in the human body?",
-     'options': ['Skin', 'The liver', 'The lungs', 'The gut'],
+     'options': ['The skin', 'The liver', 'The lungs', 'The gut'],
      'correct_index': 0,
      'explanation': ("Skin counts as an organ, and it's the biggest one you have: waterproof,"
                      ' self-repairing and temperature-regulating, wrapped around everything else. The'
@@ -1352,9 +1341,10 @@ EXTRA_BRAIN_BOOST = [
     {'question': "What's the hardest substance in your body?",
      'options': ['Tooth enamel', 'Bone', 'Fingernail', 'The cartilage in your ears'],
      'correct_index': 0,
-     'explanation': ("Enamel is harder than bone, and unlike bone it can't rebuild itself. It's the"
-                     ' one part of you with no repair crew, which is why looking after it matters'
-                     ' more than it does for anything else.'),
+     'explanation': ('Enamel is harder than bone, and it is the one part of you with no living cells'
+                     ' in it — so once it is gone it cannot grow back. It can be topped up, though:'
+                     ' minerals from saliva and toothpaste move back into enamel that has started to'
+                     ' soften, which is most of what brushing is for.'),
      'category': 'Body Facts'},
     {'question': 'Are most people slightly taller in the morning?',
      'options': ['Yes — the discs in your spine compress over the day',
@@ -1516,10 +1506,10 @@ EXTRA_BRAIN_BOOST = [
                      ' better part of a year.'),
      'category': 'Habits & Consistency'},
     {'question': 'What does tracking a habit tend to do?',
-     'options': ['Seeing the record becomes a nudge in itself',
-                 'It shows you which days are your strongest',
+     'options': ['It turns the effort into something you can look at',
+                 'It shows you which days of the week are your strongest',
                  'It makes the habit feel more like an obligation',
-                 'It mainly helps people who are already consistent'],
+                 'It mainly helps people who are consistent already'],
      'correct_index': 0,
      'explanation': ('A visible record turns an invisible effort into something you can look at, and'
                      ' people are reliably more willing to continue a line they can see. Worth'
@@ -1536,10 +1526,10 @@ EXTRA_BRAIN_BOOST = [
                      ' is the common instinct and the usual reason the restart lasts four days.'),
      'category': 'Habits & Consistency'},
     {'question': "Why do 'all or nothing' plans often fall apart?",
-     'options': ['One imperfect day feels like total failure',
+     'options': ['They turn one imperfect day into total failure',
                  'They ask for more time than most people have',
-                 'They get boring before they become a habit',
-                 "They rely on motivation, which doesn't last"],
+                 'They get boring long before they become a habit',
+                 'They rely on motivation, which does not last'],
      'correct_index': 0,
      'explanation': ('If only perfect counts, the first ordinary day ends the whole thing. The other'
                      ' three are real problems too — but this is the one that specifically comes from'
@@ -1598,9 +1588,9 @@ EXTRA_BRAIN_BOOST = [
                      " what you feel. It's the same mismatch behind seasickness."),
      'category': 'Balance & Agility'},
     {'question': 'What is reaction time?',
-     'options': ['The gap between noticing something and starting to move',
-                 'How quickly you can complete a movement once started',
-                 'How fast a nerve signal travels to the muscle',
+     'options': ['How long it takes to notice something and start moving',
+                 'How quickly you can finish a movement once it is started',
+                 'How fast a nerve signal travels from brain to muscle',
                  'How quickly you recover from an unexpected stumble'],
      'correct_index': 0,
      'explanation': ('It covers noticing, deciding and beginning to move. Most of the delay is in'
