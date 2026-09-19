@@ -6320,7 +6320,12 @@ async function handleCreateChallenge(event) {
     event.preventDefault();
     setError('create-error', '');
 
-    var titleInput = document.getElementById('tchallenge-title');
+    // NOT 'tchallenge-title': that prefix belongs to the TEAM challenge cards.
+    // This is the Side Quests form input, id="challenge-title" in index.html.
+    // A blanket rename caught it and broke side-quest creation silently — the
+    // handler is async, so the TypeError became an unhandled rejection rather
+    // than a visible error.
+    var titleInput = document.getElementById('challenge-title');
     var title = titleInput.value.trim();
     if (!title) return;
 

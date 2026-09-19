@@ -544,6 +544,35 @@ def check_photo_sharing(b: Browser, base: str, app) -> None:
     check(seen.get("caption") == "look what I did", "the caption arrives with it")
 
 
+def check_side_quests_still_work(b: Browser, base: str, app) -> None:
+    """Side Quests is the solo habit tracker, and it had no coverage at all.
+
+    A blanket CSS-class rename changed the form's input id and creation broke
+    silently — the handler is async, so the TypeError surfaced as an unhandled
+    rejection rather than an error anyone would see. 295 tests stayed green.
+    """
+    print("\nSide Quests — the solo habit tracker")
+    _, token = make_user(app, "sidequest")
+    b.goto(base + "/", wait=1.0)
+    b.js(f"localStorage.setItem('streakfit_token', {json.dumps(token)})")
+    b.goto(base + "/", wait=3.0)
+
+    check(bool(b.js("!!document.getElementById('challenge-title')")),
+          "the side-quest form is on the page")
+
+    b.js("(()=>{const i=document.getElementById('challenge-title');"
+         " i.value='Read for 10 minutes'; return 1;})()")
+    b.js("(()=>{const f=document.getElementById('create-form');"
+         " f.dispatchEvent(new Event('submit',{cancelable:true})); return 1;})()")
+    time.sleep(2.5)
+
+    listed = b.js("document.getElementById('challenges-list').innerText") or ""
+    check("Read for 10 minutes" in listed,
+          "adding a side quest actually adds it",
+          f"list shows {listed[:80]!r}")
+    check("Check In" in listed, "a new side quest offers a check-in")
+
+
 def check_page_is_clean(b: Browser, base: str, app) -> None:
     print("\nThe page itself, at phone width")
     _, token = make_user(app, "clean")
@@ -634,6 +663,7 @@ def main() -> int:
         check_guest_gets_the_celebration(browser, base)
         check_team_witness(browser, base, flask_app)
         check_photo_sharing(browser, base, flask_app)
+        check_side_quests_still_work(browser, base, flask_app)
         check_page_is_clean(browser, base, flask_app)
     except Exception as exc:  # a crash must never read as a pass
         bad(f"check run crashed: {type(exc).__name__}: {exc}")
