@@ -223,6 +223,9 @@ var guestCompleteFired = false;
 // Picked once per page load, reused across re-renders — see renderJourneyCard's
 // caller and the Rickie intro line below.
 var _cachedGreetingLine = null;
+// Held separately so finishing the mission changes what Rickie says rather
+// than bolting a clause onto a line written for before it.
+var _cachedDoneLine = null;
 
 // ── Rickie's Journey ──────────────────────────────────────────────────────────
 // Never guilt, never shame, never mention losing progress — only encouragement.
@@ -2719,9 +2722,15 @@ function _renderTodayStrip(daily) {
                 var pool = isGuest ? 'guest' : _rickieTimeOfDayPool();
                 _cachedGreetingLine = _pickRickieLine(pool);
             }
-            greetingEl.textContent = daily.completed_count >= 5
-                ? _cachedGreetingLine + ' That’s today done.'
-                : _cachedGreetingLine;
+            // A separate line once the mission is done. Appending to the
+            // pre-mission greeting produced things like "The day's not over
+            // yet. That's today done."
+            if (daily.completed_count >= 5) {
+                if (!_cachedDoneLine) _cachedDoneLine = _pickRickieLine('missionComplete');
+                greetingEl.textContent = _cachedDoneLine;
+            } else {
+                greetingEl.textContent = _cachedGreetingLine;
+            }
         }
     }
 
@@ -3021,11 +3030,18 @@ function getRickieExpression(eventContext) {
 // Minimal mode always displays neutral regardless of the computed expression —
 // same "branding only" rule _updateRickieMoodBadge already applies to the mood
 // badge, applied here to the avatar itself.
+// How long a celebration owns Rickie's face. Long enough to outlast the
+// dashboard re-render that fires 480ms after a completion.
+var _expressionHoldUntil = 0;
+
+function _holdExpression(ms) { _expressionHoldUntil = Date.now() + (ms || 6000); }
+
 function _applyRickieExpression() {
     var expr = (_rickieMode() === 'minimal') ? 'neutral' : currentRickieExpression;
     var src = RICKIE_EXPRESSION_SVG[expr] || RICKIE_EXPRESSION_SVG.neutral;
     var avatarEls = document.querySelectorAll(
-        '.journey-avatar, .rickie-avatar-sm, .rickie-reaction-avatar, .coach-avatar, .mb-avatar'
+        '.journey-avatar, .rickie-avatar-sm, .rickie-reaction-avatar, .coach-avatar, '
+        + '.mb-avatar, .today-rickie'
     );
     avatarEls.forEach(function (el) { el.src = src; });
 }
@@ -3915,6 +3931,18 @@ async function loadDailyExercises() {
         currentRickieExpression = getRickieExpression({ type: 'guest_mode' });
     } else if (daily.rise_again) {
         currentRickieExpression = getRickieExpression({ type: 'returning_user' });
+    } else if (Date.now() < _expressionHoldUntil) {
+        // A celebration set his face moments ago. This re-render runs 480ms
+        // after a completion, and resetting here is why the whole expression
+        // language was effectively invisible: Rickie went happy and then
+        // straight back to neutral before anyone could see it.
+        /* keep what the celebration set */
+    } else if (daily.completed_count >= 5) {
+        // Finished today. He stays pleased about it for the rest of the day
+        // rather than snapping back to a blank stare.
+        currentRickieExpression = 'proud';
+    } else if ((currentUser && currentUser.current_streak) >= 3) {
+        currentRickieExpression = 'happy';
     } else {
         currentRickieExpression = getRickieExpression({ type: 'idle_dashboard' });
     }
@@ -6130,6 +6158,7 @@ async function handleCompleteExercise(key, btn, row) {
                 leveledUp: summary.leveledUp,
                 perfectMission: wasPerfectMission
             });
+            _holdExpression(6000);
         } else {
             currentRickieExpression = 'neutral';
         }
