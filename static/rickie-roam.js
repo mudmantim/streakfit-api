@@ -90,6 +90,7 @@
         recent: [],         /* short-term repetition avoidance */
         timer: null,
         walkTimer: null,
+        reactionGeneration: 0,  /* only the newest reaction may end the reaction */
         pose: 'neutral'
     };
 
@@ -495,8 +496,22 @@
         clearInterval(state.walkTimer);
         el.style.transition = '';
         state.busy = true;
+
+        /* Two reactions can land on the same moment: answering a Brain Boost
+         * question fires the shared showRickieReaction path (exercise_done)
+         * AND an answered_right/answered_wrong of its own, one line apart.
+         * Without a generation token the FIRST runner's callback still fires
+         * partway through the second, sets busy=false and calls schedule() —
+         * so a behaviour starts mid-reaction and the second callback then
+         * schedules a rival timer. The result is two concurrent walk loops
+         * after every answer, compounding each time.
+         *
+         * The token means only the newest reaction can end the reaction state.
+         * A superseded runner is left to finish its animation harmlessly. */
+        var generation = ++state.reactionGeneration;
         var id = options[Math.floor(Math.random() * options.length)];
         (REACTION_RUNNERS[id] || REACTION_RUNNERS.cheer_small)(function () {
+            if (generation !== state.reactionGeneration) return;
             state.busy = false;
             schedule();
         });
