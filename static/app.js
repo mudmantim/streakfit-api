@@ -3787,6 +3787,13 @@ function setGuestUI(guest) {
     var forgetRow = document.getElementById('settings-row-forget');
     if (forgetRow) forgetRow.hidden = guest;
 
+    // Same reason: a display name is stored on the account. Hide the help line
+    // with it, or a guest gets a stray sentence about a control that is gone.
+    var nameRow = document.getElementById('settings-row-name');
+    if (nameRow) nameRow.hidden = guest;
+    var nameHelp = document.getElementById('display-name-help');
+    if (nameHelp) nameHelp.hidden = guest;
+
     var sideQuests = document.getElementById('side-quests-section');
     if (sideQuests) sideQuests.hidden = guest;
 
@@ -3898,6 +3905,23 @@ async function loadUserPreferences() {
     if (sel && result.data.skill_level) sel.value = result.data.skill_level;
     var rickieSel = document.getElementById('rickie-mode-select');
     if (rickieSel && result.data.rickie_mode) rickieSel.value = result.data.rickie_mode;
+    _syncDisplayNameField();
+}
+
+// The field shows what the USER set, which is not the same as what Rickie
+// actually calls them: an unset name falls back to the username only when the
+// username already looks like a name. Showing the fallback in the box would
+// make a blank field look filled in, and then clearing it would look broken.
+function _syncDisplayNameField() {
+    var input = document.getElementById('display-name-input');
+    if (!input || !currentUser) return;
+    input.value = currentUser.display_name || '';
+    var help = document.getElementById('display-name-help');
+    if (!help) return;
+    var calls = currentUser.rickie_calls_you;
+    help.textContent = calls
+        ? 'Not your login. Rickie calls you "' + calls + '".'
+        : "Not your login. Rickie isn't using a name for you.";
 }
 
 var THEME_COLORS = { game: '#4338ca', bright: '#0891b2', classic: '#4f46e5' };
@@ -3924,6 +3948,29 @@ async function handleDisplayModeChange(mode) {
         // Server rejected it — reload preferences to restore correct state
         await loadUserPreferences();
     }
+}
+
+// Set, change, or clear. An empty box is a deliberate choice, not a no-op:
+// it clears the stored name and Rickie goes back to using none.
+async function handleDisplayNameChange(value) {
+    var input = document.getElementById('display-name-input');
+    var help = document.getElementById('display-name-help');
+    var result = await api('/api/me', 'PATCH', { display_name: value });
+    if (!result) return;
+    if (result.status !== 200) {
+        // Say what was wrong and put the box back to the stored value, rather
+        // than leaving a rejected string sitting there looking saved.
+        if (help) {
+            help.textContent = (result.data && result.data.error)
+                || "That name didn't work — try a shorter one.";
+            help.classList.add('settings-help-error');
+        }
+        if (input && currentUser) input.value = currentUser.display_name || '';
+        return;
+    }
+    if (help) help.classList.remove('settings-help-error');
+    currentUser = Object.assign(currentUser || {}, result.data);
+    _syncDisplayNameField();
 }
 
 async function handleRickieModeChange(mode) {

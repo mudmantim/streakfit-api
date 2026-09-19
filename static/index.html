@@ -117,6 +117,22 @@
                         </button>
                     </div>
 
+                    <!-- What Rickie calls you. Separate from the login on
+                         purpose: a username is a credential people fill with
+                         email addresses, and he says this one out loud. Blank
+                         is a real choice — he then uses no name at all. -->
+                    <div class="settings-row" id="settings-row-name">
+                        <label class="settings-label" for="display-name-input">Rickie calls you</label>
+                        <input id="display-name-input" class="display-name-input"
+                               type="text" maxlength="40" autocomplete="nickname"
+                               placeholder="Leave blank for no name"
+                               aria-describedby="display-name-help"
+                               onchange="handleDisplayNameChange(this.value)">
+                    </div>
+                    <p class="settings-help" id="display-name-help">
+                        Not your login. Leave it blank and Rickie just won't use a name.
+                    </p>
+
                     <div class="settings-row" id="settings-row-rickie">
                         <label class="settings-label" for="rickie-mode-select">Rickie</label>
                         <select id="rickie-mode-select" class="skill-select" title="How much of Rickie's personality you want"

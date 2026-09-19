@@ -4018,3 +4018,33 @@ body.theme-classic .theme-btn.active { background: rgba(79,70,229,.2); }
 }
 
 .rickie-roam-still { transition: none !important; }
+
+/* ── "Rickie calls you" — the display name ──────────────────────────────────
+   Matches the settings selects rather than inventing a third input style. The
+   44px min-height is the tap target uicheck enforces at phone width. */
+.display-name-input {
+    background: var(--gray-100);
+    color: var(--gray-900);
+    border: 1.5px solid var(--gray-200);
+    border-radius: 8px;
+    padding: .35rem .6rem;
+    min-height: 44px;
+    font-size: .95rem;      /* >=16px equivalent keeps iOS from zooming on focus */
+    max-width: 11rem;
+    flex: 0 1 11rem;
+}
+.display-name-input:focus-visible {
+    outline: 2px solid var(--indigo-500, #6366f1);
+    outline-offset: 1px;
+}
+.display-name-input::placeholder { color: var(--gray-500, #6b7280); }
+
+/* The help line carries the live answer to "what does he actually call me",
+   so it is not decoration and does not shrink to footnote size. */
+.settings-help {
+    margin: -.25rem 0 .25rem;
+    font-size: .8rem;
+    line-height: 1.35;
+    color: var(--gray-600, #4b5563);
+}
+.settings-help-error { color: var(--red-600, #dc2626); font-weight: 600; }
