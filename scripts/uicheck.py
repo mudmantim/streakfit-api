@@ -718,6 +718,98 @@ def check_panes_and_solo_first(b: Browser, base: str, app) -> None:
           "Rickie opens from Today and is actually visible")
 
 
+def check_someone_can_actually_sign_up(b: Browser, base: str, app) -> None:
+    """The first sixty seconds, through the real form.
+
+    Every other check in this file mints an account directly and drops a token
+    into localStorage, because registration is rate limited and a harness that
+    signs up eleven times fails on the limiter instead of on anything real.
+    The cost of that shortcut is that the single most important path in the
+    product — a person typing a username and arriving at their first mission —
+    had no browser coverage whatsoever. This is the one check that pays the
+    rate-limit cost and walks in the front door.
+    """
+    print("\nSigning up — the front door")
+    b.goto(base + "/", wait=1.5)
+    b.reset_storage()
+    b.goto(base + "/", wait=2.0)
+
+    check(bool(b.js("(()=>{const f=document.getElementById('register-form');"
+                    " return f && !!f.offsetParent;})()")),
+          "the sign-up form is what a new visitor sees")
+
+    username = f"uicheck_signup_{int(time.time() * 1000) % 1000000}"
+    b.js("(function(){document.getElementById('reg-username').value="
+         + json.dumps(username)
+         + "; document.getElementById('reg-password').value='Passw0rd!x'; return 1;})()")
+    b.js("(()=>{const f=document.getElementById('register-form');"
+         " f.dispatchEvent(new Event('submit',{cancelable:true})); return 1;})()")
+    time.sleep(4.0)
+
+    err = (b.js("document.getElementById('register-error').textContent") or "").strip()
+    if not check(not err, "signing up reports no error", err):
+        return
+    if not check(bool(b.js("(()=>{const d=document.getElementById('dashboard-view');"
+                           " return d && !d.hidden;})()")),
+                 "it lands on the dashboard rather than staying on the form"):
+        return
+    rows = b.js("document.querySelectorAll('.daily-exercise-row').length")
+    check(rows == 5, "a brand-new account has a five-exercise mission waiting",
+          f"found {rows} rows")
+    check(bool(b.js("(()=>{const btn=[...document.querySelectorAll('button')]"
+                    ".find(e=>e.textContent.trim()==='I did this'); return !!btn;})()")),
+          "and something to tap")
+
+
+def check_brain_boost_can_be_answered(b: Browser, base: str, app) -> None:
+    """Tapping an answer, in a browser.
+
+    The content library has plenty of tests and none of them press a button.
+    193 questions were rewritten in one pass — options replaced, several
+    questions reworded, 18 dropped and 21 added — and the thing that would
+    catch a mistake in the wiring is a tap, not an assertion about a dict.
+    """
+    print("\nBrain Boost — can you answer it?")
+    _, token = make_user(app, "boost")
+    b.goto(base + "/", wait=1.0)
+    b.js(f"localStorage.setItem('streakfit_token', {json.dumps(token)})")
+    b.goto(base + "/", wait=3.0)
+
+    # Brain Boost is the reward for finishing, so the mission has to be done
+    # before it renders at all. Completed through the API rather than by
+    # tapping five buttons — the tapping has its own check, and this one is
+    # about the question.
+    daily = _api(base, "/api/daily", token=token)
+    for ex in daily["exercises"]:
+        _api(base, f"/api/daily/{ex['key']}/complete", "POST", token)
+    b.goto(base + "/", wait=3.5)
+
+    b.js("(()=>{const r=[...document.querySelectorAll('button')]"
+         ".find(e=>/Reveal Brain Boost/i.test(e.textContent)); if(r) r.click(); return 1;})()")
+    time.sleep(1.2)
+
+    count = b.js("document.querySelectorAll('.bb-option-btn').length")
+    if not check(count == 4, "four options are on screen", f"found {count}"):
+        return
+
+    question = b.js("(document.querySelector('.bb-question-text')||{}).textContent") or ""
+    check(question.strip().endswith("?"), "it is a question", question[:70])
+
+    b.js("document.querySelectorAll('.bb-option-btn')[0].click()")
+    time.sleep(2.0)
+
+    feedback = (b.js("(document.querySelector('.bb-feedback')||{}).textContent") or "").strip()
+    check(bool(feedback), "answering says whether you got it", feedback[:60])
+    explanation = (b.js("(document.querySelector('.bb-explanation')||{}).textContent") or "").strip()
+    check(len(explanation) > 40,
+          "and explains it either way — a wrong answer is where the fact lands",
+          explanation[:70])
+    # Never-negative: getting it wrong must not be scolded.
+    low = (feedback + " " + explanation).lower()
+    for word in ("wrong again", "you failed", "incorrect!", "nope!"):
+        check(word not in low, f"the wrong-answer copy stays kind ({word!r} absent)")
+
+
 def check_page_is_clean(b: Browser, base: str, app) -> None:
     print("\nThe page itself, at phone width")
     _, token = make_user(app, "clean")
@@ -811,6 +903,8 @@ def main() -> int:
         check_side_quests_still_work(browser, base, flask_app)
         check_step_up_is_offered_not_imposed(browser, base, flask_app)
         check_panes_and_solo_first(browser, base, flask_app)
+        check_brain_boost_can_be_answered(browser, base, flask_app)
+        check_someone_can_actually_sign_up(browser, base, flask_app)
         check_page_is_clean(browser, base, flask_app)
     except Exception as exc:  # a crash must never read as a pass
         bad(f"check run crashed: {type(exc).__name__}: {exc}")
