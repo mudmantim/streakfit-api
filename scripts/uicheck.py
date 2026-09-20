@@ -778,6 +778,34 @@ def check_panes_and_solo_first(b: Browser, base: str, app) -> None:
                     " return p && !p.hidden && !!p.offsetParent;})()")),
           "Rickie opens from Today and is actually visible")
 
+    # And it must not open as a blank box.
+    #
+    # It used to: an empty thread and an "Ask Rickie…" placeholder, with no
+    # greeting and nothing saying what he is for. A reviewer sat in front of it
+    # and could not think of a question — the ordinary blank-page problem,
+    # except here every guess costs a real API call, so the cost of not knowing
+    # what to ask is paid in money and in a deflection that teaches somebody he
+    # is not much use.
+    #
+    # The opener is entirely local. This asserts that too: nothing may be sent
+    # to /api/coach just by opening the panel.
+    time.sleep(0.6)
+    opener = (b.js("(()=>{const t=document.querySelector('.coach-thread');"
+                   " return t ? t.innerText : '';})()") or "").strip()
+    check(len(opener) > 30, "Rickie says something when he opens", opener[:70])
+
+    starters = b.js("(()=>{const s=[...document.querySelectorAll('.coach-starter')];"
+                    " return JSON.stringify(s.map(b=>({t:b.textContent.trim(),"
+                    "   h:Math.round(b.getBoundingClientRect().height)})));})()")
+    rows = json.loads(starters) if str(starters).startswith("[") else []
+    check(len(rows) >= 3, "and offers things to tap rather than a blank box",
+          f"{len(rows)} starters")
+    check(all(r["h"] >= 44 for r in rows),
+          "the starters are tappable at phone size",
+          str([r["h"] for r in rows]))
+    check(all(r["t"].endswith("?") for r in rows),
+          "and each one is a question", str([r["t"][:30] for r in rows]))
+
 
 def check_someone_can_actually_sign_up(b: Browser, base: str, app) -> None:
     """The first sixty seconds, through the real form.

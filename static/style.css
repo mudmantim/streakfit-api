@@ -4176,3 +4176,23 @@ body.theme-classic .theme-btn.active { background: rgba(79,70,229,.2); }
     opacity: .8;
 }
 
+/* Starter questions in the coach panel. Tappable, 44px, and they disappear
+   the moment one is chosen — they are a way in, not a menu. */
+.coach-starters {
+    display: flex;
+    flex-direction: column;
+    gap: .4rem;
+    margin: .5rem 0 .25rem;
+}
+.coach-starter {
+    min-height: 44px;
+    padding: .55rem .8rem;
+    text-align: left;
+    border: 1px solid var(--border, rgba(127, 127, 127, .35));
+    border-radius: 12px;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    cursor: pointer;
+}
+.coach-starter:hover { border-color: currentColor; }

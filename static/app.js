@@ -7190,8 +7190,67 @@ function openCoach(context) {
     if (context && context.type === 'insight') {
         _sendCoachMessage('Tell me more about today’s insight', context);
     } else {
+        _showCoachOpener();
         _coachInput.focus();
     }
+}
+
+// The blank page, and why it was worth fixing.
+//
+// "Ask Rickie" opened an empty thread with an "Ask Rickie…" placeholder and
+// nothing else — no greeting, no statement of what he is for, no sign that
+// he knows anything about you. A reviewer sat in front of it and could not
+// think of a question. That is the ordinary blank-page problem, except here
+// a wrong guess costs a real API call and gets a deflection back, which
+// teaches somebody that he is not much use before he has had a chance to be.
+//
+// So: one line from him, and three things to tap. Entirely local — nothing
+// here calls /api/coach until the person chooses to, so the opener is free
+// and the starters are not guesses at what he can answer, they are the
+// things his prompt is actually built to handle.
+//
+// Deliberately NOT here: anything that implies he was waiting, remembering,
+// or pleased to see you again. See the character rules — he is a companion,
+// not something you owe attention to.
+var _coachOpenerShown = false;
+
+function _coachStarters() {
+    var starters = [
+        'What should I do if a move hurts?',
+        'How do streaks work here?',
+        'What are acorns for?'
+    ];
+    // If they have a mission in front of them, the most useful question is
+    // about the thing they are about to do.
+    var next = document.querySelector('.daily-exercise-row.is-next .daily-exercise-name');
+    if (next && next.textContent.trim()) {
+        starters[0] = 'How do I do a ' + next.textContent.trim() + ' properly?';
+    }
+    return starters;
+}
+
+function _showCoachOpener() {
+    if (_coachOpenerShown || !_coachThread || _coachThread.children.length) return;
+    _coachOpenerShown = true;
+
+    _appendCoachMsg('coach',
+        'Ask me anything about StreakFit, or about moving your body. '
+        + 'If I do not know something, I will say so.');
+
+    var row = document.createElement('div');
+    row.className = 'coach-starters';
+    _coachStarters().forEach(function (q) {
+        var b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'coach-starter';
+        b.textContent = q;
+        b.addEventListener('click', function () {
+            row.remove();
+            _sendCoachMessage(q, { type: 'general' });
+        });
+        row.appendChild(b);
+    });
+    _coachThread.appendChild(row);
 }
 
 function _submitCoachMessage() {
