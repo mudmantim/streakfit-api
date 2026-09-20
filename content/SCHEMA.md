@@ -89,9 +89,18 @@ product" are three different claims and collapsing them is how a library of
 An item's author fixing the gate failures on their own batch is **not** a
 review. Passing validation moves something to `validated` and no further.
 
+`review.by` records **who**: `ai-agent` or `human`. Every review in this store
+to date is `ai-agent`. An agent's judgement and a person's are both legitimate
+and they are not the same claim — before this field existed the store could not
+distinguish them, and a count of "independently reviewed" items silently meant
+"reviewed by an agent".
+
 `review.depth` records how hard the check was, because these are not the same:
 
-- **`sourced`** — the claim was looked up and the source says what the item says.
+- **`sourced`** — the claim was looked up and the source says what the item
+  says. **The URLs must be on the item**; the validator rejects `sourced` with
+  no `sources`, because this label was once applied to 416 served items that
+  had none.
 - **`read`** — a person read it and judged it. Weaker, and honest about being weaker.
 - **`tested`** — for experiments: somebody actually did the thing.
 

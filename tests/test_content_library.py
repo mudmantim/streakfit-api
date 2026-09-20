@@ -110,7 +110,13 @@ def test_the_product_never_tells_a_person_they_failed():
 # When the 311 items parked at `revise` are edited and re-reviewed, raise the
 # ratchet. It is meant to go up.
 _SIX_MONTHS = 180
-_INSIGHT_RATCHET = 224      # 2026-09-20, after the full independent re-review
+# Lowered 224 -> 222 on 2026-09-20, deliberately: two served experiments were
+# quarantined for assuming a body that can stand. SF-EXP-000004 asks the reader
+# to stand up and march twenty times; SF-EXP-000007 asks them to narrow their
+# stance, which is a balance task with nothing named to hold. Both are parked
+# at `revise` with their reasons and are worth rewriting so they work from a
+# chair — this is a demotion pending an edit, not a deletion.
+_INSIGHT_RATCHET = 222      # 2026-09-20, after quarantining two experiments
 _BRAIN_BOOST_RATCHET = 200  # 2026-09-20
 
 
@@ -272,11 +278,24 @@ def test_an_experiment_that_needs_balance_says_what_to_hold():
     with a knee that decides these things — and "stand on one foot" with no
     qualifier assumes it does.
     """
-    needs_balance = re.compile(r"\b(stand on one foot|one foot|hop|hopping|"
-                               r"shift your weight|eyes closed)\b", re.I)
-    safe_wording = re.compile(r"\b(near a wall|worktop|hold|holding|something to "
-                              r"hold|sitting|seated|chair|if you would rather|"
-                              r"only as far as)\b", re.I)
+    # Broadened after a served experiment slipped through: "stand with your
+    # feet together, then a shoulder-width apart" is a deliberately narrowed
+    # stance — a balance task — and matched none of the original phrasings.
+    # Same shape as the gate that read "eyes closed WHILE WALKING OR RUNNING"
+    # and missed two items telling readers to balance with their eyes shut.
+    #
+    # It now covers anything that asks the reader to be on their feet at all,
+    # because the app does not know who is reading and "stand up and march"
+    # assumes an ability not everyone has. An experiment either avoids that or
+    # says how to do it another way.
+    needs_balance = re.compile(
+        r"\b(stand|standing|stand up|on one foot|one foot|one leg|hop|hopping|"
+        r"jump|tiptoe|shift your weight|eyes closed|eyes shut|feet together|"
+        r"narrow stance|march|marching|balance)\b", re.I)
+    safe_wording = re.compile(
+        r"\b(near a wall|worktop|counter|hold|holding|something to hold|"
+        r"sitting|seated|sit down|chair|if you would rather|if you prefer|"
+        r"only as far as|or just|lying|from a chair)\b", re.I)
     offenders = [
         e["text"][:70] for e in appmod.INSIGHT_LIBRARY
         if e["type"] == "experiment" and needs_balance.search(e["text"])

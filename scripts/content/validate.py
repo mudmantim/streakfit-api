@@ -176,6 +176,21 @@ def check_shape(item: dict) -> list[str]:
                         "passing validation is not a review")
         if review.get("depth") not in ("sourced", "read", "tested"):
             errs.append(f"review depth {review.get('depth')!r} is not sourced/read/tested")
+        # `sourced` means somebody looked the claim up and the source agreed.
+        # 416 of 440 served items carried it with no source anywhere, because
+        # the review records wrote `"depth": "sourced"` beside
+        # `"sources_checked": []` — citing bodies of literature by name without
+        # opening one. The label was the only field recording how hard anybody
+        # looked, so overstating it cost the field its meaning.
+        if review.get("depth") == "sourced" and not item.get("sources"):
+            errs.append("review depth 'sourced' with no sources on the item — "
+                        "that is 'read'")
+        # Who reviewed it, as data. An agent's judgement and a person's are
+        # both legitimate and they are not the same claim, and before this
+        # field existed the store could not tell them apart.
+        if review.get("by") not in ("ai-agent", "human"):
+            errs.append(f"review.by {review.get('by')!r} is not ai-agent/human — "
+                        "an AI review must not be readable as a human one")
     if item.get("min_age") not in (9, 13, 16):
         errs.append(f"min_age {item.get('min_age')!r} is not one of 9, 13, 16")
 
