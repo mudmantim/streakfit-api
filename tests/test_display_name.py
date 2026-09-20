@@ -9,6 +9,7 @@ The rule proved here: an explicit display_name wins; a username is used only if
 it already looks like something a person answers to; otherwise Rickie gets NO
 name and is told to talk to them without one.
 """
+import re
 import pytest
 
 import app as appmod
@@ -123,3 +124,38 @@ def test_patch_me_rejects_an_email_as_a_display_name(client):
                      headers=auth_headers(token))
     assert r.status_code == 400
     assert "email" in r.get_json()["error"].lower()
+
+
+# ── The words a person actually reads ───────────────────────────────────────
+#
+# Every one of these strings is rendered verbatim in the settings panel. They
+# used to open with the JSON field name — "display_name can't be an email
+# address", "Invalid skill_level. Must be one of: ..." — which is the API
+# talking to a developer in front of whoever is holding the phone. The intended
+# first user of this app is nine.
+
+@pytest.mark.parametrize("payload", [
+    {"display_name": "olivia@example.com"},
+    {"display_name": "x" * 200},
+    {"display_name": "visit streakfit.example.com"},
+    {"display_name": 12345},
+    {"skill_level": "custom"},
+    {"display_mode": "neon"},
+    {"rickie_mode": "loud"},
+])
+def test_validation_errors_are_written_for_a_person_not_a_developer(client, payload):
+    token = register_and_login(client, "reader_" + str(abs(hash(str(payload))))[:6],
+                               "TestPass123!")
+    r = client.patch("/api/me", json=payload, headers=auth_headers(token))
+    assert r.status_code == 400, payload
+    message = r.get_json()["error"]
+
+    # No raw field name, and no snake_case identifier of any kind.
+    for field in ("display_name", "skill_level", "display_mode", "rickie_mode"):
+        assert field not in message, f"{field!r} leaked into {message!r}"
+    assert not re.search(r"\b[a-z]+_[a-z]+\b", message), \
+        f"an identifier leaked into {message!r}"
+
+    # A sentence: starts with a capital, ends with a stop.
+    assert message[:1].isupper(), message
+    assert message.rstrip().endswith((".", "!")), message

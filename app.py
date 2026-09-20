@@ -2538,13 +2538,13 @@ def update_me():
             return jsonify({"error": cleaned}), 400
 
     if 'skill_level' in data and data['skill_level'] not in VALID_SKILL_LEVELS:
-        return jsonify({"error": "Invalid skill_level. Must be one of: beginner, intermediate, advanced"}), 400
+        return jsonify({"error": "That difficulty isn't one of the three. Pick beginner, intermediate or advanced."}), 400
 
     if 'display_mode' in data and data['display_mode'] not in VALID_DISPLAY_MODES:
-        return jsonify({"error": "Invalid display_mode. Must be one of: classic, bright, game"}), 400
+        return jsonify({"error": "That theme isn't one we have. Pick classic, bright or game."}), 400
 
     if 'rickie_mode' in data and data['rickie_mode'] not in VALID_RICKIE_MODES:
-        return jsonify({"error": "Invalid rickie_mode. Must be one of: full, quiet, minimal"}), 400
+        return jsonify({"error": "That Rickie setting isn't one we have. Pick full, quiet or minimal."}), 400
 
     user_id = int(get_jwt_identity())
     user = db.session.get(User, user_id)
@@ -5635,7 +5635,13 @@ _UNSAFE_NAME = re.compile(
     r"|^\s*$"                 # blank
     r"|\d{4,}"                # long digit runs: timestamps, ids, birth years
     r"|^(qa|test|tmp|temp|user|admin|guest|anon)[-_]"   # machine/role prefixes
-    r"|https?://|www\.",
+    r"|https?://|www\."
+    # A bare domain is still a web address. "visit streakfit.example.com" got
+    # through the scheme/www check above, and a display name is shown on the
+    # team roster and spoken by Rickie — which makes it a broadcast channel if
+    # it can hold a URL. Common TLDs only, so an ordinary name with a full stop
+    # in it ("J. Hill", "St. Clair") is untouched.
+    r"|\b[a-z0-9-]+\.(?:com|net|org|io|co|app|dev|xyz|me|tv|gg|shop|link|site)\b",
     re.I)
 
 
@@ -5643,16 +5649,22 @@ def _validate_display_name(value):
     """(ok, cleaned_or_error). `None` / "" clears it and falls back."""
     if value is None or (isinstance(value, str) and not value.strip()):
         return True, None
+    # These strings are shown to the person verbatim, so they are written for
+    # a person. They used to start with the JSON field name — "display_name
+    # can't be an email address" — which is the API talking to a developer in
+    # front of a nine-year-old who asked to be called something.
     if not isinstance(value, str):
-        return False, "display_name must be text"
+        return False, "That name needs to be text."
     cleaned = " ".join(value.split())
     if len(cleaned) > _DISPLAY_NAME_MAX:
-        return False, f"display_name can be at most {_DISPLAY_NAME_MAX} characters"
+        return False, (f"That name is a bit long — {_DISPLAY_NAME_MAX} characters "
+                       f"or fewer, please.")
     if "@" in cleaned:
-        return False, ("display_name can't be an email address — it's what Rickie "
-                       "calls you out loud")
+        return False, ("An email address isn't a good fit here — this is what "
+                       "Rickie calls you out loud.")
     if _UNSAFE_NAME.search(cleaned):
-        return False, "display_name can't contain a web address or a long run of digits"
+        return False, ("Try something without a web address or a long string of "
+                       "numbers in it.")
     return True, cleaned
 
 
