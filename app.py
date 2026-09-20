@@ -156,6 +156,18 @@ limiter = Limiter(
 )
 
 
+def _ratelimit_backend_check():
+    """Ask the limiter's storage whether it is actually there.
+
+    A seam, and it exists for a reason worth keeping: `limiter.storage` is a
+    read-only property, so the unreachable branch of the self-check could not
+    be tested at all through the real object. A check whose failure path has
+    never been executed is a check nobody should trust, so the call goes
+    through one overridable function.
+    """
+    return limiter.storage.check()
+
+
 def user_or_ip_key():
     """Limiter key for AUTHENTICATED routes: the user, falling back to the IP.
 
@@ -1952,6 +1964,74 @@ def verification_self():
         failure_reason=None if exercises == 90 else
         "The exercise library is incomplete; missions would be wrong.",
         critical=True))
+
+    # Rate-limit storage — the defect Mudman Command's July assessment named
+    # and nobody has been able to see since.
+    #
+    # The stored PRODUCTION_READINESS rationale (2026-07-25, scored 80) reads:
+    # "Rate-limit storage is still memory:// and resets per deploy". It still
+    # is. Nothing anywhere surfaced that, so it survived two months of work on
+    # everything around it.
+    #
+    # This is a SECURITY control here, not a politeness feature. The invite
+    # lookup carries a comment recording a measured 321 probes/second
+    # enumeration oracle, and the limiter is what stands in front of it. With
+    # `memory://` those counters live in one process: they reset on every
+    # deploy and every restart, and with more than one worker each worker
+    # keeps its own, so the real limit is silently multiplied by the worker
+    # count.
+    #
+    # Reported rather than fixed, because fixing it means provisioning shared
+    # storage, which is infrastructure and the owner's call. What this does is
+    # stop it being invisible.
+    #
+    # Note it does NOT assert health from configuration, which is this
+    # module's whole rule: where a shared backend IS configured, the check
+    # exercises it and reports UNKNOWN if it cannot.
+    storage_uri = os.environ.get("RATELIMIT_STORAGE_URI", "memory://")
+    in_production = os.environ.get('STREAKFIT_ENV', 'development') == 'production'
+    if storage_uri.startswith("memory:"):
+        checks.append(_self_check(
+            "ratelimit.shared_storage", "Rate limits survive a restart",
+            "Rate limiting is the control in front of the invite-code lookup, "
+            "so its counters must be shared between workers and outlive a deploy.",
+            "Read the configured limiter storage backend.",
+            "FAIL" if in_production else "PASS", "VERIFIED",
+            f"storage is {storage_uri!r}"
+            + ("" if in_production else " (development; acceptable here)"),
+            failure_reason=(
+                "In-memory rate limiting resets on every deploy and is per "
+                "worker, so the effective limit is multiplied by the worker "
+                "count. Provision shared storage and set RATELIMIT_STORAGE_URI."
+            ) if in_production else None,
+            critical=in_production))
+    else:
+        started_rl = datetime.utcnow()
+        try:
+            # Exercise it. A configured URI is not a reachable backend.
+            _ratelimit_backend_check()
+            checks.append(_self_check(
+                "ratelimit.shared_storage", "Rate limits survive a restart",
+                "Rate limiting is the control in front of the invite-code "
+                "lookup, so its counters must be shared between workers and "
+                "outlive a deploy.",
+                "Ask the configured limiter backend whether it is reachable.",
+                "PASS", "VERIFIED",
+                f"shared backend reachable ({storage_uri.split(':')[0]})",
+                duration_ms=int((datetime.utcnow() - started_rl).total_seconds() * 1000),
+                critical=True))
+        except Exception as exc:
+            checks.append(_self_check(
+                "ratelimit.shared_storage", "Rate limits survive a restart",
+                "Rate limiting is the control in front of the invite-code "
+                "lookup, so its counters must be shared between workers and "
+                "outlive a deploy.",
+                "Ask the configured limiter backend whether it is reachable.",
+                "UNKNOWN", "UNVERIFIED",
+                f"backend configured but not reachable: {type(exc).__name__}",
+                failure_reason="Shared rate-limit storage is configured but "
+                               "did not answer; limits may not be enforced.",
+                critical=True))
 
     return jsonify({
         "application": "streakfit",

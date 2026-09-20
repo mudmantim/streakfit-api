@@ -122,3 +122,63 @@ def test_these_endpoints_need_no_credentials(client):
     failure of the probe rather than a pass."""
     for path in ("/api/health", "/api/build-identity", "/api/verification/self"):
         assert client.get(path).status_code == 200, path
+
+
+# ── The defect Mudman Command's assessment named, made visible ─────────────
+
+def _check(client, check_id):
+    checks = client.get("/api/verification/self").get_json()["checks"]
+    return next((c for c in checks if c["id"] == check_id), None)
+
+
+def test_in_memory_rate_limiting_is_a_failure_in_production(client, monkeypatch):
+    """Command's stored PRODUCTION_READINESS rationale (2026-07-25) reads
+    "Rate-limit storage is still memory:// and resets per deploy". It still
+    does, and nothing surfaced it, so it survived two months of work on
+    everything around it.
+
+    It is a security control, not a politeness feature: the invite-code
+    lookup records a measured 321 probes/second enumeration oracle and the
+    limiter is what stands in front of it.
+    """
+    monkeypatch.setenv("STREAKFIT_ENV", "production")
+    monkeypatch.delenv("RATELIMIT_STORAGE_URI", raising=False)
+    c = _check(client, "ratelimit.shared_storage")
+    assert c is not None, "the check is missing entirely"
+    assert c["status"] == "FAIL", c
+    assert c["critical"] is True, "a silent security control must be critical"
+    assert "memory" in c["observed"]
+
+
+def test_in_memory_rate_limiting_is_acceptable_in_development(client, monkeypatch):
+    """It must not cry wolf locally, or people learn to ignore it."""
+    monkeypatch.setenv("STREAKFIT_ENV", "development")
+    c = _check(client, "ratelimit.shared_storage")
+    assert c["status"] == "PASS", c
+    assert c["critical"] is False
+
+
+def test_a_configured_backend_is_exercised_not_believed(client, monkeypatch):
+    """The module's rule is that no check asserts health from configuration.
+
+    A URI in an environment variable says nothing about whether anything is
+    listening, so the configured path must probe the backend and report
+    UNKNOWN when it cannot reach it — never PASS because a string was set.
+    """
+    import app as appmod
+
+    monkeypatch.setenv("STREAKFIT_ENV", "production")
+    monkeypatch.setenv("RATELIMIT_STORAGE_URI", "redis://localhost:6379")
+
+    def unreachable():
+        raise ConnectionError("no redis here")
+
+    monkeypatch.setattr(appmod, "_ratelimit_backend_check", unreachable)
+    c = _check(client, "ratelimit.shared_storage")
+    assert c["status"] == "UNKNOWN", c
+    assert "not reachable" in c["observed"]
+
+    monkeypatch.setattr(appmod, "_ratelimit_backend_check", lambda: True)
+    c = _check(client, "ratelimit.shared_storage")
+    assert c["status"] == "PASS", c
+    assert "redis" in c["observed"]
