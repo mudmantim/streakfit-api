@@ -4541,7 +4541,6 @@ def get_team(team_id):
     # indistinguishable, so the label is ordinal by join order: stable across
     # requests, meaningless outside the team, and derived from position rather
     # than from anything about the person.
-    ordinal = 0
     for m in memberships:
         # Liveness comes free from the name lookup: `_peer_names_for_ids`
         # selects the User rows, so a membership whose user row is gone is
@@ -4551,11 +4550,11 @@ def get_team(team_id):
         # so the test is membership of the keys, not truthiness of the value.
         if m.user_id not in peer_names:
             continue   # defensive: orphaned membership (user row gone) — skip, don't 500
-        ordinal += 1
         w = witness.get(m.user_id, {})
         members.append({
             "user_id": m.user_id,
-            "name": peer_names.get(m.user_id) or f"Member {ordinal}",
+            "name": peer_names.get(m.user_id),   # label assigned after the sort
+
             "is_creator": m.user_id == team.created_by_user_id,
             "completed_today": w.get('completed_today', False),
             "completed_today_count": w.get('completed_today_count', 0),
@@ -4565,6 +4564,15 @@ def get_team(team_id):
     # is doing best is a leaderboard, which every team design doc rules out.
     # Stable join order, creator first so the roster has a predictable shape.
     members.sort(key=lambda mem: (not mem["is_creator"], mem["user_id"]))
+
+    # Numbered AFTER the sort, so the labels read 1, 2, 3 down the list a
+    # person actually sees. Assigning them during the build produced
+    # ["Member 2", "Member 1"] — correct and stable, and confusing to read.
+    ordinal = 0
+    for mem in members:
+        ordinal += 1
+        if not mem["name"]:
+            mem["name"] = f"Member {ordinal}"
 
     invite = db.session.execute(
         db.select(TeamInviteCode).where(TeamInviteCode.team_id == team_id)
@@ -4863,28 +4871,6 @@ def create_rickie_team_message(team_id, trigger):
     return message
 
 
-def _member_since(team_id, user_id):
-    """When this person's CURRENT membership of this team began, or None.
-
-    The team layer authorised content by "are you a member", full stop, so
-    joining a team handed you everything that had ever been said in it. A
-    child added to an existing team inherited every conversation and every
-    photograph that preceded them.
-
-    `TeamMembership.joined_at` already existed and was read nowhere in the
-    codebase — one match, the column definition. This is the function that
-    makes it mean something.
-
-    Returns the boundary rather than a boolean so callers filter on it
-    directly. None means "not a member", which every caller already rejects.
-    """
-    return db.session.execute(
-        db.select(TeamMembership.joined_at).where(
-            TeamMembership.team_id == team_id,
-            TeamMembership.user_id == user_id)
-    ).scalar_one_or_none()
-
-
 def _peer_names_for_ids(user_ids):
     """{user_id: safe name or None} — what OTHER PEOPLE may be told somebody is called.
 
@@ -4915,7 +4901,34 @@ def _peer_names_for_ids(user_ids):
     rows = db.session.execute(
         db.select(User).where(User.id.in_(ids))
     ).scalars().all()
-    return {u.id: _safe_display_name(u) for u in rows}
+    # `display_name` ONLY. Never `_safe_display_name`, and never the login.
+    #
+    # The first version of this function called `_safe_display_name`, which
+    # falls back to the username when it does not look machine-generated. That
+    # fallback is right for its original job — Rickie saying "Olivia" to
+    # Olivia is her own name, said to her. It is wrong here, because this
+    # function decides what OTHER PEOPLE see.
+    #
+    # An independent adversarial review broke it in the most ordinary case:
+    #
+    #     ROSTER:  [{"user_id": 2, "name": "timhill"},
+    #               {"user_id": 1, "name": "oliviahill"}]
+    #     HISTORY: ['oliviahill joined the team', 'timhill created the team']
+    #
+    # Those are live logins. `_safe_display_name` refuses only `@`, blanks,
+    # 4+ digit runs, machine prefixes, URLs and >20 chars — so it passed every
+    # name a real family would actually choose, and the rename from `username`
+    # to `name` changed the label rather than the value.
+    #
+    # My tests could not catch it because I built them from exactly the shapes
+    # the helper refuses: an email address and a `qa_user_…` handle. A test
+    # assembled from its subject's own blind spot is not a test, which this
+    # project has now learned twice.
+    #
+    # A login is half a credential and registration confirms which ones exist,
+    # so handing peers real ones is worth more to an attacker than any name is
+    # worth to a teammate. Peers get a chosen name or a neutral label.
+    return {u.id: (u.display_name or "").strip() or None for u in rows}
 
 
 def _usernames_for_ids(user_ids):
@@ -5073,7 +5086,19 @@ def get_team_messages(team_id):
     if not membership:
         return jsonify({"error": "Forbidden"}), 403
 
-    # Nothing said before you arrived. See _member_since.
+    # Nothing said before you arrived.
+    #
+    # `TeamMembership.joined_at` existed and was read nowhere in the codebase
+    # before 2026-09-20 — one match, the column definition. It is now the
+    # boundary on three read paths: here, moments, and the photo bytes.
+    #
+    # There was briefly a `_member_since()` helper documented as "the function
+    # that makes it mean something", which nothing called — every site has the
+    # membership row already, for the 403. An adversarial review pointed out
+    # that a helper claiming to be the mechanism, with no callers, is worse
+    # than no helper: whoever adds the next read path greps for it, finds
+    # nothing, and concludes the boundary lives somewhere else. It is gone;
+    # this comment is where the explanation lives now.
     messages = db.session.execute(
         db.select(TeamMessage)
         .where(TeamMessage.team_id == team_id,
@@ -5246,7 +5271,13 @@ def complete_team_challenge(team_id, public_id):
     challenge = db.session.execute(
         db.select(TeamChallenge).where(TeamChallenge.public_id == public_id)
     ).scalar_one_or_none()
-    if challenge is None or challenge.team_id != team_id:
+    # A challenge started before you joined is not yours to complete, and its
+    # title is content. Unreachable in practice — public_id is a uuid4 and no
+    # route hands out pre-join ones — but it was the last read path in the
+    # team layer with no join boundary on it, and "you would have to guess a
+    # uuid" is not the reason a boundary holds.
+    if (challenge is None or challenge.team_id != team_id
+            or challenge.created_at < membership.joined_at):
         return jsonify({"error": "not_found"}), 404
 
     already = db.session.execute(
@@ -5543,15 +5574,33 @@ def delete_team_photo(team_id, public_id):
     photo = db.session.execute(
         db.select(TeamPhoto).where(TeamPhoto.public_id == public_id)
     ).scalar_one_or_none()
-    if photo is None or photo.team_id != team_id:
+    # One 404 for everything you are not allowed to act on.
+    #
+    # An adversarial review used this route as an existence oracle. The GET
+    # route deliberately returns an identical 404 for "never existed", "wrong
+    # team" and "before you joined"; this one returned 403 for a real pre-join
+    # photo and 404 for an imaginary one, so the pair of responses confirmed
+    # that a specific photograph existed in a window the caller cannot see.
+    #
+    # The idempotent 200 for an already-deleted photo had the same problem and
+    # sat BEFORE the permission check, so any member could distinguish a
+    # soft-deleted photo from one that never was.
+    #
+    # Both now fall into the same 404 as everything else, and the pre-join
+    # boundary is applied here exactly as it is on the bytes.
+    if (photo is None or photo.team_id != team_id
+            or photo.created_at < membership.joined_at):
         return jsonify({"error": "not_found"}), 404
-    if photo.deleted_at is not None:
-        return jsonify({"deleted": public_id}), 200      # idempotent
-
+    # The creator exception is unchanged — somebody has to be able to take a
+    # picture down from a family's thread — but it is resolved here so the
+    # permission check can run BEFORE the idempotent branch. Otherwise
+    # "already gone" is distinguishable from "not yours" by anybody probing.
     team = db.session.get(Team, team_id)
     is_creator = team is not None and team.created_by_user_id == user_id
     if photo.sender_user_id != user_id and not is_creator:
-        return jsonify({"error": "Forbidden"}), 403
+        return jsonify({"error": "not_found"}), 404
+    if photo.deleted_at is not None:
+        return jsonify({"deleted": public_id}), 200      # idempotent
 
     photo.deleted_at = datetime.utcnow()
     photo.image_data = None          # the bytes go now, not on a sweep later

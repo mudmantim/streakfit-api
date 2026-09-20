@@ -75,8 +75,8 @@ NEWCOMER SEES MESSAGES FROM BEFORE THEY JOINED:
 ```
 
 `TeamMembership.joined_at` already existed and was read **nowhere** — one
-match in the codebase, the column definition. `_member_since()` is what makes
-it mean something.
+match in the codebase, the column definition. It is now the boundary on three
+read paths.
 
 Three read paths gated: **messages**, **moments**, and the **photo bytes**.
 
@@ -149,9 +149,15 @@ reported as though it were.**
 |---|---|
 | `make check` — lint, types, build, 585 tests | **585 passed, 0 failed** |
 | `make uicheck` — real UI, headless Chrome, 390×844 | **157 checks, 0 problems** |
+| `scripts/verify_all.py` — end-to-end against a running server | **112 passed, 0 failed** (was 108) |
 | `scripts/coach_safety_eval.py` — offline | 13 cases, every good reply accepted, every bad rejected |
 
-Two existing tests failed during this work and both were right to:
+The end-to-end suite gained the login assertion on purpose: `verify_all.py`
+is the production-safe one, so it checks the boundary against a running server
+rather than a test client — which is where a serialiser that only misbehaves
+under real configuration would show up.
+
+Three existing checks failed during this work and all three were right to:
 
 - `test_roster_witness_does_not_reintroduce_an_n_plus_1` caught a real
   regression — my first version added a separate liveness query. Liveness now
@@ -160,6 +166,10 @@ Two existing tests failed during this work and both were right to:
   is now exactly what must not happen. Rewritten to drive the real journey —
   the kid sets a display name, the parent sees it — plus a new assertion that
   the login appears nowhere on the rendered page.
+- `verify_all.py` matched members by login. It now matches on `user_id` — and
+  this exposed a latent bug of its own: `teams.py` was relying on user ids
+  being resolved by `security.py`, which runs *later*, so the ids were all
+  `None`. It resolves its own now.
 
 ---
 

@@ -197,3 +197,92 @@ def test_a_non_member_with_a_valid_invite_code_still_reads_nothing(client):
     outsider = _t(client, "hb_code_out")
     for path in (f"/api/teams/{tid}/messages", f"/api/teams/{tid}/moments"):
         assert client.get(path, headers=auth_headers(outsider)).status_code == 403
+
+
+# ── Existence oracles: found by adversarial review ─────────────────────────
+
+def test_delete_does_not_confirm_that_a_pre_join_photo_exists(client):
+    """The GET route returns one 404 for everything; DELETE did not.
+
+    A review used the pair as an oracle: 403 for a real photograph taken
+    before the caller joined, 404 for an imaginary one. The content was never
+    exposed — its existence was, which is enough to confirm that a specific
+    picture was taken in a window you cannot see.
+    """
+    a = _t(client, "orc_a")
+    tid, code = _team(client, a)
+    up = _upload_photo(client, tid, a, caption="before")
+    assert up.status_code in (200, 201), up.get_json()
+    real = (up.get_json().get("public_id")
+            or up.get_json().get("photo", {}).get("public_id"))
+
+    b = _t(client, "orc_b")
+    _join(client, tid, code, b)
+
+    real_r = client.delete(f"/api/teams/{tid}/photos/{real}", headers=auth_headers(b))
+    fake_r = client.delete(f"/api/teams/{tid}/photos/{'0' * 32}",
+                           headers=auth_headers(b))
+    assert real_r.status_code == fake_r.status_code == 404, (
+        f"real={real_r.status_code} fake={fake_r.status_code} — the pair of "
+        f"responses tells a prober which photographs exist")
+    assert real_r.get_json() == fake_r.get_json()
+
+
+def test_delete_does_not_confirm_that_somebody_elses_photo_exists(client):
+    """Same oracle, without the join boundary involved.
+
+    The idempotent "already deleted" 200 sat BEFORE the permission check, so
+    any member could tell a soft-deleted photo from one that never existed.
+    """
+    a = _t(client, "orc2_a")
+    tid, code = _team(client, a)
+    b = _t(client, "orc2_b")
+    _join(client, tid, code, b)
+
+    up = _upload_photo(client, tid, a, caption="a's photo")
+    assert up.status_code in (200, 201)
+    real = (up.get_json().get("public_id")
+            or up.get_json().get("photo", {}).get("public_id"))
+    client.delete(f"/api/teams/{tid}/photos/{real}", headers=auth_headers(a))
+
+    gone = client.delete(f"/api/teams/{tid}/photos/{real}", headers=auth_headers(b))
+    never = client.delete(f"/api/teams/{tid}/photos/{'1' * 32}",
+                          headers=auth_headers(b))
+    assert gone.status_code == never.status_code == 404, (
+        f"soft-deleted={gone.status_code} never-existed={never.status_code}")
+
+
+def test_the_sender_can_still_delete_their_own_photo(client):
+    """The oracle fix must not take the feature away."""
+    a = _t(client, "orc3_a")
+    tid, _code = _team(client, a)
+    up = _upload_photo(client, tid, a)
+    assert up.status_code in (200, 201)
+    real = (up.get_json().get("public_id")
+            or up.get_json().get("photo", {}).get("public_id"))
+    assert client.delete(f"/api/teams/{tid}/photos/{real}",
+                         headers=auth_headers(a)).status_code == 200
+
+
+def test_a_newcomer_cannot_complete_a_challenge_from_before_they_joined(client):
+    """The last read path in the team layer with no join boundary.
+
+    Unreachable in practice — public_id is a uuid4 and no route hands out
+    pre-join ones — but "you would have to guess a uuid" is not the reason a
+    boundary holds, and the response returns the challenge title, which is
+    content.
+    """
+    a = _t(client, "chal_a")
+    tid, code = _team(client, a)
+    made = client.post(f"/api/teams/{tid}/challenges",
+                       json={"preset_key": "squats_20"}, headers=auth_headers(a))
+    assert made.status_code in (200, 201), made.get_json()
+    pid = (made.get_json().get("public_id")
+           or made.get_json().get("challenge", {}).get("public_id"))
+    assert pid, made.get_json()
+
+    b = _t(client, "chal_b")
+    _join(client, tid, code, b)
+    r = client.post(f"/api/teams/{tid}/challenges/{pid}/complete",
+                    headers=auth_headers(b))
+    assert r.status_code == 404, f"{r.status_code} {r.get_json()}"

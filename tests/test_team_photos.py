@@ -13,6 +13,26 @@ import pytest
 from app import Team, TeamPhoto, User, db
 from conftest import auth_headers, register_and_login
 
+# These tests check ATTRIBUTION — that the right person is named on a moment,
+# a message or a challenge card. Peer-visible surfaces stopped sending login
+# identifiers (tests/test_peer_identity_privacy.py), so they send a chosen
+# display name or "Member N".
+#
+# So the fixtures choose a name, which is what a real family does, and every
+# assertion below keeps its original meaning. Deliberately NOT done in
+# conftest: setting a display name for every account everywhere would make
+# the privacy tests vacuous, because those rely on accounts that have not
+# chosen one.
+_register_without_a_name = register_and_login
+
+
+def register_and_login(client, username, password='WalkTest123!'):
+    token = _register_without_a_name(client, username, password)
+    client.patch('/api/me', json={'display_name': username},
+                 headers=auth_headers(token))
+    return token
+
+
 # A real, minimal JPEG: SOI, a baseline SOF0 declaring 64x64, a tiny scan, EOI.
 # Built by hand so the tests need no image library and no binary fixture file.
 # 64x64 rather than 8x8 on purpose -- PHOTO_MIN_DIMENSION rejects anything
@@ -349,7 +369,26 @@ def test_an_ordinary_member_cannot_delete_someone_elses_photo(client, family):
     db.session.commit()
     photo = upload(client, family["kid"], family["team_id"]).get_json()["photo"]
 
-    assert client.delete(photo["url"], headers=auth_headers(third)).status_code == 403
+    # 404, not 403, and that is the point.
+    #
+    # An adversarial review used this route as an existence oracle: 403 said
+    # "this photograph is real but not yours", 404 said "no such photograph".
+    # The pair confirmed which pictures existed. The refusal is unchanged —
+    # an ordinary member still cannot delete somebody else's photo — but the
+    # response no longer distinguishes the two cases, so this asserts the
+    # stronger property: it is byte-for-byte what you get for a photo that
+    # never existed.
+    refused = client.delete(photo["url"], headers=auth_headers(third))
+    imaginary = client.delete(
+        f"/api/teams/{family['team_id']}/photos/{'0' * 32}",
+        headers=auth_headers(third))
+    assert refused.status_code == 404
+    assert (refused.status_code, refused.get_json()) == \
+           (imaginary.status_code, imaginary.get_json())
+
+    # And it really is still there for the person who may delete it.
+    assert client.delete(photo["url"],
+                         headers=auth_headers(family["kid"])).status_code == 200
 
 
 def _uid(username):

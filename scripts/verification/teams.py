@@ -3,6 +3,7 @@
 reads (Operation: No Dead Ends, R2.8)."""
 import json
 import os
+import re
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -43,18 +44,33 @@ def run(api, results, scenario):
             {users["a"]["id"], users["b"]["id"]} <= roster_ids,
             f"roster={roster_ids}",
         )
-        # And the guarantee itself, checked on a live server: no member-visible
-        # response may contain another account's login.
+        # The guarantee itself, on a live server: no member-visible response
+        # may contain another account's login.
+        #
+        # The first version of this check was VACUOUS and an adversarial
+        # review said so. Smoke accounts are called `qa_smoke_*`, and a `qa_`
+        # prefix was already refused by the old name resolver, so "the login
+        # is absent" could never fail here no matter how broken the roster
+        # was. It passed against an implementation that published ordinary
+        # logins verbatim.
+        #
+        # So it asserts the POSITIVE shape as well: peers get a chosen display
+        # name or "Member N", and nothing else. These accounts never set a
+        # display name, so every label must be a Member ordinal — which fails
+        # immediately if anything falls back to a username, whatever that
+        # username happens to look like.
         body = json.dumps(detail)
         results.check(
             "teams.roster_carries_no_login_identifier",
             all(users[r]["username"] not in body for r in ("a", "b")),
             f"detail={body[:200]}",
         )
+        names = [m.get("name") for m in detail["members"]]
         results.check(
-            "teams.every_member_has_a_display_label",
-            all((m.get("name") or "").strip() for m in detail["members"]),
-            f"names={[m.get('name') for m in detail['members']]}",
+            "teams.roster_labels_are_never_derived_from_a_login",
+            all(re.fullmatch(r"Member \d+", n or "") for n in names),
+            f"names={names} (these accounts set no display name, so every "
+            f"label must be a Member ordinal)",
         )
         results.check(
             "teams.creator_flag_correct",

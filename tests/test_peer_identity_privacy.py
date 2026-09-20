@@ -22,6 +22,21 @@ from conftest import auth_headers, register_and_login
 
 EMAIL_LOGIN = "olivia.hill@example.com"
 MACHINE_LOGIN = "qa_user_1789836556_2"
+# The one that matters most, and the one this file originally lacked.
+#
+# The first version of these tests used only the two shapes above — an email
+# address and a machine handle. Both are refused by `_safe_display_name`, so
+# every assertion passed against an implementation that still published
+# ORDINARY logins verbatim:
+#
+#     ROSTER:  [{"name": "timhill"}, {"name": "oliviahill"}]
+#     HISTORY: ['oliviahill joined the team']
+#
+# An independent adversarial review found it in minutes. A test assembled
+# from the same assumptions as the code it checks is not a test, and this
+# project has now learned that twice — see docs/reports for the first.
+ORDINARY_LOGIN = "oliviahill"
+ANOTHER_ORDINARY_LOGIN = "timhill"
 
 
 def _t(client, name):
@@ -33,6 +48,12 @@ def _team(client, token, name="The Hills"):
     assert r.status_code == 201, r.get_json()
     t = r.get_json()["team"]
     return t["id"], t["invite_code"]
+
+
+def _join_ok(client, tid, code, token):
+    r = client.post(f"/api/teams/{tid}/join", json={"code": code},
+                    headers=auth_headers(token))
+    assert r.status_code == 200, r.get_json()
 
 
 def _everything_a_member_can_read(client, tid, token):
@@ -257,3 +278,59 @@ def test_a_persons_own_typed_message_is_never_rewritten(client):
     body = json.dumps(client.get(f"/api/teams/{tid}/messages",
                                  headers=auth_headers(other)).get_json())
     assert typed in body, "a member's own words were rewritten"
+
+
+# ── The case the first version of this file missed ─────────────────────────
+
+def test_an_ORDINARY_login_never_reaches_another_member(client):
+    """No `@`, no digits, no machine prefix, under twenty characters — the
+    shape a real person actually registers with, and the shape every earlier
+    test in this file failed to cover."""
+    kid = _t(client, ORDINARY_LOGIN)
+    adult = _t(client, ANOTHER_ORDINARY_LOGIN)
+    tid, code = _team(client, adult)
+    _join_ok(client, tid, code, kid)
+    client.post(f"/api/teams/{tid}/messages", json={"body": "hello"},
+                headers=auth_headers(kid))
+
+    blobs = _everything_a_member_can_read(client, tid, adult)
+    _assert_no_login_anywhere(blobs, ORDINARY_LOGIN)
+    # And the viewer's own login must not be echoed back at them by a peer
+    # surface either — it is still a credential.
+    _assert_no_login_anywhere(blobs, ANOTHER_ORDINARY_LOGIN)
+
+
+def test_the_roster_labels_everyone_who_has_not_chosen_a_name(client):
+    a = _t(client, ANOTHER_ORDINARY_LOGIN)
+    b = _t(client, ORDINARY_LOGIN)
+    tid, code = _team(client, a)
+    _join_ok(client, tid, code, b)
+
+    names = [m["name"] for m in client.get(
+        f"/api/teams/{tid}", headers=auth_headers(a)).get_json()["members"]]
+    assert names == ["Member 1", "Member 2"], names
+
+
+def test_a_chosen_display_name_is_what_peers_see(client):
+    a = _t(client, ANOTHER_ORDINARY_LOGIN)
+    b = _t(client, ORDINARY_LOGIN)
+    tid, code = _team(client, a)
+    _join_ok(client, tid, code, b)
+    client.patch("/api/me", json={"display_name": "Liv"}, headers=auth_headers(b))
+
+    names = [m["name"] for m in client.get(
+        f"/api/teams/{tid}", headers=auth_headers(a)).get_json()["members"]]
+    assert "Liv" in names, names
+    assert ORDINARY_LOGIN not in names, names
+
+
+def test_team_history_never_names_an_ordinary_login(client):
+    a = _t(client, ANOTHER_ORDINARY_LOGIN)
+    b = _t(client, ORDINARY_LOGIN)
+    tid, code = _team(client, a)
+    _join_ok(client, tid, code, b)
+
+    body = json.dumps(client.get(f"/api/teams/{tid}/moments",
+                                 headers=auth_headers(a)).get_json())
+    assert ORDINARY_LOGIN not in body, body[:300]
+    assert ANOTHER_ORDINARY_LOGIN not in body, body[:300]

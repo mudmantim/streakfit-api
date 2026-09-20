@@ -12,6 +12,26 @@ import pytest
 from app import TeamChallenge, TeamChallengeCompletion, User, db
 from conftest import auth_headers, register_and_login
 
+# These tests check ATTRIBUTION — that the right person is named on a moment,
+# a message or a challenge card. Peer-visible surfaces stopped sending login
+# identifiers (tests/test_peer_identity_privacy.py), so they send a chosen
+# display name or "Member N".
+#
+# So the fixtures choose a name, which is what a real family does, and every
+# assertion below keeps its original meaning. Deliberately NOT done in
+# conftest: setting a display name for every account everywhere would make
+# the privacy tests vacuous, because those rely on accounts that have not
+# chosen one.
+_register_without_a_name = register_and_login
+
+
+def register_and_login(client, username, password='WalkTest123!'):
+    token = _register_without_a_name(client, username, password)
+    client.patch('/api/me', json={'display_name': username},
+                 headers=auth_headers(token))
+    return token
+
+
 
 @pytest.fixture()
 def team_of_two(client):
