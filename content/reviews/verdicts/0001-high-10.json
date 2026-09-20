@@ -1,0 +1,229 @@
+{
+  "verdicts": [
+    {
+      "id": "SF-TRV-000128",
+      "verdict": "accept",
+      "reason": "Repeated bout effect is well established, including protection after a single prior bout. Answer is the best of four plausible options, no option is a length or specificity tell, and the explanation teaches the mechanism rather than restating the key."
+    },
+    {
+      "id": "SF-TRV-000129",
+      "verdict": "accept",
+      "reason": "Keyed answer is the umbrella cause and the explanation correctly kills the 'cold air has less oxygen' folk belief. Minor: the 'blood moves more slowly in the cold' distractor is a real effect (peripheral vasoconstriction) rather than a falsehood, but it is a consequence of the keyed answer, not a competing one."
+    },
+    {
+      "id": "SF-TRV-000130",
+      "verdict": "accept",
+      "reason": "Two-systems framing is a fair simplification and the item deliberately avoids the contested 'soreness = damage' claim by keying the systems option instead. Options are all plausible and matched in length."
+    },
+    {
+      "id": "SF-TRV-000132",
+      "verdict": "accept",
+      "reason": "Acute affective response to a single bout is well supported and the answer is hedged ('often within minutes'). 'The quickest return movement offers' is a comparison within movement's own benefits (mood in minutes vs fitness in weeks) and is defensible."
+    },
+    {
+      "id": "SF-TRV-000133",
+      "verdict": "accept",
+      "reason": "Post-exercise attention benefit is supported and the keyed option is appropriately hedged ('for a while afterwards'). 'Works at any age' in the explanation is firmer than the evidence base but the substance is not misleading."
+    },
+    {
+      "id": "SF-TRV-000134",
+      "verdict": "accept",
+      "reason": "Accurately scoped to what the walking/divergent-thinking study actually measured, including the treadmill-indoors finding and the residual effect after sitting. Correctly labelled contested and explicitly says the mechanism is a guess rather than a finding. Model item for this library."
+    },
+    {
+      "id": "SF-TRV-000135",
+      "verdict": "revise",
+      "reason": "The ~20% figure is an ADULT figure, and this item ships to nine-year-olds as 'your body's energy'. Brain glucose use peaks in childhood at roughly 66% of resting metabolism and is still far above the adult share at ages 9-10, which means 'about half' — a listed distractor — is closer to true for the youngest readers than the keyed answer. Either scope the claim to adults or drop the 'about half' distractor. Also weak test-craft: 'almost none' is a bare-dismissal option nobody would pick."
+    },
+    {
+      "id": "SF-TRV-000136",
+      "verdict": "accept",
+      "reason": "Cerebellum ~10% of brain volume and 'more than half' its neurons is true and conservatively stated (the real figure is roughly 80%). Minor test-craft note: two distractors (spinal cord, inner ear) are not parts of the brain, so a reader can eliminate them from the question stem alone."
+    },
+    {
+      "id": "SF-TRV-000137",
+      "verdict": "revise",
+      "reason": "'Muscles store nothing; they do as they're told' is stated as flat fact and is not true. Human skeletal muscle carries an epigenetic memory of prior training (retained DNA hypomethylation after detraining, faster regain on retraining), and myonuclear retention after detraining has been shown in young adults. The question asks where 'muscle memory' lives without saying which sense is meant, then absolutely denies the option ('In the muscle fibers themselves') that is correct for the strength-training sense. Narrow the question to motor skill, or soften the denial and label contested."
+    },
+    {
+      "id": "SF-TRV-000138",
+      "verdict": "accept",
+      "reason": "Motor chunking is well supported and the shoelace example genuinely illustrates it. 'Twenty separate instructions' is a rhetorical figure rather than a claimed measurement, which is acceptable at this reading level."
+    },
+    {
+      "id": "SF-TRV-000139",
+      "verdict": "accept",
+      "reason": "Kept correlational ('is linked to'), and the explanation hedges the hippocampus claim with 'one of the areas most responsive' rather than asserting a causal volume effect. Distractors are plausible and none is a tell."
+    },
+    {
+      "id": "SF-TRV-000140",
+      "verdict": "accept",
+      "reason": "Anticipatory heart rate rise ahead of effort is real and well described. Options are matched in length and all four are plausible mechanisms."
+    },
+    {
+      "id": "SF-TRV-000141",
+      "verdict": "revise",
+      "reason": "Invented causal mechanism in the last clause: 'nowhere near light, which is why there's always a small delay between deciding and moving'. Conduction over a limb at ~120 m/s costs single-digit milliseconds, while reaction time is ~200 ms — the delay is central processing, not conduction speed. This also directly contradicts SF-TRV-000173 in the same packet ('Most of the delay is in the brain rather than the muscles or the nerves'). The speed figures themselves are fine; cut the 'which is why'."
+    },
+    {
+      "id": "SF-TRV-000142",
+      "verdict": "revise",
+      "reason": "Labelled simplified but the mood half is contested and has moved against this item. Circulating endorphins do not readily cross the blood-brain barrier, and a controlled human study found exercise-induced euphoria and anxiolysis persisted under opioid blockade; current evidence points to endocannabinoids. 'They're part of why a hard effort can leave you feeling better' is exactly the folklore this library is supposed to be catching. Keep the pain-modulation core and the etymology, drop or hedge the runner's-high attribution, or relabel contested."
+    },
+    {
+      "id": "SF-TRV-000143",
+      "verdict": "accept",
+      "reason": "Dissociation-plus-rhythm account is well supported and the item correctly separates 'the work doesn't change' from 'how hard it feels'. 'Reliably' is slightly firm — the RPE effect is strongest at submaximal intensity and shrinks near maximal — but the claim is not misleading as written."
+    },
+    {
+      "id": "SF-TRV-000144",
+      "verdict": "accept",
+      "reason": "Standard and correct, and the explanation earns its place by adding the liver-as-largest-internal nuance rather than restating the key. Minor ambiguity: lungs and gut beat skin on surface area, so 'largest' rests on mass/coverage, but this is the conventional and defensible reading."
+    },
+    {
+      "id": "SF-TRV-000145",
+      "verdict": "revise",
+      "reason": "Invented causal mechanism: 'which is also why scrapes heal so readily'. Routine epidermal turnover and wound healing are different processes; turnover rate is not the reason grazes heal. Also the number is shakier than stated — whole-epidermis turnover is commonly put at 40-56 days in young adults and lengthens considerably with age, so 'roughly every month' is a young-adult figure presented as universal to an audience that includes seniors."
+    },
+    {
+      "id": "SF-TRV-000146",
+      "verdict": "accept",
+      "reason": "Fingerprints form in utero and the pattern is permanent; the identical-twin detail is correct and is what makes the item worth reading. All four options plausible, no length tell."
+    },
+    {
+      "id": "SF-TRV-000148",
+      "verdict": "accept",
+      "reason": "Diurnal disc compression is real and the astronaut comparison is accurate. No body-image or weight framing. Distractors are all plausible and the keyed option is not the longest."
+    },
+    {
+      "id": "SF-TRV-000149",
+      "verdict": "accept",
+      "reason": "Correct and correctly hedged: 'almost every mammal' leaves room for sloths and manatees rather than overclaiming a universal. Good, memorable, age-appropriate."
+    },
+    {
+      "id": "SF-TRV-000150",
+      "verdict": "accept",
+      "reason": "Arrector pili mechanism is accurately described and the vestigial framing is right. Distractors are plausible physiological guesses rather than jokes."
+    },
+    {
+      "id": "SF-TRV-000151",
+      "verdict": "accept",
+      "reason": "Nerve-mediated wrinkling is genuinely established by the denervation evidence the explanation cites, and the item wisely stops short of claiming the contested grip-advantage function. 'Deliberately' is a stylistic flourish, not an unearned claim."
+    },
+    {
+      "id": "SF-TRV-000152",
+      "verdict": "accept",
+      "reason": "The superlative is anatomically earned: olfaction is the one sense that bypasses the thalamic relay and projects directly into limbic/memory structures, which is exactly what the explanation says."
+    },
+    {
+      "id": "SF-TRV-000153",
+      "verdict": "accept",
+      "reason": "Continuous bone remodelling is correct and the 'rebuilt while still in use' framing teaches something. The decade figure is the standard textbook approximation and is hedged rather than asserted as a measurement."
+    },
+    {
+      "id": "SF-TRV-000154",
+      "verdict": "reject",
+      "reason": "All four options are true. The cornea, the lens, tooth enamel AND the epidermis are all avascular — every distractor is a correct answer to the question as asked. The item cannot be salvaged by editing the explanation; the stem needs rewriting (e.g. 'which part takes its oxygen directly from the air') or three genuinely vascular distractors."
+    },
+    {
+      "id": "SF-TRV-000155",
+      "verdict": "accept",
+      "reason": "Matches the real-time MRI evidence, which showed cavity formation at the moment of the pop rather than collapse, and the refractory-period detail is correct and checkable by the reader. Borderline on labelling — the sound-source mechanism still has dissent in the literature — but the item describes the evidence rather than overclaiming it."
+    },
+    {
+      "id": "SF-TRV-000156",
+      "verdict": "accept",
+      "reason": "Sciatic as longest/widest single nerve is standard, and the explanation pre-empts the obvious objection by distinguishing a nerve from the spinal cord bundle. Options are matched and plausible."
+    },
+    {
+      "id": "SF-TRV-000157",
+      "verdict": "accept",
+      "reason": "Cue-based habit formation is supported, and the explanation handles the 'other options are also good advice' problem explicitly rather than pretending the distractors are wrong. Note: 'making it obvious' is jargon from a specific popular book and no source is given."
+    },
+    {
+      "id": "SF-TRV-000158",
+      "verdict": "accept",
+      "reason": "Repetition-over-size is supported by the habit automaticity literature and the answer is hedged as 'builds consistency better', not as a physiological claim. 'Five minutes done forty times' reads as illustration rather than a measured comparison."
+    },
+    {
+      "id": "SF-TRV-000159",
+      "verdict": "accept",
+      "reason": "Sound and safe advice, and 'usually helps' keeps it appropriately loose. 'Far easier to scale back up than to restart from nothing' is an unmeasured comparative, but it is practical guidance rather than a health claim, so it is a labelling issue (see packet note on editorial-vs-simplified) rather than an accuracy defect."
+    },
+    {
+      "id": "SF-TRV-000160",
+      "verdict": "accept",
+      "reason": "'Motivation usually follows action' is consistent with behavioural activation findings and is stated with 'usually' rather than as a law. 'The first two minutes' is rhetorical rather than a claimed dose."
+    },
+    {
+      "id": "SF-TRV-000161",
+      "verdict": "accept",
+      "reason": "Strong item: it keys the decision-fatigue answer and then explicitly warns that a long streak should not become the reason to continue, which matches the product's anti-addiction stance instead of quietly undermining it."
+    },
+    {
+      "id": "SF-TRV-000163",
+      "verdict": "accept",
+      "reason": "The distinction between the action getting easier and the starting getting easier is accurate, genuinely useful, and consistent with automaticity research. The explanation does real work rather than restating the key."
+    },
+    {
+      "id": "SF-TRV-000164",
+      "verdict": "accept",
+      "reason": "Correctly debunks the 21-day figure as a surgeon's anecdote rather than a finding, and the 'under three weeks to the better part of a year' range matches the study that actually measured it. Best-in-packet handling of a firmness trap."
+    },
+    {
+      "id": "SF-TRV-000165",
+      "verdict": "accept",
+      "reason": "Honestly labelled editorial, self-monitoring evidence supports the core, and the closing line ('shorten the line, not the habit') guards against the obligation failure mode instead of ignoring it."
+    },
+    {
+      "id": "SF-TRV-000166",
+      "verdict": "revise",
+      "reason": "Typo in user-facing question text: 'realiztic' should be 'realistic'. Content is otherwise fine — starting below your old level is sound, safe advice and the explanation names the common instinct it is correcting. Text-only fix."
+    },
+    {
+      "id": "SF-TRV-000167",
+      "verdict": "accept",
+      "reason": "Correctly isolates the failure that comes specifically from the all-or-nothing structure, and the explanation openly concedes the other three options are real problems too, which is the right way to handle a 'best answer' stem."
+    },
+    {
+      "id": "SF-TRV-000168",
+      "verdict": "accept",
+      "reason": "Keys the non-conditional-habit answer and explicitly disowns the 'push through' distractor ('Nothing here is about pushing through'), which keeps it clear of the shame and no-pain-no-gain framings the rubric bars."
+    },
+    {
+      "id": "SF-TRV-000169",
+      "verdict": "accept",
+      "reason": "Vision, vestibular and proprioception is the correct triad, and the explanation handles the near-miss foot-pressure distractor by noting it is part of, not all of, position sense. 'Take any one away and you can still balance' is true and not a movement instruction."
+    },
+    {
+      "id": "SF-TRV-000170",
+      "verdict": "reject",
+      "reason": "Safety rule breach, and the item does not merely mention eyes-closed balancing — it recommends it: 'which is also why it's such a good way to make the exercise harder without moving anything'. That is a direct progression cue to stand on one foot with eyes closed, delivered to nine-year-olds and to seniors, with no danger named and no support/wall mentioned. Fall risk. The underlying fact (vision carries a large share of balance) is fine and can be taught without the instruction; the last clause must go and the item should be re-reviewed after."
+    },
+    {
+      "id": "SF-TRV-000171",
+      "verdict": "accept",
+      "reason": "Semicircular canals are correct and the right-angles detail explains why three are needed. Acceptable simplification: it omits the otolith organs, so 'whichever way your head turns' covers rotation but not linear acceleration — true at the level of detail given."
+    },
+    {
+      "id": "SF-TRV-000172",
+      "verdict": "accept",
+      "reason": "Endolymph inertia and the sensory-mismatch account are correct, and the seasickness link earns the item its place. Descriptive, not an instruction to spin, so no safety issue."
+    },
+    {
+      "id": "SF-TRV-000173",
+      "verdict": "accept",
+      "reason": "Accurate definition and the explanation correctly locates the bulk of the delay in central processing rather than conduction. Note this is the item SF-TRV-000141 contradicts; this one is the correct version."
+    },
+    {
+      "id": "SF-TRV-000174",
+      "verdict": "accept",
+      "reason": "Task-specific improvement with poor far transfer is well supported, and the item resists the tempting overclaim by keying the narrower of the two 'yes' options rather than the more impressive one."
+    },
+    {
+      "id": "SF-TRV-000175",
+      "verdict": "accept",
+      "reason": "Deceleration-and-change-of-direction definition is correct and distinguishes agility from speed and from reaction time, both of which appear as plausible distractors. 'Most of what makes someone look quick' is an unmeasured proportion but reads as emphasis, not data; 'practice in a kitchen' means 'no field required' rather than a movement instruction."
+    }
+  ]
+}
