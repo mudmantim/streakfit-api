@@ -293,10 +293,34 @@ def check_measured_claims(item: dict) -> list[str]:
             f"hedge it or cite it"]
 
 
+# The bolted-on mechanism. A WARNING, because this one needs a human.
+#
+# Three reviewers, separately, named the same construction as the recurring
+# defect shape in this library: a true, well-hedged item that reaches for a
+# kicker in its last sentence and invents a causal explanation for it.
+#
+#   "...which is also why it's such a good way to make the exercise harder"
+#   "...which is why there's always a small delay between deciding and moving"
+#   "...which is also why scrapes heal so readily"
+#
+# In each case the core claim is fine and the tail is fabricated. That is a
+# judgement about whether a specific causal link is supported, which no regex
+# can make — so this flags the construction for a reader and never blocks.
+# It is worth flagging anyway: the pattern is invisible when you read one item
+# and obvious when you read forty.
+_BOLTED_MECHANISM = re.compile(
+    r"(?:,\s*)?which is (?:also )?why\b|(?:,\s*)?and that(?:'s| is) why\b",
+    re.I)
+
+
 def check_language(item: dict) -> tuple[list[str], list[str]]:
     errs, warns = [], []
     text = body(item)
     low = text.lower()
+    if item.get("type") not in ("joke", "riddle", "rickie") \
+            and _BOLTED_MECHANISM.search(text) and not item.get("sources"):
+        warns.append("a 'which is why' tail — check the causal link is real and "
+                     "not a kicker bolted onto a true claim")
     for banned in BANNED:
         if re.search(r"\b" + re.escape(banned) + r"\b", low):
             errs.append(f"banned vocabulary: {banned!r}")
