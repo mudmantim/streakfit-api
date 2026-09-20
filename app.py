@@ -2582,8 +2582,32 @@ def update_me():
 
 _MEMORY_BOOK_TIMELINE_LIMIT = 30
 
+# Ordered by how soon somebody can reach them, because that is the order they
+# are read in.
+#
+# This list used to go: first mission (day one), then 100 exercises (day 20 at
+# five a day), then 100 Brain Boosts, 1000 XP, 100 acorns, level 10, 500
+# exercises. So after the very first day there was nothing reachable for three
+# weeks, and everything visible on the Milestones page was a locked row with a
+# number on it that a new user could not move. An independent walkthrough read
+# the page as a list of things they had failed to do.
+#
+# The early ones below are deliberately small and deliberately about SHOWING UP
+# rather than about volume — three days, a first full week, twenty-five moves.
+# None of them unlock anything; they are a record, which is the only thing a
+# milestone is for here.
+#
+# 'best_streak', not 'current_streak'. A milestone must never un-unlock itself
+# because somebody had a hard week — that would be the app punishing a person
+# for a gap, which is the one thing this product has promised not to do.
 _MILESTONE_DEFINITIONS = [
     {'key': 'first_mission',  'label': 'First Mission',      'metric': 'missions_completed',    'target': 1},
+    {'key': 'days_3',         'label': 'Three Days',          'metric': 'days_active',           'target': 3},
+    {'key': 'exercises_25',   'label': '25 Exercises',        'metric': 'exercises_completed',   'target': 25},
+    {'key': 'streak_7',       'label': 'A Full Week',         'metric': 'best_streak',           'target': 7},
+    {'key': 'brain_boost_10', 'label': '10 Brain Boosts',     'metric': 'brain_boosts_answered', 'target': 10},
+    {'key': 'exercises_50',   'label': '50 Exercises',        'metric': 'exercises_completed',   'target': 50},
+    {'key': 'streak_14',      'label': 'Two Weeks',           'metric': 'best_streak',           'target': 14},
     {'key': 'exercises_100',  'label': '100 Exercises',       'metric': 'exercises_completed',   'target': 100},
     {'key': 'exercises_500',  'label': '500 Exercises',       'metric': 'exercises_completed',   'target': 500},
     {'key': 'brain_boost_100', 'label': '100 Brain Boosts',   'metric': 'brain_boosts_answered', 'target': 100},
@@ -2804,6 +2828,8 @@ def get_memory_book():
 
     metric_values = dict(lifetime)
     metric_values['level'] = level_info['level']
+    # Best, not current — see the note on _MILESTONE_DEFINITIONS.
+    metric_values['best_streak'] = stats['best_streak']
 
     milestones = [
         {
