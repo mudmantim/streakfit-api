@@ -114,12 +114,73 @@ test asserts the reply path does not branch on it.
 
 ---
 
+## 1.4 My first fix was wrong, and an independent review found it
+
+This is the most important thing in the report.
+
+The username fix above shipped, passed 14 tests and 157 UI checks, and **was
+broken for the most common case**. An adversarial reviewer produced this in
+minutes:
+
+```
+ROSTER:  [{"user_id": 2, "name": "timhill"},
+          {"user_id": 1, "name": "oliviahill"}]
+HISTORY: ['oliviahill joined the team', 'timhill created the team']
+```
+
+Those are live logins. `_peer_names_for_ids` called `_safe_display_name`,
+which **falls back to the username** when it does not look machine-generated.
+It refuses only `@`, blanks, 4+ digit runs, a `qa/test/tmp` prefix, URLs, and
+names over twenty characters — so every name a real family would register
+with went straight through. Renaming the field from `username` to `name`
+changed the label, not the value.
+
+**Why my tests could not catch it.** I built them from exactly the two shapes
+the helper refuses — an email address and a `qa_user_…` handle. Every
+assertion passed against an implementation that published ordinary logins
+verbatim. The live check in `verify_all.py` was worse: smoke accounts are
+named `qa_smoke_*`, and a `qa_` prefix is refused by rule, so "the login is
+absent" **could never fail there** no matter how broken the roster was.
+
+A test assembled from its subject's own blind spot is not a test. This project
+has now learned that twice — the first time was Rickie standing on text.
+
+**Fixed** by making peers get a chosen display name or `Member N`, full stop,
+and by adding the missing case rather than widening the old one. The live
+check now asserts the *positive* shape: every label must match `Member \d+`
+for an account that chose no name, which fails immediately if anything falls
+back to a username whatever it looks like. Verified by mutation: restoring the
+old resolver fails 3 of 14.
+
+### Three further findings from the same review
+
+| Finding | Status |
+|---|---|
+| **Photo DELETE was an existence oracle.** Its sibling GET returns one 404 for "never existed", "wrong team" and "before you joined". DELETE returned 403 for a real pre-join photo and 404 for an imaginary one, so the pair confirmed which pictures exist. The idempotent "already deleted" 200 had the same problem and ran *before* the permission check. | **Fixed.** Everything you may not act on is one 404, asserted byte-for-byte against an imaginary photo. |
+| **Challenge completion had no join boundary** and returns the challenge title, which is content. Unreachable in practice — `public_id` is a uuid4 — but "you would have to guess a uuid" is not why a boundary holds. | **Fixed.** |
+| **`_member_since()` was dead code** documented as "the function that makes it mean something", with no callers. Whoever adds the next read path greps for it, finds nothing, and concludes the boundary lives elsewhere. | **Removed**, explanation moved to the filters. |
+
+### What held up under attack
+
+Reported because it was tested adversarially rather than assumed: the join
+boundary held on every path the reviewer could reach; photo `public_id` is not
+enumerable; cross-team access failed; leave-and-rejoin **narrows** and never
+widens; the admin routes fail closed; and the memory book, data export and
+personal challenges are strictly self-scoped.
+
+One item was left as-is: `last_activity_at` in `GET /api/teams` is the
+timestamp of the newest message including pre-join ones, so a newcomer with no
+post-join traffic sees an older timestamp. It is metadata, not content, and it
+drives the "new since you were here" badge. Flagged rather than changed.
+
+---
+
 ## 2. Tests added, and what they are worth
 
 | File | Tests | What it proves |
 |---|---|---|
-| `tests/test_peer_identity_privacy.py` | 10 | No member-visible endpoint returns another account's login |
-| `tests/test_team_history_boundary.py` | 8 | Content before `joined_at` is unreachable, including via direct byte requests |
+| `tests/test_peer_identity_privacy.py` | 14 | No member-visible endpoint returns another account's login |
+| `tests/test_team_history_boundary.py` | 12 | Content before `joined_at` is unreachable, including via direct byte requests |
 | `tests/test_coach_safety_rules.py` | 7 | The crisis rules are present, and the grader works |
 | `scripts/coach_safety_eval.py` | 13 cases | Offline; costs nothing |
 
@@ -127,9 +188,9 @@ The identity tests **scan the whole response for the login string** at every
 endpoint, rather than asserting a field is right — the failure mode is a field
 somebody forgot, not a field somebody got wrong.
 
-**Verified by mutation, not by passing:** reverting the roster fails 5 of 10
-identity tests; removing only the photo-bytes guard fails the direct-request
-test.
+**Verified by mutation, not by passing:** restoring the old name resolver
+fails 3 of 14 identity tests; removing only the photo-bytes guard fails the
+direct-request test.
 
 **What the safety tests do NOT prove.** They cannot tell you Rickie behaves
 this way — that needs the live model. The offline suite tests the **grader**,
@@ -147,7 +208,7 @@ reported as though it were.**
 
 | Check | Result |
 |---|---|
-| `make check` — lint, types, build, 585 tests | **585 passed, 0 failed** |
+| `make check` — lint, types, build | **593 passed, 0 failed** |
 | `make uicheck` — real UI, headless Chrome, 390×844 | **157 checks, 0 problems** |
 | `scripts/verify_all.py` — end-to-end against a running server | **112 passed, 0 failed** (was 108) |
 | `scripts/coach_safety_eval.py` — offline | 13 cases, every good reply accepted, every bad rejected |
