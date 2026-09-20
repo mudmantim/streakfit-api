@@ -2617,6 +2617,27 @@ _MILESTONE_DEFINITIONS = [
 ]
 
 
+def milestones_for(metric_values):
+    """Milestone rows from a bag of metric values.
+
+    Pulled out of the route so a test can reach it. The rule this serves —
+    that nothing earned is lost by being away — was previously guarded by an
+    allow-list of metric NAMES in the test suite, which is a proxy that goes
+    stale every time a milestone is added. Now the test can build two users
+    with the same history and different absences and compare the actual rows.
+    """
+    return [
+        {
+            'key': m['key'],
+            'label': m['label'],
+            'target': m['target'],
+            'progress': min(metric_values[m['metric']], m['target']),
+            'unlocked': metric_values[m['metric']] >= m['target'],
+        }
+        for m in _MILESTONE_DEFINITIONS
+    ]
+
+
 def _resolve_exercise_meta(exercise_key):
     """Look up an exercise's display name/category from EXERCISE_LIBRARY by
     key, searching across every skill tier since DailyCompletion doesn't
@@ -2831,16 +2852,7 @@ def get_memory_book():
     # Best, not current — see the note on _MILESTONE_DEFINITIONS.
     metric_values['best_streak'] = stats['best_streak']
 
-    milestones = [
-        {
-            'key': m['key'],
-            'label': m['label'],
-            'target': m['target'],
-            'progress': min(metric_values[m['metric']], m['target']),
-            'unlocked': metric_values[m['metric']] >= m['target'],
-        }
-        for m in _MILESTONE_DEFINITIONS
-    ]
+    milestones = milestones_for(metric_values)
 
     # A "most done" move, and ONLY when that is a real thing.
     #

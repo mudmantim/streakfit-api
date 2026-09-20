@@ -572,6 +572,33 @@ def test_extra_movement_beyond_the_mission_still_counts_and_still_pays(client):
 # "rewarded the miss": an absence is not a failure, and nothing here takes
 # anything away from anyone.
 
+def _milestone_progress(user_id):
+    """Every milestone's progress for one user, by key.
+
+    Built from the same metric bag the Memory Book route builds, so this
+    cannot quietly diverge from what a reader is shown.
+    """
+    user = db.session.get(User, user_id)
+    stats = appmod.get_user_stats(user_id)
+    exercises = db.session.execute(
+        db.select(db.func.count(DailyCompletion.id))
+        .where(DailyCompletion.user_id == user_id)).scalar() or 0
+    dates = set(db.session.execute(
+        db.select(DailyCompletion.date)
+        .where(DailyCompletion.user_id == user_id).distinct()).scalars().all())
+    metrics = {
+        'xp_total': user.xp_total,
+        'acorns_total': user.acorns_total,
+        'missions_completed': stats['total_missions'],
+        'brain_boosts_answered': stats['brain_boost_answers'],
+        'exercises_completed': exercises,
+        'days_active': len(dates),
+        'level': appmod.xp_to_level(user.xp_total)['level'],
+        'best_streak': stats['best_streak'],
+    }
+    return {m['key']: m['progress'] for m in appmod.milestones_for(metrics)}
+
+
 def _returning_user(username, tier, missions, days_away, keys):
     u = User(username=username, password_hash='x', skill_level=tier)
     db.session.add(u)
@@ -617,12 +644,33 @@ def test_nothing_earned_is_lost_by_being_away(app, days_away):
     assert u.acorns_total == 150
     assert stats['total_missions'] == 40
     assert stats['best_streak'] == 40
-    # Milestones are all cumulative metrics, so none of them un-earn either.
-    for m in appmod._MILESTONE_DEFINITIONS:
-        assert m['metric'] in ('missions_completed', 'exercises_completed',
-                               'brain_boosts_answered', 'xp_total', 'acorns_total',
-                               'level'), \
-            f"{m['key']} is measured by {m['metric']}, which may reset on an absence"
+    # Milestones must not un-earn either.
+    #
+    # This used to be an allow-list of metric NAMES, which went stale the
+    # moment new milestones were added: `days_active` and `best_streak` are
+    # both strictly monotone — one counts distinct dates that ever had
+    # activity, the other is a maximum — but neither was on the list, so a
+    # correct change failed a test that was only ever a proxy for the rule.
+    #
+    # The rule itself is tested instead. Build the SAME history at two very
+    # different absences and assert every milestone reads identically: any
+    # metric that decays with time away would differ between the two, whatever
+    # it is called and whenever it was added.
+    # days_away=0 puts the twin's last mission YESTERDAY, so they are current.
+    # An earlier version used 1, which dates it two days back — long enough to
+    # break a streak — so both users read zero on any decaying metric and the
+    # comparison passed no matter what. Verified by mutation: switching a
+    # milestone to `current_streak` now fails this test, and did not before.
+    twin = _returning_user(f"keep_twin_{days_away}", 'advanced', 40, 0,
+                           _ADVANCED_FIVE)
+    here = _milestone_progress(u.id)
+    long_ago = _milestone_progress(twin.id)
+    assert set(here) == set(long_ago)
+    for key in here:
+        assert here[key] == long_ago[key], (
+            f"milestone {key!r} reads {here[key]} after {days_away} days away "
+            f"but {long_ago[key]} when current — an absence is costing somebody "
+            f"progress they already earned")
 
 
 def test_the_returning_note_never_mentions_the_absence(app):
