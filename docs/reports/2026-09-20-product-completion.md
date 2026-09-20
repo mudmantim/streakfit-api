@@ -107,6 +107,132 @@ Rickie, which makes it a broadcast channel the moment it can hold a URL.
 
 ---
 
+## 3. The optional team experience
+
+Verified by 19 assertions in `uicheck` that drive the real UI — creating a
+team, joining with a code, the roster, the campfire, sharing a photo with a
+filter, and the other member seeing it — and by **53 team-specific checks** in
+`scripts/verify_all.py` (teams, campfire, moments, chat, photos), including the
+non-member access boundary.
+
+What was already true and stayed true:
+
+- **The roster never lists who has NOT moved.** There is no leaderboard, no
+  ranking and no "behind" state. A test holds this.
+- **The Campfire is cumulative and never resets.** It cannot go backwards, so
+  a missed day cannot take anything away from anybody.
+- **Teams are genuinely optional.** A solo user gets no standing Team tab —
+  asking for one is what reveals it. The one quiet way in sits at the foot of
+  Progress.
+- **Photos are fetched through an authorized request, not a public URL**, EXIF
+  including GPS is stripped, and the composer says plainly that anyone who can
+  see a photo can screenshot it.
+- **Ordinary teammate chat consumes no AI credits.** This is a test, not a
+  promise.
+
+Changed this phase: the free-plan team-count cap was removed, so unlimited
+teams on every plan is now true of the code and not only of the pitch.
+
+An independent walkthrough of the team experience was commissioned; its
+findings are appended below if they arrived before this report was written.
+
+---
+
+## 5. Brain Boost content quality
+
+**This is where the serious findings were.**
+
+The library was serving 526 items marked `accepted` at review depth `read`.
+Nobody had checked a single claim against anything. The depth was recorded
+honestly — they *had* been read — but `read` was being served as though it
+meant verified.
+
+Fifteen independent reviewers re-read every served item in slices. None saw
+another's verdicts, and none was told the items were already live: `stage` is
+stripped from the packets precisely so a re-reviewer cannot reproduce a prior
+decision.
+
+### What they voted
+
+| Lane | Reviewed | Accept | Revise | Reject |
+|---|---|---|---|---|
+| high — facts, movement, trivia, experiments | 498 | 71% | 27% | 2% |
+| low — jokes, riddles, Rickie asides | 95 | 39% | 26% | 35% |
+
+**593 items re-reviewed. Store now: 440 accepted, 311 revise, 47 rejected.**
+424 of the accepted are at `sourced` depth; the other 16 are jokes, where
+there is nothing to source. Nothing was deleted — every demoted item is on
+disk with the reason, in `content/reviews/*.jsonl`, because that reason is how
+the next batch avoids the same mistake.
+
+### Two safety hazards, both live until today
+
+- **SF-FCT-000045** invited the reader to close their eyes while standing to
+  feel how much harder balancing gets. The fall *is* the demonstration, no
+  warning, in an app whose audience includes nine-year-olds and seniors.
+- **SF-TRV-000170** went further: it *recommended* eyes-closed single-leg
+  balance as "such a good way to make the exercise harder without moving
+  anything." Two reviewers found the first; the widened safety gate found the
+  second, which nobody had flagged.
+
+The gate that should have caught both required the phrase "eyes closed **while
+walking or running**" — narrower than the rule it stood for. It now covers
+balancing and standing, matches "closing your eyes" as well as "eyes closed",
+and applies to trivia **distractors**, because a wrong option is still read.
+
+### Wrong answers in the answer key
+
+- **SF-TRV-000154** — all four options are correct. Cornea, lens, tooth enamel
+  and epidermis are all avascular. The distractors had never been checked for
+  truth, only the key.
+- **Two items** awarded "children learn by watching" over "being encouraged",
+  where the evidence favours the option marked wrong (modelling r≈.16,
+  support r≈.38).
+- **SF-TRV-000082/94** key the superseded damage-and-repair model of getting
+  stronger.
+
+### The pattern underneath, and the gate now enforcing it
+
+Four reviewers reached the same conclusion without conferring: almost nothing
+in the pool is outright false. The defects are a **true core wrapped in a
+quantity nobody measured** — and all of them were tagged `simplified` with
+empty sources, which passed validation because the schema only required a
+source at `established`. `simplified` had become a sourcing exemption: the
+label a claim wears in order not to be checked.
+
+An unsourced comparative, proportion, percentage or dose is now an **error**,
+not a warning, whatever the confidence tier says. Hedged language is
+deliberately untouched — "tends to", "can", "often" is the honest version, and
+penalising it would push authors back toward firmness.
+
+A second, softer gate warns on a mechanism bolted onto a true claim
+("...which is also why..."), which three reviewers named independently. That
+one stays a warning because whether a causal link is supported is a judgement
+no regex can make.
+
+### What this cost, stated plainly
+
+The served pool fell from 693 to 440, and **the reward slot fell hardest**:
+jokes 60 → 16, riddles 20 → 11, Rickie asides 15 → 10. **37 items** for the
+one thing a person gets for finishing their day. That is thin.
+
+It is still the right trade — a third of the jokes were not jokes, just a
+setup followed by a bland positive statement with no wordplay or twist — but
+it is a real gap, and it needs authoring rather than a lower bar.
+
+Trivia is in better shape at 200 accepted, roughly eighteen months of days
+before Brain Boost repeats.
+
+### The 5,000-item goal
+
+**Not close, and further away than before this phase.** 440 accepted against a
+5,000 target. The honest read is that the goal was being approached by
+counting items rather than by checking them, and the measured accept rate on
+independently reviewed content is 61–71% for facts and under 40% for humour.
+Reaching 5,000 at this standard means authoring roughly 7,000.
+
+---
+
 ## 4. Rickie's AI usage architecture
 
 Unchanged this phase and still as reported: `docs/product/ai-usage-and-credits.md`.
@@ -191,4 +317,47 @@ already live.
    coach already fails closed to a friendly 503 with no key, so a per-account
    flag reuses that exact path. It is the single cheapest change that would most
    reduce the surface for a child account.
-5. **Whether to keep the joke library at all** in its current form — see below.
+5. **The reward slot is down to 37 items.** Jokes, riddles and Rickie asides
+   took the worst of the re-review because a third of them were not jokes.
+   Either commission authoring against the standard the reviewers applied, or
+   decide the slot can repeat more often. Lowering the bar is the third option
+   and I would not take it — a flat joke on the one screen that exists to say
+   "well done" is worse than no joke.
+6. **Whether `simplified` should mean anything.** Several reviewers noticed the
+   same thing: items that are plainly editorial opinion, and items that are
+   genuinely contested, are both labelled `simplified` because it is the tier
+   that needs no source. The measured-claims gate bites the worst of it, but
+   the label itself is doing no work.
+
+---
+
+## What would stop me calling this ready
+
+Two things, and neither is cosmetic.
+
+**The content pool.** Every served item has now been independently reviewed,
+which is a real change of state — but 311 items sit at `revise` waiting for
+somebody to fix them, and the reward slot is thin enough that a daily user
+would notice repetition inside six weeks.
+
+**The operational unknowns.** The retention cron is not live, and backup
+retention is unverified. Both are marked as such everywhere they appear, and
+neither can be resolved from inside this repo.
+
+Everything else in the brief is done: the acorn loop works end to end, the
+individual experience no longer claims things it cannot do, teams work and
+stay optional, and the AI cost architecture is measured rather than guessed.
+
+---
+
+## How to check any of this
+
+    make check                                   # 553 tests, lint, types, build
+    make uicheck                                 # 153 browser checks at 390x844
+    python scripts/verify_all.py --base-url http://localhost:5000
+    python scripts/content/validate.py           # content gates
+    python scripts/content/review_queue.py --batch 0001 --status
+    python scripts/rickie_cost_audit.py          # makes no API calls
+
+The review ledgers are `content/reviews/0001.jsonl` and `0002.jsonl` — every
+verdict, who made it, and why.
