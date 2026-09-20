@@ -114,6 +114,31 @@ app.config['MAX_CONTENT_LENGTH'] = PHOTO_MAX_UPLOAD_BYTES
 # doesn't exist — equalizes response time so it can't reveal valid usernames.
 _DUMMY_PW_HASH = generate_password_hash('unused-timing-equalizer', method='pbkdf2:sha256')
 
+# Which model Rickie is, and how much he is allowed to say.
+#
+# These were literals three thousand lines down, inside the tool loop. A model
+# bump is a routine operational act — a deprecation notice, a price change, a
+# regression that wants pinning to the previous version — and it should be an
+# environment variable, not a code hunt in the middle of a retry loop. It also
+# makes a per-environment override possible, so a cheaper model can be used
+# while somebody is exercising the app rather than evaluating it.
+#
+# Cost context, because max_tokens is the lever that matters: measured at
+# $0.0149 a reply, of which the prompt is about 63%. See
+# docs/operations/ai-cost-model.md.
+COACH_MODEL = os.environ.get('STREAKFIT_COACH_MODEL', 'claude-sonnet-5')
+COACH_MAX_TOKENS = int(os.environ.get('STREAKFIT_COACH_MAX_TOKENS', '768'))
+
+# When Rickie forgets a conversation he was supposed to keep, that failure had
+# nowhere to go but a log line nobody greps. It is counted here and reported by
+# /api/verification/self, so losing somebody's memory shows up in the health
+# surface instead of being invisible until they mention it.
+#
+# Process-local and resets on deploy, like every other counter in this app —
+# honest for "is something wrong right now", useless as a historical series,
+# and the self-check says which of those it is.
+_COACH_HEALTH = {'persist_failures': 0, 'last_persist_failure': None}
+
 
 @app.after_request
 def _security_headers(resp):
@@ -2325,6 +2350,29 @@ def verification_self():
         limitations="A key being present does not establish that it works — "
                     "proving that requires spending money, which an unattended "
                     "check may not do.",
+        critical=False))
+
+    # Losing somebody's conversation used to be visible only to whoever
+    # happened to grep the logs. Reported here so it shows up in the health
+    # surface — and reported as UNKNOWN rather than PASS when the count is
+    # zero, because "nothing has failed since this process started" is not the
+    # same as "this works", and the difference is the entire point of the
+    # evidence levels.
+    failures = _COACH_HEALTH['persist_failures']
+    checks.append(_self_check(
+        "coach.memory_writes", "Coach memory persisting",
+        "Conversations Rickie is meant to remember are reaching the database.",
+        "Count failures of _persist_coach_interaction since this process started.",
+        "FAIL" if failures else "UNKNOWN",
+        "VERIFIED" if failures else "UNKNOWN",
+        (f"{failures} failed since boot, most recently "
+         f"{_COACH_HEALTH['last_persist_failure']}") if failures
+        else "none since boot",
+        failure_reason=("Conversations are being lost; Rickie will not remember "
+                        "what people told him.") if failures else None,
+        limitations=None if failures else
+        "Counts from this process only and resets on deploy. Zero means nothing "
+        "has failed since boot, not that the path has been exercised.",
         critical=False))
 
     exercises = sum(len(cat) for tier in EXERCISE_LIBRARY.values() for cat in tier.values())
@@ -7359,8 +7407,8 @@ def coach():
         response = None
         for _ in range(3):
             response = client.messages.create(
-                model='claude-sonnet-5',
-                max_tokens=768,
+                model=COACH_MODEL,
+                max_tokens=COACH_MAX_TOKENS,
                 # Thinking off on purpose: Rickie is a short, snappy chat coach, and
                 # Sonnet 5 runs adaptive thinking by default when the field is omitted —
                 # which would add latency and spend the small token budget on reasoning
@@ -7408,6 +7456,8 @@ def coach():
                 # engine already strips the values; this is the second lock on
                 # the same door, because the cost of being wrong here is not
                 # symmetrical with the cost of a thinner stack trace.
+                _COACH_HEALTH['persist_failures'] += 1
+                _COACH_HEALTH['last_persist_failure'] = type(exc).__name__
                 app.logger.warning('coach memory persist failed: %s',
                                    type(exc).__name__)
         return jsonify({"reply": reply}), 200
@@ -7457,6 +7507,17 @@ def ratelimit_exceeded(e):
 @app.errorhandler(400)
 def bad_request(e):
     return jsonify({"error": "Bad request"}), 400
+
+@app.errorhandler(403)
+def forbidden(e):
+    """Every 403 in this app comes from `_require_admin_secret`, which is the
+    only `abort(403)` and is reached only from /api/admin/* — so answering in
+    JSON cannot turn an HTML page into a wall of braces. It was returning
+    Flask's default HTML, which any client parsing the body as JSON would
+    choke on.
+
+    If an HTML route ever needs to 403, this has to learn to negotiate."""
+    return jsonify({"error": "Forbidden"}), 403
 
 @app.errorhandler(404)
 def not_found(e):

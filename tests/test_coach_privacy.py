@@ -207,7 +207,15 @@ def test_the_coach_limits_are_what_we_think_they_are(app):
     src = inspect.getsource(appmod.coach)
     assert '"10 per day"' in src or "'10 per day'" in src
     assert '"3 per minute"' in src or "'3 per minute'" in src
-    assert "max_tokens=768" in src
+    # The output budget moved out of the route and into configuration, so the
+    # thing to pin is the effective VALUE rather than the literal — a test that
+    # greps for `max_tokens=768` passes a route that reads an unbounded config
+    # and fails one that is correct. Both halves are checked: the ceiling is
+    # what we think, and the route actually uses it.
+    assert appmod.COACH_MAX_TOKENS == 768, (
+        f"the reply budget is {appmod.COACH_MAX_TOKENS}, not the 768 this was pinned at"
+    )
+    assert "max_tokens=COACH_MAX_TOKENS" in src
     assert "len(message) > 500" in src
     # The tool loop is a bounded backstop, not an open loop.
     assert "for _ in range(3)" in src

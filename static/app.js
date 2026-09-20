@@ -3773,7 +3773,22 @@ async function api(path, method, body) {
         return null;
     }
 
-    var data = await res.json();
+    // Not every response is JSON, and the ones that are not are exactly the
+    // ones that arrive when something has gone wrong: a platform 502, a
+    // gateway timeout, a proxy error page. Unguarded, res.json() rejects,
+    // nothing catches it — the try above only wraps the fetch itself — and the
+    // caller gets an unhandled rejection. That is the same failure shape as
+    // the Side Quest regression: a button that silently does nothing.
+    var data;
+    try {
+        data = await res.json();
+    } catch (err) {
+        data = {
+            error: res.status >= 500
+                ? 'Something went wrong at our end. Try again in a moment.'
+                : 'That did not go through. Try again in a moment.'
+        };
+    }
     return { status: res.status, data: data };
 }
 
