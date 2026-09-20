@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 """Teams subsystem — create, join, and the member roster the team panel
 reads (Operation: No Dead Ends, R2.8)."""
+import json
 import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from verification._client import run_module_standalone
-from verification._fixtures import build_team_scenario
+from verification._fixtures import build_team_scenario, fetch_user_id
 
 
 def run(api, results, scenario):
@@ -21,25 +22,53 @@ def run(api, results, scenario):
         f"status={status} member_count={detail.get('member_count')}",
     )
     if ok:
-        roster_usernames = {m["username"] for m in detail["members"]}
+        # The roster is keyed by user_id now, and only security.py resolved
+        # ids before — and it runs after this module. Resolved here so teams
+        # does not depend on another module having run first.
+        for role in ("a", "b"):
+            if users[role].get("id") is None:
+                fetch_user_id(api, results, users, role,
+                              check_name=f"teams.fetch_{role}_user_id")
+
+        # Identify members by user_id, not by login.
+        #
+        # The roster stopped returning other people's login identifiers — it
+        # sends `name`, a chosen display name or a stable "Member N". These
+        # smoke accounts are called qa_smoke_* and carry a run tag, which is
+        # exactly the machine-looking shape `_safe_display_name` refuses, so
+        # matching on the login here would never succeed again.
+        roster_ids = {m["user_id"] for m in detail["members"]}
         results.check(
-            "teams.roster_lists_both_by_name",
-            {users["a"]["username"], users["b"]["username"]} <= roster_usernames,
-            f"roster={roster_usernames}",
+            "teams.roster_lists_both_members",
+            {users["a"]["id"], users["b"]["id"]} <= roster_ids,
+            f"roster={roster_ids}",
+        )
+        # And the guarantee itself, checked on a live server: no member-visible
+        # response may contain another account's login.
+        body = json.dumps(detail)
+        results.check(
+            "teams.roster_carries_no_login_identifier",
+            all(users[r]["username"] not in body for r in ("a", "b")),
+            f"detail={body[:200]}",
+        )
+        results.check(
+            "teams.every_member_has_a_display_label",
+            all((m.get("name") or "").strip() for m in detail["members"]),
+            f"names={[m.get('name') for m in detail['members']]}",
         )
         results.check(
             "teams.creator_flag_correct",
-            any(m["username"] == users["a"]["username"] and m["is_creator"] for m in detail["members"]),
+            any(m["user_id"] == users["a"]["id"] and m["is_creator"] for m in detail["members"]),
         )
         results.check(
             "teams.non_creator_flag_correct",
-            any(m["username"] == users["b"]["username"] and not m["is_creator"] for m in detail["members"]),
+            any(m["user_id"] == users["b"]["id"] and not m["is_creator"] for m in detail["members"]),
         )
 
         # Witness fields: the roster's whole purpose is showing whether the
         # people you share a campfire with moved today. Shipped without them
         # for the life of the team feature.
-        member = next((m for m in detail["members"] if m["username"] == users["a"]["username"]), {})
+        member = next((m for m in detail["members"] if m["user_id"] == users["a"]["id"]), {})
         results.check(
             "teams.roster_carries_today_status",
             "completed_today" in member and "completed_today_count" in member,
