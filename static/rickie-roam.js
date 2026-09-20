@@ -191,9 +191,22 @@
         return rects;
     }
 
+    /* Keep the whole raccoon on the screen.
+     *
+     * The grid's first column sits a few pixels from the left edge, and with
+     * free positions now scarce he landed there repeatedly — a walkthrough
+     * found him in that one spot for 11 of 23 samples with half his body cut
+     * off by the edge. Half a mascot reads as a rendering bug, not a character.
+     */
+    var EDGE_MARGIN = 8;
+
+    function clampToScreen(left, width) {
+        return Math.max(EDGE_MARGIN, Math.min(left, width - SIZE - EDGE_MARGIN));
+    }
+
     function isClear(x, y, rects) {
         var s = stage();
-        var left = x * Math.max(1, s.width - SIZE);
+        var left = clampToScreen(x * Math.max(1, s.width - SIZE), s.width);
         var top = y * Math.max(1, s.height - SIZE);
         var right = left + SIZE, bottom = top + SIZE;
         for (var i = 0; i < rects.length; i++) {
@@ -270,8 +283,11 @@
     function place() {
         if (!el) return;
         var s = stage();
-        var left = state.x * Math.max(0, s.width - SIZE);
-        var top = state.y * Math.max(0, s.height - SIZE);
+        /* Same clamp as isClear uses, or the collision test and the render
+         * would disagree about where he is. */
+        var left = clampToScreen(state.x * Math.max(0, s.width - SIZE), s.width);
+        var top = Math.max(0, Math.min(state.y * Math.max(0, s.height - SIZE),
+                                       s.height - SIZE));
         el.style.transform = 'translate(' + Math.round(left) + 'px,' + Math.round(top) + 'px)' +
                              ' scaleX(' + state.facing + ')';
     }
@@ -490,7 +506,11 @@
         '.exercise-modal:not([hidden])',
         '.coach-panel:not([hidden])',
         '.photo-composer:not([hidden])',
-        '.bb-options'
+        '.bb-options',
+        /* Settings. An independent walkthrough caught him standing on the
+         * Rickie-mode explanation while somebody was reading it to decide how
+         * much of him they wanted — which is funny once and annoying after. */
+        '#settings-menu:not([hidden])'
     ];
 
     function attentionWanted() {
@@ -629,6 +649,7 @@
         _isClear: isClear,
         _occupiedRects: occupiedRects,
         _somewhereClear: somewhereClear,
+        _place: place,
         react: react,
         setPaused: setPaused,
         isPaused: function () { return state.paused; },

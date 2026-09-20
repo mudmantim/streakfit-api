@@ -2721,11 +2721,15 @@ async function _sendPhoto(teamId, canvas, caption, sendBtn, objectUrl) {
 // Sometimes, not always. A companion who opens every single greeting with your
 // name is a salesperson. Deterministic per day rather than random, so it does
 // not flicker between re-renders of the same screen.
-function _withName(line) {
+// `dayOverride` exists so this is testable. Without it a check of "does the
+// name ever reach the greeting" is a one-in-three coin flip on the day it runs,
+// which is a flaky test dressed up as a feature test.
+function _withName(line, dayOverride) {
     if (!line || isGuest) return line;
     var name = currentUser && currentUser.rickie_calls_you;
     if (!name) return line;                       // no safe name: use none
-    var day = Math.floor(Date.now() / 86400000);
+    var day = (dayOverride === undefined)
+        ? Math.floor(Date.now() / 86400000) : dayOverride;
     if (day % 3 !== 0) return line;
     return line.replace(/[.!?]?$/, ', ' + name + '.');
 }
@@ -2832,7 +2836,9 @@ var RICKIE_LINES = {
         "Small wins still count.",
         "Rickie is proud of that one.",
         "That's one more for the books.",
-        "Rickie noticed that.",
+        "Something's different about today already.",
+        "That's the hard part done — starting.",
+        "One down. The rest are easier.",
         "Nice. Onward."
     ],
     brainBoostCorrect: [
@@ -2962,16 +2968,28 @@ var _lastRickieLineByPool = {};
 // Picks from a named pool in RICKIE_LINES, never repeating the immediately
 // previous pick *within that same pool* (each pool tracks its own history,
 // so an exercise-completion pick can't be blocked by a Brain Boost pick).
+// Avoids the last FEW lines, not just the last one.
+//
+// Blocking only the immediately previous string is enough to stop a literal
+// repeat and not enough to stop the feeling of one: an independent walkthrough
+// of five exercises in a row got "Rickie noticed that." twice and then "Rickie
+// saw that.", all three distinct strings and all three the same sentence. A
+// third of the pool is remembered, so a short session spreads across it.
+var _RECENT_LINE_MEMORY = 3;
+
 function _pickRickieLine(poolKey) {
     var pool = RICKIE_LINES[poolKey];
     if (!pool || pool.length === 0) return '';
     if (pool.length === 1) return pool[0];
-    var last = _lastRickieLineByPool[poolKey];
-    var choice;
-    do {
-        choice = pool[Math.floor(Math.random() * pool.length)];
-    } while (choice === last);
-    _lastRickieLineByPool[poolKey] = choice;
+    var recent = _lastRickieLineByPool[poolKey];
+    if (!Array.isArray(recent)) recent = recent ? [recent] : [];
+    var depth = Math.min(_RECENT_LINE_MEMORY, pool.length - 1);
+    var eligible = pool.filter(function (line) { return recent.indexOf(line) === -1; });
+    if (!eligible.length) eligible = pool;
+    var choice = eligible[Math.floor(Math.random() * eligible.length)];
+    recent.push(choice);
+    while (recent.length > depth) recent.shift();
+    _lastRickieLineByPool[poolKey] = recent;
     return choice;
 }
 

@@ -1034,12 +1034,37 @@ def check_display_name_can_be_set_changed_and_cleared(b: Browser, base: str, app
                 " return c.measureText(i.placeholder).width <= i.clientWidth - 12;})()")
     check(bool(fits), "its placeholder fits the box at phone width")
 
+    # Nothing in the settings panel may be clipped by the panel's own width.
+    # The active theme button rendered as "🎮 G" at 375px once the buttons
+    # gained words, which looks broken rather than terse.
+    clipped = b.js("(()=>{const m=document.getElementById('settings-menu');"
+                   " if(!m) return 'no menu'; const bad=[];"
+                   " const mr=m.getBoundingClientRect();"
+                   " for(const el of m.querySelectorAll('button,select,input,label,p')){"
+                   "  if(!el.offsetParent) continue;"
+                   "  const r=el.getBoundingClientRect();"
+                   "  if(r.right>mr.right+1||r.left<mr.left-1)"
+                   "    bad.push((el.id||el.className||el.tagName).toString().slice(0,24));"
+                   "  if(el.scrollWidth>el.clientWidth+2&&el.tagName!=='SELECT')"
+                   "    bad.push('overflow:'+(el.id||el.className||el.tagName).toString().slice(0,20));"
+                   " } return bad.join('|');})()")
+    check(not clipped, "nothing in the settings panel is clipped at phone width",
+          str(clipped)[:90])
+
     # And the name reaches the app, not just the chat prompt it was built for.
     set_name("Olivia")
     b.goto(base + "/", wait=2.5)
-    reaches = b.js("(()=>{return typeof _withName==='function' && "
-                   "/Olivia/.test(_withName('Morning.'));})()")
-    check(bool(reaches), "the name is actually used by the app's own greeting")
+    # Across three consecutive days, not whichever day this happens to run:
+    # the name appears on some days by design, so a single-day assertion is a
+    # coin flip. What must hold is that it appears at all, and never on a day
+    # where the app decided not to use it.
+    reaches = b.js("(()=>{if(typeof _withName!=='function') return 'no function';"
+                   " const out=[0,1,2].map(d=>_withName('Morning.',d));"
+                   " const named=out.filter(s=>/Olivia/.test(s)).length;"
+                   " return named===1 ? 'ok' : 'named on '+named+' of 3 days';})()")
+    check(reaches == "ok",
+          "the name reaches the app's own greeting, on some days not all",
+          str(reaches))
 
     # A guest has no account to store it on.
     b.reset_storage()
@@ -1162,6 +1187,23 @@ def check_rickie_roams(b: Browser, base: str, app) -> None:
     b.js("RickieRoam.setPaused(false)")
     check(not blocked, "every position he may stand in is clear of controls AND text",
           "; ".join(blocked[:3]))
+
+    # He must be wholly on screen. A walkthrough found him in ONE position for
+    # 11 of 23 samples with half his body past the left edge — which reads as a
+    # rendering bug, not a character. Checked over many placements, because a
+    # single sample would usually miss it.
+    offscreen = b.js("""(()=>{const el=document.querySelector('.rickie-roam');
+      const bad=[];
+      for(let i=0;i<25;i++){
+        const s=RickieRoam._somewhereClear&&RickieRoam._somewhereClear();
+        if(!s) continue;
+        RickieRoam._state.x=s.x; RickieRoam._state.y=s.y; RickieRoam._place();
+        const r=el.getBoundingClientRect();
+        if(r.left< -0.5||r.top< -0.5||r.right>innerWidth+0.5||r.bottom>innerHeight+0.5)
+          bad.push(Math.round(r.left)+','+Math.round(r.top));
+      } return bad.join('|');})()""")
+    check(not offscreen, "he is never rendered partly off the screen",
+          str(offscreen)[:80])
 
     # A tap at his position reaches the page underneath.
     #

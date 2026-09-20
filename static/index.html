@@ -135,13 +135,17 @@
 
                     <div class="settings-row" id="settings-row-rickie">
                         <label class="settings-label" for="rickie-mode-select">Rickie</label>
-                        <select id="rickie-mode-select" class="skill-select" title="How much of Rickie's personality you want"
+                        <select id="rickie-mode-select" class="skill-select" title="How much of Rickie's personality you want" aria-describedby="rickie-mode-help"
                                 onchange="handleRickieModeChange(this.value)">
-                            <option value="full">🦝 Full</option>
-                            <option value="quiet">🦝 Quiet</option>
-                            <option value="minimal">🦝 Minimal</option>
+                            <option value="full">🦝 Full — jokes and celebrations</option>
+                            <option value="quiet">🦝 Quiet — fewer interruptions</option>
+                            <option value="minimal">🦝 Minimal — just the facts</option>
                         </select>
                     </div>
+                    <p class="settings-help" id="rickie-mode-help">
+                        How chatty Rickie is. He never stops being available — this
+                        only changes how often he speaks up on his own.
+                    </p>
                     <div class="settings-row" id="settings-row-forget">
                         <span class="settings-label">Memory</span>
                         <button id="btn-forget-coach" class="btn-forget-coach"
@@ -153,9 +157,18 @@
                     <div class="settings-row">
                         <span class="settings-label">Theme</span>
                         <div class="theme-toggle" role="group" aria-label="Display mode">
-                            <button class="theme-btn" data-mode="classic" onclick="handleDisplayModeChange('classic')" title="Classic">📋</button>
-                            <button class="theme-btn" data-mode="bright"  onclick="handleDisplayModeChange('bright')"  title="Bright">✨</button>
-                            <button class="theme-btn" data-mode="game"    onclick="handleDisplayModeChange('game')"    title="Game">🎮</button>
+                            <button class="theme-btn" data-mode="classic" onclick="handleDisplayModeChange('classic')"
+                                    aria-label="Classic theme — plain and quiet">
+                                <span aria-hidden="true">📋</span><span class="theme-btn-text">Classic</span>
+                            </button>
+                            <button class="theme-btn" data-mode="bright"  onclick="handleDisplayModeChange('bright')"
+                                    aria-label="Bright theme — light and colorful">
+                                <span aria-hidden="true">✨</span><span class="theme-btn-text">Bright</span>
+                            </button>
+                            <button class="theme-btn" data-mode="game"    onclick="handleDisplayModeChange('game')"
+                                    aria-label="Game theme — the playful one">
+                                <span aria-hidden="true">🎮</span><span class="theme-btn-text">Game</span>
+                            </button>
                         </div>
                     </div>
                     <div class="settings-divider"></div>
@@ -261,10 +274,17 @@
                 <div class="journey-header">
                     <img src="/static/rickie.svg" alt="Rickie" class="journey-avatar">
                     <div class="journey-header-text">
-                        <h2 class="journey-title">Rickie's Journey</h2>
+                        <h2 class="journey-title">Your Journey</h2>
                         <p class="journey-level-line">
                             <span id="journey-level" class="journey-level"></span>
                             <span id="journey-level-title" class="journey-level-title"></span>
+                        </p>
+                        <!-- A level with no explanation is a number that looks
+                             like a judgement. Say what it counts and, more
+                             importantly, what it does not. -->
+                        <p class="journey-level-note">
+                            Levels just count how much you've moved. They don't
+                            unlock anything and they never go down.
                         </p>
                     </div>
                 </div>
@@ -279,6 +299,10 @@
                     <span id="journey-acorns-value" class="journey-acorns-value">0</span>
                     <span class="journey-acorns-label">Acorns</span>
                 </div>
+                <p class="journey-acorns-note">
+                    Earned by moving. Spend them on photo filters for team photos —
+                    spending never reduces the total you've earned.
+                </p>
 
                 <p id="journey-message" class="journey-message"></p>
 
