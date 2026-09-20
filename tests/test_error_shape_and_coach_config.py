@@ -186,3 +186,63 @@ def test_a_real_persist_failure_actually_increments_the_counter(client, monkeypa
     finally:
         appmod._COACH_HEALTH["persist_failures"] = 0
         appmod._COACH_HEALTH["last_persist_failure"] = None
+
+
+def test_the_reply_budget_cannot_be_raised_without_limit():
+    """Making the budget configurable without a ceiling turned an environment
+    variable into an unbounded spending control.
+
+    Output tokens are the expensive half of a reply. A typo, a pasted value or
+    a bad rollout must not be able to multiply the bill, so the value is
+    clamped rather than merely defaulted.
+    """
+    assert appmod.COACH_MAX_TOKENS_CEILING <= 4096, "the ceiling is not a ceiling"
+    assert appmod.COACH_MAX_TOKENS_FLOOR >= 1
+    assert (appmod.COACH_MAX_TOKENS_FLOOR
+            <= appmod.COACH_MAX_TOKENS_DEFAULT
+            <= appmod.COACH_MAX_TOKENS_CEILING)
+    # The live value is inside the band whatever the environment says.
+    assert (appmod.COACH_MAX_TOKENS_FLOOR
+            <= appmod.COACH_MAX_TOKENS
+            <= appmod.COACH_MAX_TOKENS_CEILING)
+
+
+def test_an_absurd_or_malformed_budget_lands_somewhere_safe():
+    """Checked in a subprocess: reloading the app module in-process rebinds
+    globals the live Flask app still closes over. See
+    tests/test_error_shape_and_coach_config.py's model-override test."""
+    import os
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    root = Path(appmod.__file__).resolve().parent
+    cases = {
+        "200000": appmod.COACH_MAX_TOKENS_CEILING,   # clamped down
+        "0": appmod.COACH_MAX_TOKENS_FLOOR,          # clamped up
+        "-5": appmod.COACH_MAX_TOKENS_FLOOR,
+        "abc": appmod.COACH_MAX_TOKENS_DEFAULT,      # unparseable -> default
+        "": appmod.COACH_MAX_TOKENS_DEFAULT,
+        "1500": 1500,                                # a legitimate override
+    }
+    for raw, expected in cases.items():
+        env = dict(os.environ, SECRET_KEY="x", JWT_SECRET_KEY="x",
+                   STREAKFIT_COACH_MAX_TOKENS=raw)
+        result = subprocess.run(
+            [sys.executable, "-c", "import app; print(app.COACH_MAX_TOKENS)"],
+            cwd=str(root), env=env, capture_output=True, text=True, timeout=120)
+        assert result.returncode == 0, (
+            f"STREAKFIT_COACH_MAX_TOKENS={raw!r} stopped the app booting:\n"
+            f"{result.stderr[-800:]}")
+        got = int(result.stdout.strip().splitlines()[-1])
+        assert got == expected, f"{raw!r} -> {got}, expected {expected}"
+
+
+def test_the_configured_model_is_announced_at_boot():
+    """A model name carries no price, so it cannot be bounded by arithmetic.
+    It is logged instead: an unexpected model is a cost change and belongs in
+    the first lines of a deploy, not on an invoice."""
+    import inspect
+
+    src = inspect.getsource(appmod)
+    assert "coach configured: model=%s max_tokens=%d" in src

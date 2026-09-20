@@ -126,8 +126,47 @@ _DUMMY_PW_HASH = generate_password_hash('unused-timing-equalizer', method='pbkdf
 # Cost context, because max_tokens is the lever that matters: measured at
 # $0.0149 a reply, of which the prompt is about 63%. See
 # docs/operations/ai-cost-model.md.
+# The reply budget is CLAMPED, not merely defaulted.
+#
+# Making it configurable without a ceiling turned an environment variable into
+# an unbounded spending control: `STREAKFIT_COACH_MAX_TOKENS=200000` was
+# accepted, and output tokens are the expensive half of a reply. A typo, a
+# copied-in value or a bad rollout should not be able to multiply the bill.
+#
+# The ceiling is generous against the 768 this actually runs at — room to
+# lengthen a reply deliberately, none to lose a zero by accident. A malformed
+# value falls back to the default with a loud log rather than refusing to boot:
+# one mistyped coach setting should not take the whole product down, and the
+# fallback is the safe direction anyway.
+COACH_MAX_TOKENS_DEFAULT = 768
+COACH_MAX_TOKENS_CEILING = 2048
+COACH_MAX_TOKENS_FLOOR = 64
+
+
+def _coach_token_budget():
+    raw = os.environ.get('STREAKFIT_COACH_MAX_TOKENS', str(COACH_MAX_TOKENS_DEFAULT))
+    try:
+        wanted = int(raw)
+    except (TypeError, ValueError):
+        app.logger.error(
+            'STREAKFIT_COACH_MAX_TOKENS=%r is not a number — using %d',
+            raw, COACH_MAX_TOKENS_DEFAULT)
+        return COACH_MAX_TOKENS_DEFAULT
+    clamped = max(COACH_MAX_TOKENS_FLOOR, min(COACH_MAX_TOKENS_CEILING, wanted))
+    if clamped != wanted:
+        app.logger.error(
+            'STREAKFIT_COACH_MAX_TOKENS=%d is outside %d-%d — clamped to %d',
+            wanted, COACH_MAX_TOKENS_FLOOR, COACH_MAX_TOKENS_CEILING, clamped)
+    return clamped
+
+
+# Which model Rickie is. Unlike the budget this cannot be bounded by arithmetic
+# — a model name carries no price — so it is LOGGED at boot instead, because an
+# unexpected model is a cost change and should be visible in the first lines of
+# a deploy rather than discovered on an invoice.
 COACH_MODEL = os.environ.get('STREAKFIT_COACH_MODEL', 'claude-sonnet-5')
-COACH_MAX_TOKENS = int(os.environ.get('STREAKFIT_COACH_MAX_TOKENS', '768'))
+COACH_MAX_TOKENS = _coach_token_budget()
+app.logger.info('coach configured: model=%s max_tokens=%d', COACH_MODEL, COACH_MAX_TOKENS)
 
 # When Rickie forgets a conversation he was supposed to keep, that failure had
 # nowhere to go but a log line nobody greps. It is counted here and reported by
