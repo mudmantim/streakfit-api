@@ -1,0 +1,163 @@
+{
+  "verdicts": [
+    {
+      "id": "SF-TRV-000151",
+      "verdict": "accept",
+      "reason": "Mechanism is correct (sympathetically mediated vasoconstriction; denervated digits do not wrinkle). All four options are real candidate explanations, the osmosis distractor is the genuine popular misconception, and the explanation adds the evidence rather than restating the key.",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000162",
+      "verdict": "revise",
+      "reason": "Two defensible correct answers. Option 1 ('repetition at a set time trains the body to expect it') describes circadian/anticipatory learning, which is also a real reason a fixed time helps — and the explanation concedes this outright ('which is a different mechanism from your body learning a schedule'). If the item means to test context-cueing specifically, either narrow the stem to place only ('Why does a fixed PLACE help a habit stick?') or replace option 1 with something false.",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000182",
+      "verdict": "accept",
+      "reason": "Uneven-terrain stabiliser recruitment is a fair simplification, the explanation concedes that surface softness and gradient contribute too rather than pretending the distractors are worthless, and no option is a joke or a bare dismissal.",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000072",
+      "verdict": "accept",
+      "reason": "Anti-movement/stabilisation as the core's primary role is standard and correctly framed; all three distractors are partially true things the core also does, which is the right kind of distractor. Explanation teaches an application (carrying shopping one-handed) instead of restating.",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000033",
+      "verdict": "revise",
+      "reason": "The keyed answer is wrong for the stem, and the explanation contradicts the key. Standard talk test: able to SING = light/easy; can talk but NOT sing = MODERATE; can't say more than a few words = vigorous. The stem asks about an 'easy pace' but keys the moderate band. The explanation then says 'singing means easy' — i.e. it states the correct taxonomy and disagrees with its own answer_index. Fix: either key the option to singing comfortably, or change the stem to 'a moderate pace'. Also drop the superlative 'the simplest way' from the stem. This one is currently teaching a child to treat moderate effort as their easy baseline.",
+      "sources_checked": [
+        "https://www.cdc.gov/physicalactivity/basics/measuring/index.html",
+        "https://www.uhhospitals.org/-/media/files/health-information/move/talk-test-perceived-exertion-qa.pdf"
+      ]
+    },
+    {
+      "id": "SF-TRV-000116",
+      "verdict": "accept",
+      "reason": "True, age-appropriate, and the explanation earns its place with the haemoglobin fact rather than restating. Distractors are things a reader could genuinely misclassify, and the explanation is careful to say the three distractors are needed too, not worthless.",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000105",
+      "verdict": "accept",
+      "reason": "Slow-wave activity and memory consolidation in deep sleep are well established, and the contested glymphatic claim is correctly labelled AND stated as contested in the text — the 2013 Xie finding was directly challenged by Miao et al., Nature Neuroscience 2024, and remains disputed. This is the item in the sample that handles uncertainty properly. Minor: the key is the longest and most specific option; consider padding the distractors.",
+      "sources_checked": [
+        "https://www.nature.com/articles/s41593-024-01638-y",
+        "https://www.thetransmitter.org/glymphatic-system/new-method-reignites-controversy-over-brain-clearance-during-sleep/",
+        "https://www.alzforum.org/news/research-news/does-sleep-really-speed-clearance-brain"
+      ]
+    },
+    {
+      "id": "SF-TRV-000089",
+      "verdict": "revise",
+      "reason": "Guessable without knowing anything. The key is the only affirming, non-extreme option; the other three are an absolute ('Only running and jumping have ANY effect'), a flat either/or ('set by diet RATHER THAN movement') and a flat denial ('leaves the bone unchanged'). A reader who has learned that quiz absolutes are usually wrong scores this cold. Rewrite at least two distractors as plausible, non-absolute wrong beliefs (e.g. 'bone only responds to load while you are still growing'). Also overlaps SF-TRV-000049, which teaches the same load-response point in its explanation.",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000062",
+      "verdict": "revise",
+      "reason": "Near-duplicate of SF-TRV-000032 in the same sample — same fact (resting heart rate falls with training), same mechanism, and a copy-pasted explanation sentence ('It's one of the few fitness changes you can watch happen — count for a minute now, and again in two months'). Keep SF-TRV-000032, which has the stronger distractor set, and cut or fully repurpose this one.",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000113",
+      "verdict": "revise",
+      "reason": "Two of the three distractors are not plausible — 'Only if the food is served cold' is close to a joke, and 'Only in small amounts not worth counting' is a hedge nobody believes. The key is also the longest option and the only affirmative in a yes/no stem. Separately, 'A decent share of most people's daily fluid' is an unsourced quantified claim under `simplified`; the usual figure is roughly 20-30% from food and should be stated with a source or dropped.",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000303",
+      "verdict": "accept",
+      "reason": "Eccentric loading as the cause of downhill-walking soreness is correct and well established. Distractors are all real lay explanations, the key is not the longest, and the explanation gives the mechanism plus the uphill contrast rather than restating.",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000006",
+      "verdict": "revise",
+      "reason": "The underlying fact holds (ROM peaks around 16:00, tracking core temperature) but the option text says 'Most people', which is an unsourced quantified claim under `simplified` — cite it (e.g. Reilly/Atkinson diurnal-variation work in Chronobiology International) or reword to 'tends to'. Guessability is also weak: option 2 ('flexibility is fixed') is eliminated by the stem's own wording, leaving a coin flip between options 0 and 3. Finally it duplicates SF-TRV-000306's mechanism — two items in this sample both teach 'X tracks body temperature, which peaks in the late afternoon'.",
+      "sources_checked": [
+        "https://pubmed.ncbi.nlm.nih.gov/17612948/",
+        "https://www.tandfonline.com/doi/full/10.1080/07420528.2025.2611854"
+      ]
+    },
+    {
+      "id": "SF-TRV-000306",
+      "verdict": "revise",
+      "reason": "'A disproportionate number of sporting records have fallen' in that window is a quantified empirical claim with no source under `simplified` — either cite it or cut the clause; the reaction-time point stands without it. Also a near-duplicate of SF-TRV-000006: same causal mechanism, same body-temperature-peaks-late-afternoon payload, same 'the effect is small' caveat. One of the two should go.",
+      "sources_checked": [
+        "https://pubmed.ncbi.nlm.nih.gov/17612948/"
+      ]
+    },
+    {
+      "id": "SF-TRV-000186",
+      "verdict": "reject",
+      "reason": "The teaching point is contradicted by the evidence. The explanation asserts that outdoor and indoor play are close on intensity ('the intensity and the duration are much closer than people assume'), but the literature is consistent the other way: children are roughly twice as active outdoors, and preschoolers need about 9.1 minutes indoors to accumulate a minute of MVPA versus 3.8 minutes outdoors. That makes option 3 ('more vigorous throughout') defensibly correct, so the item has two right answers and keys the wrong one. Options 0 and 1 are also arguably true. Cannot be fixed by swapping distractors — the premise needs rewriting, ideally into an item that teaches the intensity difference with a source.",
+      "sources_checked": [
+        "https://www.ncbi.nlm.nih.gov/pmc/articles/PMC6265760/",
+        "https://pmc.ncbi.nlm.nih.gov/articles/PMC7972019/"
+      ]
+    },
+    {
+      "id": "SF-TRV-000075",
+      "verdict": "accept",
+      "reason": "Clean definitional item; the three distractors are the three qualities coordination is most often confused with (speed, strength, flexibility), and the catching-a-ball example does explanatory work. Age-appropriate at 9.",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000131",
+      "verdict": "revise",
+      "reason": "Answerable from the term itself: 'warm-up' rules out 'the hardest set' and 'done at the end' without any knowledge, leaving a two-way choice. Low information payload. Also 'Cheap insurance' implies injury prevention, which is exactly the over-firm framing the rubric names ('stretching prevents injury'); the defensible benefit is movement rehearsal and readiness, so say that and drop the insurance metaphor.",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000121",
+      "verdict": "accept",
+      "reason": "DOMS peaking at roughly 24-48 hours is correct and the 36-hour figure sits inside the accepted window. Distractors span the plausible range rather than being jokes, and the explanation adds a genuinely useful inference (the culprit is usually the session before last).",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000101",
+      "verdict": "accept",
+      "reason": "~90 minutes is the standard figure, and the explanation adds real content about the deep-sleep-early / REM-late distribution instead of restating. Distractor spread is sensible and nothing here is medical advice.",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000032",
+      "verdict": "accept",
+      "reason": "Correct (increased stroke volume, same cardiac output at fewer beats), and 'the heart is getting weaker' is a genuinely plausible naive distractor, which is what makes this the better of the two resting-heart-rate items. Note the duplicate: SF-TRV-000062 teaches the same fact with a copy-pasted explanation line; keep this one.",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000018",
+      "verdict": "revise",
+      "reason": "The explanation asserts one mechanism and rules out others with no source ('loops are broken by interruption more than by effort', 'It isn't about using up energy') — that is firmness beyond the evidence on a mental-health topic. It also never addresses distractor 3 (increased cerebral blood flow), which is partly true, so the reader is left with an unexplained wrong answer. Either hedge the mechanism ('one reason may be...') or cite the nature-walk rumination work. Consider adding a boundary line: a repeating thought that does not shift is worth telling an adult about, rather than implying a walk is the answer.",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000049",
+      "verdict": "accept",
+      "reason": "Continuous bone remodelling is correct at every age, and the 'bone is finished material, like a shell' option is an elaborated real misconception rather than a bare dismissal. The explanation earns its place (fracture healing, load response, why growth stopping is not the same as remodelling stopping). Minor thematic overlap with SF-TRV-000089 on load response, but this item's payload is distinct.",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000065",
+      "verdict": "accept",
+      "reason": "Correct and the explanation does the hard part — it explains WHY veins look blue (light scattering in skin) rather than just asserting that blood is always red. Distractors are the actual versions of the myth people hold. Safe and age-appropriate.",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000110",
+      "verdict": "accept",
+      "reason": "True and correctly framed as speed of availability, not as 'best' fuel. The explanation distinguishes all three distractors rather than restating the key, and there is no weight, body-composition or restriction framing anywhere in it.",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000048",
+      "verdict": "accept",
+      "reason": "Arithmetic checks out: 27 bones per hand and 26 per foot = 106 of about 206, i.e. just over half. The explanation pre-empts the common half-remembered version ('a quarter are in your feet') instead of restating the key, which is genuinely useful. Minor: 'More than half' is the only non-fraction phrasing, so it stands out slightly; consider 'About half' as a fourth fraction-style distractor.",
+      "sources_checked": []
+    }
+  ]
+}
