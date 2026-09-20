@@ -1,29 +1,80 @@
 # Production hotfix — login identifier exposed to teammates
 
 **Branch:** `hotfix/username-exposure` · **Base:** `8b409d1` (`origin/main`)
-**Commits:** `5f8495c`, `76f194d` · Nothing pushed, nothing deployed.
+**Commits:** `5f8495c`, `76f194d`, `676ebbf` (+ this update) · Nothing pushed, nothing deployed.
 
-This branch is **two commits on top of what production is running**. It has no
+This branch is **three commits on top of the production baseline**. It has no
 relationship to `product-completion` and must not be confused with it — see §8.
 
 ---
 
-## 1. The production revision, established rather than assumed
+## 1. The deployment baseline — the Render record is UNVERIFIED
 
-Production has **no `/api/build-identity`** (404) — that endpoint is itself
-part of the undeployed work. It answers only `/health`. So the revision was
-fingerprinted against behaviour:
+**I could not read the live Render deployment record.** There is no `render`
+CLI on this machine, no `RENDER_API_KEY` or any Render credential in the
+environment or in `.env` (which holds only `ANTHROPIC_API_KEY`, `SECRET_KEY`,
+`JWT_SECRET_KEY`), no `~/.render` config, and no Render MCP connector in this
+session. `render.yaml` in the repo is **explicitly inert** — its own header
+says the live service is configured in the Render dashboard, was not created
+from a Blueprint, and that Render never reads the file.
 
-| Probe | Production | `origin/main` = `8b409d1` |
-|---|---|---|
-| `/health` | 200 | present |
-| `/api/health` | 404 | absent |
-| `/api/build-identity` | 404 | absent |
-| `/api/verification/self` | 404 | absent |
-| team photo routes | absent | absent (0 occurrences) |
-| roster field | `username` | `username` |
+**So the deployed SHA is reported as UNVERIFIED, not assumed.** What follows
+bounds it rather than guessing it.
 
-**Production is `8b409d1`.** The hotfix branch is cut from exactly that.
+### Evidence gathered instead
+
+**Byte-exact static-asset comparison** (read-only GETs, no side effects) —
+production's served bundle against the git blobs at `8b409d1`:
+
+| Asset | Live SHA-256 | `8b409d1` | Result |
+|---|---|---|---|
+| `/static/sw.js` | `d68a5d9add82ce8f…` | `d68a5d9add82ce8f…` | **MATCH** (2,124 B) |
+| `/static/app.js` | `f75631d279b3ddb9…` | `f75631d279b3ddb9…` | **MATCH** (208,021 B) |
+| `/static/style.css` | `99bad6078ecf9a49…` | `99bad6078ecf9a49…` | **MATCH** (67,086 B) |
+
+A byte-identical 208 KB `app.js` is strong evidence, but it pins the *frontend*
+bundle, not the backend commit.
+
+**Supporting signals:** production 404s `/api/health`, `/api/build-identity`
+and `/api/verification/self` and serves only `/health`; it has no team-photo
+routes; its roster emits `username`. `origin/main` is `8b409d1`, last moved
+**2026-07-26** (~8 weeks ago, consistent with "maintenance mode"), and the live
+service is git-linked to `main` with auto-deploy.
+
+### What the ambiguity actually costs — nothing, for this hotfix
+
+The last commit on `main` touching `static/` is `bdc1a50`. Every revision from
+`bdc1a50` to `8b409d1` — **12 commits** — serves a byte-identical static
+bundle, so the asset match cannot discriminate between them. That is the honest
+size of the uncertainty.
+
+It does not matter here. **Every function this hotfix modifies is byte-identical
+across all 12 candidates**, verified by AST-extracting each one at both ends of
+the window and hashing it:
+
+| Function | `bdc1a50` | `8b409d1` | Same |
+|---|---|---|---|
+| `get_team` | `d7ad3a5e4233` | `d7ad3a5e4233` | ✓ |
+| `get_team_moments` | `623b19c1ec3a` | `623b19c1ec3a` | ✓ |
+| `get_team_messages` | `12e284c53992` | `12e284c53992` | ✓ |
+| `post_team_message` | `6646823ca22a` | `6646823ca22a` | ✓ |
+| `_serialize_team_message` | `6f1f0fcf5cad` | `6f1f0fcf5cad` | ✓ |
+| `_usernames_for_ids` | `586e45bdfffe` | `586e45bdfffe` | ✓ |
+| `_moment_display_text` | `34182091a931` | `34182091a931` | ✓ |
+
+The only `app.py` changes anywhere in that window are two rate-limit decorator
+keyings on `join_team` and `post_team_message` (`@limiter.limit(...,
+key_func=user_or_ip_key)`), which the hotfix does not touch.
+
+**Conclusion:** the deployed SHA is **unverified**; the deployed revision is
+**almost certainly `8b409d1`** and **provably within `bdc1a50..8b409d1`**; and
+the hotfix applies identically to any revision in that range.
+
+**To close this properly**, one of: the Render dashboard → the service →
+**Events** (shows the deployed commit), or `RENDER_API_KEY` in the environment
+so `GET /v1/services/<id>/deploys` can be read. **If the deployed SHA turns out
+to be outside `bdc1a50..8b409d1`, stop — do not rebase or adapt this branch
+without a fresh review.**
 
 ## 2. What was exposed, and where
 
@@ -139,9 +190,53 @@ for the other.
 
 ## 6. Deployment
 
-**Migration requirements: none.** Deploy is a code push. The existing
-`flask db upgrade && STREAKFIT_ENFORCE_DB_HEAD=1 gunicorn app:app` start
-command is unchanged and the upgrade will be a no-op.
+### What is and is not required
+
+| | Required? |
+|---|---|
+| Database migration | **No.** `git diff origin/main..HEAD -- migrations/` is empty; the diff contains zero `db.Column` lines |
+| Environment variable change | **No.** No new setting is read; `render.yaml` and `requirements.txt` untouched |
+| Service restart | **Yes, implicitly** — Render restarts on deploy. No manual restart step |
+| Production data modification | **No.** Nothing stored holds a username (§3); the leak was entirely in the read path |
+| Start-command change | **No.** `flask db upgrade && … gunicorn app:app` is unchanged; the upgrade is a no-op |
+
+### Steps, this hotfix alone
+
+1. **Confirm the deployed SHA first** (§1 — currently unverified). Render
+   dashboard → service → **Events**. If it is not within `bdc1a50..8b409d1`,
+   **stop**.
+2. Push `hotfix/username-exposure` and merge it to `main` — **fast-forward
+   only**. It is 3 commits on top of `8b409d1`, so a fast-forward is possible
+   iff the deployed baseline is in fact `8b409d1`. **A merge commit or a rebase
+   would pull in work that is not in this branch; do not force either.**
+3. Auto-deploy fires on push to `main`. Watch the Render build log.
+4. **Confirm what actually deployed** — production has no build-identity
+   endpoint to ask, so use the asset fingerprint:
+   ```
+   curl -s https://streakfit.pro/static/sw.js | grep -o 'streakfit-v[0-9]*'
+   ```
+   Expect **`streakfit-v0749`** (it serves `v0748` today). Cross-check the SHA
+   in Render → Events against the merged commit.
+
+### Risks, honestly ranked
+
+1. **The roster stops showing names — this is the real cost.** Members become
+   `Member 1`, `Member 2`. For a family team this is a genuine downgrade, and
+   it is the direct consequence of there being no display-name column to fall
+   back to. **This is the trade the owner is being asked to accept:** an
+   anonymous roster now, versus a login identifier on every roster until
+   `product-completion` ships a display name. It is reversible in minutes
+   (§7) and it discloses nothing.
+2. **Cached clients.** A browser still holding the old `app.js` reads
+   `m.username`. Commit `76f194d` keeps that key populated with the *same
+   label*, so an old client shows `Member 2`, not `undefined (Creator)` —
+   confirmed empirically against a running build. The `sw.js` bump
+   (`v0748`→`v0749`) pulls the new bundle on next load. Chat self-alignment is
+   briefly degraded for those clients (own messages render as someone else's)
+   — cosmetic, no leak, resolves on reload.
+3. **Unverified baseline** (§1). Bounded, not eliminated.
+4. **Low blast radius otherwise.** No schema, no data, no auth, no billing,
+   no background jobs. Four read serializers and one JS file.
 
 ### Risks, honestly ranked
 
@@ -161,37 +256,63 @@ command is unchanged and the upgrade will be a no-op.
 3. **Low blast radius otherwise.** No schema, no data, no auth, no billing,
    no background jobs. Four read serializers and one JS file.
 
-### Verifying after deployment
+### Post-deployment checklist — and how it avoids logging real people
 
-1. `curl https://streakfit.pro/health` → `{"status":"ok"}`.
-2. From a real account in a real team, `GET /api/teams/<id>` — every
-   `members[].name` reads `Member N` and **no value anywhere equals a login**.
-3. `GET /api/teams/<id>/moments` — `display_text` reads *"Member 1 created the
-   team"*.
-4. `GET /api/teams/<id>/messages` — `sender_username` is a label;
-   `sender_user_id` is present.
-5. Run the suite against production:
-   `SMOKE_BASE_URL=https://streakfit.pro python scripts/verify_all.py`.
-   Expect `teams.roster_carries_no_login_identifier`,
-   `moments.history_carries_no_login_identifier`,
-   `chat.read_carries_no_login_identifier` and
-   `chat.post_echo_carries_no_login_identifier` to pass. It only ever creates
-   throwaway `qa_smoke_*` accounts.
-6. Hard-reload the app and confirm the roster renders and chat still shows your
-   own messages on your side.
+**The four previously leaking paths must be checked without putting any real
+user's login into a terminal, a log or a report.** Two rules make that work:
+
+- **Assert shape, never print values.** A label matches `^Member \d+$`. That is
+  a complete check and it discloses nothing. Never paste a roster into a
+  report.
+- **Prove absence using accounts you created.** `verify_all` builds throwaway
+  `qa_smoke_*` accounts, so it *knows* the logins it is searching for and can
+  assert they are absent — without ever handling a real one.
+
+| # | Path | Check | Expected |
+|---|---|---|---|
+| 0 | — | `curl -s https://streakfit.pro/health` | `{"status":"ok"}` |
+| 1 | — | `curl -s .../static/sw.js \| grep -o 'streakfit-v[0-9]*'` | `streakfit-v0749` |
+| 2 | roster | `GET /api/teams/<id>` — every `members[].name` matches `^Member \d+$` | all match |
+| 3 | history | `GET /api/teams/<id>/moments` — every `display_text` matches `^(Member \d+\|A member\|The (team\|campfire)) ` | all match |
+| 4 | chat list | `GET /api/teams/<id>/messages` — every user message's `sender_username` matches `^Member \d+$` and `sender_user_id` is non-null | all match |
+| 5 | chat echo | `POST /api/teams/<id>/messages` — same shape on the 201 body | matches |
+| 6 | suite | `SMOKE_BASE_URL=https://streakfit.pro python scripts/verify_all.py` | `teams.roster_carries_no_login_identifier`, `moments.history_carries_no_login_identifier`, `chat.read_carries_no_login_identifier`, `chat.post_echo_carries_no_login_identifier` all PASS |
+| 7 | UI | Hard-reload; roster renders, chat still shows your own messages on your side | no `undefined`, correct alignment |
+
+Steps 2–5 can run against a real team the operator is a member of, because the
+assertion is a regex over shape. **If any check fails, capture the failing
+field name and the regex — not the value.**
+
+Note on step 6: `verify_all` creates throwaway accounts and disposable teams,
+touches no existing user or team, and is documented as safe against production
+at any time.
 
 ## 7. Rollback
 
-Code-only, so rollback is a redeploy of the previous revision:
+Code-only, so rollback is a redeploy of the previous revision — in Render,
+**Events → the previous deploy → Rollback**, or:
 
 ```
-git checkout 8b409d1 && <redeploy>
+git revert 676ebbf 76f194d 5f8495c   # then push to main
 ```
 
-No migration to reverse, no data written, no backfill to undo. The service
-worker will serve `v0748` again on the next load. **Rolling back reinstates the
-exposure** — so it is the right move for an unrelated outage, and the wrong one
-for "the roster looks anonymous". For that, ship a display name instead.
+No migration to reverse, no data written, no backfill to undo, no environment
+variable to restore. The service worker returns to `v0748` on next load.
+
+> ### Rollback is NOT a privacy-safe resolution
+>
+> **Rolling back reinstates the exposure.** The previous revision is the
+> vulnerable one: it puts every member's login identifier back on the roster,
+> in the team history, and in the chat — which is the defect this deploy
+> exists to remove.
+>
+> Rollback is therefore appropriate **only** for an unrelated production
+> failure that this deploy happens to have introduced, and it must be treated
+> as *reopening a known privacy defect*, not as returning to a safe state.
+>
+> It is **not** the answer to "the roster looks anonymous now." That is the
+> intended, documented trade (§6.1). The fix for that is to ship a display
+> name — never to restore the login.
 
 ## 8. This is NOT `product-completion`
 
