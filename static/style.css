@@ -4196,3 +4196,26 @@ body.theme-classic .theme-btn.active { background: rgba(79,70,229,.2); }
     cursor: pointer;
 }
 .coach-starter:hover { border-color: currentColor; }
+
+/* The pane nav is `position: sticky; bottom: 0`, which only sticks while its
+   containing block is being scrolled. On a short pane — Progress before you
+   have any history, Team before you have a team — the content ends halfway
+   down and the nav simply sat there, floating in the middle of the screen
+   with blank space beneath it, reading as the end of the page rather than as
+   navigation. A reviewer took it for a broken layout.
+
+   Making the dashboard a full-height flex column fixes it without touching
+   the sticky behaviour: when content is short, `flex: 1` on <main> pushes the
+   nav to the bottom; when content is long, sticky does its usual job. The
+   :not([hidden]) guard matters — a bare `display: flex` would defeat the
+   `hidden` attribute that keeps this view off-screen during sign-in. */
+#dashboard-view:not([hidden]) {
+    display: flex;
+    flex-direction: column;
+    min-height: 100vh;
+    min-height: 100dvh;
+}
+
+#dashboard-view:not([hidden]) > main.container {
+    flex: 1 0 auto;
+}

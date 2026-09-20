@@ -752,6 +752,25 @@ def check_panes_and_solo_first(b: Browser, base: str, app) -> None:
                     " return i && !!i.offsetParent;})()")),
           "the one quiet way in to Teams is at the foot of Progress")
 
+    # The nav must sit at the BOTTOM of the window, not at the bottom of the
+    # content. `position: sticky; bottom: 0` only sticks while its containing
+    # block scrolls, so on a short pane the bar stranded itself halfway down
+    # with blank space beneath — which reads as a broken layout, not as
+    # navigation. Progress on a two-day account is exactly that short pane.
+    strand = b.js(
+        "(()=>{const n=document.getElementById('pane-nav');"
+        " if(!n) return 'no nav';"
+        " const r=n.getBoundingClientRect();"
+        " const vh=window.innerHeight;"
+        " const scrollable=document.documentElement.scrollHeight>vh+2;"
+        " return JSON.stringify({gap:Math.round(vh-r.bottom),"
+        "   scrollable:scrollable,h:Math.round(r.height)});})()")
+    info = json.loads(strand) if str(strand).startswith("{") else {}
+    check(info and info.get("gap", 999) <= 2,
+          "the pane nav sits at the bottom of the window, not mid-screen",
+          f"{info.get('gap')}px of empty space below it "
+          f"(page scrollable: {info.get('scrollable')})")
+
     # Asking for it is what reveals the tab.
     b.js("document.getElementById('solo-team-invite-btn').click()")
     time.sleep(0.6)
