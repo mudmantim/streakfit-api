@@ -162,8 +162,13 @@ def test_a_configured_backend_is_exercised_not_believed(client, monkeypatch):
     """The module's rule is that no check asserts health from configuration.
 
     A URI in an environment variable says nothing about whether anything is
-    listening, so the configured path must probe the backend and report
-    UNKNOWN when it cannot reach it — never PASS because a string was set.
+    listening, so the configured path must probe the backend — never PASS
+    because a string was set.
+
+    FAIL rather than UNKNOWN, and that changed deliberately once the
+    behaviour was measured: `swallow_errors=True` keeps the app up when the
+    backend dies, which means requests proceed unlimited. The control is not
+    unverified, it is off.
     """
     import app as appmod
 
@@ -175,10 +180,47 @@ def test_a_configured_backend_is_exercised_not_believed(client, monkeypatch):
 
     monkeypatch.setattr(appmod, "_ratelimit_backend_check", unreachable)
     c = _check(client, "ratelimit.shared_storage")
-    assert c["status"] == "UNKNOWN", c
+    assert c["status"] == "FAIL", c
     assert "not reachable" in c["observed"]
 
     monkeypatch.setattr(appmod, "_ratelimit_backend_check", lambda: True)
     c = _check(client, "ratelimit.shared_storage")
     assert c["status"] == "PASS", c
     assert "redis" in c["observed"]
+
+
+def test_a_backend_that_reports_itself_down_is_a_failure_not_a_pass(client, monkeypatch):
+    """The false positive my own first version shipped.
+
+    `limits` returns False rather than raising when a Redis backend is
+    unreachable. The check only caught exceptions, so it reported
+    PASS — "shared backend reachable (redis)" — against a refused port.
+    A check that goes green for an absent dependency is worse than no check,
+    and it was only found by running the failure path rather than the happy
+    one.
+    """
+    import app as appmod
+    monkeypatch.setenv("STREAKFIT_ENV", "production")
+    monkeypatch.setenv("RATELIMIT_STORAGE_URI", "redis://localhost:6379")
+    monkeypatch.setattr(appmod, "_ratelimit_backend_check", lambda: False)
+
+    c = _check(client, "ratelimit.shared_storage")
+    assert c["status"] == "FAIL", c
+    assert c["critical"] is True
+
+
+def test_an_unreachable_backend_says_that_nothing_is_being_limited(client, monkeypatch):
+    """`swallow_errors=True` keeps the app up when the backend dies, which
+    means requests proceed UNLIMITED. The report has to say that, or it
+    understates a security control being off as merely unverified."""
+    import app as appmod
+    monkeypatch.setenv("STREAKFIT_ENV", "production")
+    monkeypatch.setenv("RATELIMIT_STORAGE_URI", "redis://localhost:6379")
+
+    def down():
+        raise ConnectionError("refused")
+    monkeypatch.setattr(appmod, "_ratelimit_backend_check", down)
+
+    c = _check(client, "ratelimit.shared_storage")
+    assert c["status"] == "FAIL"
+    assert "NO rate limiting" in c["failureReason"]

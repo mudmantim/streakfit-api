@@ -153,6 +153,22 @@ limiter = Limiter(
     app=app,
     default_limits=[],
     storage_uri=os.environ.get("RATELIMIT_STORAGE_URI", "memory://"),
+    # A rate limiter must not be able to take the application down.
+    #
+    # Measured with the driver installed and the backend refused: every login
+    # returned 500. That is a total outage caused by the availability of a
+    # supporting service, and for a habit app it is a worse failure than the
+    # one the limiter exists to prevent — nobody can get in at all, including
+    # the people whose streaks depend on showing up.
+    #
+    # So errors are swallowed and requests proceed. The cost is stated plainly
+    # rather than hidden: while the backend is unreachable there is NO rate
+    # limiting, which means no brute-force control on /api/login and no
+    # throttle on invite-code lookup. That is why the unreachable case is a
+    # FAIL in /api/verification/self and not an UNKNOWN — Mudman Command reads
+    # that endpoint, and "configured but not answering" is indistinguishable
+    # from "switched off" as far as a caller is concerned.
+    swallow_errors=True,
 )
 
 
@@ -2009,7 +2025,15 @@ def verification_self():
         started_rl = datetime.utcnow()
         try:
             # Exercise it. A configured URI is not a reachable backend.
-            _ratelimit_backend_check()
+            #
+            # `limits` returns False rather than raising when the backend is
+            # down, and the first version of this only caught exceptions — so
+            # it reported PASS, "shared backend reachable (redis)", against a
+            # refused port. A check that goes green for an absent dependency is
+            # worse than no check, and it was only found by running the failure
+            # path rather than the happy one.
+            if not _ratelimit_backend_check():
+                raise ConnectionError("backend reported itself unavailable")
             checks.append(_self_check(
                 "ratelimit.shared_storage", "Rate limits survive a restart",
                 "Rate limiting is the control in front of the invite-code "
@@ -2027,10 +2051,17 @@ def verification_self():
                 "lookup, so its counters must be shared between workers and "
                 "outlive a deploy.",
                 "Ask the configured limiter backend whether it is reachable.",
-                "UNKNOWN", "UNVERIFIED",
+                "FAIL", "VERIFIED",
                 f"backend configured but not reachable: {type(exc).__name__}",
-                failure_reason="Shared rate-limit storage is configured but "
-                               "did not answer; limits may not be enforced.",
+                # FAIL, not UNKNOWN. This was UNKNOWN until the behaviour was
+                # measured: with `swallow_errors=True` an unreachable backend
+                # means requests proceed UNLIMITED, so the control is not
+                # merely unverified, it is off. Reporting that as "we do not
+                # know" would understate it.
+                failure_reason="Shared rate-limit storage is configured but did "
+                               "not answer. Errors are swallowed so the app "
+                               "stays up, which means NO rate limiting is being "
+                               "applied — including on login and invite lookup.",
                 critical=True))
 
     return jsonify({
