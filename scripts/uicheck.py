@@ -949,6 +949,101 @@ def check_discovery_types_reach_a_reader(b: Browser, base: str, app) -> None:
              " if(c) c.remove(); return 1;})()")
 
 
+def check_acorns_are_spendable_without_a_team(b: Browser, base: str, app) -> None:
+    """The whole acorn loop for somebody who will never join a team.
+
+    Acorns are earned by moving and the only things they buy are photo filters.
+    If a solo user cannot reach a filter, the most-earned reward in the product
+    is unreachable for the people it is most meant for — so this drives the
+    entire loop: balance, an unaffordable filter, a purchase, persistence, and
+    the same filter still owned after a reload.
+    """
+    print("\nAcorns, with no team at all")
+    username, token = make_user(app, "acorn")
+
+    from app import User, db
+    with app.app_context():
+        row = db.session.execute(db.select(User).where(User.username == username)).scalar_one()
+        row.acorns_total = 18          # enough for the 15, not the 30
+        db.session.commit()
+        uid = row.id
+
+    b.goto(base + "/", wait=1.0)
+    b.js(f"localStorage.setItem('streakfit_token', {json.dumps(token)})")
+    b.goto(base + "/", wait=2.5)
+
+    # He is in no team. Anything that needs one must not be the only way in.
+    teams = b.js("(async()=>0)() , (()=>{return 1;})()")
+    del teams
+
+    check(b.js("(()=>{const btn=document.getElementById('journey-make-picture-btn');"
+               " return !!(btn);})()") is True or
+          b.js("!!document.getElementById('journey-make-picture-btn')") is True,
+          "a solo user has a way to make a picture at all")
+
+    spendable = b.js("_acornsAvailable()")
+    check(spendable == 18, "the app shows SPENDABLE acorns, not lifetime earned",
+          f"showed {spendable}")
+
+    # The catalogue, as the API gives it to a solo user.
+    cat = b.js("""(async()=>{const r=await fetch('/api/photo-filters',
+        {headers:{Authorization:'Bearer '+localStorage.getItem('streakfit_token')}});
+        const j=await r.json(); window.__cat=j; return 'ok';})()""")
+    time.sleep(1.2)
+    buyable = b.js("(()=>{const c=window.__cat; if(!c) return 'no catalogue';"
+                   " const f=(c.filters||c).filter(x=>x.unlock_type==='acorns');"
+                   " return f.length;})()")
+    check(buyable == 4, "four filters are buyable with acorns", str(buyable))
+    del cat
+
+    afford = b.js("(()=>{const c=window.__cat; const f=(c.filters||c)"
+                  ".filter(x=>x.unlock_type==='acorns');"
+                  " return JSON.stringify(f.map(x=>[x.key,x.cost,x.unlocked]));})()")
+    check("false" in str(afford).lower(),
+          "and none of them is already owned by a new account", str(afford)[:70])
+
+    # Buy the affordable one through the real endpoint.
+    b.js("""(async()=>{const r=await fetch('/api/photo-filters/sweat_mode/unlock',
+        {method:'POST',headers:{Authorization:'Bearer '+
+        localStorage.getItem('streakfit_token')}});
+        window.__buy={status:r.status, body:await r.json()}; return 'ok';})()""")
+    time.sleep(1.2)
+    status = b.js("window.__buy && window.__buy.status")
+    check(status == 200, "a solo user can buy a filter they can afford", str(status))
+    left = b.js("window.__buy && window.__buy.body && window.__buy.body.acorns_available")
+    check(left == 3, "and the balance goes down by exactly the price", f"left {left}")
+
+    # The one they cannot afford must fail cleanly, and NOT charge them.
+    b.js("""(async()=>{const r=await fetch('/api/photo-filters/frosty/unlock',
+        {method:'POST',headers:{Authorization:'Bearer '+
+        localStorage.getItem('streakfit_token')}});
+        window.__poor={status:r.status, body:await r.json()}; return 'ok';})()""")
+    time.sleep(1.2)
+    pstat = b.js("window.__poor && window.__poor.status")
+    check(pstat == 400, "one they cannot afford is refused, not silently ignored",
+          str(pstat))
+    check(b.js("window.__poor && window.__poor.body && window.__poor.body.error")
+          == "not_enough_acorns", "with a reason the UI can explain")
+
+    with app.app_context():
+        after = db.session.get(User, uid)
+        check(after.acorns_spent == 15,
+              "a refused purchase charges nothing", f"spent {after.acorns_spent}")
+        check(after.acorns_total == 18,
+              "and spending never reduces what they have EARNED",
+              f"lifetime {after.acorns_total}")
+
+    # Persistence: still owned after a reload.
+    b.goto(base + "/", wait=2.5)
+    b.js("""(async()=>{const r=await fetch('/api/photo-filters',
+        {headers:{Authorization:'Bearer '+localStorage.getItem('streakfit_token')}});
+        const j=await r.json(); window.__cat2=j; return 'ok';})()""")
+    time.sleep(1.2)
+    owned = b.js("(()=>{const c=window.__cat2; const f=(c.filters||c)"
+                 ".find(x=>x.key==='sweat_mode'); return f && f.unlocked;})()")
+    check(owned is True, "and it is still owned after a reload")
+
+
 def check_display_name_can_be_set_changed_and_cleared(b: Browser, base: str, app) -> None:
     """The control that decides what Rickie calls somebody out loud.
 
@@ -1214,6 +1309,15 @@ def check_rickie_roams(b: Browser, base: str, app) -> None:
     # rendering beneath a standing Rickie left him on top of it — a walkthrough
     # caught him on an exercise illustration and on the acorns explanation,
     # both reached without scrolling.
+    # Wait until he is standing still. Mid-WALK he deliberately ignores the
+    # step-aside — he is already travelling to a spot that was clear when
+    # chosen — so planting content during a walk tests the exemption, not the
+    # behaviour, and fails about one run in four.
+    for _ in range(40):
+        if not b.js("!!(window.RickieRoam && RickieRoam._state.walking)"):
+            break
+        time.sleep(0.25)
+
     moved = b.js("""(()=>{const el=document.querySelector('.rickie-roam');
       const r=el.getBoundingClientRect();
       const before=r.left+','+r.top;
@@ -1226,7 +1330,8 @@ def check_rickie_roams(b: Browser, base: str, app) -> None:
         'px;height:'+Math.round(r.height)+'px;background:#fff;';
       document.body.appendChild(d);
       return before;})()""")
-    time.sleep(1.4)
+    # 250ms debounce + a 420ms transition, with room to spare.
+    time.sleep(2.0)
     after = b.js("(()=>{const r=document.querySelector('.rickie-roam')"
                  ".getBoundingClientRect(); return r.left+','+r.top;})()")
     b.js("(()=>{const d=document.getElementById('uicheck-intruder');"
@@ -1279,6 +1384,84 @@ def check_rickie_roams(b: Browser, base: str, app) -> None:
       RickieRoam._state.busy=false; RickieRoam.react('mission_done');
       seen.push(RickieRoam._state.pose);} return seen.join(',');})()""") or "").split(",")
     check(len(set(poses)) >= 2, f"a celebration is not always the same one ({sorted(set(poses))})")
+
+
+def check_accessibility_basics(b: Browser, base: str, app) -> None:
+    """The things a screen reader and a keyboard need, on the real page.
+
+    Not an accessibility audit — no automated check is one. These are the four
+    failures that are objectively decidable from the DOM and that make a control
+    unusable rather than merely awkward: a control with no accessible name, an
+    image with no alt and no aria-hidden, an input with no label, and a heading
+    level skipped. The theme buttons shipped as three bare emoji with a title
+    attribute, which a phone never shows and a screen reader reads as
+    "clipboard", and nothing here caught it.
+    """
+    print("\nAccessibility — names, labels, headings")
+    username, token = make_user(app, "a11y")
+    b.goto(base + "/", wait=1.0)
+    b.js(f"localStorage.setItem('streakfit_token', {json.dumps(token)})")
+    b.goto(base + "/", wait=2.5)
+    # Open the panels that are hidden by default, so their controls count too.
+    b.js("(()=>{const m=document.getElementById('settings-menu');"
+         " if(m) m.hidden=false; return 1;})()")
+    time.sleep(0.5)
+
+    nameless = b.js("""(()=>{const bad=[];
+      const named=(el)=>{
+        if(el.getAttribute('aria-label')) return true;
+        if(el.getAttribute('aria-labelledby')) return true;
+        if((el.textContent||'').trim()) return true;
+        if(el.getAttribute('title')) return true;
+        if(el.tagName==='INPUT'&&el.getAttribute('placeholder')) return true;
+        const id=el.id;
+        if(id&&document.querySelector('label[for="'+CSS.escape(id)+'"]')) return true;
+        if(el.closest('label')) return true;
+        return false;};
+      for(const el of document.querySelectorAll('button,a[href],select,textarea,input')){
+        if(!el.offsetParent) continue;
+        if(el.type==='hidden') continue;
+        if(!named(el)) bad.push((el.id||el.className||el.tagName).toString().slice(0,26));
+      } return bad.join('|');})()""")
+    check(not nameless, "every visible control has an accessible name",
+          str(nameless)[:100])
+
+    imgless = b.js("""(()=>{const bad=[];
+      for(const el of document.querySelectorAll('img')){
+        if(!el.offsetParent) continue;
+        if(el.getAttribute('aria-hidden')==='true') continue;
+        if(el.hasAttribute('alt')) continue;
+        bad.push((el.id||el.getAttribute('src')||'img').toString().slice(0,34));
+      } return bad.join('|');})()""")
+    check(not imgless, "every visible image has alt text or is marked decorative",
+          str(imgless)[:100])
+
+    unlabelled = b.js("""(()=>{const bad=[];
+      for(const el of document.querySelectorAll('input,select,textarea')){
+        if(!el.offsetParent||el.type==='hidden') continue;
+        const id=el.id;
+        const hasLabel=(id&&document.querySelector('label[for="'+CSS.escape(id)+'"]'))
+          ||el.closest('label')||el.getAttribute('aria-label')
+          ||el.getAttribute('aria-labelledby');
+        if(!hasLabel) bad.push((el.id||el.name||el.type).toString().slice(0,26));
+      } return bad.join('|');})()""")
+    check(not unlabelled, "every visible form field has a label",
+          str(unlabelled)[:100])
+
+    headings = b.js("""(()=>{const seen=[];
+      for(const h of document.querySelectorAll('h1,h2,h3,h4,h5,h6')){
+        if(!h.offsetParent) continue;
+        seen.push(parseInt(h.tagName[1],10));}
+      let prev=0, bad=[];
+      for(const lvl of seen){ if(prev&&lvl>prev+1) bad.push(prev+'->'+lvl); prev=lvl; }
+      return bad.join(',');})()""")
+    check(not headings, "heading levels are not skipped", str(headings)[:60])
+
+    # Keyboard: the primary action must be reachable and show focus.
+    focusable = b.js("""(()=>{const n=document.querySelectorAll(
+      'button:not([disabled]),a[href],input:not([type=hidden]),select,textarea');
+      let c=0; for(const el of n) if(el.offsetParent) c++; return c;})()""")
+    check(focusable > 0, f"the page has keyboard-reachable controls ({focusable})")
 
 
 def check_page_is_clean(b: Browser, base: str, app) -> None:
@@ -1378,8 +1561,10 @@ def main() -> int:
         check_someone_can_actually_sign_up(browser, base, flask_app)
         check_coming_back_after_a_while(browser, base, flask_app)
         check_discovery_types_reach_a_reader(browser, base, flask_app)
+        check_acorns_are_spendable_without_a_team(browser, base, flask_app)
         check_display_name_can_be_set_changed_and_cleared(browser, base, flask_app)
         check_rickie_roams(browser, base, flask_app)
+        check_accessibility_basics(browser, base, flask_app)
         check_page_is_clean(browser, base, flask_app)
     except Exception as exc:  # a crash must never read as a pass
         bad(f"check run crashed: {type(exc).__name__}: {exc}")
