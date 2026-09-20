@@ -41,6 +41,7 @@ import socket
 import struct
 import subprocess
 import sys
+import tempfile
 import time
 import urllib.error
 import urllib.request
@@ -140,7 +141,31 @@ class _WS:
 class Browser:
     """A phone-sized headless Chrome, driven over CDP."""
 
-    def __init__(self, width: int = 390, height: int = 844, port: int = 9333):
+    def __init__(self, width: int = 390, height: int = 844, port: int | None = None):
+        """port=None picks a free one. Pass an explicit port only to attach.
+
+        This used to default to 9333 with a shared profile directory. Two
+        people running this file at the same time — or one person and one
+        agent — silently attached to EACH OTHER'S Chrome, because the second
+        launch found the port busy and the CDP client happily connected to the
+        browser already there. The symptom is not an error: it is checks that
+        fail on state somebody else's run created, differently every time.
+        That cost an independent reviewer several runs and cost several of
+        mine on the same afternoon before either of us worked out why.
+
+        A free port and a profile directory named after it make concurrent
+        runs independent. STREAKFIT_UICHECK_PORT still pins it for anyone who
+        needs to attach a debugger.
+        """
+        if port is None:
+            env_port = os.environ.get("STREAKFIT_UICHECK_PORT", "").strip()
+            if env_port.isdigit():
+                port = int(env_port)
+            else:
+                with socket.socket() as s:
+                    s.bind(("127.0.0.1", 0))
+                    port = s.getsockname()[1]
+        self.port = port
         for binary in ("google-chrome", "google-chrome-stable", "chromium", "chromium-browser"):
             if _which(binary):
                 break
@@ -149,7 +174,7 @@ class Browser:
         self.proc = subprocess.Popen(
             [
                 binary, "--headless=new", f"--remote-debugging-port={port}",
-                f"--user-data-dir=/tmp/streakfit-uicheck-{port}",
+                f"--user-data-dir={tempfile.gettempdir()}/streakfit-uicheck-{port}",
                 "--no-first-run", "--no-default-browser-check",
                 "--disable-extensions", "--disable-gpu", f"--window-size={width},{height}",
             ],
