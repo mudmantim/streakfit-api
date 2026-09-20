@@ -308,6 +308,128 @@ def sensitive_when_degraded(policy):
     return decorate
 
 
+# ── Age bands, capabilities, and the one function that decides ─────────────
+#
+# Everything about who may do what goes through `can()`. Not because it is
+# tidy, but because the failure this product has already had twice is a rule
+# that existed in one place and not in another — a display name that Rickie
+# honoured and the team roster did not; a join boundary applied to the message
+# list and not to the photo bytes. A permission that lives in two places is a
+# permission that will disagree with itself.
+
+AGE_ADULT, AGE_TEEN, AGE_CHILD = 'adult', 'teen', 'child'
+AGE_BANDS = (AGE_ADULT, AGE_TEEN, AGE_CHILD)
+
+# Why 13 and 18, rather than numbers somebody liked:
+#   under 13   COPPA's threshold. Below it, verifiable parental consent is
+#              required before collecting personal information.
+#   13-17      Outside COPPA entirely. Reached instead by state law — and by
+#              Anthropic's Usage Policy, which defines a minor as anyone under
+#              18 "regardless of jurisdiction".
+#   18+        Today's behaviour, unchanged.
+
+CAP_TEAMS = 'teams'              # join or create a team at all
+CAP_TEAM_CHAT = 'team_chat'      # free text to other members
+CAP_TEAM_PHOTOS = 'team_photos'  # upload or view photographs
+CAP_ASK_RICKIE = 'ask_rickie'    # free text to a third-party model
+CAPABILITIES = (CAP_TEAMS, CAP_TEAM_CHAT, CAP_TEAM_PHOTOS, CAP_ASK_RICKIE)
+
+# A capability a CHILD may never hold, whatever a guardian consents to,
+# until a named external condition is met.
+#
+# CAP_ASK_RICKIE is here because of 16 CFR 312.8(c): before releasing a
+# child's personal information to a service provider, the operator must obtain
+# WRITTEN ASSURANCES that the provider will protect it. StreakFit has no such
+# assurance from Anthropic. Until it does, sending a known under-13's free
+# text to that API is a violation on its face — so no consent record can
+# unlock it, because consent is not the thing that is missing.
+#
+# This is a gate, not a note in a document. It opens when somebody sets the
+# flag, and setting the flag is a claim that the assurance exists.
+_CHILD_HARD_BLOCKED = {
+    CAP_ASK_RICKIE: (
+        "no written 312.8(c) assurance from the AI provider is on file",
+        "STREAKFIT_CHILD_AI_ASSURANCE_ON_FILE",
+    ),
+}
+
+
+def _hard_block_reason(capability):
+    """Why a child may not hold this capability regardless of consent."""
+    entry = _CHILD_HARD_BLOCKED.get(capability)
+    if entry is None:
+        return None
+    reason, env_flag = entry
+    if os.environ.get(env_flag) == '1':
+        return None
+    return reason
+
+
+def _age_band(user):
+    """The band, or None when nobody has asked.
+
+    None is NOT adult. An account whose age has never been established is
+    treated as a child by `can()`, because guessing the other way is the
+    guess that costs something.
+    """
+    band = (getattr(user, 'age_band', None) or '').strip().lower()
+    return band if band in AGE_BANDS else None
+
+
+def _active_consent(child_user_id, capability):
+    """A live, unrevoked consent granted through a live, unrevoked link."""
+    return db.session.execute(
+        db.select(Consent.id)
+        .join(GuardianLink, GuardianLink.id == Consent.guardian_link_id)
+        .where(Consent.child_user_id == child_user_id,
+               Consent.capability == capability,
+               Consent.revoked_at.is_(None),
+               GuardianLink.revoked_at.is_(None),
+               GuardianLink.child_user_id == child_user_id)
+    ).scalar_one_or_none() is not None
+
+
+def can(user, capability, record=False):
+    """May this user do this? Default deny.
+
+    Returns (allowed: bool, reason: str). The reason is for the audit log and
+    for the message a person reads — never a bare boolean, because "no" and
+    "no, and here is what would change it" are different products.
+
+    A PAID ENTITLEMENT IS NOT CONSULTED ANYWHERE IN THIS FUNCTION. Plus and
+    sponsorship buy allowances; they do not buy age. That is asserted by a
+    test rather than left to the reader.
+    """
+    if capability not in CAPABILITIES:
+        raise ValueError(f"unknown capability {capability!r}")
+
+    band = _age_band(user)
+    if band == AGE_ADULT:
+        allowed, reason = True, "adult"
+    elif band is None:
+        # Not asked yet. Treated as a child, deliberately.
+        allowed, reason = False, "age not established"
+    elif band == AGE_TEEN:
+        # Teen defaults are an OWNER DECISION and are not encoded here. Until
+        # one is taken, a teen is treated as a child for capabilities that
+        # reach outside the app, which is the safe direction to be wrong in.
+        allowed, reason = False, "teen policy not set"
+    else:
+        blocked = _hard_block_reason(capability)
+        if blocked is not None:
+            allowed, reason = False, blocked
+        elif _active_consent(user.id, capability):
+            allowed, reason = True, "guardian consent on file"
+        else:
+            allowed, reason = False, "no guardian consent"
+
+    if record:
+        db.session.add(PermissionAudit(
+            subject_user_id=user.id, capability=capability,
+            decision="allow" if allowed else "deny", reason=reason[:80]))
+    return allowed, reason
+
+
 def _ratelimit_backend_check():
     """Ask the limiter's storage whether it is actually there.
 
@@ -1381,7 +1503,106 @@ class User(db.Model):
     # balance is earned - spent. See _acorns_available().
     acorns_spent = db.Column(db.Integer, nullable=False, default=0)
     is_plus = db.Column(db.Boolean, nullable=False, default=False)
+    # An age BAND, never a date of birth.
+    #
+    # The product's strongest privacy property is that it holds no email, no
+    # real name, no date of birth and no location. A DOB would immediately be
+    # the most sensitive column in this database, and nothing in the product
+    # needs one — every rule below is expressible from a band.
+    #
+    # NULL means "not asked yet", which is not the same as adult and must
+    # never be treated as one. Nothing sets this column yet: there is no age
+    # screen, because what counts as a compliant neutral screen is an open
+    # legal question (see docs/child-safety/). The column exists so the
+    # permission layer has something real to read.
+    age_band = db.Column(db.String(8), nullable=True)
     challenges = db.relationship('Challenge', backref='owner', lazy=True)
+
+class GuardianLink(db.Model):
+    """A guardian's authority over a child account. Deliberately its own row.
+
+    Kept separate from `User` so that "who pays", "who is on this team" and
+    "who may authorise" can never collapse into each other. A Plus
+    subscription, a sponsorship or an invite code establishes none of this.
+
+    `method` and `evidence_ref` record HOW the link was established, because
+    a consent record that cannot say how it was obtained is not evidence of
+    anything. Nothing is written here yet by any route — the model exists so
+    the permission layer has something real to deny against.
+    """
+    __tablename__ = 'guardian_link'
+    id = db.Column(db.Integer, primary_key=True)
+    child_user_id = db.Column(db.Integer, db.ForeignKey('user.id'),
+                              nullable=False, index=True)
+    guardian_user_id = db.Column(db.Integer, db.ForeignKey('user.id'),
+                                 nullable=False, index=True)
+    # How the guardian was verified. No method is implemented yet; the column
+    # exists so a link can never be written without saying how it was made.
+    method = db.Column(db.String(40), nullable=False)
+    # An opaque pointer to whatever the method produced (a receipt id, a
+    # verification id). NEVER the evidence itself — no ID images, no card
+    # numbers, no signed forms live in this database.
+    evidence_ref = db.Column(db.String(120), nullable=True)
+    established_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    revoked_at = db.Column(db.DateTime, nullable=True)
+
+    __table_args__ = (
+        # Multiple legitimate guardians are supported — two parents, a parent
+        # and a grandparent. What is not supported is the same guardian linked
+        # twice, which would make revocation ambiguous.
+        db.UniqueConstraint('child_user_id', 'guardian_user_id',
+                            name='uq_guardian_link'),
+    )
+
+
+class Consent(db.Model):
+    """One capability, granted by one guardian, revocable.
+
+    Per capability rather than one blanket flag, because "you may use teams"
+    and "you may send free text to a third-party model" are not the same
+    decision and a guardian should not be made to take them together.
+
+    THE DEFAULT IS NO. Absence of a row is absence of consent — there is no
+    'pending' or 'assumed' state, and nothing grants a capability by being
+    left blank.
+    """
+    __tablename__ = 'consent'
+    id = db.Column(db.Integer, primary_key=True)
+    child_user_id = db.Column(db.Integer, db.ForeignKey('user.id'),
+                              nullable=False, index=True)
+    guardian_link_id = db.Column(db.Integer, db.ForeignKey('guardian_link.id'),
+                                 nullable=False)
+    capability = db.Column(db.String(40), nullable=False)
+    method = db.Column(db.String(40), nullable=False)
+    granted_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    revoked_at = db.Column(db.DateTime, nullable=True)
+
+    __table_args__ = (
+        db.UniqueConstraint('child_user_id', 'capability', 'guardian_link_id',
+                            name='uq_consent'),
+        db.Index('ix_consent_child_capability', 'child_user_id', 'capability'),
+    )
+
+
+class PermissionAudit(db.Model):
+    """What was decided, when, and on what grounds — never the content.
+
+    A guardian revoking a capability and a child hitting a wall are both
+    events somebody may later need to reconstruct. What is deliberately NOT
+    here: message bodies, conversation text, photographs, or anything a child
+    typed. The audit answers "was this allowed" and nothing else.
+    """
+    __tablename__ = 'permission_audit'
+    id = db.Column(db.Integer, primary_key=True)
+    subject_user_id = db.Column(db.Integer, db.ForeignKey('user.id'),
+                                nullable=False, index=True)
+    actor_user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True)
+    capability = db.Column(db.String(40), nullable=False)
+    decision = db.Column(db.String(16), nullable=False)      # allow | deny
+    reason = db.Column(db.String(80), nullable=False)
+    occurred_at = db.Column(db.DateTime, nullable=False,
+                            default=datetime.utcnow, index=True)
+
 
 class AnalyticsEvent(db.Model):
     __tablename__ = 'analytics_event'
