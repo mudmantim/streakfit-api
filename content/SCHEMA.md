@@ -113,5 +113,38 @@ store makes a claim's standing explicit:
   noticing".
 
 An item may not be `accepted` with `confidence: established` and no `sources`.
-That single rule is what stops the library drifting back toward confident
-nonsense as it grows.
+
+### `simplified` is not a sourcing exemption
+
+That rule alone was not enough, and here is how it failed. Because only
+`established` required a source, `simplified` became the label a claim wore in
+order not to be checked. A re-review of the whole inherited pool in September
+2026 found fifteen reviewers reaching the same conclusion independently:
+almost nothing was outright false, and nearly every defect was a **true core
+wrapped in a quantity nobody measured**.
+
+> "Stair climbing uses more muscles than almost any other everyday movement."
+> "Most repair happens while you sleep."
+> "A few seconds a day improves your balance."
+> "Bone stands up to squashing about as well as concrete."
+
+All four were `simplified` with empty sources, and all four passed.
+
+So there is a second rule, and it does not care about the confidence tier:
+
+**An unsourced comparative, superlative, proportion, percentage or dose may
+not be `accepted`.** Hedged language is deliberately exempt — "tends to",
+"can", "often", "for some people" is the honest version of the same sentence,
+and penalising it would push authors back toward firmness, which is the thing
+being prevented.
+
+A third check is a warning rather than an error: a **mechanism bolted onto a
+true claim** ("...which is also why..."). Three reviewers named that
+construction separately. Whether a specific causal link is supported is a
+judgement no gate can make, so it flags and never blocks — but the pattern is
+invisible in one item and obvious across forty.
+
+Together these are what stop the library drifting back toward confident
+nonsense as it grows. All three live in `scripts/content/validate.py`, and
+`review_queue.py` imports the second one so that a reviewer's `accept` cannot
+put a blocked item back into circulation.

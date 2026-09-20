@@ -87,11 +87,53 @@ def test_the_product_never_tells_a_person_they_failed():
 
 # ── Depth: it must not run out ─────────────────────────────────────────────
 
+# The requirement, and separately the ratchet. They are different things and
+# they were previously one magic number.
+#
+# 250 was chosen when the library was bigger, against an original problem of
+# 90-day insight repeats. The September 2026 re-review demoted every item that
+# could not be independently verified and INSIGHT_LIBRARY fell to 224, so the
+# old assertion failed — correctly, because something did get smaller.
+#
+# Lowering 250 to 224 and moving on would have been the wrong response: that
+# turns a guard into a record of whatever happened last. So there are two
+# assertions now, and between them they are stricter than the one they replace.
+#
+#   REQUIREMENT — what the product actually needs: no repeat inside six months
+#   for a given person. That is the number a user experiences, and it is stated
+#   as such rather than as a round figure somebody liked.
+#
+#   RATCHET — the served pool may not shrink below where it stands today
+#   without somebody changing this line deliberately. Demoting a bad item is
+#   right; letting the library bleed out one demotion at a time is not.
+#
+# When the 311 items parked at `revise` are edited and re-reviewed, raise the
+# ratchet. It is meant to go up.
+_SIX_MONTHS = 180
+_INSIGHT_RATCHET = 224      # 2026-09-20, after the full independent re-review
+_BRAIN_BOOST_RATCHET = 200  # 2026-09-20
+
+
 def test_the_libraries_are_deep_enough_to_last():
-    """Both were small enough that a daily user met the same item on a fixed
-    cycle — 90 days for insights, 40 for Brain Boost."""
-    assert len(appmod.INSIGHT_LIBRARY) >= 250
-    assert len(appmod.BRAIN_BOOST_LIBRARY) >= 180
+    """A person must not meet the same item twice inside six months."""
+    assert len(appmod.INSIGHT_LIBRARY) >= _SIX_MONTHS
+    assert len(appmod.BRAIN_BOOST_LIBRARY) >= _SIX_MONTHS
+
+
+def test_the_served_pool_does_not_quietly_shrink():
+    """A ratchet, not a description.
+
+    If this fails, content left the served pool. That may be entirely correct
+    — the re-review removed two live safety hazards — but it must be a
+    decision somebody made and recorded here, not something that happened.
+    """
+    assert len(appmod.INSIGHT_LIBRARY) >= _INSIGHT_RATCHET, (
+        f"Today's Insight fell to {len(appmod.INSIGHT_LIBRARY)} from "
+        f"{_INSIGHT_RATCHET}. If the demotions were right, lower this line and "
+        f"say why in the commit.")
+    assert len(appmod.BRAIN_BOOST_LIBRARY) >= _BRAIN_BOOST_RATCHET, (
+        f"Brain Boost fell to {len(appmod.BRAIN_BOOST_LIBRARY)} from "
+        f"{_BRAIN_BOOST_RATCHET}.")
 
 
 def test_a_user_sees_no_repeats_until_the_library_is_exhausted():
