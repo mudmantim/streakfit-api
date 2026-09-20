@@ -4480,6 +4480,26 @@ def lookup_team_by_code(code):
     member_count = db.session.execute(
         db.select(db.func.count(TeamMembership.id)).where(TeamMembership.team_id == team.id)
     ).scalar()
+    # An abandoned team is not a team, and its code is not a key.
+    #
+    # An independent walkthrough took a family through the whole product —
+    # created a team, shared photographs of a child, chatted — and then had
+    # everybody leave. The invite code still resolved. A stranger holding it
+    # could join the empty team and download both photographs in full, read
+    # the entire chat, and read the team's history with everybody's usernames
+    # attached, while the two people who had actually been in the family got
+    # 403 on the same photographs.
+    #
+    # The composer promises "Only your team can open this". With nobody in the
+    # team, "your team" silently became "whoever still has six characters in a
+    # text message" — and because Rotate Code requires membership, that code
+    # could never be revoked by anyone, ever.
+    #
+    # The same 404 as an unknown code, deliberately: a distinct error would
+    # tell a prober that the code was once real.
+    if not member_count:
+        return jsonify({"error": "Invalid invite code"}), 404
+
     campfire = db.session.execute(
         db.select(TeamCampfire).where(TeamCampfire.team_id == team.id)
     ).scalar_one_or_none()
@@ -4574,6 +4594,16 @@ def join_team(team_id):
         db.select(TeamInviteCode).where(TeamInviteCode.team_id == team_id)
     ).scalar_one_or_none()
     if not invite or invite.code != code:
+        return jsonify({"error": "Invalid invite code"}), 403
+
+    # Checked HERE as well as in lookup, not instead of it. This route takes a
+    # team_id in the path, so a caller who already knows the id never has to
+    # ask lookup anything — guarding only the preview would leave the door
+    # open and the doorbell disconnected.
+    members_now = db.session.execute(
+        db.select(db.func.count(TeamMembership.id)).where(TeamMembership.team_id == team_id)
+    ).scalar()
+    if not members_now:
         return jsonify({"error": "Invalid invite code"}), 403
 
     existing = db.session.execute(
