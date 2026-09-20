@@ -147,14 +147,56 @@ authorised to set them and would not be the right one to.
 | Testing confidence | "69 tests… several subsystems still have none" | **596 tests**, plus 157 real-UI checks and 112 end-to-end checks that run safely against production. The largest genuine change of the five. |
 | Business readiness | "no billing" | **Unchanged, deliberately.** You have instructed no billing be implemented. |
 
+## 6A. A finding about the framework, produced by using it
+
+Worth recording separately because it is not a StreakFit defect and not a
+Mudman Command bug — it is a gap that only appeared once a real application
+was wired up.
+
+StreakFit's rate-limit failure policy (Option B) makes the app **degrade
+deliberately** when shared storage is unavailable: invite-code lookup refuses
+with 503, login falls back to a tighter per-process cap, and everything else
+carries on. That is the system working as designed under a dependency
+failure.
+
+Command's `CheckStatus` is `PASS | FAIL | UNKNOWN`. There is no value for
+"degraded on purpose". So the self-check reports **FAIL**, with the word
+DEGRADED in the observed text, and Command's roll-up — weakest critical link,
+never an average — turns that into **`recommendation: "roll back"`**.
+
+Rolling back is the wrong advice there. The build is not the problem; a
+dependency is down and the application is handling it correctly. The evidence
+is true and the conclusion drawn from it is wrong.
+
+**Inventing a fourth status was the obvious move and would have been worse.**
+Command's roll-up and every consumer understand three values; a fourth would
+be rolled up as unknown-shaped noise by anything that had not been taught
+about it. Reporting FAIL and naming the condition in text is the honest
+option available today.
+
+A peer audit of `mudman-command` reached the same finding independently and
+is recording it there, classified alongside an existing "evidence true, claim
+wrong" defect in that repository. **Neither of us is implementing a fix** —
+changing `CheckStatus` is a framework decision with consumers beyond
+StreakFit, and it is the owner's call.
+
+If it is ever taken up, the shape that seems right from this side is a status
+that is *not* a fourth level but a qualifier: a check that is failing its
+ideal condition while its fallback is working is a different claim from a
+check that is simply failing, and the difference matters most in exactly the
+situation where somebody is deciding whether to roll a deployment back.
+
+---
+
 ## 7. Remaining blockers and the approvals needed
 
 | # | Blocker | Whose | Approval needed |
 |---|---|---|---|
 | 1 | StreakFit not registered in Command | Command | Three small edits to `~/projects/mudman-command`: add `authProbePath`/`throttlePath` to `TargetApp` **defaulting to today's PorchLight values so nothing else changes**, read them in `runner.ts` in place of the two literals, and register StreakFit with `healthPath: /api/health`, `authProbePath: /api/me`, `throttlePath: /api/login`. **Your call — I did not touch it.** |
-| 2 | Shared rate-limit storage | Infrastructure | Provision Redis (or equivalent) and set `RATELIMIT_STORAGE_URI`. Until then a production verification run fails on a critical check. |
+| 2 | Shared rate-limit storage | Infrastructure | Provision Redis (or equivalent) and set `RATELIMIT_STORAGE_URI`. Until then a production verification run fails on a critical check. Exact steps in `docs/operations/activation-checklist.md`. |
 | 3 | Retention cron not live | Infrastructure | Create the Render Cron Job. Until then `retention.recent` is UNKNOWN, which Command's roll-up treats as "investigate". |
 | 4 | Re-scoring the five categories | Human judgement | Nobody can do this from code. §6 is the evidence. |
+| 4b | **The verification branch exists only on this machine** | Owner | `streakfit-verification-support` (`5a9b8f9`) in `~/projects/mudman-command` is committed but **not on origin**, and pushing is outside my authorisation. A `git bundle` copy sits in `.local-backups/` as partial insurance, which survives a branch deletion but not a disk loss. |
 | 5 | Assessment target | Deployment | The July assessment targeted `streakfit.pro`. This branch is not deployed, so even a registered runner would assess the *old* build until you push — which you have not authorised. |
 
 **Separate from the score: check the qualification gates.** Command stores a
