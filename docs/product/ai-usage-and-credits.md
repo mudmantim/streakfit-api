@@ -290,6 +290,19 @@ The clean way to guarantee this is that the only call site of the metering
 function is inside `coach()`. If a second call site ever appears, that is the
 review moment.
 
+**This is now enforced by a test, not by intention.**
+`tests/test_ai_boundary.py` asserts that exactly one function in `app.py`
+reaches the Anthropic client, and names the routes the promise is actually about
+— teams, photos, messages, challenges, campfire, brain-boost, daily, moments,
+memory-book — checking none of them reaches it. It also guards the guard: it
+asserts `coach()` still *does* reach the client, so a rename cannot make the
+test pass by silently checking nothing.
+
+A future "summarise this team's week" or "suggest a caption for this photo"
+would add a second call site. The test turns that from a billing surprise into
+a failing build, and the correct order is allowance accounting first, then an
+entry in `ALLOWED_MODEL_CALLERS` — never the reverse.
+
 ---
 
 ## 8. AI photo transformations — open question
@@ -309,7 +322,40 @@ audit needs a decision on which model/provider would do it.
 
 ---
 
-## 9. Decisions needed
+## 9. The membership model these numbers serve
+
+Confirmed, and unchanged by anything in this document:
+
+| | |
+|---|---|
+| **Free** | $0. Creates and joins **unlimited** teams. |
+| **Individual Plus** | proposed **$4.99/month**, premium features across unlimited teams |
+| **Sponsored Plus** | proposed **$0.99/month** per person, up to **5** per active Plus subscriber |
+
+**Sponsored Plus provides exactly the same features and AI allowance as a
+Plus subscription somebody bought themselves.** Anything less makes sponsored
+users second-class and defeats the point of the feature.
+
+Every user owns their own account, progress, teams, privacy settings and AI
+allowance. A sponsored user who later subscribes independently keeps everything,
+and a sponsorship ending never touches their history or team memberships.
+
+Two things follow from that and are worth stating because they constrain the
+numbers above:
+
+- **The economics work at the household level, not per seat.** A sponsor at the
+  cap pays $9.94 for six accounts. Judging a $0.99 seat against its own AI cost
+  in isolation will always look alarming and is the wrong frame.
+- **Sponsorship is a billing relationship, not a supervisory one.** A sponsor
+  learns nothing about a sponsored person's conversations — not the content, not
+  a per-day count. See `docs/operations/minors-and-consent.md`, which also notes
+  that this means sponsorship cannot double as parental oversight.
+
+The free tier removing the old 10-team cap costs nothing in AI terms: teams,
+chat, photos and challenges make no model calls at all, which the boundary test
+above now enforces.
+
+## 10. Decisions needed
 
 1. **Allowances.** 15 Free / 150 Plus as proposed, or different? The audit says
    300 Plus is not sustainable uncached.
