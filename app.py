@@ -2544,6 +2544,28 @@ def register():
 
 @app.route('/api/login', methods=['POST'])
 @limiter.limit("10 per minute")
+# Failed logins are throttled separately and far harder than successful ones.
+#
+# 10/minute on the endpoint protects the endpoint. It does not protect an
+# ACCOUNT: it allowed 600 password guesses an hour, per IP, indefinitely, with
+# no escalation and no lockout. Mudman Command's login-throttle probe found it
+# — seven deliberately wrong passwords in a row and StreakFit answered 401
+# every time, where the same probe gets a 429 out of PorchLight.
+#
+# `deduct_when` is what makes this cheap: the bucket is only charged when the
+# response is a 401, so somebody typing their own password wrong twice and
+# then getting it right spends two of five, and a person who logs in normally
+# every day spends nothing at all. Only guessing is expensive.
+#
+# Keyed per IP rather than per username on purpose. Keying on the username
+# supplied by the caller would let an attacker rotate usernames to stay under
+# the limit, and would also let them lock a real person out of their own
+# account by guessing at it — an availability attack dressed as a security
+# control.
+@limiter.limit("5 per minute",
+               deduct_when=lambda response: response.status_code == 401)
+@limiter.limit("30 per hour",
+               deduct_when=lambda response: response.status_code == 401)
 def login():
     data = request.get_json()
     if not data or not data.get('username') or not data.get('password'):
