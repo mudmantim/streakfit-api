@@ -202,8 +202,15 @@
              nothing and breaks nothing. -->
         <main class="container" data-pane="today">
 
+            <!-- This said "sign up anytime to save your streak", which was
+                 false twice over: guest progress lives in a Set in memory, so
+                 there is no streak, and signing up carries nothing across. It
+                 also offered no way to sign up. Both fixed: the sentence is now
+                 true, and the button exists. -->
             <p id="guest-mode-banner" class="guest-mode-banner" hidden>
-                Guest mode — sign up anytime to save your streak.
+                Guest mode — a look around. Nothing here is saved.
+                <button id="guest-signup-btn" type="button" class="guest-signup-btn"
+                        onclick="handleGuestSignup()">Start for real →</button>
             </p>
 
             <!-- Today. Rickie and the streak live on the page itself rather

@@ -4105,3 +4105,18 @@ body.theme-classic .theme-btn.active { background: rgba(79,70,229,.2); }
     .settings-menu .display-name-input { flex: 1 1 100%; }
     .settings-menu .theme-toggle { width: 100%; justify-content: space-between; }
 }
+
+/* The guest banner promised a sign-up and offered no way to reach one. */
+.guest-signup-btn {
+    margin-left: .5rem;
+    padding: .3rem .7rem;
+    min-height: 32px;
+    border: 1.5px solid currentColor;
+    border-radius: 999px;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    font-weight: 700;
+    cursor: pointer;
+}
+.guest-signup-btn:hover { background: rgba(255, 255, 255, .18); }

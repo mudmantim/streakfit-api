@@ -36,6 +36,7 @@ import datetime as dt
 import hashlib
 import json
 import os
+import re
 import socket
 import struct
 import subprocess
@@ -1206,6 +1207,80 @@ def check_display_name_can_be_set_changed_and_cleared(b: Browser, base: str, app
     check(bool(help_hidden), "nor left a stray sentence about a missing control")
 
 
+def check_guest_promise_is_true(b: Browser, base: str) -> None:
+    """The guest banner must not promise something the code cannot do.
+
+    It used to read "sign up anytime to save your streak", which was false in
+    two independent ways: guest progress lives in a Set in memory, so a reload
+    loses it and signing up carries nothing across; and there was no sign-up
+    control anywhere in guest mode to act on the offer even if it had been
+    true. This checks BOTH halves — that the sentence no longer claims saving,
+    and that the way out now exists and lands on the register form — plus the
+    fact underneath, that progress genuinely does not survive a reload. If
+    carry-over is ever built, this check should fail and be rewritten, not
+    deleted.
+    """
+    b.reset_storage()
+    b.goto(base + "/", wait=1.5)
+    b.goto(base + "/", wait=2.0)
+    b.js("handleGuestMode()")
+    time.sleep(2.5)
+
+    text = b.js("(()=>{const g=document.getElementById('guest-mode-banner');"
+                " return g ? (g.textContent||'').replace(/\\s+/g,' ').trim() : '';})()")
+    if not check(bool(text), "the guest banner is present"):
+        return
+    promises = bool(re.search(r"save your streak|saved? your progress", str(text), re.I))
+    check(not promises, "the guest banner does not promise saving what is not saved",
+          str(text))
+
+    # The way out exists, is actually visible, and is big enough to tap.
+    btn = b.js("(()=>{const e=document.getElementById('guest-signup-btn');"
+               " if(!e) return 'missing';"
+               " const r=e.getBoundingClientRect();"
+               " if(!(r.width>0&&r.height>0)) return 'not rendered';"
+               " if(r.height<28) return 'height '+Math.round(r.height);"
+               " const s=getComputedStyle(e);"
+               " if(s.visibility==='hidden'||s.display==='none') return 'hidden';"
+               " return 'ok';})()")
+    check(btn == "ok", "a guest has a reachable way to start a real account",
+          str(btn))
+
+    # And it lands on register, not login — a person who has decided to start
+    # should not be asked to sign in to an account they do not have.
+    landed = b.js("(()=>{handleGuestSignup();"
+                  " const f=document.getElementById('register-form');"
+                  " const v=document.getElementById('auth-view');"
+                  " const shown=f && f.getBoundingClientRect().height>0;"
+                  " return (v && !v.hidden && shown) ? 'ok' : 'register form not shown';})()")
+    time.sleep(0.5)
+    check(landed == "ok", "and it opens the sign-up form, not the login form",
+          str(landed))
+
+    # The fact the copy now tells the truth about: a reload is a clean slate.
+    b.js("handleGuestMode()")
+    time.sleep(2.0)
+    # Use the app's own "I did this" button, the way the rest of this file
+    # does — a guessed .exercise-card selector matched nothing and turned this
+    # assertion into a silent skip, which is worse than not having it.
+    tap_and_read(b)
+    time.sleep(1.0)
+    marked = b.js("(()=>{return (typeof guestCompleted!=='undefined'"
+                  " && guestCompleted) ? guestCompleted.size : -1;})()")
+    if not check(isinstance(marked, int) and marked > 0,
+                 "a guest tap really does register as progress first",
+                 f"guestCompleted.size = {marked}"):
+        return
+    b.goto(base + "/", wait=2.0)
+    b.js("handleGuestMode()")
+    time.sleep(2.0)
+    survived = b.js("(()=>{return (typeof guestCompleted!=='undefined'"
+                    " && guestCompleted) ? guestCompleted.size : -1;})()")
+    check(survived == 0,
+          "and it really is a clean slate on reload, as the banner now says",
+          f"guestCompleted.size = {survived} after reload — the banner understates it")
+
+
 def check_rickie_roams(b: Browser, base: str, app) -> None:
     """Rickie, moving, and never in the way.
 
@@ -1563,6 +1638,30 @@ def main() -> int:
         print(f"could not import app.py ({exc}).")
         return 2
 
+    # Preflight: a token minted HERE must be one the server THERE accepts.
+    # If the running server booted with different secrets than this process
+    # loaded, every authenticated check fails with a confusing downstream
+    # KeyError instead of naming the cause. Find that out in one call.
+    try:
+        _u, _tok = make_user(flask_app, "preflight")
+        _req = urllib.request.Request(
+            base + "/api/daily", headers={"Authorization": f"Bearer {_tok}"})
+        with urllib.request.urlopen(_req, timeout=20) as _r:
+            _ok = _r.status == 200
+    except urllib.error.HTTPError as exc:
+        print(f"the server at {base} rejected a token minted by this process "
+              f"(HTTP {exc.code}).")
+        print("The two are not using the same JWT_SECRET_KEY / database. Start "
+              "the server the same way this script reads its config — from "
+              ".env, e.g. `make run` — rather than with inline overrides.")
+        return 2
+    except Exception as exc:
+        print(f"preflight call to {base}/api/daily failed ({exc}).")
+        return 2
+    if not _ok:
+        print(f"preflight call to {base}/api/daily did not return 200.")
+        return 2
+
     print(f"StreakFit UI check — {base} at 390x844\n" + "=" * 58)
     try:
         browser = Browser()
@@ -1576,6 +1675,7 @@ def main() -> int:
         check_returning_user_is_acknowledged(browser, base, flask_app)
         check_first_mission_celebration(browser, base, flask_app)
         check_guest_gets_the_celebration(browser, base)
+        check_guest_promise_is_true(browser, base)
         check_team_witness(browser, base, flask_app)
         check_photo_sharing(browser, base, flask_app)
         check_side_quests_still_work(browser, base, flask_app)

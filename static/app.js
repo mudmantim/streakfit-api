@@ -3829,6 +3829,18 @@ function handleGuestMode() {
     showView('dashboard');
 }
 
+// Leaving guest mode with intent. handleExitGuest drops you on the LOGIN tab,
+// which is the wrong one for somebody who has just decided to start.
+function handleGuestSignup() {
+    isGuest = false;
+    guestCompleted = new Set();
+    guestCompleteFired = false;
+    setGuestUI(false);
+    clearErrors();
+    showTab('register');
+    showView('auth');
+}
+
 function handleExitGuest() {
     isGuest = false;
     guestCompleted = new Set();
