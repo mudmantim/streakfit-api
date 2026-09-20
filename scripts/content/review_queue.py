@@ -49,8 +49,16 @@ from __future__ import annotations
 import argparse
 import json
 import random
+import sys
 from datetime import date, datetime
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+# The same gate the validator runs. Imported rather than reimplemented: two
+# copies of "what may not be served" is how a corpus ends up failing
+# validation with no record of which decision put it there.
+from validate import check_measured_claims as _measured_claim_errors  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[2]
 ITEMS = ROOT / "content" / "items"
@@ -250,6 +258,18 @@ def cmd_apply(batch: str, verdict_file: Path, reviewer: str, depth: str) -> int:
                               "— schema forbids serving it")
             counts["accept"] -= 1
             counts["revise"] += 1
+        # Same principle, newer rule: an unsourced comparative, proportion or
+        # dose may not be served whatever the confidence tier says. Enforced
+        # here as well as in the validator because a reviewer accepting one
+        # otherwise leaves the corpus failing validation with no record of why
+        # — which is what happened the first time this gate was switched on.
+        elif decision == "accept":
+            gate = _measured_claim_errors(dict(item, stage="accepted"))
+            if gate:
+                decision = "revise"
+                v = dict(v, reason=f"reviewer accepted, but {gate[0]}")
+                counts["accept"] -= 1
+                counts["revise"] += 1
         item["stage"] = {"accept": "accepted", "revise": "revise",
                          "reject": "rejected"}[decision]
         item["review"] = {

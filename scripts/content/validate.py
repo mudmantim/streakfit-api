@@ -212,6 +212,67 @@ def check_provenance(item: dict) -> list[str]:
     return errs
 
 
+# An unearned comparative is the failure mode this library actually has.
+#
+# Four independent re-reviewers of the inherited pool reached the same
+# conclusion without conferring: almost nothing is outright false, and the
+# defects are nearly all a TRUE CORE wrapped in a quantity nobody measured.
+# "Stair climbing uses more muscles than almost any other everyday movement."
+# "Most repair happens while you sleep." "A few seconds a day improves your
+# balance." "Bone stands up to squashing about as well as concrete."
+#
+# Every one of those was tagged `simplified` with no sources, and passed,
+# because the schema only requires a source at `established`. So `simplified`
+# had become a sourcing exemption: the label a claim wears to avoid being
+# checked. The reviewers each proposed the same rule, which is this one.
+#
+# The trigger is narrow on purpose — a shape of claim, not a topic. Hedged
+# language ("tends to", "can", "often") is left alone, because hedging is the
+# honest version and penalising it would push authors back toward firmness.
+_EMPIRICAL_CLAIM = re.compile(
+    r"\b(?:more|less|fewer|better|worse|faster|slower|stronger|harder|easier)\s+than\b"
+    # "most days" and "most of the time" are frequency idioms about a person's
+    # own behaviour, not proportions of a population, so they are excluded by
+    # the negative lookahead. Tuned against the real corpus rather than
+    # invented: without it the gate fired on "move on most days", which is
+    # advice, not a measured claim.
+    r"|\b(?:most|almost all|nearly all|the majority of)\s+"
+    r"(?!days\b|of the time\b|mornings\b|evenings\b|weeks\b)\w+"
+    r"|\bmore\s+\w+\s+than\s+(?:any|almost)\b"
+    r"|\b(?:twice|three times|half|a third|two thirds)\s+as\b"
+    r"|\b\d+\s*(?:%|percent)\b"
+    r"|\bas\s+\w+\s+as\s+(?:a|an|the)\b",
+    re.I)
+
+# Hedges that turn a comparative into a claim about a tendency. If one of these
+# is present the sentence is no longer asserting a measured quantity.
+_HEDGED = re.compile(
+    r"\b(?:tends?\s+to|can\b|may\b|might\b|often|usually|generally|for\s+some"
+    r"|roughly|about|around|some\s+people|it\s+varies|varies)\b", re.I)
+
+
+def check_measured_claims(item: dict) -> list[str]:
+    """A comparative or a proportion needs a source, whatever the confidence.
+
+    Not a warning. An item making a measured claim with nothing behind it is
+    exactly what the last three content incidents were, and a warning is a
+    thing that gets scrolled past.
+    """
+    if item.get("type") in ("joke", "riddle", "rickie"):
+        return []
+    if item.get("sources"):
+        return []
+    if item.get("stage") != "accepted":
+        return []           # only bites on what actually reaches a reader
+    text = body(item)
+    m = _EMPIRICAL_CLAIM.search(text)
+    if not m or _HEDGED.search(text):
+        return []
+    return [f"measured claim {m.group(0)!r} with no sources — a comparative, "
+            f"proportion or dose needs one whatever the confidence tier says; "
+            f"hedge it or cite it"]
+
+
 def check_language(item: dict) -> tuple[list[str], list[str]]:
     errs, warns = [], []
     text = body(item)
@@ -324,7 +385,8 @@ def main() -> int:
     seen_ids = set()
     for item in items:
         prefix = f"{item.get('id', '?')} ({item.get('_file', '?')})"
-        for err in check_shape(item) + check_provenance(item):
+        for err in (check_shape(item) + check_provenance(item)
+                    + check_measured_claims(item)):
             errors.append(f"{prefix}: {err}")
         errs, warns = check_language(item)
         errors += [f"{prefix}: {e}" for e in errs]
