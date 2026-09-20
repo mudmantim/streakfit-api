@@ -62,7 +62,27 @@ CRUEL = re.compile(
 # Actions a child could copy and be hurt by. Allowed only where the explanation
 # names the danger.
 DANGEROUS = re.compile(
-    r"hold\w* (your |the )?breath|breath.?hold\w*|eyes (closed|shut) while (walking|running)"
+    r"hold\w* (your |the )?breath|breath.?hold\w*"
+    # Eyes closed. This used to require "while walking or running", which is
+    # narrower than the rule it stands for: the fall risk is BALANCING with
+    # your eyes shut, and an item inviting exactly that ("closing your eyes
+    # while standing still makes balancing much harder") passed this gate and
+    # was served for months. Two reviewers found it independently.
+    #
+    # Note the scope: for trivia, `body()` includes the DISTRACTORS, which is
+    # deliberate — a wrong option is still read, and "close your eyes and
+    # stand on one leg" is no safer for being the wrong answer.
+    #
+    # Deliberately NOT matched: eyes closed while seated or still and not
+    # balancing, e.g. touching your nose to demonstrate proprioception. That
+    # is the illustration the balance items should have used.
+    # "eyes closed", "eyes shut" AND "closing your eyes" — the live item said
+    # the third, so matching only the first two would have missed the exact
+    # case this rule was widened for.
+    r"|(?:eyes (?:closed|shut)|clos(?:e|ing)[a-z]* (?:your |the )?eyes)"
+    r"[^.]{0,70}\b(?:walk|run|balanc|stand|one (?:leg|foot)|heel|tiptoe)"
+    r"|\b(?:walk|run|balanc|stand)[a-z]*[^.]{0,70}"
+    r"(?:eyes (?:closed|shut)|clos(?:e|ing)[a-z]* (?:your |the )?eyes)"
     r"|skip(ping)? (a |your |my )?(next )?meals?|stop(ping)? eating", re.I)
 BRITISH = re.compile(
     r"\b(colour\w*|centre|fibre\w*|practis\w*|recognis\w*|stabilis\w*|favourite"
@@ -381,19 +401,31 @@ def main() -> int:
     if args.counts:
         return 0
 
-    errors, warnings = [], []
+    # Errors are split by whether the item is SERVED.
+    #
+    # The contract at the top of this file says an accepted item carrying an
+    # error fails the run. The implementation failed on any error at all,
+    # which only became a contradiction once the pipeline started parking
+    # defective items at `revise` in bulk: an item moved to `revise` BECAUSE
+    # it has a defect would then break the build forever, so the only way to
+    # get green was to delete the evidence. Parking is the whole point of the
+    # stage, so a parked item's errors are reported and do not block.
+    errors, parked, warnings = [], [], []
     seen_ids = set()
     for item in items:
         prefix = f"{item.get('id', '?')} ({item.get('_file', '?')})"
-        for err in (check_shape(item) + check_provenance(item)
-                    + check_measured_claims(item)):
-            errors.append(f"{prefix}: {err}")
+        found = (check_shape(item) + check_provenance(item)
+                 + check_measured_claims(item))
         errs, warns = check_language(item)
-        errors += [f"{prefix}: {e}" for e in errs]
-        warnings += [f"{prefix}: {w}" for w in warns]
+        found += errs
         if item.get("id") in seen_ids:
+            # A duplicate id is a corpus problem whatever the stage: two rows
+            # answering to one id break every lookup, served or not.
             errors.append(f"{prefix}: duplicate id")
         seen_ids.add(item.get("id"))
+        bucket = errors if item.get("stage") == SERVED_STAGE else parked
+        bucket += [f"{prefix}: {e}" for e in found]
+        warnings += [f"{prefix}: {w}" for w in warns]
 
     # Corpus-level gates only make sense over everything, never one batch.
     if not args.batch:
@@ -403,6 +435,10 @@ def main() -> int:
         errors += check_duplicates(items)
 
     print()
+    if parked:
+        print(f"  ({len(parked)} errors on items already parked at 'revise' or "
+              f"'rejected' — reported, not blocking; they are why those items "
+              f"are parked)")
     for w in warnings[:25]:
         print(f"  WARN   {w}")
     if len(warnings) > 25:
