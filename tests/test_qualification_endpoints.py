@@ -209,10 +209,14 @@ def test_a_backend_that_reports_itself_down_is_a_failure_not_a_pass(client, monk
     assert c["critical"] is True
 
 
-def test_an_unreachable_backend_says_that_nothing_is_being_limited(client, monkeypatch):
-    """`swallow_errors=True` keeps the app up when the backend dies, which
-    means requests proceed UNLIMITED. The report has to say that, or it
-    understates a security control being off as merely unverified."""
+def test_an_unreachable_backend_is_reported_as_degraded_not_merely_unknown(client, monkeypatch):
+    """This assertion used to read "NO rate limiting is being applied", which
+    was true when errors were swallowed globally and is not true any more.
+
+    Under Option B an unreachable backend means invite lookup refuses and
+    login falls back to a tighter per-process cap, so the report must describe
+    a DEGRADED control rather than an absent one — while still refusing to
+    call the per-process floor equivalent to shared limiting."""
     import app as appmod
     monkeypatch.setenv("STREAKFIT_ENV", "production")
     monkeypatch.setenv("RATELIMIT_STORAGE_URI", "redis://localhost:6379")
@@ -223,4 +227,6 @@ def test_an_unreachable_backend_says_that_nothing_is_being_limited(client, monke
 
     c = _check(client, "ratelimit.shared_storage")
     assert c["status"] == "FAIL"
-    assert "NO rate limiting" in c["failureReason"]
+    assert "DEGRADED" in c["observed"]
+    assert "PER-PROCESS" in c["failureReason"]
+    assert "floor, not shared" in c["failureReason"]

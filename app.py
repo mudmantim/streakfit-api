@@ -8,6 +8,7 @@ import re
 import string
 import subprocess
 import threading
+from functools import wraps
 import time
 import uuid
 import urllib.parse
@@ -153,23 +154,158 @@ limiter = Limiter(
     app=app,
     default_limits=[],
     storage_uri=os.environ.get("RATELIMIT_STORAGE_URI", "memory://"),
-    # A rate limiter must not be able to take the application down.
+    # NOT `swallow_errors`. See _degrade_limiter_when_shared_storage_is_down.
     #
-    # Measured with the driver installed and the backend refused: every login
-    # returned 500. That is a total outage caused by the availability of a
-    # supporting service, and for a habit app it is a worse failure than the
-    # one the limiter exists to prevent — nobody can get in at all, including
-    # the people whose streaks depend on showing up.
-    #
-    # So errors are swallowed and requests proceed. The cost is stated plainly
-    # rather than hidden: while the backend is unreachable there is NO rate
-    # limiting, which means no brute-force control on /api/login and no
-    # throttle on invite-code lookup. That is why the unreachable case is a
-    # FAIL in /api/verification/self and not an UNKNOWN — Mudman Command reads
-    # that endpoint, and "configured but not answering" is indistinguishable
-    # from "switched off" as far as a caller is concerned.
-    swallow_errors=True,
+    # Swallowing storage errors keeps the app up and silently permits
+    # unlimited login guessing and unlimited invite-code enumeration, which is
+    # the one outcome this control exists to prevent. The availability problem
+    # it solved is real — measured, every login returned 500 with the backend
+    # refused — but it is solved below, per route, instead of globally.
 )
+
+
+# ── Degrading safely when shared rate-limit storage goes away ──────────────
+#
+# Option B, chosen by the owner over failing open or failing closed globally.
+#
+# The two sensitive endpoints cost very different things when blocked:
+#
+#   /api/teams/lookup/<code>  blocking it stops somebody JOINING A TEAM during
+#                             an outage. Annoying; harms nobody. And it is the
+#                             route with a measured 321 probes/second
+#                             enumeration oracle behind it, which in a product
+#                             where an invite is how an adult reaches a child
+#                             is a child-safety control.
+#
+#   /api/login                blocking it locks out every user, including the
+#                             people whose streaks depend on showing up today.
+#
+# So they get different policies, and everything else — the daily mission,
+# Brain Boost, team reads, existing authenticated sessions — carries on
+# untouched. A rate limiter must not be able to take the product down.
+#
+# WHAT THIS IS NOT. The login fallback is a PER-PROCESS counter. With N
+# workers an attacker gets N times the stated allowance, and it resets when a
+# worker restarts. It is a floor, not a replacement, and nothing here reports
+# it as equivalent to shared limiting — the self-check says DEGRADED and
+# Mudman Command reads that as FAIL.
+
+_SHARED_RL_PROBE_TTL = timedelta(seconds=15)
+_shared_rl_state = {"checked_at": None, "healthy": True}
+_shared_rl_lock = threading.Lock()
+
+
+def _shared_storage_configured():
+    """Is a SHARED backend configured at all?
+
+    `memory://` is not an outage, it is a known configuration weakness that
+    the self-check already reports. Treating it as degraded would fail invite
+    lookup closed on every deployment that has not provisioned Redis yet —
+    including production today — so it deliberately does not.
+    """
+    return not os.environ.get(
+        "RATELIMIT_STORAGE_URI", "memory://").startswith("memory:")
+
+
+def _shared_storage_healthy():
+    """Cached health of the shared backend.
+
+    Probed at most once every 15 seconds. Probing per request would put a
+    round trip in front of every call and, when the backend is down, a
+    connection timeout in front of every call.
+    """
+    if not _shared_storage_configured():
+        return True
+    now = datetime.utcnow()
+    with _shared_rl_lock:
+        last = _shared_rl_state["checked_at"]
+        if last is not None and now - last < _SHARED_RL_PROBE_TTL:
+            return _shared_rl_state["healthy"]
+    try:
+        healthy = bool(_ratelimit_backend_check())
+    except Exception:
+        healthy = False
+    with _shared_rl_lock:
+        _shared_rl_state.update(checked_at=now, healthy=healthy)
+    return healthy
+
+
+def _degrade_limiter_when_shared_storage_is_down():
+    """Turn the shared limiter off rather than let it raise.
+
+    Registered FIRST, ahead of Flask-Limiter's own before_request hook, which
+    matters: without `swallow_errors` a storage error inside that hook is a
+    500, and by the time this ran afterwards the request would already have
+    failed. Flask runs these in registration order and the limiter's was
+    registered at construction, so this one is inserted at the front.
+    """
+    if not _shared_storage_configured():
+        return
+    limiter.enabled = _shared_storage_healthy()
+
+
+app.before_request_funcs.setdefault(None, []).insert(
+    0, _degrade_limiter_when_shared_storage_is_down)
+
+
+class _ProcessLocalWindow:
+    """A fixed-window counter in this worker's memory. Deliberately small.
+
+    Exists only for the degraded path. It is not shared, it does not survive a
+    restart, and it is never used while the shared backend is answering.
+    """
+
+    def __init__(self):
+        self._hits = {}
+        self._lock = threading.Lock()
+
+    def over(self, key, limit, window_seconds):
+        now = datetime.utcnow()
+        with self._lock:
+            start, count = self._hits.get(key, (now, 0))
+            if (now - start).total_seconds() >= window_seconds:
+                start, count = now, 0
+            count += 1
+            self._hits[key] = (start, count)
+            if len(self._hits) > 10000:      # bounded; this is a fallback
+                self._hits.clear()
+            return count > limit
+
+
+_degraded_login_window = _ProcessLocalWindow()
+# Tighter than the healthy limit, because it is multiplied by the worker count.
+_DEGRADED_LOGIN_LIMIT = 3
+_DEGRADED_LOGIN_WINDOW_SECONDS = 60
+
+
+def sensitive_when_degraded(policy):
+    """Protect a route when shared rate-limit storage is unavailable.
+
+    `policy="refuse"`  — 503. For routes whose loss costs nobody anything.
+    `policy="strict"`  — a much tighter per-process cap. For routes that must
+                         keep working.
+    """
+    def decorate(view):
+        @wraps(view)
+        def wrapper(*args, **kwargs):
+            if _shared_storage_configured() and not _shared_storage_healthy():
+                if policy == "refuse":
+                    return jsonify({
+                        "error": "temporarily_unavailable",
+                        "message": "This is briefly unavailable. Please try "
+                                   "again in a few minutes.",
+                    }), 503
+                key = f"{view.__name__}:{get_remote_address()}"
+                if _degraded_login_window.over(
+                        key, _DEGRADED_LOGIN_LIMIT,
+                        _DEGRADED_LOGIN_WINDOW_SECONDS):
+                    return jsonify({
+                        "error": "rate_limited",
+                        "message": "Too many attempts. Please wait a minute.",
+                    }), 429
+            return view(*args, **kwargs)
+        return wrapper
+    return decorate
 
 
 def _ratelimit_backend_check():
@@ -2052,16 +2188,25 @@ def verification_self():
                 "outlive a deploy.",
                 "Ask the configured limiter backend whether it is reachable.",
                 "FAIL", "VERIFIED",
-                f"backend configured but not reachable: {type(exc).__name__}",
+                f"DEGRADED — backend configured but not reachable "
+                f"({type(exc).__name__}); invite lookup is refusing and login "
+                f"is on a per-process cap",
                 # FAIL, not UNKNOWN. This was UNKNOWN until the behaviour was
                 # measured: with `swallow_errors=True` an unreachable backend
                 # means requests proceed UNLIMITED, so the control is not
                 # merely unverified, it is off. Reporting that as "we do not
                 # know" would understate it.
+                # FAIL rather than a new status, because Mudman Command's
+                # CheckStatus is PASS/FAIL/UNKNOWN and inventing a fourth
+                # would roll up as unknown-shaped noise. The degradation is
+                # named in the text instead, where a reader looks.
                 failure_reason="Shared rate-limit storage is configured but did "
-                               "not answer. Errors are swallowed so the app "
-                               "stays up, which means NO rate limiting is being "
-                               "applied — including on login and invite lookup.",
+                               "not answer. The application is still serving: "
+                               "invite-code lookup refuses with 503 and login "
+                               "falls back to a tighter PER-PROCESS cap, which "
+                               "is multiplied by the worker count and does not "
+                               "survive a restart. It is a floor, not shared "
+                               "rate limiting.",
                 critical=True))
 
     return jsonify({
@@ -2597,6 +2742,10 @@ def register():
                deduct_when=lambda response: response.status_code == 401)
 @limiter.limit("30 per hour",
                deduct_when=lambda response: response.status_code == 401)
+# Keeps working when shared storage is down, at a much tighter per-process
+# cap. Locking everybody out of their own account is a worse outcome than a
+# bounded guessing window that the self-check reports as degraded.
+@sensitive_when_degraded("strict")
 def login():
     data = request.get_json()
     if not data or not data.get('username') or not data.get('password'):
@@ -4602,6 +4751,11 @@ def list_teams():
 # someone realises they do not actually know these people.
 @limiter.limit("12 per minute", key_func=user_or_ip_key)
 @limiter.limit("60 per hour", key_func=user_or_ip_key)
+# Refuses outright while shared storage is down. Losing this for a few
+# minutes costs somebody the ability to JOIN A TEAM; losing the throttle
+# costs a measured 321 probes/second against a code that is how an adult
+# reaches a child. Those are not close.
+@sensitive_when_degraded("refuse")
 def lookup_team_by_code(code):
     invite = db.session.execute(
         db.select(TeamInviteCode).where(TeamInviteCode.code == code.strip().upper())
