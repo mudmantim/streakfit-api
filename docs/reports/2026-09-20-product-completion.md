@@ -212,16 +212,25 @@ no regex can make.
 
 ### What this cost, stated plainly
 
-The served pool fell from 693 to 440, and **the reward slot fell hardest**:
-jokes 60 → 16, riddles 20 → 11, Rickie asides 15 → 10. **37 items** for the
-one thing a person gets for finishing their day. That is thin.
+The served pool fell from 693 to 440. Measured against what a person actually
+meets each day:
 
-It is still the right trade — a third of the jokes were not jokes, just a
-setup followed by a bland positive statement with no wordplay or twist — but
-it is a real gap, and it needs authoring rather than a lower bar.
+| Slot | Pool now | Days before it repeats |
+|---|---|---|
+| Today's Insight (facts, movement, riddles, experiments, Rickie asides) | 224 | 224 |
+| Brain Boost (trivia) | 200 | 200 |
+| Rickie's jokes (only when somebody asks him for one, in chat) | **16** | — |
 
-Trivia is in better shape at 200 accepted, roughly eighteen months of days
-before Brain Boost repeats.
+**The jokes are the thin part, and only the jokes.** They went 60 → 16,
+because a third of them were not jokes at all — a setup followed by a bland
+positive statement with no wordplay or twist. They are not the daily reward
+slot; they are what Rickie reaches for when asked for a joke in conversation,
+so 16 is survivable rather than broken. It still needs authoring rather than a
+lower bar: a flat joke told on request is worse than Rickie saying he hasn't
+got a good one.
+
+The two daily slots are in decent shape — seven months of Insight and six and
+a half of Brain Boost before either repeats for a given person.
 
 ### The 5,000-item goal
 
@@ -317,12 +326,11 @@ already live.
    coach already fails closed to a friendly 503 with no key, so a per-account
    flag reuses that exact path. It is the single cheapest change that would most
    reduce the surface for a child account.
-5. **The reward slot is down to 37 items.** Jokes, riddles and Rickie asides
-   took the worst of the re-review because a third of them were not jokes.
-   Either commission authoring against the standard the reviewers applied, or
-   decide the slot can repeat more often. Lowering the bar is the third option
-   and I would not take it — a flat joke on the one screen that exists to say
-   "well done" is worse than no joke.
+5. **Rickie's joke library is down to 16.** A third of the originals were not
+   jokes. These are only served when somebody asks him for one, so it is not
+   urgent — but 16 is few enough that a chatty user will see a repeat. Worth
+   commissioning authoring against the standard the reviewers applied rather
+   than restoring the rejected ones.
 6. **Whether `simplified` should mean anything.** Several reviewers noticed the
    same thing: items that are plainly editorial opinion, and items that are
    genuinely contested, are both labelled `simplified` because it is the tier
@@ -337,8 +345,9 @@ Two things, and neither is cosmetic.
 
 **The content pool.** Every served item has now been independently reviewed,
 which is a real change of state — but 311 items sit at `revise` waiting for
-somebody to fix them, and the reward slot is thin enough that a daily user
-would notice repetition inside six weeks.
+somebody to fix them, and several of those are items a reviewer called good
+with one clause wrong. That is a day of editing, not a rewrite, and until it
+happens the library is a third smaller than it reads.
 
 **The operational unknowns.** The retention cron is not live, and backup
 retention is unverified. Both are marked as such everywhere they appear, and
