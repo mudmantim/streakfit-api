@@ -4069,7 +4069,18 @@ def _filter_is_usable(user, user_id, filter_key):
 
 TEAM_FREE_MEMBER_CAP = 8
 TEAM_PLUS_MEMBER_CAP = 25
-TEAM_FREE_TEAM_COUNT_CAP = 10  # Plus: unlimited (no cap check at all)
+# How many teams a person may belong to: NO LIMIT, on any plan.
+#
+# This was 10 for Free and unlimited for Plus. The confirmed membership model
+# says Free users create and join unlimited teams, and that is the right call
+# for a product whose teams are family and friends: the cap could only ever bite
+# somebody organising a lot of small groups, which is exactly the behaviour
+# worth encouraging. Paying gains you premium FEATURES across teams, never
+# permission to have another one.
+#
+# The per-team MEMBER cap (8 free / 25 with a Plus member) is a different thing
+# and stays — it bounds one group's size, not a person's participation.
+TEAM_FREE_TEAM_COUNT_CAP = None
 
 CAMPFIRE_STAGE_THRESHOLDS = [
     (0, 'Kindling'),
@@ -4156,7 +4167,13 @@ def _team_member_cap(team_id):
     return TEAM_PLUS_MEMBER_CAP if has_plus_member else TEAM_FREE_MEMBER_CAP
 
 def _user_team_count_cap(user):
-    return None if user.is_plus else TEAM_FREE_TEAM_COUNT_CAP
+    """None on every plan: joining teams is never a paid permission.
+
+    Kept as a function rather than deleting the call sites, so that if a cap
+    ever comes back it comes back in ONE place with a reason attached, instead
+    of being re-scattered across create and join.
+    """
+    return TEAM_FREE_TEAM_COUNT_CAP
 
 
 @app.route('/api/teams', methods=['POST'])
