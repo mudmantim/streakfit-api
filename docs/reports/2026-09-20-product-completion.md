@@ -187,11 +187,14 @@ These are real, and I stopped rather than widening the phase:
 | **No photo gallery**; team history truncates at 8 with no "show more"; three moment types render as a bare bullet. | Straightforward but outside this phase. |
 | **Invite codes use `random`, not `secrets`.** | The rate limiter is doing the real work (12/min, 60/hr against a measured 321 probes/sec oracle), but generation should not be the weak half. |
 
-**A harness finding worth acting on:** `scripts/uicheck.py`'s `Browser` hardcodes
-`--remote-debugging-port=9333` and a shared profile, so two agents running it
-at once silently attach to each other's Chrome. The walkthrough lost several
-runs to this before noticing, and it also cost several of my own `uicheck` runs
-today. It needs a port override.
+**A harness finding, now fixed:** `scripts/uicheck.py`'s `Browser` hardcoded
+`--remote-debugging-port=9333` with a shared profile, so a second run attached
+to the first run's Chrome and drove somebody else's session. The symptom was
+never an error — just checks failing on state another run had created,
+differently every time. The walkthrough lost several runs to it and so did I,
+each of us assuming the app had regressed. Each `Browser` now takes a free
+port and its own profile; verified by opening two at once and confirming they
+cannot see each other's state.
 
 ### What the walkthrough confirmed was right
 
