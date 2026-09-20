@@ -946,7 +946,8 @@ function _buildRosterSection(data) {
 
         var name = document.createElement('span');
         name.className = 'team-roster-name';
-        name.textContent = m.username + (m.is_creator ? ' (Creator)' : '');
+        // `m.name` is a neutral per-team label ("Member 2"), never the login.
+        name.textContent = (m.name || 'Member') + (m.is_creator ? ' (Creator)' : '');
         row.appendChild(name);
 
         // Creator can remove any other member -- never themselves (Leave
@@ -1115,7 +1116,10 @@ async function _loadTeamMessages(teamId) {
 
 function _appendTeamMsg(m) {
     var isRickie = m.sender_type === 'rickie';
-    var isSelf = !isRickie && currentUser && m.sender_username === currentUser.username;
+    // Compare ids, not names. The server no longer sends anybody's login, and
+    // labels are per-team ordinals so two people can share "Member 2" across
+    // different teams — an id is the only thing that identifies "me" here.
+    var isSelf = !isRickie && currentUser && m.sender_user_id === currentUser.id;
 
     var wrap = document.createElement('div');
     wrap.className = 'team-msg ' + (isRickie ? 'team-msg-rickie' : (isSelf ? 'team-msg-self' : 'team-msg-other'));

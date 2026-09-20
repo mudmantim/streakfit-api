@@ -2795,15 +2795,18 @@ def get_team(team_id):
     memberships = db.session.execute(
         db.select(TeamMembership).where(TeamMembership.team_id == team_id)
     ).scalars().all()
-    usernames = _usernames_for_ids(m.user_id for m in memberships)
+    # Liveness still comes from a User lookup — a membership whose user row is
+    # gone must stay off the roster — but the NAME shown comes from the label
+    # map, never from the login that lookup returns.
+    live_ids = set(_usernames_for_ids(m.user_id for m in memberships))
+    labels = _team_member_labels(team_id)
     members = []
     for m in memberships:
-        uname = usernames.get(m.user_id)
-        if uname is None:
+        if m.user_id not in live_ids:
             continue   # defensive: orphaned membership (user row gone) — skip, don't 500
         members.append({
             "user_id": m.user_id,
-            "username": uname,
+            "name": labels.get(m.user_id),
             "is_creator": m.user_id == team.created_by_user_id,
         })
 
@@ -3014,10 +3017,15 @@ def get_team_moments(team_id):
         .order_by(TeamMoment.occurred_at.desc())
     ).scalars().all()
 
-    usernames = _usernames_for_ids([m.subject_user_id for m in moments])
+    # A moment can name somebody who has since LEFT the team, so there is no
+    # label for them. That resolves to None and `_moment_display_text` already
+    # renders the subjectless wording ("A member left") — which is the right
+    # outcome anyway: a departed member's login is no more disclosable than a
+    # current one's.
+    labels = _team_member_labels(team_id)
     result = []
     for m in moments:
-        subject_username = usernames.get(m.subject_user_id) if m.subject_user_id else None
+        subject_username = labels.get(m.subject_user_id) if m.subject_user_id else None
         metadata = json.loads(m.moment_metadata) if m.moment_metadata else None
         result.append({
             "moment_type": m.moment_type,
@@ -3068,9 +3076,48 @@ def create_rickie_team_message(team_id, trigger):
     return message
 
 
+def _team_member_labels(team_id):
+    """{user_id: "Member N"} — what OTHER MEMBERS of this team may be told
+    somebody is called.
+
+    `_usernames_for_ids` resolves the LOGIN IDENTIFIER, and four team-facing
+    serializers were sending it straight to every other member: the roster,
+    the team history, the chat list and the chat POST echo. That hands a
+    teammate half of somebody's credentials, and `/api/login` takes exactly
+    this field — so it also confirms which accounts are real before anybody
+    starts guessing passwords.
+
+    This schema has no display-name column, so there is no name to put in its
+    place. Peers therefore get a neutral ordinal and nothing else. It never
+    falls back to the username, because the username is the thing being
+    protected: a fallback that prints the login whenever it "looks like a real
+    name" would still expose every ordinary one — `olivia`, `timhill` — which
+    is the common case rather than an edge case.
+
+    The label is ordinal by join order with the creator first: stable across
+    requests, meaningless outside the team, and derived from position rather
+    than from anything about the person. Two members both shown as "Member"
+    would be indistinguishable, which is why it is numbered.
+
+    `_usernames_for_ids` is kept for the places that legitimately need the
+    login: your own account, the admin dashboard, and the deletion report.
+    """
+    team = db.session.get(Team, team_id)
+    creator_id = team.created_by_user_id if team else None
+    memberships = db.session.execute(
+        db.select(TeamMembership).where(TeamMembership.team_id == team_id)
+    ).scalars().all()
+    # Creator first, then join order. Numbered after the sort so the labels
+    # read 1, 2, 3 down the list a person actually sees.
+    ordered = sorted(memberships, key=lambda m: (m.user_id != creator_id, m.user_id))
+    return {m.user_id: f"Member {n}" for n, m in enumerate(ordered, start=1)}
+
+
 def _usernames_for_ids(user_ids):
     """Batch-resolve {user_id: username} in a single query — the fix for the
-    db.session.get(User, id)-in-a-loop N+1 in the team serializers."""
+    db.session.get(User, id)-in-a-loop N+1 in the team serializers.
+
+    NEVER for anything a peer sees; use `_team_member_labels` there."""
     ids = {i for i in user_ids if i}
     if not ids:
         return {}
@@ -3080,19 +3127,30 @@ def _usernames_for_ids(user_ids):
     return {rid: uname for rid, uname in rows}
 
 
-def _serialize_team_message(m, usernames=None):
-    """`usernames` is a pre-resolved {id: username} map (batch path, no per-row
-    query). When omitted, falls back to a single lookup for direct/one-off use."""
-    sender_username = None
+def _serialize_team_message(m, labels=None):
+    """`labels` is a pre-resolved {id: "Member N"} map (batch path, no per-row
+    query). When omitted it is resolved here for direct/one-off use.
+
+    The one-off branch is the easiest of the four leaks to miss: it only runs
+    when a caller does not pass the map, so a fix applied to the batch path
+    alone would leave a live leak behind a rarely-taken branch. The POST
+    handler takes exactly that branch."""
+    if labels is None:
+        labels = _team_member_labels(m.team_id)
+    sender_label = None
     if m.sender_type == 'user' and m.sender_user_id:
-        if usernames is not None:
-            sender_username = usernames.get(m.sender_user_id)
-        else:
-            sender = db.session.get(User, m.sender_user_id)
-            sender_username = sender.username if sender else None
+        sender_label = labels.get(m.sender_user_id)
     return {
         "sender_type": m.sender_type,
-        "sender_username": sender_username,
+        # The id, so the client can tell "mine" from "theirs" without being
+        # given a login to compare. It is not a credential and the roster
+        # already carries it.
+        "sender_user_id": m.sender_user_id,
+        # Key name kept so the client contract does not change in a hotfix,
+        # and so this converges with `product-completion` rather than
+        # conflicting with it. The VALUE is a label, never a login — see
+        # `_team_member_labels`. Do not "restore" a username here.
+        "sender_username": sender_label,
         "body": m.body,
         "created_at": m.created_at.isoformat(),
     }
@@ -3115,10 +3173,8 @@ def get_team_messages(team_id):
         .order_by(TeamMessage.created_at.asc())
     ).scalars().all()
 
-    usernames = _usernames_for_ids(
-        m.sender_user_id for m in messages if m.sender_type == 'user'
-    )
-    return jsonify([_serialize_team_message(m, usernames) for m in messages]), 200
+    labels = _team_member_labels(team_id)
+    return jsonify([_serialize_team_message(m, labels) for m in messages]), 200
 
 
 @app.route('/api/teams/<int:team_id>/messages', methods=['POST'])

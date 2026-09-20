@@ -2,6 +2,7 @@
 """Team Moments subsystem — the durable history record (team_created,
 member_joined, campfire_log_added, ...). Never records absence, never
 ranks members -- see Team System Baseline Section 10."""
+import json
 import os
 import sys
 
@@ -29,12 +30,20 @@ def run(api, results, scenario):
     timestamps = [m["occurred_at"] for m in moments]
     results.check("moments.ordered_newest_first", timestamps == sorted(timestamps, reverse=True))
 
-    # team_created names the creator, not a team-wide event.
+    # team_created names the creator, not a team-wide event -- but by their
+    # per-team label, never by the login they sign in with.
     created_moment = next((m for m in moments if m["moment_type"] == "team_created"), None)
     results.check(
         "moments.team_created_names_creator",
-        created_moment is not None and created_moment.get("subject_username") == scenario.users["a"]["username"],
+        created_moment is not None and bool(created_moment.get("subject_username")),
         f"moment={created_moment}",
+    )
+    logins = {u["username"] for u in scenario.users.values()}
+    blob = json.dumps(moments)
+    results.check(
+        "moments.history_carries_no_login_identifier",
+        not any(login in blob for login in logins),
+        f"moments={blob[:300]}",
     )
 
     return scenario

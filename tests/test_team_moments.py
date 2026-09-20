@@ -37,8 +37,9 @@ def test_team_creation_creates_moment(client):
     moments = get_moments(client, token, team['id']).get_json()
     assert len(moments) == 1
     assert moments[0]['moment_type'] == 'team_created'
-    assert moments[0]['subject_username'] == 'creator'
-    assert moments[0]['display_text'] == 'creator created the team'
+    assert moments[0]['subject_username'] == 'Member 1'
+    assert moments[0]['display_text'] == 'Member 1 created the team'
+    assert 'creator' not in moments[0]['display_text']
 
 
 def test_joining_creates_moment(client):
@@ -51,7 +52,7 @@ def test_joining_creates_moment(client):
     types = [m['moment_type'] for m in moments]
     assert types.count('member_joined') == 1
     joined_moment = next(m for m in moments if m['moment_type'] == 'member_joined')
-    assert joined_moment['subject_username'] == 'member'
+    assert joined_moment['subject_username'] == 'Member 2'
 
 
 def test_leaving_creates_moment(client):
@@ -66,7 +67,8 @@ def test_leaving_creates_moment(client):
     # -- check via the creator, who's still in the team.
     moments = get_moments(client, creator_token, team['id']).get_json()
     left_moment = next(m for m in moments if m['moment_type'] == 'member_left')
-    assert left_moment['subject_username'] == 'member'
+    assert left_moment['subject_username'] is None
+    assert left_moment['display_text'] == 'A member left'
 
 
 def test_campfire_log_creates_moment(client):
@@ -77,9 +79,9 @@ def test_campfire_log_creates_moment(client):
 
     moments = get_moments(client, token, team['id']).get_json()
     log_moment = next(m for m in moments if m['moment_type'] == 'campfire_log_added')
-    assert log_moment['subject_username'] == 'creator'
+    assert log_moment['subject_username'] == 'Member 1'
     assert log_moment['metadata']['total_team_missions'] == 1
-    assert log_moment['display_text'] == 'creator added a log to the campfire'
+    assert log_moment['display_text'] == 'Member 1 added a log to the campfire'
 
 
 def test_campfire_stage_threshold_creates_moment(client, app):

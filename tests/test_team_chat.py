@@ -32,7 +32,8 @@ def test_member_can_post_and_read_message(client):
     assert resp.status_code == 201
     posted = resp.get_json()
     assert posted['sender_type'] == 'user'
-    assert posted['sender_username'] == 'creator'
+    assert posted['sender_username'] == 'Member 1'
+    assert posted['sender_user_id'] is not None
     assert posted['body'] == 'Great job today!'
 
     messages = get_messages(client, token, team['id']).get_json()
@@ -52,7 +53,7 @@ def test_member_sees_other_members_message(client):
     messages = get_messages(client, member_token, team['id']).get_json()
     assert len(messages) == 2
     assert messages[0]['sender_type'] == 'rickie'
-    assert messages[1]['sender_username'] == 'creator'
+    assert messages[1]['sender_username'] == 'Member 1'
 
 
 def test_messages_ordered_chronologically(client):
