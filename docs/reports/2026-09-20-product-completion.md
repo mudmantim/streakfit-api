@@ -14,16 +14,24 @@ probe already reported ($0.12, behind an enforced ceiling).
 
 ## The short version
 
-The individual experience had a set of small dishonesties in it — numbers that
-were wrong, promises the code did not keep, and one claim the app invented
-outright. Those are fixed. The bigger finding is not in the app at all: the
-Brain Boost library was serving 526 items marked "accepted" that nobody had
-ever fact-checked, and re-reviewing them removed **two live safety hazards** and
-demoted about a third of what was read.
+Three findings matter more than the rest, and none of them was on the list I
+started with.
 
-**Not ready for Olivia yet.** Two things still block it, both named below:
-the content pool is only part-way re-reviewed, and the operational items
-(cron, backups) remain unverified against real infrastructure.
+1. **A privacy failure in teams.** Once everybody left a team, its invite code
+   still worked — a stranger holding it could read the family's chat and
+   download photographs of their children, while the family themselves could
+   not. Found by an independent walkthrough, reproduced, fixed, and pinned with
+   six tests.
+2. **Two live safety hazards in the content library**, both telling readers to
+   balance with their eyes closed, in an app used by nine-year-olds and by
+   seniors. The library was serving 526 items marked "accepted" that nobody had
+   ever fact-checked.
+3. **The app was claiming things it could not do** — a "favourite move" invented
+   from one day's data, a guest banner promising to save a streak that was never
+   stored, an acorn balance showing lifetime earnings.
+
+All three are fixed. **Still not ready for Olivia**, and the blockers are named
+in full at the end.
 
 ---
 
@@ -133,8 +141,73 @@ What was already true and stayed true:
 Changed this phase: the free-plan team-count cap was removed, so unlimited
 teams on every plan is now true of the code and not only of the pitch.
 
-An independent walkthrough of the team experience was commissioned; its
-findings are appended below if they arrived before this report was written.
+### What the independent team walkthrough found
+
+It went through as a family — created a team, joined with a code, shared
+photographs of a child, chatted, ran a challenge, and left — and found one
+serious privacy failure plus a long tail.
+
+**Fixed: an abandoned team's invite code was still a key.** After everybody
+left, the code still resolved. A stranger holding it could join the empty
+team and download both photographs in full, read the entire chat, and read
+the team's history with everyone's usernames attached — while the two people
+who *had* been in the family got 403 on those same photographs, because view
+and delete are gated on current membership. And it could never be undone by
+anyone, because Rotate Code requires membership too.
+
+It also made the best sentence in the product false. The composer says "Only
+your team can open this." With nobody in the team, "your team" silently
+became "whoever still has six characters in an old text message."
+
+A team with no members now refuses lookup and refuses join — both, because
+`/join` takes a team id in the path and never has to ask lookup anything.
+Lookup returns the same 404 as an unknown code, so a prober cannot learn that
+a code was once real. Six tests, including the two that stop the fix going too
+far: a team down to one member still works, and the creator leaving does not
+close a team other people are in.
+
+**Fixed: Leave Team took one tap and said nothing.** Out of the team in 200ms,
+the tab gone from the nav, no confirmation before and no acknowledgement
+after. This codebase already asks twice for removing a member, deleting a
+photo, and spending acorns. It now asks twice for this too, and the note says
+what somebody hesitating is afraid of — your streak, XP and acorns are
+untouched.
+
+### Not fixed, and why
+
+These are real, and I stopped rather than widening the phase:
+
+| Finding | Why it is still open |
+|---|---|
+| **"Copy Link" produces a link that does nothing.** The recipient lands on their ordinary Today screen; the code is captured into a form inside a hidden pane behind a hidden tab, and `replaceState` wipes it from the URL on the first tick. | This is a feature — an invite landing screen — not a bug fix. It is the single biggest barrier to a parent actually getting a child into a team, and it deserves designing rather than patching. |
+| **Invite codes contain every confusable pair** (`U0HIUD`, `LXCI1S`). Since the link is broken, reading the code aloud *is* the path. | One-line fix, but it changes issued codes. Worth doing with the link fix. |
+| **Nothing explains what the Campfire is.** "0 logs on the fire, 100 more to reach Small Flame" — 50 days for a family of two, shown as a bar at 2%. | Copy plus possibly a threshold change. A product decision. |
+| **A targeted challenge cannot be declined.** One button, "I did it". The only place one person can place an obligation on another. | Needs a designed answer, not a dismiss button bolted on. |
+| **Challenge rewards silently stop after 3/day** but still celebrate. | Needs a decision on what should happen instead. |
+| **No photo gallery**; team history truncates at 8 with no "show more"; three moment types render as a bare bullet. | Straightforward but outside this phase. |
+| **Invite codes use `random`, not `secrets`.** | The rate limiter is doing the real work (12/min, 60/hr against a measured 321 probes/sec oracle), but generation should not be the weak half. |
+
+**A harness finding worth acting on:** `scripts/uicheck.py`'s `Browser` hardcodes
+`--remote-debugging-port=9333` and a shared profile, so two agents running it
+at once silently attach to each other's Chrome. The walkthrough lost several
+runs to this before noticing, and it also cost several of my own `uicheck` runs
+today. It needs a port override.
+
+### What the walkthrough confirmed was right
+
+Worth recording, because it was tested adversarially rather than assumed:
+
+- **The roster is honest under pressure.** With one member who had done
+  nothing, the panel gave her **no status line at all** — not "missed", not a
+  grey dash, not a zero. Order is creator-first then join order, never by
+  performance. No ranking anywhere.
+- **Every aggregate line is positive or neutral and names nobody.**
+- **Nothing earned disappears on leaving** — streak, level, acorns and best
+  streak all verified intact afterwards.
+- **The Campfire only goes up.** A contributing member left and the total
+  stayed put. There is exactly one mutation site and it is `+= 1`.
+- **Error copy is good throughout**: "This team is at its 8-member limit",
+  "Already a member of this team", and lowercase invite codes work.
 
 ---
 
@@ -285,8 +358,8 @@ or any other regime, and no assessment has been done.
 
 | Check | Result |
 |---|---|
-| `make check` (lint + types + build + pytest) | **553 passed**, 0 failed |
-| `make uicheck` (real UI, headless Chrome, 390×844) | **153 checks, 0 problems** — run three times consecutively |
+| `make check` (lint + types + build + pytest) | **560 passed**, 0 failed |
+| `make uicheck` (real UI, headless Chrome, 390×844) | **156 checks, 0 problems** |
 | `scripts/verify_all.py` (end-to-end, production-safe) | **108 passed, 0 failed** |
 | Content validation | **0 errors** on served items |
 
@@ -353,9 +426,17 @@ happens the library is a third smaller than it reads.
 retention is unverified. Both are marked as such everywhere they appear, and
 neither can be resolved from inside this repo.
 
+**The team invite link.** A parent taps "Copy Link", texts it to their child,
+and the child lands on an ordinary Today screen with no mention of an
+invitation. The only working route in is for the child to independently find a
+quiet row at the foot of Progress. Teams are optional, so this does not block
+solo use — but "invite Olivia to a team" is a thing that currently does not
+work as designed, and it is a feature to build rather than a bug to patch.
+
 Everything else in the brief is done: the acorn loop works end to end, the
-individual experience no longer claims things it cannot do, teams work and
-stay optional, and the AI cost architecture is measured rather than guessed.
+individual experience no longer claims things it cannot do, teams are honest
+and stay optional, and the AI cost architecture is measured rather than
+guessed.
 
 ---
 
