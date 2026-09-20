@@ -178,7 +178,7 @@ components:
       properties:
         id: {type: integer}
         username: {type: string}
-        skill_level: {type: string, enum: [beginner, intermediate, advanced, custom]}
+        skill_level: {type: string, enum: [beginner, intermediate, advanced]}
         display_mode: {type: string, enum: [classic, bright, game]}
         rickie_mode: {type: string, enum: [full, quiet, minimal]}
         current_streak: {type: integer}
@@ -526,7 +526,7 @@ paths:
               type: object
               minProperties: 1
               properties:
-                skill_level: {type: string, enum: [beginner, intermediate, advanced, custom]}
+                skill_level: {type: string, enum: [beginner, intermediate, advanced]}
                 display_mode: {type: string, enum: [classic, bright, game]}
                 rickie_mode: {type: string, enum: [full, quiet, minimal]}
             example: {"skill_level": "intermediate", "display_mode": "bright"}
@@ -564,7 +564,7 @@ paths:
               schema: {$ref: '#/components/schemas/Error'}
               examples:
                 none: {value: {"error": "Provide skill_level, display_mode, and/or rickie_mode"}}
-                bad_skill: {value: {"error": "Invalid skill_level. Must be one of: beginner, intermediate, advanced, custom"}}
+                bad_skill: {value: {"error": "Invalid skill_level. Must be one of: beginner, intermediate, advanced"}}
                 bad_display: {value: {"error": "Invalid display_mode. Must be one of: classic, bright, game"}}
                 bad_rickie: {value: {"error": "Invalid rickie_mode. Must be one of: full, quiet, minimal"}}
         '401': {$ref: '#/components/responses/UnauthorizedJWT'}

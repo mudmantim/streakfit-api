@@ -182,7 +182,14 @@ def user_or_ip_key():
 
 # --- Exercise Library ---
 
-VALID_SKILL_LEVELS  = {'beginner', 'intermediate', 'advanced', 'custom'}
+# 'custom' is NOT here, deliberately. It was accepted by PATCH /api/me and
+# implemented nowhere: EXERCISE_LIBRARY has no such tier, so build_daily_mission
+# silently falls back to 'beginner'. The result was a setting a person could
+# store, see reflected in the mission header ("Sunday, Sep 20 · Custom"), and
+# which changed nothing whatsoever — the app agreeing with you and then
+# quietly doing something else. The picker already had the option disabled;
+# the API accepting it anyway is what made the state reachable at all.
+VALID_SKILL_LEVELS  = {'beginner', 'intermediate', 'advanced'}
 VALID_DISPLAY_MODES = {'classic', 'bright', 'game'}
 VALID_RICKIE_MODES  = {'full', 'quiet', 'minimal'}
 
@@ -2531,7 +2538,7 @@ def update_me():
             return jsonify({"error": cleaned}), 400
 
     if 'skill_level' in data and data['skill_level'] not in VALID_SKILL_LEVELS:
-        return jsonify({"error": "Invalid skill_level. Must be one of: beginner, intermediate, advanced, custom"}), 400
+        return jsonify({"error": "Invalid skill_level. Must be one of: beginner, intermediate, advanced"}), 400
 
     if 'display_mode' in data and data['display_mode'] not in VALID_DISPLAY_MODES:
         return jsonify({"error": "Invalid display_mode. Must be one of: classic, bright, game"}), 400

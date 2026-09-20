@@ -3862,6 +3862,16 @@ function setGuestUI(guest) {
     var nameHelp = document.getElementById('display-name-help');
     if (nameHelp) nameHelp.hidden = guest;
 
+    // "Download my data" and "Delete my account" were offered to guests, who
+    // have neither. An independent reviewer found the download returning
+    // "Couldn't get it." and the delete button doing nothing at all — no
+    // modal, no message, not even a console error. Both are account
+    // operations; a guest has no account for them to operate on.
+    var dataRow = document.getElementById('settings-row-yourdata');
+    if (dataRow) dataRow.hidden = guest;
+    var deleteRow = document.getElementById('settings-row-delete');
+    if (deleteRow) deleteRow.hidden = guest;
+
     var sideQuests = document.getElementById('side-quests-section');
     if (sideQuests) sideQuests.hidden = guest;
 
@@ -3987,9 +3997,16 @@ function _syncDisplayNameField() {
     var help = document.getElementById('display-name-help');
     if (!help) return;
     var calls = currentUser.rickie_calls_you;
-    help.textContent = calls
-        ? 'Not your login. Rickie calls you "' + calls + '".'
-        : "Not your login. Rickie isn't using a name for you.";
+    if (!calls) {
+        help.textContent = "Not your login. Rickie isn't using a name for you.";
+    } else if (!currentUser.display_name && calls === currentUser.username) {
+        // The fallback IS the login, so "Not your login" contradicted the very
+        // next clause. Say what is actually happening instead.
+        help.textContent = 'Rickie is using your username, "' + calls
+            + '". Type something here if you would rather he used that.';
+    } else {
+        help.textContent = 'Not your login. Rickie calls you "' + calls + '".';
+    }
 }
 
 var THEME_COLORS = { game: '#4338ca', bright: '#0891b2', classic: '#4f46e5' };
@@ -4717,7 +4734,12 @@ function renderBrainBoostQuestion(brainBoost) {
             explanation.hidden = false;
         }
 
-        pointsNote.textContent = '+' + points + ' points';
+        // "XP", not "points". The same award was announced as "+3 points"
+        // inline and "+3 XP" in the toast a second later, which reads as two
+        // different currencies to anybody not reading the source. The app has
+        // two real currencies already (XP and acorns); it does not need a
+        // third name for one of them.
+        pointsNote.textContent = '+' + points + ' XP';
         pointsNote.hidden = false;
     }
 
