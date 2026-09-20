@@ -917,6 +917,25 @@ def check_brain_boost_can_be_answered(b: Browser, base: str, app) -> None:
     for word in ("wrong again", "you failed", "incorrect!", "nope!"):
         check(word not in low, f"the wrong-answer copy stays kind ({word!r} absent)")
 
+    # And Rickie must not be standing on any of it.
+    #
+    # The roaming check measures the DEFAULT dashboard. An independent
+    # walkthrough kept finding him over Brain Boost specifically — the option
+    # buttons, the label, the rep counts — because this whole card only exists
+    # after the mission is finished and the question is revealed, which is a
+    # page state that check never reaches. The engine is told about content by
+    # a MutationObserver, so "it reacts eventually" is the claim; this is the
+    # measurement of it, using exactly the same occupancy test.
+    b.goto(base + "/", wait=3.0)
+    b.js("(()=>{const r=[...document.querySelectorAll('button')]"
+         ".find(e=>/Reveal Brain Boost/i.test(e.textContent)); if(r) r.click(); return 1;})()")
+    time.sleep(2.0)   # the observer is debounced; give him time to move
+    if b.js("document.querySelectorAll('.bb-option-btn').length"):
+        blocked = _spots_he_may_stand_in_that_are_not_clear(b, tries=8)
+        check(not blocked,
+              "Rickie has nowhere to stand that covers the question or its options",
+              "; ".join(blocked[:3]))
+
 
 def check_coming_back_after_a_while(b: Browser, base: str, app) -> None:
     """The returning user, in a browser.
@@ -1370,6 +1389,52 @@ def check_guest_promise_is_true(b: Browser, base: str) -> None:
           f"guestCompleted.size = {survived} after reload — the banner understates it")
 
 
+def _spots_he_may_stand_in_that_are_not_clear(b: Browser, tries: int = 8):
+    """Place Rickie where the engine says is clear, then measure the page.
+
+    Extracted so it can be pointed at a page STATE as well as at the default
+    dashboard. The obstruction bug that kept coming back was never "the engine
+    is wrong in general" — it was "the engine is wrong about this screen",
+    and the only way to catch that is to run the same measurement after the
+    screen has changed.
+
+    Returns a list of descriptions of what he landed on. Empty is good.
+    """
+    blocked = []
+    b.js("RickieRoam.setPaused(true)")   # he must hold still to be measured
+    for _ in range(tries):
+        b.js("""(()=>{const s=RickieRoam._somewhereClear(); if(!s) return 0;
+          const e=document.querySelector('.rickie-roam');
+          const st=e.parentNode.getBoundingClientRect();
+          e.style.transform='translate('+Math.round(s.x*(st.width-56))+'px,'+
+            Math.round(s.y*(st.height-56))+'px)'; return 1;})()""")
+        hit = b.js("""(()=>{const r=document.querySelector('.rickie-roam').getBoundingClientRect();
+          const band=document.getElementById('rickie-roam-band');
+          const bad=[];
+          const textBearing=(n)=>{for(const c of n.childNodes)
+            if(c.nodeType===3&&c.nodeValue&&c.nodeValue.trim()) return true; return false;};
+          const nodes=new Set(document.querySelectorAll(
+              'button,a,input,select,textarea,img,svg,.bb-option-btn'));
+          for(const el of document.body.querySelectorAll('*'))
+            if(textBearing(el)) nodes.add(el);
+          const rendered=(el)=>{const r=el.getBoundingClientRect();
+            if(!r.width||!r.height) return false;
+            if(el.offsetParent) return true;
+            try{return getComputedStyle(el).position==='fixed';}catch(e){return false;}};
+          for(const el of nodes){
+            if(!rendered(el)) continue;   // offsetParent is null for fixed
+            if(band&&(el===band||band.contains(el))) continue;
+            const q=el.getBoundingClientRect();
+            if(!q.width||!q.height) continue;
+            if(!(q.right<r.left||q.left>r.right||q.bottom<r.top||q.top>r.bottom))
+              bad.push((el.id||el.className||el.tagName).toString().slice(0,30));
+          } return bad.join('|');})()""")
+        if hit:
+            blocked.append(hit)
+    b.js("RickieRoam.setPaused(false)")
+    return blocked
+
+
 def check_rickie_roams(b: Browser, base: str, app) -> None:
     """Rickie, moving, and never in the way.
 
@@ -1431,47 +1496,7 @@ def check_rickie_roams(b: Browser, base: str, app) -> None:
     spots = b.js("RickieRoam._freeSpots().length")
     if not check(spots > 0, "there is somewhere clear for him to stand", f"{spots} free"):
         return
-    blocked = []
-    b.js("RickieRoam.setPaused(true)")   # he must hold still to be measured
-    for _ in range(8):
-        b.js("""(()=>{const s=RickieRoam._somewhereClear(); if(!s) return 0;
-          const e=document.querySelector('.rickie-roam');
-          const st=e.parentNode.getBoundingClientRect();
-          e.style.transform='translate('+Math.round(s.x*(st.width-56))+'px,'+
-            Math.round(s.y*(st.height-56))+'px)'; return 1;})()""")
-        # Measures EVERY VISIBLE PIECE OF TEXT, not a list of class names.
-        #
-        # This check passed for weeks while an independent review of the running
-        # app found him parked over the mission counter, the date subtitle, a
-        # button label and the Brain Boost question in four of six phone
-        # screenshots. It passed because it asked about the same hand-written
-        # list the placement engine used: both knew `.daily-exercise-name`,
-        # neither knew about the counter. A test that shares its subject's blind
-        # spot is not a test, it is a second opinion from the same person.
-        hit = b.js("""(()=>{const r=document.querySelector('.rickie-roam').getBoundingClientRect();
-          const band=document.getElementById('rickie-roam-band');
-          const bad=[];
-          const textBearing=(n)=>{for(const c of n.childNodes)
-            if(c.nodeType===3&&c.nodeValue&&c.nodeValue.trim()) return true; return false;};
-          const nodes=new Set(document.querySelectorAll(
-              'button,a,input,select,textarea,img,svg,.bb-option-btn'));
-          for(const el of document.body.querySelectorAll('*'))
-            if(textBearing(el)) nodes.add(el);
-          const rendered=(el)=>{const r=el.getBoundingClientRect();
-            if(!r.width||!r.height) return false;
-            if(el.offsetParent) return true;
-            try{return getComputedStyle(el).position==='fixed';}catch(e){return false;}};
-          for(const el of nodes){
-            if(!rendered(el)) continue;   // offsetParent is null for fixed
-            if(band&&(el===band||band.contains(el))) continue;
-            const q=el.getBoundingClientRect();
-            if(!q.width||!q.height) continue;
-            if(!(q.right<r.left||q.left>r.right||q.bottom<r.top||q.top>r.bottom))
-              bad.push((el.id||el.className||el.tagName).toString().slice(0,30));
-          } return bad.join('|');})()""")
-        if hit:
-            blocked.append(hit)
-    b.js("RickieRoam.setPaused(false)")
+    blocked = _spots_he_may_stand_in_that_are_not_clear(b, tries=8)
     check(not blocked, "every position he may stand in is clear of controls AND text",
           "; ".join(blocked[:3]))
 
@@ -1497,14 +1522,17 @@ def check_rickie_roams(b: Browser, base: str, app) -> None:
     # rendering beneath a standing Rickie left him on top of it — a walkthrough
     # caught him on an exercise illustration and on the acorns explanation,
     # both reached without scrolling.
-    # Wait until he is standing still. Mid-WALK he deliberately ignores the
-    # step-aside — he is already travelling to a spot that was clear when
-    # chosen — so planting content during a walk tests the exemption, not the
-    # behaviour, and fails about one run in four.
-    for _ in range(40):
-        if not b.js("!!(window.RickieRoam && RickieRoam._state.walking)"):
-            break
-        time.sleep(0.25)
+    # NOT gated on him standing still any more.
+    #
+    # An earlier version of this check waited for `walking` to be false before
+    # planting content, because mid-walk he deliberately ignores the step-aside
+    # and the check failed about one run in four. That made the check pass, and
+    # it was the wrong fix: the flakiness was real. Content arriving during a
+    # walk left him standing on it afterwards, because nothing re-ran the
+    # handler when the walk ended, and the "wait for stillness" dance simply
+    # arranged for the test never to meet that case. walkTo now re-checks on
+    # arrival, so this plants content whenever it likes and polls for him to
+    # move — which exercises both paths instead of only the easy one.
 
     moved = b.js("""(()=>{const el=document.querySelector('.rickie-roam');
       const r=el.getBoundingClientRect();
@@ -1518,10 +1546,17 @@ def check_rickie_roams(b: Browser, base: str, app) -> None:
         'px;height:'+Math.round(r.height)+'px;background:#fff;';
       document.body.appendChild(d);
       return before;})()""")
-    # 250ms debounce + a 420ms transition, with room to spare.
-    time.sleep(2.0)
-    after = b.js("(()=>{const r=document.querySelector('.rickie-roam')"
-                 ".getBoundingClientRect(); return r.left+','+r.top;})()")
+    # Poll rather than sleep once: the debounce is 250ms and the move 420ms,
+    # but if he was mid-walk when the content arrived he re-checks on arrival,
+    # and a walk can be a couple of seconds. Six seconds is far longer than
+    # either path needs and the loop exits the moment he moves.
+    after = str(moved)
+    for _ in range(30):
+        time.sleep(0.2)
+        after = b.js("(()=>{const r=document.querySelector('.rickie-roam')"
+                     ".getBoundingClientRect(); return r.left+','+r.top;})()")
+        if str(after) != str(moved):
+            break
     b.js("(()=>{const d=document.getElementById('uicheck-intruder');"
          " if(d) d.remove(); return 1;})()")
     check(str(after) != str(moved),

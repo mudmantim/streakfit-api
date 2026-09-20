@@ -322,6 +322,42 @@
         };
     }
 
+    /* Hoisted to module scope on purpose.
+     *
+     * This lived inside the mount function, which meant walkTo could not call
+     * it — and walkTo is exactly where it is needed, because the handler bails
+     * out while `walking` is true and nothing re-ran it when the walk ended.
+     */
+    var asideCheck = null;
+
+    function stepAsideIfCovered() {
+        clearTimeout(asideCheck);
+        asideCheck = setTimeout(function () {
+            /* NOT gated on state.busy.
+             *
+             * `busy` is true for the whole of any behaviour — sitting,
+             * dozing, watching — which is most of the time. Gating on it
+             * made this check, and the scroll check it replaced, inert
+             * almost always: a diagnostic found him standing on occupied
+             * space with busy=true and the handler declining to act.
+             * Being mid-doze is not a reason to keep sitting on somebody's
+             * text.
+             *
+             * Mid-WALK is different: he is already travelling to a spot
+             * that was clear when chosen, and moving him now would fight
+             * the transition. */
+            if (!el || state.paused || state.suspended || state.walking) return;
+            if (isClear(state.x, state.y, occupiedRects())) return;
+            var spot = somewhereClear();
+            if (!spot) return;
+            state.x = spot.x;
+            state.y = spot.y;
+            el.style.transition = 'transform 420ms ease-in-out';
+            place();
+        }, 250);
+    }
+
+
     function walkTo(target, speedPxPerSec, onArrive) {
         var s = stage();
         var dx = (target.x - state.x) * Math.max(1, s.width - SIZE);
@@ -351,6 +387,21 @@
             el.style.transition = '';
             setPose('neutral');
             if (onArrive) onArrive();
+            /* Re-check on arrival.
+             *
+             * stepAsideIfCovered bails out while `walking` is true — correct,
+             * because he is already travelling to a spot that was clear when
+             * it was chosen. But nothing re-ran the check afterwards, so
+             * content that appeared DURING a walk left him standing on it
+             * until the next scroll or DOM mutation happened to fire the
+             * handler. That is the exact bug step-aside exists to prevent,
+             * surviving inside its own exemption.
+             *
+             * It also made the check for this behaviour flaky: a walk starting
+             * in the instant between "is he still?" and "plant the content"
+             * produced a real failure that looked like a race in the test. It
+             * was not — the test was right and this was the gap. */
+            stepAsideIfCovered();
         }, ms + 40);
     }
 
@@ -649,34 +700,6 @@
          * rather than a timer, so the "nothing runs while he is idle" property
          * survives: if the page is not changing, this never fires.
          */
-        var asideCheck = null;
-
-        function stepAsideIfCovered() {
-            clearTimeout(asideCheck);
-            asideCheck = setTimeout(function () {
-                /* NOT gated on state.busy.
-                 *
-                 * `busy` is true for the whole of any behaviour — sitting,
-                 * dozing, watching — which is most of the time. Gating on it
-                 * made this check, and the scroll check it replaced, inert
-                 * almost always: a diagnostic found him standing on occupied
-                 * space with busy=true and the handler declining to act.
-                 * Being mid-doze is not a reason to keep sitting on somebody's
-                 * text.
-                 *
-                 * Mid-WALK is different: he is already travelling to a spot
-                 * that was clear when chosen, and moving him now would fight
-                 * the transition. */
-                if (!el || state.paused || state.suspended || state.walking) return;
-                if (isClear(state.x, state.y, occupiedRects())) return;
-                var spot = somewhereClear();
-                if (!spot) return;
-                state.x = spot.x;
-                state.y = spot.y;
-                el.style.transition = 'transform 420ms ease-in-out';
-                place();
-            }, 250);
-        }
 
         window.addEventListener('scroll', stepAsideIfCovered, { passive: true });
 
