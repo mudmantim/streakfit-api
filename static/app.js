@@ -3471,12 +3471,16 @@ function _mbBuildNotes(data) {
     if (lifetime.missions_completed >= 1) {
         notes.push("Rickie remembers your first mission — that's when this all started.");
     }
+    // "Done most often", not "your favourite". The app picks the five daily
+    // moves, so the user never chose one — a preference claim was never
+    // something this data could support, however much data there is.
     if (favorites.favorite_exercise) {
-        notes.push("Your favorite move seems to be " + favorites.favorite_exercise + ". Rickie's noticed.");
+        notes.push("You've done " + favorites.favorite_exercise
+            + " more than anything else so far.");
     }
     if (favorites.favorite_category) {
         var label = MEMORY_CATEGORY_LABELS[favorites.favorite_category] || favorites.favorite_category;
-        notes.push("You gravitate toward " + label + " days.");
+        notes.push("Most of your moves so far have been " + label + ".");
     }
     if (lifetime.days_active >= 1) {
         notes.push("You've shown up on " + lifetime.days_active +

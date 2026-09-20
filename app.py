@@ -2798,13 +2798,41 @@ def get_memory_book():
         for m in _MILESTONE_DEFINITIONS
     ]
 
-    favorite_row = db.session.execute(
+    # A "most done" move, and ONLY when that is a real thing.
+    #
+    # This took the single most-completed exercise with no minimum and no
+    # margin. After one mission every exercise is tied at one completion, so it
+    # returned an arbitrary row and the Memory Book announced "Your favorite
+    # move seems to be Wall Sit. Rickie's noticed." to somebody who had done
+    # each of five moves exactly once. An independent reviewer called it the
+    # moment the whole companion stopped reading as honest, and they were right:
+    # a claim to have noticed a pattern, made from no pattern, is the fastest
+    # way to make every other number on the page suspect.
+    #
+    # Two conditions now. MIN_TALLY, so one mission cannot produce a verdict at
+    # all. And a MARGIN over the runner-up, because the daily mission repeats
+    # moves on its own schedule and a one-completion lead is the rotation
+    # talking, not the person.
+    #
+    # Note the framing this feeds: the app CHOOSES the five daily moves, so the
+    # user never expressed a preference and "favourite" was never a claim this
+    # data could support. The client says "done most often", which is a fact.
+    FAVOURITE_MIN_TALLY = 5
+    FAVOURITE_MIN_MARGIN = 2
+
+    tallies = db.session.execute(
         db.select(DailyCompletion.exercise_key, db.func.count(DailyCompletion.id).label('n'))
         .where(DailyCompletion.user_id == user_id)
         .group_by(DailyCompletion.exercise_key)
         .order_by(db.desc('n'))
-        .limit(1)
-    ).first()
+        .limit(2)
+    ).all()
+
+    favorite_row = None
+    if tallies and tallies[0].n >= FAVOURITE_MIN_TALLY:
+        runner_up = tallies[1].n if len(tallies) > 1 else 0
+        if tallies[0].n - runner_up >= FAVOURITE_MIN_MARGIN:
+            favorite_row = tallies[0]
 
     if favorite_row:
         # Only the name is used here; the favourite *category* is computed
