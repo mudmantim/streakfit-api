@@ -1393,7 +1393,10 @@ function _buildRosterSection(data) {
 
         var name = document.createElement('span');
         name.className = 'team-roster-name';
-        name.textContent = m.username + (m.is_creator ? ' (Creator)' : '');
+        // `m.name`, not `m.username`: the server no longer sends other
+        // people's logins at all. It sends a display name, or a stable
+        // "Member N" for anybody who has not set one.
+        name.textContent = (m.name || 'Member') + (m.is_creator ? ' (Creator)' : '');
         main.appendChild(name);
 
         var status = _rosterStatusText(m);
@@ -1618,7 +1621,12 @@ async function _loadTeamMessages(teamId) {
 
 function _appendTeamMsg(m) {
     var isRickie = m.sender_type === 'rickie';
-    var isSelf = !isRickie && currentUser && m.sender_username === currentUser.username;
+    // Compare IDS. This compared sender_username to the viewer's own
+    // username, which only worked because the server was sending logins —
+    // the very thing being fixed. Two people who both chose the display name
+    // "Sam" would also have seen each other's messages as their own.
+    var isSelf = !isRickie && currentUser && m.sender_user_id != null
+        && m.sender_user_id === currentUser.id;
 
     var wrap = document.createElement('div');
     wrap.className = 'team-msg ' + (isRickie ? 'team-msg-rickie' : (isSelf ? 'team-msg-self' : 'team-msg-other'));
@@ -1710,7 +1718,7 @@ async function openChallengePicker(teamId) {
     var options = [{ id: null, name: 'Everyone' }].concat(
         (_teamPanelMembers || [])
             .filter(function (m) { return !currentUser || m.user_id !== currentUser.id; })
-            .map(function (m) { return { id: m.user_id, name: m.username }; })
+            .map(function (m) { return { id: m.user_id, name: m.name }; })
     );
     options.forEach(function (opt, i) {
         var chip = document.createElement('button');
@@ -2044,7 +2052,12 @@ async function _sendTeamMessage(body) {
     if (empty0) empty0.remove();
     var pending = _appendTeamMsg({
         sender_type: 'user',
-        sender_username: currentUser ? currentUser.username : null,
+        // The optimistic echo must match what the server will send back, or
+        // the message jumps sides when the thread reloads.
+        sender_user_id: currentUser ? currentUser.id : null,
+        sender_username: currentUser
+            ? (currentUser.rickie_calls_you || currentUser.display_name || 'You')
+            : null,
         body: body,
         created_at: new Date().toISOString(),
     });

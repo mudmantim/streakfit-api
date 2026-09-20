@@ -477,7 +477,29 @@ def check_team_witness(b: Browser, base: str, app) -> None:
           f"roster was {roster[:120]!r}")
     check("days" in roster or "day" in roster, "the roster shows each member's streak",
           f"roster was {roster[:120]!r}")
-    check(kid in roster, "the kid appears on the roster their parent is reading")
+    # The roster identifies people by the name they CHOSE, never by their
+    # login. This used to assert the kid's username appeared, which is now
+    # precisely the thing that must not happen: registration accepts email
+    # addresses and the roster was showing them to every member.
+    #
+    # So the real journey is driven instead — the kid sets a display name, and
+    # the parent sees it — plus the security property, checked on the rendered
+    # page rather than on the API response.
+    _api(base, "/api/me", "PATCH", kid_token, {"display_name": "Liv"})
+    b.js("location.reload()")
+    time.sleep(3.0)
+    b.js("(()=>{const btn=[...document.querySelectorAll('button')]"
+         ".find(b=>b.textContent.trim()==='Open'); if(btn) btn.click(); return 1;})()")
+    time.sleep(2.0)
+    roster = b.js("(()=>{const e=document.querySelector('.team-roster');"
+                  " return e ? e.innerText : '';})()") or ""
+    check("Liv" in roster,
+          "the kid appears on the roster their parent is reading, by chosen name",
+          f"roster was {roster[:140]!r}")
+    page = b.js("document.body.innerText") or ""
+    check(kid not in page,
+          "and the kid's login identifier is nowhere on the parent's screen",
+          f"{kid!r} found in the rendered page")
 
     history = b.js("(()=>{const e=document.querySelector('.team-moments-body');"
                    " return e ? e.innerText : '';})()") or ""

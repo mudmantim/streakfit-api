@@ -55,8 +55,12 @@ def _make_team(client, token, name='The Hills'):
 
 
 def _members_by_name(client, token, team_id):
+    # `name`, not `username`: the roster stopped sending other people's login
+    # identifiers (tests/test_peer_identity_privacy.py). These accounts all
+    # have person-shaped logins, so `name` resolves to the same string and
+    # every assertion below means exactly what it meant before.
     resp = client.get(f'/api/teams/{team_id}', headers=auth_headers(token))
-    return {m['username']: m for m in resp.get_json()['members']}
+    return {m['name']: m for m in resp.get_json()['members']}
 
 
 # ── The data the roster is for ─────────────────────────────────────────────
@@ -141,9 +145,9 @@ def test_roster_is_not_ordered_by_who_is_doing_best(client):
     members = client.get(f"/api/teams/{team['id']}",
                          headers=auth_headers(token)).get_json()['members']
 
-    assert members[0]['username'] == 'creator_last_place'
+    assert members[0]['name'] == 'creator_last_place'
     assert members[0]['current_streak'] == 0
-    assert members[1]['username'] == 'big_streak'
+    assert members[1]['name'] == 'big_streak'
     assert members[1]['current_streak'] == 5
 
 

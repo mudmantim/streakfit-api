@@ -4531,17 +4531,31 @@ def get_team(team_id):
     memberships = db.session.execute(
         db.select(TeamMembership).where(TeamMembership.team_id == team_id)
     ).scalars().all()
-    usernames = _usernames_for_ids(m.user_id for m in memberships)
+    # Peer names, never logins. See _peer_names_for_ids.
+    peer_names = _peer_names_for_ids(m.user_id for m in memberships)
     witness = _witness_for_ids(m.user_id for m in memberships)
     members = []
+    # A stable, non-identifying label for anybody with no safe name — which is
+    # exactly the person this fix protects, since an email-shaped login is what
+    # `_safe_display_name` refuses. Two members both showing "Member" would be
+    # indistinguishable, so the label is ordinal by join order: stable across
+    # requests, meaningless outside the team, and derived from position rather
+    # than from anything about the person.
+    ordinal = 0
     for m in memberships:
-        uname = usernames.get(m.user_id)
-        if uname is None:
+        # Liveness comes free from the name lookup: `_peer_names_for_ids`
+        # selects the User rows, so a membership whose user row is gone is
+        # simply absent from the map. A separate liveness query was one query
+        # too many and test_roster_witness_does_not_reintroduce_an_n_plus_1
+        # caught it — the map's VALUE may legitimately be None (no safe name),
+        # so the test is membership of the keys, not truthiness of the value.
+        if m.user_id not in peer_names:
             continue   # defensive: orphaned membership (user row gone) — skip, don't 500
+        ordinal += 1
         w = witness.get(m.user_id, {})
         members.append({
             "user_id": m.user_id,
-            "username": uname,
+            "name": peer_names.get(m.user_id) or f"Member {ordinal}",
             "is_creator": m.user_id == team.created_by_user_id,
             "completed_today": w.get('completed_today', False),
             "completed_today_count": w.get('completed_today_count', 0),
@@ -4774,7 +4788,9 @@ def get_team_moments(team_id):
         .order_by(TeamMoment.occurred_at.desc())
     ).scalars().all()
 
-    usernames = _usernames_for_ids([m.subject_user_id for m in moments])
+    # Peer names. Team history is permanent, so a login written into it is
+    # written into it forever — this was the worst of the four sites.
+    usernames = _peer_names_for_ids([m.subject_user_id for m in moments])
     result = []
     for m in moments:
         subject_username = usernames.get(m.subject_user_id) if m.subject_user_id else None
@@ -4836,6 +4852,39 @@ def create_rickie_team_message(team_id, trigger):
     )
     db.session.add(message)
     return message
+
+
+def _peer_names_for_ids(user_ids):
+    """{user_id: safe name or None} — what OTHER PEOPLE may be told somebody is called.
+
+    `_usernames_for_ids` resolves the LOGIN IDENTIFIER, and four team
+    serializers were sending it straight to every other member. Registration
+    accepts any 2-80 character string and people register with email
+    addresses — this codebase already knows that, which is why
+    `_safe_display_name` exists to stop Rickie reading one aloud. The team
+    roster, the team history, the chat and the challenge cards were all doing
+    exactly what Rickie was stopped from doing, in writing, permanently.
+
+    Reproduced before fixing: a member registered as
+    "olivia.hill@example.com" appeared verbatim on the roster of every team
+    they joined and in that team's history, and setting a display name did not
+    change it.
+
+    So peers get `_safe_display_name` and nothing else. When that is None the
+    caller substitutes a neutral label; it never falls back to the username,
+    because the username is the thing being protected.
+
+    `_usernames_for_ids` is kept for the places that legitimately need the
+    login: your own account, your own export, and the server-side deletion
+    report.
+    """
+    ids = {i for i in user_ids if i}
+    if not ids:
+        return {}
+    rows = db.session.execute(
+        db.select(User).where(User.id.in_(ids))
+    ).scalars().all()
+    return {u.id: _safe_display_name(u) for u in rows}
 
 
 def _usernames_for_ids(user_ids):
@@ -4917,9 +4966,17 @@ def _serialize_team_message(m, usernames=None, photos=None, challenges=None, vie
             sender_username = usernames.get(m.sender_user_id)
         else:
             sender = db.session.get(User, m.sender_user_id)
-            sender_username = sender.username if sender else None
+            # `_safe_display_name`, not `.username`. This one-off path was the
+            # easiest of the four to miss: it only runs when a caller does not
+            # pass the pre-resolved map, so a fix applied to the batch path
+            # alone would leave a live leak behind a rarely-taken branch.
+            sender_username = _safe_display_name(sender) if sender else None
     out = {
         "sender_type": m.sender_type,
+        # The id, so the client can tell "mine" from "theirs" without
+        # comparing names. It used to compare sender_username to the viewer's
+        # own username, which only worked because the login was being sent.
+        "sender_user_id": m.sender_user_id if m.sender_type == 'user' else None,
         "sender_username": sender_username,
         "body": m.body,
         "created_at": m.created_at.isoformat(),
@@ -4929,6 +4986,28 @@ def _serialize_team_message(m, usernames=None, photos=None, challenges=None, vie
         if challenge is not None:
             out["challenge"] = _serialize_challenge(
                 challenge, challenges[1], usernames or {}, viewer_id)
+            # HISTORY, fixed without a migration.
+            #
+            # Announcement rows written before this change have a login baked
+            # into `body` — f"{sender.username} started a challenge: ...".
+            # Chat messages do not expire, so those logins would sit in old
+            # threads indefinitely, and no amount of careful serialization
+            # elsewhere would reach them.
+            #
+            # Rather than rewrite stored history (destructive, and an owner's
+            # call), the sentence is DERIVED at read time for exactly the rows
+            # the system wrote: `challenge_id` is not null only on
+            # announcements. The stored text is never shown for these rows, so
+            # old rows and new rows both come out safe and nothing is lost.
+            #
+            # A person's own typed message has no challenge_id and is never
+            # touched.
+            who = (usernames or {}).get(m.sender_user_id)
+            preset = CHALLENGE_PRESETS_BY_KEY.get(
+                getattr(challenge, 'preset_key', None) or '')
+            title = (preset or {}).get('title') or 'a challenge'
+            out["body"] = (f"{who} started a challenge: {title}" if who
+                           else f"Started a challenge: {title}")
 
     if getattr(m, 'photo_id', None):
         photo = photos.get(m.photo_id) if photos is not None else db.session.get(TeamPhoto, m.photo_id)
@@ -4969,7 +5048,7 @@ def get_team_messages(team_id):
         .order_by(TeamMessage.created_at.asc())
     ).scalars().all()
 
-    usernames = _usernames_for_ids(
+    usernames = _peer_names_for_ids(
         m.sender_user_id for m in messages if m.sender_type == 'user'
     )
     # Batch the photo rows, and load only the metadata columns -- selecting the
@@ -4995,7 +5074,7 @@ def get_team_messages(team_id):
         extra_ids.update([ch.created_by_user_id, ch.target_user_id])
     for uids in completions.values():
         extra_ids.update(uids)
-    usernames.update(_usernames_for_ids(extra_ids - set(usernames)))
+    usernames.update(_peer_names_for_ids(extra_ids - set(usernames)))
 
     return jsonify([
         _serialize_team_message(m, usernames, photos, (challenge_rows, completions), user_id)
@@ -5085,10 +5164,20 @@ def create_team_challenge(team_id):
     db.session.add(challenge)
     db.session.flush()
 
+    # The body used to be f"{sender.username} started a challenge: ...", which
+    # wrote a LOGIN IDENTIFIER into a durable chat row. Serializing peer names
+    # safely does not help here: by the time anybody reads it the login is
+    # already part of the stored text.
+    #
+    # It also did not need to name anybody. The row carries `sender_user_id`
+    # and the client renders the sender's name from that, so naming them in
+    # the body said it twice — once safely and once not.
     sender = db.session.get(User, user_id)
+    who = _safe_display_name(sender) if sender else None
     message = TeamMessage(
         team_id=team_id, sender_type='user', sender_user_id=user_id,
-        body=f"{sender.username if sender else 'Someone'} started a challenge: {preset['title']}",
+        body=(f"{who} started a challenge: {preset['title']}" if who
+              else f"Started a challenge: {preset['title']}"),
         challenge_id=challenge.id, created_at=now,
     )
     db.session.add(message)
@@ -5096,7 +5185,7 @@ def create_team_challenge(team_id):
                        metadata={"title": preset['title']})
     db.session.commit()
 
-    usernames = _usernames_for_ids([user_id, target_user_id])
+    usernames = _peer_names_for_ids([user_id, target_user_id])
     payload = _serialize_team_message(message)
     payload['challenge'] = _serialize_challenge(challenge, {}, usernames, user_id)
     return jsonify(payload), 201
