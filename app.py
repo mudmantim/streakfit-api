@@ -2807,6 +2807,14 @@ def get_team(team_id):
         members.append({
             "user_id": m.user_id,
             "name": labels.get(m.user_id),
+            # DEPRECATED, and deliberately not a username any more. A browser
+            # holding the previous app.js from its service-worker cache reads
+            # `m.username` and would render the literal "undefined (Creator)"
+            # for every member until the new bundle lands. It carries the same
+            # label as `name`, so it discloses nothing; it exists only so the
+            # deploy is not visibly broken for anyone mid-session.
+            # Remove once `product-completion` ships — that branch reads `name`.
+            "username": labels.get(m.user_id),
             "is_creator": m.user_id == team.created_by_user_id,
         })
 

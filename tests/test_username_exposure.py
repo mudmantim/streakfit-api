@@ -88,8 +88,11 @@ def test_roster_labels_are_not_derived_from_the_login(client):
 
     assert names == ['Member 1', 'Member 2'], names
     for m in roster['members']:
-        assert 'username' not in m, m
         assert m['name'] not in (CREATOR, JOINER)
+        # The deprecated compat key is allowed to exist, but only carrying the
+        # same label. What is forbidden is the login, under any key.
+        assert m.get('username') == m['name']
+        assert not {CREATOR, JOINER} & set(str(v) for v in m.values())
 
 
 def test_team_history_never_names_a_member_by_login(client):

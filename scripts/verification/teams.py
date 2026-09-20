@@ -36,7 +36,8 @@ def run(api, results, scenario):
         )
         results.check(
             "teams.roster_carries_no_login_identifier",
-            not (logins & roster_names) and all("username" not in m for m in members),
+            not (logins & roster_names)
+            and not any(str(v) in logins for m in members for v in m.values()),
             f"roster={roster_names} keys={sorted(members[0])}",
         )
         results.check(
