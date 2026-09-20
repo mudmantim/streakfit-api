@@ -188,11 +188,34 @@ branch the shared tree is on):
 **Re-measured** by running that registry entry through `origin/master`'s
 `verifyApp()` against a local StreakFit:
 
-> **12 checks — 11 PASS, 1 UNKNOWN, 0 FAIL. Overall PASS, level VERIFIED,
-> recommendation `proceed`.**
+> **12 checks — 11 PASS, 1 UNKNOWN, 0 FAIL. Overall PASS, recommendation
+> `proceed`, headline level VERIFIED *as the runner computed it*.**
 
-The single UNKNOWN is `self.coach.memory_writes` ("none since boot"), which is
-its designed value at zero.
+**That headline level is worth reading narrowly, and the qualification is
+mine to make rather than something to quote past.** The framework's own Part 5
+defines `VERIFIED` as an assertion that **"would have failed if the property
+were false"**, and says it **"requires a negative control: a demonstration
+that the check can fail."** In this run, **exactly one of the twelve checks
+carries an in-run negative control** — `auth.boundary`, which probes a
+nonexistent path alongside the real one and observed *"A nonexistent path
+answers 404 here, so a 401 at /api/me is the boundary, not a missing route."*
+Ten of the twelve checks carry level VERIFIED; the **other nine** emit it with
+nothing in the result establishing they could have failed.
+
+This is a known gap in the framework, not a defect in StreakFit and not a
+reason to re-run anything: `docs/PRODUCTION_VERIFICATION_FRAMEWORK.md` says so
+about itself in its own opening — the rule is *"not checkable from a result.
+Proposed correction under review; see the audit of 2026-09-20."* The Command
+session tracks it as **P5**. The roll-up computed VERIFIED correctly given what
+the checks declared about themselves. **So: treat "PASS / proceed" as the real
+finding, and "VERIFIED" as the runner's arithmetic rather than as proof of ten
+demonstrated negative controls.**
+
+The single UNKNOWN is `self.coach.memory_writes` ("none since boot"), its
+designed value at zero. **That it did not drag the headline down is by design,
+not luck:** `rollUp` takes the weakest link across *critical* checks only and
+excludes checks never attempted, and this one is non-critical. Same for the
+OBSERVED on `self.coach.configured`. Neither was overlooked.
 
 **Owner of the change:** **another StreakFit session**, not the Command
 session and not queued for you. Committed as `5a9b8f9` ("Verification probes
@@ -207,13 +230,15 @@ throttle guard that reports UNKNOWN when no attempt was actually rejected.
 score was invented.** The verifier was extracted read-only into a scratchpad
 and run from there.
 
-**Two caveats that keep this out of §1:**
+**Two caveats keep this out of §1. The first is the one that matters.**
 
-1. That PASS is a **local development build** (`environment: development`,
-   `storageProvider: sqlite`). **Production has never been measured this
-   way.** Qualification of the deployed product remains unmeasured until §4c.
-2. **§6A is open and not ours to fix.** StreakFit's Option B rate-limit
-   fallback degrades *deliberately* when shared storage is unreachable, and
+1. **The run describes a build nobody would use.** `environment:
+   development`, `storageProvider: sqlite`. **Production has never been
+   measured this way**, and qualification of the deployed product stays
+   unmeasured until §4c. Everything above is a statement about a laptop.
+2. Second, and smaller: **§6A is open and not ours to fix.** StreakFit's
+   Option B rate-limit fallback degrades *deliberately* when shared storage
+   is unreachable, and
    Command's `CheckStatus` has no value for "degraded on purpose" — so it
    reports FAIL and the weakest-link roll-up recommends "roll back" for a
    build that is not the problem. Written up at
