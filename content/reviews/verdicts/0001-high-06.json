@@ -1,0 +1,229 @@
+{
+  "verdicts": [
+    {
+      "id": "SF-FCT-000227",
+      "verdict": "accept",
+      "reason": "Planning fallacy, correctly stated including the direction of the error (people overestimate what they will finish). Hedged with 'reliably poor' rather than a made-up percentage. Age-appropriate and useful."
+    },
+    {
+      "id": "SF-FCT-000228",
+      "verdict": "accept",
+      "reason": "Small-dose habit framing is consistent with the app's values and safe; the second clause (repetition ingrains whatever pattern is repeated) is ordinary motor-learning and is stated without a fake number. Teaches something real about form."
+    },
+    {
+      "id": "SF-FCT-000229",
+      "verdict": "revise",
+      "reason": "Firmness defect. 'is what keeps MOST streaks alive' is an unearned proportion — nobody measured what keeps most streaks alive. The underlying idea (implementation intentions / if-then plans help adherence) is supported, but it is stated as a measured majority. Soften to something like 'Deciding in advance what you'll do on the day you don't feel like it is one of the things that keeps a streak alive.'"
+    },
+    {
+      "id": "SF-FCT-000230",
+      "verdict": "revise",
+      "reason": "Two unearned comparatives in one item: 'Kids move most when nobody calls it exercise' (superlative) and 'tends to go on considerably longer' (a quantified duration comparison nobody measured here). The core observation — framing activity as play rather than exercise raises engagement — is plausible but is stated far more firmly than any cited evidence. Also `simplified` with no source for what is really a behavioural research claim."
+    },
+    {
+      "id": "SF-FCT-000231",
+      "verdict": "accept",
+      "reason": "Hedged ('most children', 'given time, space, and no instructions'), safe, and true of free play at the level of detail given. The closing line is editorial colour rather than a factual overreach."
+    },
+    {
+      "id": "SF-FCT-000232",
+      "verdict": "accept",
+      "reason": "Properly hedged with 'often'. Side-by-side walking reducing the pressure of a hard conversation is a modest, non-medical claim and is not stated as a measured effect. Safe for all ages."
+    },
+    {
+      "id": "SF-FCT-000233",
+      "verdict": "accept",
+      "reason": "Household behaviour concordance is real and the item hedges twice ('usually', 'a little'). No mechanism is invented and no proportion is claimed."
+    },
+    {
+      "id": "SF-FCT-000234",
+      "verdict": "accept",
+      "reason": "Sibling modelling is well documented, and the claim is hedged with 'tend to'. The 'coaches' line is framing, not an invented effect. Safe and age-appropriate."
+    },
+    {
+      "id": "SF-FCT-000235",
+      "verdict": "revise",
+      "reason": "Stated as a guaranteed outcome: a weekly repeat 'turns it into a landmark that kids still remember years later.' Family-ritual research supports that rituals are valued and remembered, but not that repeating anything weekly reliably produces a decades-long memory. Needs a hedge ('can become', 'often') rather than a promise."
+    },
+    {
+      "id": "SF-FCT-000236",
+      "verdict": "revise",
+      "reason": "'far more likely' is an unearned magnitude. Choice/autonomy does support intrinsic motivation, but the size of the effect here is invented. Drop 'far' or cite the autonomy-support evidence."
+    },
+    {
+      "id": "SF-FCT-000237",
+      "verdict": "accept",
+      "reason": "Straightforwardly true (incidental daily activity is real movement), no number claimed, safe, and it usefully reframes existing activity without any body or weight framing."
+    },
+    {
+      "id": "SF-FCT-000238",
+      "verdict": "revise",
+      "reason": "Safety. The item invites a nine-year-old to race 'to the end of the street' and does not name the traffic hazard, which the rubric requires for anything a child could copy and be hurt by. Relocate it to a safe setting (park, yard, path) or name the condition explicitly."
+    },
+    {
+      "id": "SF-FCT-000239",
+      "verdict": "accept",
+      "reason": "Warm, safe, non-comparative, and makes a genuine point about modelling across generations. No factual claim to overreach on."
+    },
+    {
+      "id": "SF-FCT-000240",
+      "verdict": "accept",
+      "reason": "True at the level given and directly aligned with the app's no-comparison stance. States a direction, not a measured effect size."
+    },
+    {
+      "id": "SF-FCT-000241",
+      "verdict": "accept",
+      "reason": "True, safe, and it reframes chores as movement without any weight or body-composition framing. Modest but it does teach the reframe."
+    },
+    {
+      "id": "SF-FCT-000242",
+      "verdict": "accept",
+      "reason": "Hedged with 'usually' and framed against adult expectation rather than as a measurement. Children being more fatigue-resistant in intermittent play is well supported, and the boredom half is plainly observational."
+    },
+    {
+      "id": "SF-FCT-000243",
+      "verdict": "accept",
+      "reason": "Inclusive, safe, no comparison of bodies, and it makes a real point about pacing a group. Nothing to verify and nothing overstated."
+    },
+    {
+      "id": "SF-FCT-000244",
+      "verdict": "revise",
+      "reason": "'one of the few things' is an unearned superlative and is easy to falsify — a nine-year-old and a sixty-year-old can genuinely cook, play games, garden or make music side by side too. The point survives without the ranking: say movement is one of the things they can do side by side at their own speeds."
+    },
+    {
+      "id": "SF-FCT-000245",
+      "verdict": "accept",
+      "reason": "Hedged with 'often', and the accountability/telling-someone effect is a reasonable, non-medical claim. No proportion or magnitude invented."
+    },
+    {
+      "id": "SF-FCT-000246",
+      "verdict": "revise",
+      "reason": "Three firmness problems stacked: 'the MOST reliable exercise partners', 'in MOST households', and the causal 'mainly because'. None of that is measured, and the dog-walking literature is actually mixed — a large share of dog owners do not walk their dog regularly. Rewrite as an observation about the daily prompt a dog provides, without the superlative or the household proportion."
+    },
+    {
+      "id": "SF-FCT-000247",
+      "verdict": "accept",
+      "reason": "True and non-quantified: playground play does develop balance, coordination and confidence. Safe, and the closing point (it doesn't feel like training) is the actual insight."
+    },
+    {
+      "id": "SF-FCT-000248",
+      "verdict": "accept",
+      "reason": "Correctly labelled `editorial`, which licenses the firmness of 'is the one that sticks'. Safe, no medical claim, and it says something worth reading to an adult user."
+    },
+    {
+      "id": "SF-FCT-000249",
+      "verdict": "accept",
+      "reason": "Hedged with 'tend to' on both halves and framed as a comparison against adults' own expectations rather than a measured quantity. Consistent with modelling research."
+    },
+    {
+      "id": "SF-FCT-000250",
+      "verdict": "accept",
+      "reason": "Verified anatomy: the fingers contain no muscle bellies; flexion and extension come from extrinsic forearm muscles acting through long tendons. The puppet-string image is an accurate simplification, not an invented mechanism."
+    },
+    {
+      "id": "SF-FCT-000251",
+      "verdict": "accept",
+      "reason": "Verified: 26 bones per foot, 52 of roughly 206 bones, which is genuinely about a quarter. The proportion is one of the few in this packet that is actually arithmetic rather than assertion."
+    },
+    {
+      "id": "SF-FCT-000252",
+      "verdict": "accept",
+      "reason": "Verified: the malleus, incus and stapes are the smallest bones in the body, the largest about 8 mm. 'All three on a fingernail' is a fair size image, not an invented measurement."
+    },
+    {
+      "id": "SF-FCT-000253",
+      "verdict": "accept",
+      "reason": "Verified: the femur is the longest and strongest bone, and its anterior bow (a real, named feature) is correctly described as a slight curve rather than straight. Good detail that most readers won't know."
+    },
+    {
+      "id": "SF-FCT-000254",
+      "verdict": "accept",
+      "reason": "Verified on both halves: the function of yawning genuinely is unresolved (and the item says so, which is the honest handling of an open question), and reading or thinking about yawning is a documented contagion trigger. 'Often' is the right hedge."
+    },
+    {
+      "id": "SF-FCT-000255",
+      "verdict": "accept",
+      "reason": "'More than six hundred' matches the standard skeletal-muscle count and is loose in the safe direction. 'Dozens at once' for a sit-to-stand is qualitative, not a fabricated number."
+    },
+    {
+      "id": "SF-FCT-000256",
+      "verdict": "accept",
+      "reason": "Microsaccades and fixational drift are established and the item claims nothing beyond their existence and imperceptibility. Genuinely surprising to a reader, which is what this category is for."
+    },
+    {
+      "id": "SF-FCT-000257",
+      "verdict": "accept",
+      "reason": "Verified: two lobes on the left, three on the right, and the left lung's cardiac notch really is the heart occupying that space. The 'gave up a lobe's worth of space' phrasing is a simplification of standard anatomy, not an invented mechanism."
+    },
+    {
+      "id": "SF-FCT-000258",
+      "verdict": "accept",
+      "reason": "'About a minute' is the mainstream resting figure (roughly 5 L blood over roughly 5 L/min cardiac output); published estimates run 20-60 seconds, so 'about a minute' is within range and appropriately approximate."
+    },
+    {
+      "id": "SF-FCT-000259",
+      "verdict": "accept",
+      "reason": "'Tens of thousands of miles' is the correctly loose version of the commonly cited 60,000-mile estimate — notably, the item did NOT commit to the precise figure, which is the right call given the estimate's softness."
+    },
+    {
+      "id": "SF-FCT-000260",
+      "verdict": "accept",
+      "reason": "True for the motor pathway the item names: myelinated alpha motor fibres conduct at roughly 70-120 m/s, well above highway speed. The comparison is qualitative and correctly scoped to brain-to-muscle signals rather than all nerves."
+    },
+    {
+      "id": "SF-FCT-000261",
+      "verdict": "accept",
+      "reason": "Established bone biology — vascularised, innervated, continuously remodelled — stated without any dose, rate or proportion. Corrects a real misconception children hold."
+    },
+    {
+      "id": "SF-FCT-000262",
+      "verdict": "accept",
+      "reason": "Verified: the auricular muscles are present in everyone and voluntary control is variable. Stated with the correct hedge ('only some people'), no proportion invented."
+    },
+    {
+      "id": "SF-FCT-000263",
+      "verdict": "accept",
+      "reason": "Verified and non-obvious: the visible lingual papillae are not themselves taste buds; the buds sit in the epithelium along the papillae's walls. A genuine correction of a common misconception."
+    },
+    {
+      "id": "SF-FCT-000264",
+      "verdict": "accept",
+      "reason": "Retronasal olfaction dominating flavour perception is well established in sensory science, and the blocked-nose observation is the everyday evidence for it. The proportion here ('most of the work') is one of the rare ones in this packet that the literature actually supports."
+    },
+    {
+      "id": "SF-FCT-000266",
+      "verdict": "accept",
+      "reason": "'About a fifth' matches the standard ~20% of resting metabolic rate for the brain, and the 'even when sitting still' clause is the correct and interesting part."
+    },
+    {
+      "id": "SF-FCT-000267",
+      "verdict": "accept",
+      "reason": "Verified against NASA: spinal lengthening in microgravity is commonly cited as up to about 3%, roughly two inches for a tall adult, so 'an inch or two' is accurate. The item also actively corrects the 'no gravity in space' misconception with the right explanation (free fall), which is a bonus rather than a defect."
+    },
+    {
+      "id": "SF-FCT-000269",
+      "verdict": "revise",
+      "reason": "Firmness defect of exactly the type this library has. The first half (fingernails grow faster than toenails) is solidly established; the second half — 'the nails on your dominant hand grow fastest of all' — is stated flatly as fact when the evidence is mixed: it rests largely on Bean's decades-long self-observation, and at least one peer-reviewed comparison found no significant right/left difference. Either drop the dominant-hand clause or mark it as something people have noticed but not settled."
+    },
+    {
+      "id": "SF-FCT-000270",
+      "verdict": "accept",
+      "reason": "Safe, non-clinical resilience framing that explicitly refuses to tell a reader they shouldn't find hard things hard. No mechanism, dose or proportion claimed."
+    },
+    {
+      "id": "SF-FCT-000271",
+      "verdict": "revise",
+      "reason": "'the one that changes the most' is an unearned superlative, ranking sleep above every other self-care behaviour with nothing to support the ranking. Sleep's importance is not in doubt; the league table is. Rewrite without the ranking, e.g. 'and one of the ones that changes the most.'"
+    },
+    {
+      "id": "SF-FCT-000272",
+      "verdict": "accept",
+      "reason": "Safe, age-appropriate conflict guidance with no medical or psychological claim beyond common sense. Nothing to overstate."
+    },
+    {
+      "id": "SF-FCT-000273",
+      "verdict": "accept",
+      "reason": "Defines gratitude honestly and explicitly rules out toxic positivity ('isn't pretending things are fine'), which is the right handling for a young audience. No claim about outcomes or benefits, so nothing to overreach."
+    }
+  ]
+}

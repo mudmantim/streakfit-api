@@ -1,0 +1,44 @@
+{
+  "verdicts": [
+    {
+      "id": "SF-TRV-000407",
+      "verdict": "revise",
+      "reason": "measured claim 'most of' with no sources \u2014 a comparative, proportion or dose needs one whatever the confidence tier says; hedge it or cite it"
+    },
+    {
+      "id": "SF-TRV-000408",
+      "verdict": "revise",
+      "reason": "measured claim 'faster than' with no sources \u2014 a comparative, proportion or dose needs one whatever the confidence tier says; hedge it or cite it"
+    },
+    {
+      "id": "SF-TRV-000432",
+      "verdict": "revise",
+      "reason": "measured claim 'less than' with no sources \u2014 a comparative, proportion or dose needs one whatever the confidence tier says; hedge it or cite it"
+    },
+    {
+      "id": "SF-TRV-000461",
+      "verdict": "revise",
+      "reason": "measured claim 'more than' with no sources \u2014 a comparative, proportion or dose needs one whatever the confidence tier says; hedge it or cite it"
+    },
+    {
+      "id": "SF-TRV-000467",
+      "verdict": "revise",
+      "reason": "measured claim 'most of' with no sources \u2014 a comparative, proportion or dose needs one whatever the confidence tier says; hedge it or cite it"
+    },
+    {
+      "id": "SF-TRV-000468",
+      "verdict": "revise",
+      "reason": "measured claim 'most of' with no sources \u2014 a comparative, proportion or dose needs one whatever the confidence tier says; hedge it or cite it"
+    },
+    {
+      "id": "SF-TRV-000471",
+      "verdict": "revise",
+      "reason": "measured claim 'most people' with no sources \u2014 a comparative, proportion or dose needs one whatever the confidence tier says; hedge it or cite it"
+    },
+    {
+      "id": "SF-TRV-000474",
+      "verdict": "revise",
+      "reason": "measured claim 'faster than' with no sources \u2014 a comparative, proportion or dose needs one whatever the confidence tier says; hedge it or cite it"
+    }
+  ]
+}

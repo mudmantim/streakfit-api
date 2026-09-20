@@ -1,0 +1,39 @@
+{
+  "verdicts": [
+    {
+      "id": "SF-EXP-000001",
+      "verdict": "revise",
+      "reason": "measured claim 'Most people' with no sources \u2014 a comparative, proportion or dose needs one whatever the confidence tier says; hedge it or cite it"
+    },
+    {
+      "id": "SF-EXP-000002",
+      "verdict": "revise",
+      "reason": "measured claim 'most people' with no sources \u2014 a comparative, proportion or dose needs one whatever the confidence tier says; hedge it or cite it"
+    },
+    {
+      "id": "SF-EXP-000003",
+      "verdict": "revise",
+      "reason": "measured claim 'better than' with no sources \u2014 a comparative, proportion or dose needs one whatever the confidence tier says; hedge it or cite it"
+    },
+    {
+      "id": "SF-EXP-000010",
+      "verdict": "revise",
+      "reason": "measured claim 'most of' with no sources \u2014 a comparative, proportion or dose needs one whatever the confidence tier says; hedge it or cite it"
+    },
+    {
+      "id": "SF-EXP-000013",
+      "verdict": "revise",
+      "reason": "measured claim 'twice as' with no sources \u2014 a comparative, proportion or dose needs one whatever the confidence tier says; hedge it or cite it"
+    },
+    {
+      "id": "SF-FCT-000307",
+      "verdict": "revise",
+      "reason": "measured claim 'more than' with no sources \u2014 a comparative, proportion or dose needs one whatever the confidence tier says; hedge it or cite it"
+    },
+    {
+      "id": "SF-FCT-000310",
+      "verdict": "revise",
+      "reason": "measured claim 'most sporting' with no sources \u2014 a comparative, proportion or dose needs one whatever the confidence tier says; hedge it or cite it"
+    }
+  ]
+}
