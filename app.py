@@ -2501,6 +2501,14 @@ def get_me():
         "recent_week": get_recent_week(user_id),
         "xp_total": user.xp_total,
         "acorns_total": user.acorns_total,
+        # Both halves, always. The client works out what is spendable as
+        # earned - spent, and this endpoint sent only `earned` — so the Progress
+        # tab, the ONLY screen showing a person their acorns, displayed lifetime
+        # earnings as though they were a balance. Buy a 20-acorn filter and the
+        # composer said "10 left" while Progress still said 30, through a full
+        # reload. `acorns_available` is sent too so nothing has to recompute it.
+        "acorns_spent": user.acorns_spent or 0,
+        "acorns_available": _acorns_available(user),
         "level": level_info['level'],
         "level_title": level_info['level_title'],
         "xp_into_level": level_info['xp_into_level'],
@@ -2553,6 +2561,9 @@ def update_me():
         "username": user.username,
         "display_name": user.display_name,
         "rickie_calls_you": _safe_display_name(user),
+        "acorns_total": user.acorns_total,
+        "acorns_spent": user.acorns_spent or 0,
+        "acorns_available": _acorns_available(user),
         "skill_level": user.skill_level,
         "display_mode": user.display_mode,
         "rickie_mode": user.rickie_mode,

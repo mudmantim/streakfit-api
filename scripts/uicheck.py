@@ -1043,6 +1043,30 @@ def check_acorns_are_spendable_without_a_team(b: Browser, base: str, app) -> Non
                  ".find(x=>x.key==='sweat_mode'); return f && f.unlocked;})()")
     check(owned is True, "and it is still owned after a reload")
 
+    # The number on the PROGRESS tab, after spending — which is the screen a
+    # person actually looks at, and the one this check previously never
+    # exercised. It passed because the fixture had spent nothing, so
+    # earned - spent happened to equal earned. An independent reviewer bought a
+    # filter and found the composer saying "10 left" while Progress still said
+    # 30, through a full reload: /api/me never sent acorns_spent at all, and a
+    # missing field reads exactly like zero spent.
+    shown = b.js("_acornsAvailable()")
+    check(shown == 3,
+          "the Progress figure is what is SPENDABLE after a purchase, "
+          "not lifetime earned", f"showed {shown} (should be 18 - 15)")
+    check(b.js("currentUser && typeof currentUser.acorns_available === 'number'"),
+          "and the server sends the spendable figure rather than leaving the "
+          "client to infer it")
+
+    # Spending must take two taps. One exploratory tap on a priced chip used to
+    # spend the acorns outright, and nothing refunds them.
+    src = b.js("String(window._offerFilterPurchase || "
+               "(typeof _offerFilterPurchase !== 'undefined' "
+               "? _offerFilterPurchase : ''))")
+    confirms = ("_pendingFilterKey" in str(src)) and ("Tap it again" in str(src))
+    check(confirms,
+          "buying a filter asks before it spends, rather than on first tap")
+
 
 def check_display_name_can_be_set_changed_and_cleared(b: Browser, base: str, app) -> None:
     """The control that decides what Rickie calls somebody out loud.

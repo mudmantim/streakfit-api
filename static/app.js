@@ -276,6 +276,13 @@ function renderJourneyCard() {
 // actually spend is the kind of small dishonesty that makes a reward feel fake.
 function _acornsAvailable() {
     if (!currentUser) return 0;
+    // Prefer the server's own figure; fall back to the subtraction for any
+    // response that predates it. The subtraction silently returned LIFETIME
+    // earnings for months because /api/me never sent acorns_spent, and a
+    // missing field reads exactly like zero spent.
+    if (typeof currentUser.acorns_available === 'number') {
+        return currentUser.acorns_available;
+    }
     var earned = currentUser.acorns_total || 0;
     var spent = currentUser.acorns_spent || 0;
     return Math.max(0, earned - spent);
@@ -2589,13 +2596,32 @@ function _buildPhotoComposer(teamId, objectUrl, solo) {
     note.textContent = 'Pick a look. Rickie has opinions.';
 }
 
+// Two taps, not one.
+//
+// A priced chip looked exactly like a free one, so a single exploratory tap
+// spent the acorns instantly and irreversibly. An independent reviewer spent
+// two thirds of everything they had earned by tapping a chip to see what it
+// looked like. Acorns take days to earn and nothing refunds them, so the first
+// tap now only asks.
+var _pendingFilterKey = null;
+
 async function _offerFilterPurchase(filter, note, paintStrip, repaint) {
     if (_photoAcorns < filter.cost) {
+        _pendingFilterKey = null;
         note.className = 'photo-filter-note is-locked';
         note.textContent = 'That one costs ' + filter.cost + ' acorns — you have '
             + _photoAcorns + '. Acorns come from showing up.';
         return;
     }
+    if (_pendingFilterKey !== filter.key) {
+        _pendingFilterKey = filter.key;
+        note.className = 'photo-filter-note';
+        note.textContent = filter.name + ' costs ' + filter.cost
+            + ' acorns, and you have ' + _photoAcorns
+            + '. Tap it again to spend them.';
+        return;
+    }
+    _pendingFilterKey = null;
     note.className = 'photo-filter-note';
     note.textContent = 'Unlocking ' + filter.name + '…';
 
