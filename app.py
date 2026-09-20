@@ -4782,9 +4782,18 @@ def get_team_moments(team_id):
     if not membership:
         return jsonify({"error": "Forbidden"}), 403
 
+    # The team's story from when you arrived, not before it.
+    #
+    # Moments name people — "X joined", "X shared a photo" — so a newcomer
+    # reading the full history learns who has been in this family's team and
+    # what they did, from before they were part of it. Aggregates are treated
+    # differently on purpose: the campfire total is the team's shared
+    # accomplishment and is the whole point of the feature, so it is not
+    # filtered. Named events are.
     moments = db.session.execute(
         db.select(TeamMoment)
-        .where(TeamMoment.team_id == team_id)
+        .where(TeamMoment.team_id == team_id,
+               TeamMoment.occurred_at >= membership.joined_at)
         .order_by(TeamMoment.occurred_at.desc())
     ).scalars().all()
 
@@ -4852,6 +4861,28 @@ def create_rickie_team_message(team_id, trigger):
     )
     db.session.add(message)
     return message
+
+
+def _member_since(team_id, user_id):
+    """When this person's CURRENT membership of this team began, or None.
+
+    The team layer authorised content by "are you a member", full stop, so
+    joining a team handed you everything that had ever been said in it. A
+    child added to an existing team inherited every conversation and every
+    photograph that preceded them.
+
+    `TeamMembership.joined_at` already existed and was read nowhere in the
+    codebase — one match, the column definition. This is the function that
+    makes it mean something.
+
+    Returns the boundary rather than a boolean so callers filter on it
+    directly. None means "not a member", which every caller already rejects.
+    """
+    return db.session.execute(
+        db.select(TeamMembership.joined_at).where(
+            TeamMembership.team_id == team_id,
+            TeamMembership.user_id == user_id)
+    ).scalar_one_or_none()
 
 
 def _peer_names_for_ids(user_ids):
@@ -5042,9 +5073,11 @@ def get_team_messages(team_id):
     if not membership:
         return jsonify({"error": "Forbidden"}), 403
 
+    # Nothing said before you arrived. See _member_since.
     messages = db.session.execute(
         db.select(TeamMessage)
-        .where(TeamMessage.team_id == team_id)
+        .where(TeamMessage.team_id == team_id,
+               TeamMessage.created_at >= membership.joined_at)
         .order_by(TeamMessage.created_at.asc())
     ).scalars().all()
 
@@ -5461,7 +5494,14 @@ def get_team_photo(team_id, public_id):
     ).scalar_one_or_none()
     # Same 404 whether it never existed, belongs to another team, or is gone --
     # an id should not be able to confirm that a photo exists somewhere else.
-    if photo is None or photo.team_id != team_id or photo.deleted_at is not None:
+    #
+    # A photograph taken before you joined gets the same 404, and this is the
+    # path that actually serves the bytes: filtering it out of the thread
+    # would leave the image one direct request away, which is not a boundary
+    # at all.
+    if (photo is None or photo.team_id != team_id
+            or photo.deleted_at is not None
+            or photo.created_at < membership.joined_at):
         return jsonify({"error": "not_found"}), 404
     if photo.expires_at and photo.expires_at <= datetime.utcnow():
         return jsonify({"error": "expired"}), 410
