@@ -169,7 +169,22 @@ def ledger_append(batch: str, records: list[dict]) -> Path:
     return path
 
 
-def cmd_emit(batch: str, stage: str, limit: int | None) -> int:
+def cmd_emit(batch: str, stage: str, limit: int | None,
+             chunk: int | None = None) -> int:
+    """Write reviewer packets for one batch.
+
+    `--chunk` exists for RE-REVIEW. The inherited 0001 pool is ~500 items that
+    were marked accepted at `read` depth — nobody checked the claims against
+    anything — and a single 500-item packet is not a review, it is a reading
+    marathon that one reviewer does badly at the end. Chunking lets the same
+    pool go to several independent reviewers who each see a slice and none of
+    whom sees the others' verdicts.
+
+    Note what is NOT passed through, and why it matters more here than in a
+    first review: `stage` is stripped, so a re-reviewer is never told that the
+    item they are judging is already live. Being shown a prior verdict is the
+    fastest way to reproduce it.
+    """
     rows = [r for r in load_batch(batch) if r[2].get("stage") == stage]
     if limit:
         rows = rows[:limit]
@@ -182,15 +197,21 @@ def cmd_emit(batch: str, stage: str, limit: int | None) -> int:
              if k not in ("review", "stage", "batch", "added")})
     outdir = LEDGER_DIR / "packets"
     outdir.mkdir(parents=True, exist_ok=True)
+    wrote = 0
     for name, items in packets.items():
         if not items:
             continue
-        path = outdir / f"{batch}-{name}.json"
-        path.write_text(json.dumps(
-            {"lane": name, "rubric": HIGH_RUBRIC if name == "high" else LOW_RUBRIC,
-             "items": items}, indent=2, ensure_ascii=False), encoding="utf-8")
-        print(f"{name:5s} lane: {len(items):4d} items -> {path.relative_to(ROOT)}")
-    if not any(packets.values()):
+        size = chunk or len(items)
+        slices = [items[i:i + size] for i in range(0, len(items), size)]
+        for n, part in enumerate(slices, 1):
+            suffix = f"-{n:02d}" if chunk else ""
+            path = outdir / f"{batch}-{name}{suffix}.json"
+            path.write_text(json.dumps(
+                {"lane": name, "rubric": HIGH_RUBRIC if name == "high" else LOW_RUBRIC,
+                 "items": part}, indent=2, ensure_ascii=False), encoding="utf-8")
+            print(f"{name:5s} lane: {len(part):4d} items -> {path.relative_to(ROOT)}")
+            wrote += 1
+    if not wrote:
         print(f"nothing at stage {stage!r} in batch {batch}")
     return 0
 
@@ -311,6 +332,9 @@ def main() -> int:
     ap.add_argument("--emit", action="store_true")
     ap.add_argument("--stage", default="generated")
     ap.add_argument("--limit", type=int)
+    ap.add_argument("--chunk", type=int,
+                    help="split each lane into packets of this many items, for "
+                         "handing to several independent reviewers")
     ap.add_argument("--apply", type=Path)
     ap.add_argument("--reviewer", default="unnamed-reviewer")
     ap.add_argument("--depth", default="read", choices=("sourced", "read", "tested"))
@@ -320,7 +344,7 @@ def main() -> int:
     a = ap.parse_args()
 
     if a.emit:
-        return cmd_emit(a.batch, a.stage, a.limit)
+        return cmd_emit(a.batch, a.stage, a.limit, a.chunk)
     if a.apply:
         return cmd_apply(a.batch, a.apply, a.reviewer, a.depth)
     if a.spot_check:
