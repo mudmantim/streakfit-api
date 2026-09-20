@@ -600,6 +600,48 @@ def check_side_quests_still_work(b: Browser, base: str, app) -> None:
           f"list shows {listed[:80]!r}")
     check("Check In" in listed, "a new side quest offers a check-in")
 
+    # Correcting and removing it — through the buttons, not the API.
+    #
+    # Side Quests were write-once: no rename, no delete, and no route to build
+    # either on. A typo was permanent and an abandoned habit sat in the list
+    # forever. Driven here rather than only in pytest because the previous
+    # silent breakage in this section was a UI wiring bug that 295 green tests
+    # did not see.
+    opened = b.js("(()=>{const e=[...document.querySelectorAll('.challenge-edit-btn')];"
+                  " if(!e.length) return 'no edit button';"
+                  " e[0].click();"
+                  " return document.querySelector('.challenge-editor')"
+                  "   ? 'ok' : 'editor did not open';})()")
+    if not check(opened == "ok", "a side quest can be edited", str(opened)):
+        return
+    time.sleep(0.4)
+
+    b.js("(()=>{const i=document.querySelector('.challenge-edit-input');"
+         " i.value='Read for 20 minutes';"
+         " document.querySelector('.challenge-edit-save').click(); return 1;})()")
+    time.sleep(2.5)
+    listed = b.js("document.getElementById('challenges-list').innerText") or ""
+    check("Read for 20 minutes" in listed and "Read for 10 minutes" not in listed,
+          "renaming it sticks", f"list shows {listed[:90]!r}")
+
+    # One tap must NOT delete. The button says what the second tap will do.
+    b.js("(()=>{document.querySelector('.challenge-edit-btn').click(); return 1;})()")
+    time.sleep(0.4)
+    first = b.js("(()=>{const r=document.querySelector('.challenge-edit-remove');"
+                 " r.click(); return r.textContent;})()")
+    time.sleep(1.2)
+    still = b.js("document.getElementById('challenges-list').innerText") or ""
+    check("Read for 20 minutes" in still,
+          "one tap on Remove does not remove it", f"list shows {still[:90]!r}")
+    check("again" in str(first).lower(),
+          "and the button says what the next tap will do", str(first))
+
+    b.js("(()=>{document.querySelector('.challenge-edit-remove').click(); return 1;})()")
+    time.sleep(2.5)
+    after = b.js("document.getElementById('challenges-list').innerText") or ""
+    check("Read for 20 minutes" not in after,
+          "the second tap removes it", f"list still shows {after[:90]!r}")
+
 
 def check_step_up_is_offered_not_imposed(b: Browser, base: str, app) -> None:
     """The progression affordance, driven through the real UI.

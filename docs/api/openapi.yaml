@@ -1000,6 +1000,84 @@ paths:
               example: {"error": "Not found"}
         '422': {$ref: '#/components/responses/UnprocessableJWT'}
 
+    patch:
+      tags: [Challenges]
+      summary: Rename a side quest
+      description: >
+        Changes the title only. The streak, best streak and check-in history are
+        untouched — the name is a label, and renaming must never cost somebody
+        their history. Scoped to the caller in the query, so another user's id
+        returns 404 rather than 403.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: challenge_id
+          in: path
+          required: true
+          schema: {type: integer}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title]
+              properties:
+                title: {type: string, maxLength: 100}
+            example: {"title": "Read ten pages"}
+      responses:
+        '200':
+          description: The renamed challenge.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Challenge'}
+        '400':
+          description: Empty or over-long title. The message is written for a person.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+              example: {"error": "Give it a name first."}
+        '401': {$ref: '#/components/responses/UnauthorizedJWT'}
+        '404':
+          description: No such challenge owned by this user.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '422': {$ref: '#/components/responses/UnprocessableJWT'}
+
+    delete:
+      tags: [Challenges]
+      summary: Remove a side quest
+      description: >
+        Deletes the row. Nothing about the daily mission lives on it, so the
+        mission streak, XP, levels and lifetime totals are unaffected — a
+        promise the UI makes out loud and `tests/test_side_quest_editing.py`
+        holds to. Scoped to the caller in the query.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: challenge_id
+          in: path
+          required: true
+          schema: {type: integer}
+      responses:
+        '200':
+          description: Removed.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message: {type: string}
+              example: {"message": "Side Quest removed"}
+        '401': {$ref: '#/components/responses/UnauthorizedJWT'}
+        '404':
+          description: No such challenge owned by this user.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '422': {$ref: '#/components/responses/UnprocessableJWT'}
+
   /api/challenges/{challenge_id}/checkin:
     post:
       tags: [Challenges]

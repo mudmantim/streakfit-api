@@ -2995,6 +2995,76 @@ def check_in(challenge_id):
         "new_record": new_record
     }), 200
 
+@app.route('/api/challenges/<int:challenge_id>', methods=['PATCH'])
+@jwt_required()
+def rename_challenge(challenge_id):
+    """Rename a Side Quest.
+
+    Side Quests are the one thing in this app a person types themselves, and
+    until now they were also the one thing they could never correct. A typo in
+    a habit you look at every day, forever, is a small daily reminder that the
+    app does not bend for you.
+    """
+    user_id = int(get_jwt_identity())
+    challenge = db.session.execute(
+        db.select(Challenge).where(
+            Challenge.id == challenge_id,
+            Challenge.user_id == user_id,
+        )
+    ).scalar_one_or_none()
+    if challenge is None:
+        abort(404)
+
+    data = request.get_json(silent=True) or {}
+    title = (data.get('title') or '').strip()
+    title = " ".join(title.split())
+    if not title:
+        return jsonify({"error": "Give it a name first."}), 400
+    if len(title) > 100:
+        return jsonify({"error": "That name is a bit long — 100 characters "
+                                 "or fewer, please."}), 400
+
+    challenge.title = title
+    db.session.commit()
+    return jsonify({
+        "id": challenge.id,
+        "title": challenge.title,
+        "current_streak": challenge.current_streak,
+        "longest_streak": challenge.longest_streak,
+    }), 200
+
+
+@app.route('/api/challenges/<int:challenge_id>', methods=['DELETE'])
+@jwt_required()
+def delete_challenge(challenge_id):
+    """Remove a Side Quest.
+
+    There was no way to. A person could add habits and never remove one, so a
+    list they built themselves silently became a list of things they had
+    stopped doing and were reminded of daily — which is the opposite of the
+    rule that this app never punishes anyone for showing up.
+
+    Scoped to the caller by the WHERE clause rather than by a check after the
+    fetch, so a wrong id cannot delete somebody else's row even momentarily.
+    Deleting a Side Quest does NOT touch the mission streak, XP, levels or
+    lifetime totals — nothing a person has actually done is stored on this row,
+    only the counter for this one habit.
+    """
+    user_id = int(get_jwt_identity())
+    challenge = db.session.execute(
+        db.select(Challenge).where(
+            Challenge.id == challenge_id,
+            Challenge.user_id == user_id,
+        )
+    ).scalar_one_or_none()
+    if challenge is None:
+        abort(404)
+
+    db.session.delete(challenge)
+    db.session.commit()
+    return jsonify({"message": "Side Quest removed"}), 200
+
+
 def todays_mission(user_id, skill_level, today):
     """Today's five, plus everything needed to explain them.
 

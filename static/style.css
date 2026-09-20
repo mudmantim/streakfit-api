@@ -4120,3 +4120,59 @@ body.theme-classic .theme-btn.active { background: rgba(79,70,229,.2); }
     cursor: pointer;
 }
 .guest-signup-btn:hover { background: rgba(255, 255, 255, .18); }
+
+/* Side Quest editing. The card is a flex row; the editor is a full-width
+   block below it, so it never squeezes the check-in button. */
+.challenge-edit-btn {
+    flex: 0 0 auto;
+    min-height: 44px;
+    padding: 0 .75rem;
+    border: 1px solid var(--gray-200);
+    border-radius: var(--radius);
+    background: transparent;
+    color: var(--gray-500);
+    font: inherit;
+    font-size: var(--text-sm);
+    cursor: pointer;
+}
+.challenge-edit-btn:hover { color: var(--gray-900); border-color: currentColor; }
+
+.challenge-editor { flex: 1 0 100%; margin-top: .6rem; }
+.challenge-edit-input {
+    width: 100%;
+    min-height: 44px;
+    padding: .5rem .7rem;
+    border: 1px solid var(--gray-200);
+    border-radius: var(--radius);
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    box-sizing: border-box;
+}
+.challenge-edit-row { display: flex; flex-wrap: wrap; gap: .4rem; margin-top: .5rem; }
+.challenge-edit-row button {
+    min-height: 44px;
+    padding: 0 .9rem;
+    border-radius: var(--radius);
+    font: inherit;
+    font-weight: 600;
+    cursor: pointer;
+}
+.challenge-edit-cancel {
+    border: 1px solid var(--gray-200);
+    background: transparent;
+    color: inherit;
+}
+.challenge-edit-remove {
+    margin-left: auto;
+    border: 1px solid #dc2626;
+    background: transparent;
+    color: #dc2626;
+}
+.challenge-edit-remove.is-confirming { background: #dc2626; color: #fff; }
+.challenge-edit-note {
+    margin: .45rem 0 0;
+    font-size: .82rem;
+    opacity: .8;
+}
+

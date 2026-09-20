@@ -6739,7 +6739,104 @@ function renderChallenge(c) {
 
     card.appendChild(info);
     card.appendChild(btn);
+
+    // Edit — the thing a Side Quest has never had.
+    //
+    // Side Quests are the only content a person types into this app, and they
+    // were write-once: no rename, no removal, and no DELETE route to build one
+    // on. So a typo was permanent, and a habit you stopped doing sat in the
+    // list forever with "Not started" beside it — a daily reminder of a thing
+    // you gave up, inside an app whose first design rule is never to punish
+    // somebody for showing up.
+    //
+    // No confirm() anywhere: a browser modal blocks the page, and this is a
+    // habit tracker, not a bank. Removal takes a second deliberate tap on a
+    // button that has changed its own label to say exactly what it will do.
+    var editBtn = document.createElement('button');
+    editBtn.type = 'button';
+    editBtn.className = 'challenge-edit-btn';
+    editBtn.textContent = 'Edit';
+    editBtn.setAttribute('aria-label', 'Edit ' + c.title);
+    editBtn.addEventListener('click', function () {
+        if (card.querySelector('.challenge-editor')) return;
+        editBtn.hidden = true;
+        card.appendChild(_buildChallengeEditor(c, card, editBtn));
+    });
+    card.appendChild(editBtn);
     return card;
+}
+
+function _buildChallengeEditor(c, card, editBtn) {
+    var box = document.createElement('div');
+    box.className = 'challenge-editor';
+
+    var field = document.createElement('input');
+    field.type = 'text';
+    field.className = 'challenge-edit-input';
+    field.value = c.title;
+    field.maxLength = 100;
+    field.setAttribute('aria-label', 'New name for ' + c.title);
+
+    var note = document.createElement('p');
+    note.className = 'challenge-edit-note';
+
+    var save = document.createElement('button');
+    save.type = 'button';
+    save.className = 'btn-primary challenge-edit-save';
+    save.textContent = 'Save';
+    save.addEventListener('click', async function () {
+        var title = field.value.trim();
+        if (!title || title === c.title) { close(); return; }
+        save.disabled = true;
+        var r = await api('/api/challenges/' + c.id, 'PATCH', { title: title });
+        save.disabled = false;
+        if (r && r.status === 200) { await loadChallenges(); return; }
+        note.textContent = (r && r.data && r.data.error) || 'Could not rename that.';
+    });
+
+    // Two taps. Acorns get the same treatment for the same reason: an action
+    // nothing can undo should not be one tap away from an exploratory finger.
+    var pending = false;
+    var remove = document.createElement('button');
+    remove.type = 'button';
+    remove.className = 'challenge-edit-remove';
+    remove.textContent = 'Remove';
+    remove.addEventListener('click', async function () {
+        if (!pending) {
+            pending = true;
+            remove.textContent = 'Tap again to remove';
+            remove.classList.add('is-confirming');
+            note.textContent = 'Your mission streak, XP and levels are not affected.';
+            return;
+        }
+        remove.disabled = true;
+        var r = await api('/api/challenges/' + c.id, 'DELETE');
+        if (r && r.status === 200) { await loadChallenges(); return; }
+        remove.disabled = false;
+        note.textContent = 'Could not remove that — try again in a moment.';
+    });
+
+    var cancel = document.createElement('button');
+    cancel.type = 'button';
+    cancel.className = 'challenge-edit-cancel';
+    cancel.textContent = 'Cancel';
+    cancel.addEventListener('click', close);
+
+    function close() {
+        box.remove();
+        editBtn.hidden = false;
+    }
+
+    var row = document.createElement('div');
+    row.className = 'challenge-edit-row';
+    row.appendChild(save);
+    row.appendChild(cancel);
+    row.appendChild(remove);
+
+    box.appendChild(field);
+    box.appendChild(row);
+    box.appendChild(note);
+    return box;
 }
 
 async function handleCreateChallenge(event) {
