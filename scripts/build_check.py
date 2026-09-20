@@ -159,6 +159,71 @@ def check_js_syntax() -> None:
             fail(f"{js.name}: JavaScript syntax error — {proc.stderr.strip().splitlines()[:3]}")
 
 
+# ── 3b. The API client survives a response that is not JSON ─────────────────
+_API_GUARD_PROBE = r"""
+const src = require('fs').readFileSync(process.argv[1], 'utf8');
+const start = src.indexOf('async function api(path, method, body) {');
+if (start < 0) { console.error('api() not found'); process.exit(2); }
+const end = src.indexOf('\n}', src.indexOf('return { status: res.status, data: data };', start)) + 2;
+let resp;
+const api = new Function('localStorage','fetch','showView','setError',
+  src.slice(start, end) + '; return api;')(
+  { getItem: () => null, removeItem: () => {} }, async () => resp, () => {}, () => {});
+let bad = 0;
+const cases = [
+  [502, () => { throw new SyntaxError('Unexpected token <'); }],
+  [403, () => { throw new SyntaxError('Unexpected token <'); }],
+  [204, () => { throw new SyntaxError('Unexpected end of JSON input'); }],
+  [200, () => ({ ok: true })],
+];
+(async () => {
+  for (const [status, body] of cases) {
+    resp = { status, json: async () => body() };
+    try {
+      const out = await api('/api/probe');
+      if (!out || !out.data || typeof out.data !== 'object') {
+        console.error('status ' + status + ' returned no usable object'); bad++;
+      }
+    } catch (e) { console.error('status ' + status + ' rejected: ' + e.message); bad++; }
+  }
+  process.exit(bad ? 1 : 0);
+})();
+"""
+
+
+def check_api_client_guard() -> None:
+    """A response that is not JSON must not reject an uncaught promise.
+
+    `api()` wraps its try/catch around the fetch, not the parse, so an
+    unguarded `await res.json()` turns any HTML error body — a platform 502, a
+    gateway timeout, a proxy page — into an unhandled rejection. The caller
+    never resolves and the user gets a control that silently does nothing:
+    exactly the shape of the Side Quest regression.
+
+    Here rather than in the browser harness because it needs no server, and
+    because the bodies that trigger it come from infrastructure a local run
+    never produces.
+    """
+    global checks_run
+    node = shutil.which("node")
+    app_js = STATIC / "app.js"
+    if not node:
+        warn("node not found — skipped the api() non-JSON guard check")
+        return
+    if not app_js.exists():
+        fail("static/app.js is missing")
+        return
+    checks_run += 1
+    proc = subprocess.run([node, "-e", _API_GUARD_PROBE, str(app_js)],
+                          capture_output=True, text=True, timeout=60, check=False)
+    if proc.returncode == 2:
+        warn("api() could not be located in app.js — guard check skipped "
+             f"({proc.stderr.strip()})")
+    elif proc.returncode != 0:
+        fail("app.js: api() rejects on a non-JSON response — "
+             f"{proc.stderr.strip().splitlines()[:3]}")
+
+
 # ── 4. Shipped JSON parses ───────────────────────────────────────────────────
 def check_json_files() -> None:
     global checks_run
@@ -345,6 +410,7 @@ def main() -> int:
         check_asset_references,
         check_service_worker,
         check_js_syntax,
+        check_api_client_guard,
         check_json_files,
         check_app_imports,
         check_exercise_illustrations,
