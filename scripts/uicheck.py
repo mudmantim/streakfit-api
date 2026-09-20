@@ -465,6 +465,27 @@ def check_team_witness(b: Browser, base: str, app) -> None:
     check("to reach" in campfire, "the campfire shows progress toward its next stage",
           f"campfire was {campfire[:120]!r}")
 
+    # Leaving is the one irreversible control on this panel, and it used to go
+    # on one tap with nothing said before or after. A walkthrough was out of
+    # the team within 200ms of a single tap: the panel closed, the Team tab
+    # disappeared from the nav, and the user landed on Progress in silence.
+    first = b.js("(()=>{const b=document.querySelector("
+                 "  '.team-panel-leave-row .retention-btn');"
+                 " if(!b) return 'no leave button';"
+                 " b.click();"
+                 " return b.textContent.trim();})()")
+    time.sleep(1.2)
+    still_in = b.js("(()=>{const r=document.querySelector('.team-roster');"
+                    " return !!(r && r.innerText.trim());})()")
+    check(bool(still_in), "one tap on Leave Team does not leave the team",
+          f"button said {first!r}")
+    check("again" in str(first).lower(),
+          "and the button says what the next tap will do", str(first))
+    note = b.js("(()=>{const n=document.querySelector('.team-panel-leave-note');"
+                " return n && !n.hidden ? n.textContent : '';})()") or ""
+    check("streak" in note.lower(),
+          "and it says the thing somebody hesitating is afraid of", note[:90])
+
 
 def check_photo_sharing(b: Browser, base: str, app) -> None:
     """The Olivia test: take a photo, filter it, send it, family sees it."""

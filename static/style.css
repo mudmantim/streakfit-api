@@ -4237,3 +4237,18 @@ body.theme-classic .theme-btn.active { background: rgba(79,70,229,.2); }
 .journey-glossary dt { flex: 0 0 auto; font-weight: 700; white-space: nowrap; }
 
 .journey-glossary dd { margin: 0; opacity: .85; }
+
+/* Leaving a team is the one irreversible control on the team panel, and it
+   used to look exactly like Rotate Code beside it. */
+.team-panel-leave-row .retention-btn.is-confirming {
+    border-color: #dc2626;
+    background: #dc2626;
+    color: #fff;
+}
+
+.team-panel-leave-note {
+    margin: .5rem 0 0;
+    font-size: .84rem;
+    line-height: 1.4;
+    opacity: .85;
+}

@@ -1505,25 +1505,68 @@ function _buildInviteSection(data) {
     return wrap;
 }
 
+// Leaving a team is the one irreversible control on this screen, and it was
+// the only one without a confirmation.
+//
+// An independent walkthrough tapped it once and was out of the team within
+// 200ms: the panel closed, the Team tab vanished from the nav, and the user
+// landed on Progress with nothing said. No confirmation beforehand, no
+// acknowledgement afterwards, and no way back except being re-invited. A
+// failed leave was silent too — the handler re-enabled the button and
+// returned without showing an error.
+//
+// Meanwhile this codebase already asks twice for strictly LESS destructive
+// things: removing a member, deleting a photo, spending acorns. Leaving sat
+// directly under the invite row, styled identically to Rotate Code.
+//
+// Two taps, the same pattern as everywhere else, plus the sentence that
+// actually matters: your own streak and history are not affected. That is the
+// thing somebody hesitating over this button is afraid of.
 function _buildLeaveTeamRow(data) {
     var wrap = document.createElement('div');
     wrap.className = 'team-panel-info-section team-panel-leave-row';
 
+    var note = document.createElement('p');
+    note.className = 'team-panel-leave-note';
+    note.hidden = true;
+
+    var pending = false;
     var leaveBtn = document.createElement('button');
     leaveBtn.type = 'button';
     leaveBtn.className = 'retention-btn retention-btn-ghost';
     leaveBtn.textContent = 'Leave Team';
     leaveBtn.addEventListener('click', async function () {
+        if (!pending) {
+            pending = true;
+            leaveBtn.textContent = 'Tap again to leave ' + (data.name || 'this team');
+            leaveBtn.classList.add('is-confirming');
+            note.hidden = false;
+            note.textContent = 'Your streak, XP and acorns stay exactly as they '
+                + 'are. You would need a new invite to come back.';
+            return;
+        }
         leaveBtn.disabled = true;
         var result = await api('/api/teams/' + data.id + '/leave', 'POST');
         if (!result || result.status !== 200) {
             leaveBtn.disabled = false;
+            pending = false;
+            leaveBtn.textContent = 'Leave Team';
+            leaveBtn.classList.remove('is-confirming');
+            note.hidden = false;
+            note.textContent = (result && result.data && result.data.error)
+                || 'Could not leave just now — try again in a moment.';
             return;
         }
         closeTeamPanel();
         loadTeams();
+        // Say it happened. The walkthrough's complaint was not only the
+        // missing confirmation but the silence afterwards — the Team tab
+        // simply disappeared from the nav.
+        showRickieReaction('You left ' + (data.name || 'the team')
+            + '. Your streak is untouched.');
     });
     wrap.appendChild(leaveBtn);
+    wrap.appendChild(note);
 
     return wrap;
 }
