@@ -4219,3 +4219,21 @@ body.theme-classic .theme-btn.active { background: rgba(79,70,229,.2); }
 #dashboard-view:not([hidden]) > main.container {
     flex: 1 0 auto;
 }
+
+/* Three counters, one place that says what they are. */
+.journey-glossary {
+    margin: .6rem 0 .2rem;
+    padding: .6rem .7rem;
+    border-radius: 12px;
+    background: var(--surface-2, rgba(127, 127, 127, .08));
+    font-size: .86rem;
+    line-height: 1.4;
+}
+
+.journey-glossary-row { display: flex; gap: .5rem; align-items: baseline; }
+
+.journey-glossary-row + .journey-glossary-row { margin-top: .35rem; }
+
+.journey-glossary dt { flex: 0 0 auto; font-weight: 700; white-space: nowrap; }
+
+.journey-glossary dd { margin: 0; opacity: .85; }

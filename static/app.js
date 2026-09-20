@@ -257,7 +257,17 @@ function renderJourneyCard() {
     var track = document.querySelector('.journey-xp-track');
     if (track) track.setAttribute('aria-valuenow', Math.round(pct));
 
-    document.getElementById('journey-xp-caption').textContent = xpToNext + ' XP to next level';
+    // Say what they HAVE, not only what is missing.
+    //
+    // This read "107 XP to next level" and nothing else, so the one screen
+    // that exists to show progress never stated the current figure. A bar with
+    // no number on it is a mood, not a fact: a reviewer could not tell whether
+    // they were at 13 XP or 113, and "107 to next level" on day one reads as a
+    // wall rather than as a start. Naming the destination level matters too —
+    // "next level" is abstract, "Level 2" is somewhere you can get to.
+    var nextLevel = (currentUser.level || 1) + 1;
+    document.getElementById('journey-xp-caption').textContent =
+        xpIntoLevel + ' / ' + xpRequired + ' XP · ' + xpToNext + ' to Level ' + nextLevel;
 
     document.getElementById('journey-acorns-value').textContent = _acornsAvailable();
     _renderWeekStrip();
