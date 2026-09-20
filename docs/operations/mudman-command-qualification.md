@@ -10,6 +10,13 @@ StreakFit is missing anything — its side is complete — but because of two
 things in Command itself. Those are recorded here and **not changed**, because
 changing Command is not this repository's call.
 
+> **Updated 2026-09-20.** A seventh self-check was added,
+> `ratelimit.shared_storage`, and on a production-configured build it **FAILS**
+> — see `docs/reports/2026-09-20-mudman-command-qualification.md`. Command's
+> roll-up is the weakest critical check, so StreakFit would not pass a
+> verification run today even once registered. The blockers below are still
+> accurate and were re-verified in Command's code on that date.
+
 ## StreakFit's side — complete and verified locally
 
 | Requirement | Status |
@@ -26,7 +33,7 @@ Against a database built by `flask db upgrade`, with an API key present:
 ```
 PASS  db.reachable      query returned, N accounts
 PASS  db.migrations     stamped at <rev>, 18 revisions in the chain
-PASS  content.loaded    659 accepted items, 708 in the store
+PASS  content.loaded    440 accepted items, 798 in the store
 PASS  coach.configured  key present
 PASS  exercises.loaded  90 exercises across 3 tiers
 ```
