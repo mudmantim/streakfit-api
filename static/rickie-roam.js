@@ -90,6 +90,7 @@
         recent: [],         /* short-term repetition avoidance */
         timer: null,
         walkTimer: null,
+        walking: false,     /* mid-walk: do not reposition under him */
         reactionGeneration: 0,  /* only the newest reaction may end the reaction */
         pose: 'neutral'
     };
@@ -161,6 +162,26 @@
         return false;
     }
 
+    /* `offsetParent` is null for POSITION:FIXED elements, so using it as the
+     * "is this on screen" test made every fixed thing invisible to the
+     * occupancy check — the celebration toast (.rickie-reaction), the modal
+     * overlays, the confetti layer. He could stand on his own toast, and an
+     * independent walkthrough saw him drawn over an open modal.
+     *
+     * The rect is checked first because it is cheap and already needed, and it
+     * is zero for display:none. getComputedStyle is only reached for the small
+     * set of elements that have a real rect but no offsetParent, which is
+     * essentially the fixed ones.
+     */
+    function isRendered(node) {
+        var r = node.getBoundingClientRect();
+        if (!r.width || !r.height) return false;
+        if (node.offsetParent) return true;
+        try {
+            return getComputedStyle(node).position === 'fixed';
+        } catch (e) { return false; }
+    }
+
     function occupiedRects() {
         var s = stage();
         var rects = [];
@@ -174,7 +195,7 @@
         }
         for (var k = 0; k < seen.length; k++) {
             var node = seen[k];
-            if (!node.offsetParent) continue;
+            if (!isRendered(node)) continue;
             /* He is not an obstruction to himself. */
             if (band && (node === band || band.contains(node))) continue;
             var r = node.getBoundingClientRect();
@@ -316,6 +337,7 @@
          * animation frame runs in JavaScript. */
         var frame = 0;
         clearInterval(state.walkTimer);
+        state.walking = true;
         state.walkTimer = setInterval(function () {
             frame = 1 - frame;
             setPose(frame ? 'walk_a' : 'walk_b');
@@ -325,6 +347,7 @@
         place();
         setTimeout(function () {
             clearInterval(state.walkTimer);
+            state.walking = false;
             el.style.transition = '';
             setPose('neutral');
             if (onArrive) onArrive();
@@ -611,11 +634,40 @@
 
         place();
         window.addEventListener('resize', place);
-        var scrollCheck = null;
-        window.addEventListener('scroll', function () {
-            clearTimeout(scrollCheck);
-            scrollCheck = setTimeout(function () {
-                if (state.busy || state.paused || state.suspended) return;
+
+        /* Step aside when the page changes under him.
+         *
+         * This used to run on scroll ONLY, so placement was correct at the
+         * moment he moved and stale for as long as he stood still — and he
+         * stands still most of the time. Anything that rendered beneath him
+         * without a scroll left him sitting on it: a Brain Boost revealing its
+         * options, a card finishing its load, a pane switch, a toast. An
+         * independent walkthrough found him parked on an exercise illustration
+         * and on the acorns explanation, both reached without scrolling.
+         *
+         * Now the same check runs whenever the DOM changes. It is event-driven
+         * rather than a timer, so the "nothing runs while he is idle" property
+         * survives: if the page is not changing, this never fires.
+         */
+        var asideCheck = null;
+
+        function stepAsideIfCovered() {
+            clearTimeout(asideCheck);
+            asideCheck = setTimeout(function () {
+                /* NOT gated on state.busy.
+                 *
+                 * `busy` is true for the whole of any behaviour — sitting,
+                 * dozing, watching — which is most of the time. Gating on it
+                 * made this check, and the scroll check it replaced, inert
+                 * almost always: a diagnostic found him standing on occupied
+                 * space with busy=true and the handler declining to act.
+                 * Being mid-doze is not a reason to keep sitting on somebody's
+                 * text.
+                 *
+                 * Mid-WALK is different: he is already travelling to a spot
+                 * that was clear when chosen, and moving him now would fight
+                 * the transition. */
+                if (!el || state.paused || state.suspended || state.walking) return;
                 if (isClear(state.x, state.y, occupiedRects())) return;
                 var spot = somewhereClear();
                 if (!spot) return;
@@ -623,8 +675,23 @@
                 state.y = spot.y;
                 el.style.transition = 'transform 420ms ease-in-out';
                 place();
-            }, 220);
-        }, { passive: true });
+            }, 250);
+        }
+
+        window.addEventListener('scroll', stepAsideIfCovered, { passive: true });
+
+        if (window.MutationObserver) {
+            var observer = new MutationObserver(stepAsideIfCovered);
+            observer.observe(document.body, {
+                childList: true,
+                subtree: true,
+                /* `hidden` and `class` are how this app shows and hides panes
+                 * and cards, so they change what occupies the screen. Other
+                 * attributes do not and would only add noise. */
+                attributes: true,
+                attributeFilter: ['hidden', 'class']
+            });
+        }
         document.addEventListener('visibilitychange', function () {
             /* Nothing runs while the tab is hidden. */
             if (document.hidden) { clearTimeout(state.timer); clearInterval(state.walkTimer); }

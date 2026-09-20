@@ -1174,8 +1174,12 @@ def check_rickie_roams(b: Browser, base: str, app) -> None:
               'button,a,input,select,textarea,img,svg,.bb-option-btn'));
           for(const el of document.body.querySelectorAll('*'))
             if(textBearing(el)) nodes.add(el);
+          const rendered=(el)=>{const r=el.getBoundingClientRect();
+            if(!r.width||!r.height) return false;
+            if(el.offsetParent) return true;
+            try{return getComputedStyle(el).position==='fixed';}catch(e){return false;}};
           for(const el of nodes){
-            if(!el.offsetParent) continue;
+            if(!rendered(el)) continue;   // offsetParent is null for fixed
             if(band&&(el===band||band.contains(el))) continue;
             const q=el.getBoundingClientRect();
             if(!q.width||!q.height) continue;
@@ -1204,6 +1208,32 @@ def check_rickie_roams(b: Browser, base: str, app) -> None:
       } return bad.join('|');})()""")
     check(not offscreen, "he is never rendered partly off the screen",
           str(offscreen)[:80])
+
+    # He must step aside when content appears UNDER him, not only when the
+    # page scrolls. Placement used to be checked at move time only, so anything
+    # rendering beneath a standing Rickie left him on top of it — a walkthrough
+    # caught him on an exercise illustration and on the acorns explanation,
+    # both reached without scrolling.
+    moved = b.js("""(()=>{const el=document.querySelector('.rickie-roam');
+      const r=el.getBoundingClientRect();
+      const before=r.left+','+r.top;
+      // Drop a block of text exactly where he is standing.
+      const d=document.createElement('div');
+      d.id='uicheck-intruder';
+      d.textContent='content that arrived underneath him';
+      d.style.cssText='position:fixed;z-index:1;left:'+Math.round(r.left)+
+        'px;top:'+Math.round(r.top)+'px;width:'+Math.round(r.width)+
+        'px;height:'+Math.round(r.height)+'px;background:#fff;';
+      document.body.appendChild(d);
+      return before;})()""")
+    time.sleep(1.4)
+    after = b.js("(()=>{const r=document.querySelector('.rickie-roam')"
+                 ".getBoundingClientRect(); return r.left+','+r.top;})()")
+    b.js("(()=>{const d=document.getElementById('uicheck-intruder');"
+         " if(d) d.remove(); return 1;})()")
+    check(str(after) != str(moved),
+          "he steps aside when content appears under him, without a scroll",
+          f"stayed at {after}")
 
     # A tap at his position reaches the page underneath.
     #
