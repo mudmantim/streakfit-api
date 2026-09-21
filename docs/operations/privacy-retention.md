@@ -1,11 +1,24 @@
-# Conversation retention — what is actually guaranteed
+# Retention — what is actually guaranteed
 
-StreakFit's data export tells a user `coach_conversation_days: 30`. This file is
-the accounting behind that sentence: what deletes their conversation, when, and
-under what conditions it does **not**.
+Two different promises live in this file, and they are kept by different code on
+different clocks:
 
-Written because the promise was, for a while, only true for people who kept
-using the app — which is the opposite of who a retention window is for.
+1. **Conversation retention** — `coach_conversation_days: 30` in a user's data
+   export. This is the original subject of the file and everything up to
+   "Moderation evidence" is about it.
+2. **Moderation evidence retention** — what happens to a reported message,
+   caption or photo after a report is dealt with. Added when the moderation
+   operations milestone shipped; it has its own section at the end.
+
+Both sections answer the same three questions in the same order: what is stored,
+what deletes it, and under what conditions deletion does **not** happen.
+
+Written because the conversation promise was, for a while, only true for people
+who kept using the app — which is the opposite of who a retention window is for.
+
+---
+
+# Conversation retention
 
 ## What is stored
 
@@ -129,3 +142,169 @@ To check a live database by hand:
 ```bash
 flask coach-prune          # prints how many it deleted
 ```
+
+---
+
+# Moderation evidence retention
+
+The second promise. When somebody reports a message, a caption or a photo, the
+app keeps a copy so an operator can decide what happened. That copy is private
+content belonging to people who did not choose to hand it over, so it is kept on
+a clock and deleted on a schedule.
+
+Everything in this section is **verified locally and not yet running in
+production** — see "What is NOT guaranteed" below before relying on any of it.
+
+## What is stored, and for how long
+
+| Row | What it is | Clock |
+|---|---|---|
+| `photo_evidence.ciphertext` | An encrypted copy of the reported image, sealed with Fernet under `STREAKFIT_EVIDENCE_KEY` | **30 days from capture** (`PHOTO_EVIDENCE_MAX_AGE_DAYS`), absolute |
+| `report_evidence.content_text` / `context_json` | The reported words and the surrounding context | **30 days after the report is closed** (`EVIDENCE_RETENTION_DAYS_AFTER_CLOSURE`) |
+| `report.note` | The reporter's own description of what they were reporting | Deleted with the text evidence, on the same clock |
+
+**The two clocks are deliberately different, and the difference is the point.**
+
+Text and caption evidence runs from **closure**, so a report still being worked
+on keeps what a reviewer needs to decide it. Photo bytes run from **capture**,
+full stop — an absolute cap that does not stretch because a workflow stalled. A
+photo of a child does not become safer to keep because nobody got round to
+reviewing the report.
+
+`expires_at` is written on the photo row at capture time and never recomputed.
+
+## What deletes it
+
+One function, `_sweep_moderation_evidence()`, reached two ways:
+
+**1. The in-process sweeper thread** — the same thread that sweeps coach turns,
+enabled by `STREAKFIT_RETENTION_SWEEPER=1`, running hourly. The moderation sweep
+sits in its own `try` block so that a failure in one retention promise cannot
+cancel the other.
+
+**2. `flask moderation-prune`** — the same sweep as a one-shot command, for a
+scheduler. `render.yaml` declares a daily cron that runs it. **That cron is
+inert** for exactly the reason the coach cron is: Render does not read
+`render.yaml` for this service.
+
+There is deliberately **no request-path sweep** for moderation evidence, unlike
+layer 2 of the conversation story. Evidence deletion is not something to do a
+little of on somebody's page load.
+
+### Reading is gated separately from sweeping
+
+A detail worth stating, because it changes what the sweep's timing means: the
+operator route refuses evidence whose `expires_at` has passed **even if the
+sweep has not yet run**, and records the refused access as `purged`.
+
+So a delay in the sweep leaves bytes in the database longer than 30 days, but it
+does **not** extend the window in which anybody can look at them. The sweep's
+cadence decides when the row goes; it does not decide whether the promise holds
+for readers.
+
+## Legal holds
+
+A legal hold is the **only** thing that suppresses either clock. It is never an
+implicit skip — nothing else in the sweep quietly passes over a row.
+
+- **Set and released** through `POST /api/admin/reports/<id>/legal-hold` with
+  `{"hold": true|false}`.
+- **Authorization** is the operator boundary and nothing else: the same
+  `X-Admin-Secret` gate as every other `/api/admin/*` route. There is no
+  separate legal-hold credential and no per-user permission.
+- **Setting one requires a written reason.** A request with `hold: true` and no
+  reason is refused with 400. Releasing does not require a reason.
+- **Both directions are audited.** Setting writes a `legal_hold_set`
+  `ModerationAction`, releasing writes `legal_hold_released`, each carrying the
+  reason given.
+- **Releasing restores the schedule rather than granting an extension.**
+  Evidence that passed its deadline while held is deleted by the next sweep
+  after release, not 30 days later.
+
+A held row is counted and reported by the sweep (`held_by_legal_hold`) rather
+than silently skipped, so "we kept everything forever" cannot happen by
+accident.
+
+## What survives deletion
+
+Deletion removes the content and keeps the accounting. After a sweep:
+
+- `photo_evidence` — `ciphertext` is `NULL`, `byte_size` is `0`, `purged_at` is
+  set, and `unavailable_reason` is `retention_expired`.
+- `report_evidence` — `content_text` and `context_json` are `NULL`, `purged_at`
+  is set.
+- `report` — keeps that a report existed, its category, when it was filed and
+  closed, and what was decided. `evidence_purged_at` is set.
+- A `ModerationAction` row is written by `system`: `photo_evidence_purged` or
+  `evidence_purged`, noting the rule that fired.
+
+**The `unavailable_reason` field exists so that an empty record reads as
+"deleted on schedule" rather than "never captured".** Those are very different
+facts about a report, and a reviewer looking at an empty evidence list is
+entitled to know which one they are seeing.
+
+## What is NOT guaranteed — read this part
+
+**None of this is scheduled in production yet.** The in-process thread only runs
+where `STREAKFIT_RETENTION_SWEEPER=1` is set on the serving command, and the
+`render.yaml` cron is inert. Until one of those is actually live, moderation
+evidence retention is **implemented and locally verified, not operating**. It
+should not be described to anyone as a retention practice the product currently
+follows.
+
+**Nothing records that a moderation sweep ran.** The conversation sweep writes a
+`retention_run` row even when it deletes nothing, which is what lets
+`GET /api/verification/self` report `retention.recent`. **The moderation sweep
+writes no such row.** A moderation sweep that silently stops is therefore
+indistinguishable from one that runs and finds nothing expired — the precise
+failure mode the conversation section of this file was written about. Closing
+that gap is outstanding work, not a solved problem.
+
+**Deletion does not reach backups.** Deleting a row removes it from the live
+database. A backup taken beforehand still contains the ciphertext, and for photo
+evidence that means an encrypted copy of a reported image persists in that
+backup until it ages out. The provider's backup retention is an unconfirmed P0
+in `docs/operations/production-readiness.md`; until it is confirmed and a
+restore is tested, the honest answer is that we do not know the window.
+
+The same applies to any other copy: a database export taken for debugging, a
+local development dump, or a restored staging copy each carry their own evidence
+until they are destroyed. **No claim should be made that reported content is
+irrecoverably deleted 30 days after capture.** What can be said is that it is
+deleted from the live database on that schedule.
+
+**Key loss is not deletion, and key retention is not access.** Losing
+`STREAKFIT_EVIDENCE_KEY` makes existing photo evidence permanently
+undecryptable, which is not the same as having deleted it — the ciphertext is
+still there, and still in backups, and the sweep can still remove it without the
+key. Conversely, a backup that contains both the ciphertext and a copy of the
+key is a readable copy of reported images.
+
+**The window is wall-clock, not exact.** A row is deleted on the first sweep
+after its deadline, so in practice content lives its 30 days plus up to an hour
+(thread interval) or up to a day (cron cadence, once one exists). The reader-
+facing refusal described above is exact; the deletion is not.
+
+## Verifying it
+
+```bash
+.venv/bin/pytest tests/test_moderation_operations.py -q   # includes:
+#   photo evidence is purged at thirty days from capture
+#   text evidence is purged thirty days after closure
+#   an open report keeps its evidence
+#   a legal hold suppresses deletion, and releasing it restores the schedule
+#   a legal hold requires a written reason
+#   the sweep touches no unrelated user data
+#   the retention thread sweeps moderation evidence
+#   one failing sweep does not cancel the other
+```
+
+To check a live database by hand:
+
+```bash
+flask moderation-prune     # prints purged text rows, photo rows, and holds
+```
+
+It prints how many it skipped under legal hold as well as how many it deleted,
+because a sweep that deleted nothing and a sweep that was blocked on everything
+are different events.
