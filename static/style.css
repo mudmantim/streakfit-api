@@ -4252,3 +4252,87 @@ body.theme-classic .theme-btn.active { background: rgba(79,70,229,.2); }
     line-height: 1.4;
     opacity: .85;
 }
+
+/* --- Moderation controls: block, report, and the category picker ---------- */
+/*
+ * Sized to the same 44px minimum the mobile pass applied to every other
+ * control. A safety affordance that is hard to hit on a phone is a safety
+ * affordance that does not get used.
+ */
+.team-roster-mod {
+    display: flex;
+    gap: .35rem;
+    align-items: center;
+    flex-shrink: 0;
+    position: relative;
+}
+.team-roster-mod-btn,
+.team-msg-report-btn {
+    background: none;
+    border: 1px solid var(--gray-200);
+    color: var(--gray-500);
+    border-radius: 6px;
+    padding: .25rem .6rem;
+    min-height: 44px;
+    font-size: .75rem;
+    font-weight: 600;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+}
+.team-roster-mod-btn:hover,
+.team-msg-report-btn:hover { background: var(--gray-100); }
+
+.team-msg-mod {
+    display: flex;
+    justify-content: flex-end;
+    margin-top: .25rem;
+    position: relative;
+}
+/* Quiet until wanted: reporting should be findable, not advertised over the
+   conversation it sits in. */
+.team-msg-report-btn {
+    opacity: .55;
+    min-height: 44px;
+    padding: .2rem .5rem;
+}
+.team-msg-report-btn:hover,
+.team-msg-report-btn:focus-visible { opacity: 1; }
+
+.report-picker {
+    position: absolute;
+    right: 0;
+    top: calc(100% + .25rem);
+    z-index: 20;
+    background: var(--white, #fff);
+    border: 1px solid var(--gray-200);
+    border-radius: 10px;
+    padding: .5rem;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, .12);
+    display: flex;
+    flex-direction: column;
+    gap: .25rem;
+    min-width: 190px;
+}
+.report-picker-heading {
+    margin: 0 0 .15rem;
+    font-size: .75rem;
+    font-weight: 700;
+    color: var(--gray-500);
+}
+.report-picker-btn {
+    background: none;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    padding: .4rem .5rem;
+    min-height: 44px;
+    text-align: left;
+    font-size: .8rem;
+    cursor: pointer;
+    color: var(--gray-700, #333);
+}
+.report-picker-btn:hover { background: var(--gray-100); }
+.report-picker-done {
+    margin: 0;
+    font-size: .8rem;
+    color: var(--gray-600, #555);
+}

@@ -1789,6 +1789,20 @@ class TeamInviteCode(db.Model):
 class TeamMessage(db.Model):
     __tablename__ = 'team_message'
     id = db.Column(db.Integer, primary_key=True)
+    # A stable handle a client can name when reporting one message. Photos and
+    # challenges already had one; messages did not, and the serializer sent no
+    # identifier at all -- so "report this message" was unexpressible.
+    #
+    # A column default rather than four edits at the four TeamMessage(...)
+    # sites: the next person to add a fifth gets it for free, which is the
+    # failure mode worth designing against.
+    #
+    # Nullable because rows written before this migration have no id and
+    # backfilling under a unique constraint is a data migration nobody needs;
+    # the migration backfills what exists, and a NULL simply means that one
+    # old message can be reported via its author rather than individually.
+    public_id = db.Column(db.String(32), nullable=True, unique=True, index=True,
+                          default=lambda: uuid.uuid4().hex)
     team_id = db.Column(db.Integer, db.ForeignKey('team.id'), nullable=False)
     sender_type = db.Column(db.String(10), nullable=False)  # 'user' | 'rickie'
     sender_user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True)
@@ -1925,6 +1939,148 @@ class TeamChallengeCompletion(db.Model):
     __table_args__ = (
         db.UniqueConstraint('challenge_id', 'user_id', name='uq_challenge_completion'),
     )
+
+
+# --- Moderation: blocking, reporting, review ---------------------------------
+#
+# StreakFit has no direct messages, so "contact" is not a DM channel to close.
+# The surfaces one person can point at another are: team chat, team photos,
+# and a team challenge that NAMES somebody (`TeamChallenge.target_user_id`).
+# Those three are what a block has to reach, and they are what the enforcement
+# below covers.
+#
+# Nothing in this section touches a person's movement history. Blocking,
+# reporting and every moderation action operate on social surfaces only;
+# DailyCompletion, streaks, XP and acorns are never read or written here.
+
+class UserBlock(db.Model):
+    """One person choosing not to be reachable by another.
+
+    Directional on purpose. A block is a statement about what the BLOCKER
+    will see and receive; it is not a mutual agreement and not a punishment,
+    so it carries no notification and nothing the blocked person can observe.
+    Enforcement reads it in BOTH directions (`_blocked_ids_for`) because
+    hiding only one side leaks the block: if A blocks B and B still watches
+    A's messages arrive while A never answers, B learns what happened.
+    """
+    __tablename__ = 'user_block'
+    id = db.Column(db.Integer, primary_key=True)
+    blocker_user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False, index=True)
+    blocked_user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False, index=True)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+
+    __table_args__ = (
+        # Duplicate blocks are a no-op at the database level, not only in the route.
+        db.UniqueConstraint('blocker_user_id', 'blocked_user_id', name='uq_user_block'),
+    )
+
+
+class Report(db.Model):
+    """Somebody telling us something is wrong.
+
+    `reporter_user_id` is never serialized into any non-operator response, and
+    the reported person is never told a report exists. The subject is recorded
+    as (type, ref) rather than a foreign key so a report survives its content
+    being deleted -- the evidence snapshot is what a reviewer actually reads.
+    """
+    __tablename__ = 'report'
+    id = db.Column(db.Integer, primary_key=True)
+    public_id = db.Column(db.String(32), nullable=False, unique=True, index=True)
+    reporter_user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False, index=True)
+    reported_user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True, index=True)
+    team_id = db.Column(db.Integer, db.ForeignKey('team.id'), nullable=True, index=True)
+    category = db.Column(db.String(24), nullable=False)      # see REPORT_CATEGORIES
+    subject_type = db.Column(db.String(16), nullable=False)  # user | message | photo | challenge
+    subject_ref = db.Column(db.String(64), nullable=True)    # public_id of the content, if any
+    note = db.Column(db.Text, nullable=True)                 # the reporter's own words, optional
+    status = db.Column(db.String(16), nullable=False, default='pending', index=True)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    reviewed_at = db.Column(db.DateTime, nullable=True)
+    disposition = db.Column(db.String(24), nullable=True)
+
+    __table_args__ = (
+        db.Index('ix_report_status_created', 'status', 'created_at'),
+    )
+
+
+class ReportEvidence(db.Model):
+    """What the content said AT THE MOMENT it was reported.
+
+    A snapshot rather than a foreign key, because the obvious failure is the
+    one where somebody reports a message, the sender edits or deletes it, and
+    the reviewer opens an empty report. Written in the same transaction as the
+    report.
+
+    Operator-only, always. It is the one place private content is duplicated,
+    so nothing outside `/api/admin/*` reads this table.
+    """
+    __tablename__ = 'report_evidence'
+    id = db.Column(db.Integer, primary_key=True)
+    report_id = db.Column(db.Integer, db.ForeignKey('report.id'), nullable=False, index=True)
+    captured_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    content_type = db.Column(db.String(16), nullable=False)
+    content_text = db.Column(db.Text, nullable=True)
+    author_user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True)
+    context_json = db.Column(db.Text, nullable=True)   # surrounding metadata, JSON string
+
+
+class ModerationAction(db.Model):
+    """The audit trail. Append-only by convention -- nothing updates these rows.
+
+    `actor` is an operator identity string, not a user id: moderation is done
+    with the admin secret, and recording a user id would imply a reviewer
+    account exists when it does not.
+    """
+    __tablename__ = 'moderation_action'
+    id = db.Column(db.Integer, primary_key=True)
+    report_id = db.Column(db.Integer, db.ForeignKey('report.id'), nullable=True, index=True)
+    actor = db.Column(db.String(40), nullable=False, default='operator')
+    action = db.Column(db.String(32), nullable=False)
+    target_user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True, index=True)
+    team_id = db.Column(db.Integer, db.ForeignKey('team.id'), nullable=True)
+    subject_type = db.Column(db.String(16), nullable=True)
+    subject_ref = db.Column(db.String(64), nullable=True)
+    note = db.Column(db.Text, nullable=True)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+
+
+class ContentRestriction(db.Model):
+    """One piece of content withheld from everyone but an operator.
+
+    Separate from the content's own `deleted_at` so that a moderator hiding
+    something and an author deleting their own photo stay distinguishable, and
+    so lifting a restriction can never resurrect something the author deleted.
+    """
+    __tablename__ = 'content_restriction'
+    id = db.Column(db.Integer, primary_key=True)
+    subject_type = db.Column(db.String(16), nullable=False)
+    subject_ref = db.Column(db.String(64), nullable=False)
+    reason = db.Column(db.String(32), nullable=False)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    lifted_at = db.Column(db.DateTime, nullable=True)
+
+    __table_args__ = (
+        db.Index('ix_content_restriction_subject', 'subject_type', 'subject_ref'),
+    )
+
+
+class UserRestriction(db.Model):
+    """A person's SOCIAL privileges suspended. Never their account, never their
+    streak, never their progress.
+
+    A suspended user keeps every solo feature: the daily mission, the streak,
+    Brain Boost, Side Quests, their own history. What stops is posting into a
+    team. That separation is the point -- "never punish who showed up" applies
+    to somebody being moderated too.
+    """
+    __tablename__ = 'user_restriction'
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False, index=True)
+    kind = db.Column(db.String(24), nullable=False, default='social_suspended')
+    reason = db.Column(db.String(32), nullable=True)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    expires_at = db.Column(db.DateTime, nullable=True)   # NULL = until lifted
+    lifted_at = db.Column(db.DateTime, nullable=True)
 
 
 class VerificationRun(db.Model):
@@ -5612,6 +5768,8 @@ def _serialize_team_message(m, usernames=None, photos=None, challenges=None, vie
             sender_username = _safe_display_name(sender) if sender else None
     out = {
         "sender_type": m.sender_type,
+        # What the client names when reporting this one message.
+        "message_id": m.public_id,
         # The id, so the client can tell "mine" from "theirs" without
         # comparing names. It used to compare sender_username to the viewer's
         # own username, which only worked because the login was being sent.
@@ -5701,6 +5859,21 @@ def get_team_messages(team_id):
         .order_by(TeamMessage.created_at.asc())
     ).scalars().all()
 
+    # Moderation, applied on the way out.
+    #
+    # Two filters, and they are different in kind. A BLOCK is personal: these
+    # messages exist and other members still see them, they are simply not
+    # shown to this viewer. A RESTRICTION is a moderator withholding content
+    # from everyone. Applying both here rather than in the query keeps the
+    # `joined_at` boundary above as the single history rule and makes the two
+    # moderation rules legible side by side.
+    blocked = _blocked_ids_for(user_id)
+    if blocked:
+        messages = [m for m in messages if m.sender_user_id not in blocked]
+    restricted = _restricted_refs('message', [m.public_id for m in messages])
+    if restricted:
+        messages = [m for m in messages if m.public_id not in restricted]
+
     usernames = _peer_names_for_ids(
         m.sender_user_id for m in messages if m.sender_type == 'user'
     )
@@ -5747,6 +5920,10 @@ def post_team_message(team_id):
     if not membership:
         return jsonify({"error": "Forbidden"}), 403
 
+    suspended = _require_social_privileges(user_id)
+    if suspended:
+        return suspended
+
     data = request.get_json(silent=True) or {}
     body = (data.get('body') or '').strip()
     if not body:
@@ -5788,6 +5965,10 @@ def create_team_challenge(team_id):
     if not membership:
         return jsonify({"error": "Forbidden"}), 403
 
+    suspended = _require_social_privileges(user_id)
+    if suspended:
+        return suspended
+
     data = request.get_json(silent=True) or {}
     preset = CHALLENGE_PRESETS_BY_KEY.get((data.get('preset_key') or '').strip())
     if preset is None:
@@ -5803,6 +5984,13 @@ def create_team_challenge(team_id):
         if not target_member:
             return jsonify({"error": "not_a_team_member"}), 400
         target_user_id = int(target_user_id)
+        # Naming somebody in a challenge is the one way this product lets a
+        # person point at another person, so it is the one write a block has to
+        # stop. The error is the same "not_a_team_member" the line above
+        # returns: a distinct code here would tell the sender they have been
+        # blocked, which is the single thing blocking must never disclose.
+        if _is_blocked_between(user_id, target_user_id):
+            return jsonify({"error": "not_a_team_member"}), 400
 
     now = datetime.utcnow()
     challenge = TeamChallenge(
@@ -6016,6 +6204,10 @@ def upload_team_photo(team_id):
     if not membership:
         return jsonify({"error": "Forbidden"}), 403
 
+    suspended = _require_social_privileges(user_id)
+    if suspended:
+        return suspended
+
     upload = request.files.get('photo')
     if upload is None:
         return jsonify({"error": "photo_required"}), 400
@@ -6129,6 +6321,14 @@ def get_team_photo(team_id, public_id):
             or photo.deleted_at is not None
             or photo.created_at < membership.joined_at):
         return jsonify({"error": "not_found"}), 404
+    # Moderation, on the byte path for the same reason `joined_at` is checked
+    # here: hiding a photo from the thread while the image stays one direct
+    # request away is not hiding it. A restricted photo and a blocked sender
+    # both give the same 404 as every other refusal above.
+    if _is_content_restricted('photo', photo.public_id):
+        return jsonify({"error": "not_found"}), 404
+    if photo.sender_user_id in _blocked_ids_for(user_id):
+        return jsonify({"error": "not_found"}), 404
     if photo.expires_at and photo.expires_at <= datetime.utcnow():
         return jsonify({"error": "expired"}), 410
 
@@ -6206,6 +6406,555 @@ def delete_team_photo(team_id, public_id):
                     team_id, public_id, user_id, is_creator and photo.sender_user_id != user_id)
 
     return jsonify({"deleted": public_id}), 200
+
+
+# --- Moderation: enforcement helpers -----------------------------------------
+
+REPORT_CATEGORIES = (
+    'harassment',
+    'threats',
+    'inappropriate_content',
+    'child_safety',
+    'spam',
+    'other',
+)
+
+# Categories that hide the reported content the moment the report is filed,
+# before any human has looked at it.
+#
+# This is a deliberate asymmetry and it is abusable: anybody can hide one
+# message by reporting it, and that is a cost being accepted on purpose. The
+# alternative is leaving material somebody has just flagged as a child-safety
+# concern visible to a child for as long as review takes, and between "a
+# message is wrongly hidden for a few hours" and "a child sees it for a few
+# hours" the first is the survivable failure. It is scoped as narrowly as
+# possible: one piece of content, not the person, and reversible in one click.
+#
+# See docs/moderation/policy.md -- OPEN DECISION 2 if this should widen.
+AUTO_RESTRICT_CATEGORIES = ('child_safety',)
+
+SUBJECT_TYPES = ('user', 'message', 'photo', 'challenge')
+
+
+def _blocked_ids_for(user_id):
+    """Every user id this person cannot see and cannot be seen by.
+
+    Deliberately symmetric. A block is directional as a record -- A chose it,
+    B did not -- but enforcement has to cut both ways, because one-directional
+    hiding announces the block. If B keeps seeing A post into a thread where
+    A can no longer see B, B has learned something the block exists to avoid
+    telling them.
+    """
+    rows = db.session.execute(
+        db.select(UserBlock.blocker_user_id, UserBlock.blocked_user_id).where(
+            db.or_(UserBlock.blocker_user_id == user_id,
+                   UserBlock.blocked_user_id == user_id)
+        )
+    ).all()
+    out = set()
+    for blocker, blocked in rows:
+        out.add(blocked if blocker == user_id else blocker)
+    out.discard(user_id)
+    return out
+
+
+def _is_blocked_between(a_user_id, b_user_id):
+    """True if either has blocked the other. Used on WRITE paths."""
+    if a_user_id is None or b_user_id is None or a_user_id == b_user_id:
+        return False
+    return db.session.execute(
+        db.select(db.func.count(UserBlock.id)).where(
+            db.or_(
+                db.and_(UserBlock.blocker_user_id == a_user_id,
+                        UserBlock.blocked_user_id == b_user_id),
+                db.and_(UserBlock.blocker_user_id == b_user_id,
+                        UserBlock.blocked_user_id == a_user_id),
+            )
+        )
+    ).scalar() > 0
+
+
+def _restricted_refs(subject_type, refs):
+    """Which of these content refs are currently withheld by a moderator."""
+    refs = [r for r in refs if r]
+    if not refs:
+        return set()
+    rows = db.session.execute(
+        db.select(ContentRestriction.subject_ref).where(
+            ContentRestriction.subject_type == subject_type,
+            ContentRestriction.subject_ref.in_(refs),
+            ContentRestriction.lifted_at.is_(None),
+        )
+    ).scalars().all()
+    return set(rows)
+
+
+def _is_content_restricted(subject_type, subject_ref):
+    return bool(_restricted_refs(subject_type, [subject_ref]))
+
+
+def _social_suspension_for(user_id):
+    """The live social suspension for this user, or None.
+
+    Fail-closed: any error reading the restriction table is treated as
+    suspended rather than allowed. A moderation check that quietly passes
+    when its own storage is unavailable is not a moderation check.
+    """
+    try:
+        now = datetime.utcnow()
+        return db.session.execute(
+            db.select(UserRestriction).where(
+                UserRestriction.user_id == user_id,
+                UserRestriction.kind == 'social_suspended',
+                UserRestriction.lifted_at.is_(None),
+                db.or_(UserRestriction.expires_at.is_(None),
+                       UserRestriction.expires_at > now),
+            ).limit(1)
+        ).scalar_one_or_none()
+    except Exception:
+        app.logger.exception('social suspension lookup failed — failing closed')
+        return UserRestriction(user_id=user_id, kind='social_suspended',
+                               reason='lookup_failed')
+
+
+def _require_social_privileges(user_id):
+    """Returns a (response, status) tuple to return, or None to continue.
+
+    Called at the top of every social WRITE. Reads are left alone on purpose:
+    a suspended person can still see their team, because cutting somebody's
+    view of their family is a punishment out of proportion to anything this
+    system is for.
+    """
+    restriction = _social_suspension_for(user_id)
+    if restriction is None:
+        return None
+    return jsonify({
+        "error": "Your ability to post to teams is paused while we look into a report.",
+        "code": "social_suspended",
+    }), 403
+
+
+def _capture_report_evidence(report, subject_type, subject_ref, team_id):
+    """Snapshot the reported content so a later edit or delete cannot empty
+    the report. Returns (evidence_or_None, reported_user_id_or_None)."""
+    content_text = None
+    author_id = None
+    context = {"team_id": team_id, "subject_ref": subject_ref}
+
+    if subject_type == 'message':
+        row = db.session.execute(
+            db.select(TeamMessage).where(TeamMessage.public_id == subject_ref)
+        ).scalar_one_or_none()
+        if row is not None:
+            content_text = row.body
+            author_id = row.sender_user_id
+            context.update({"created_at": row.created_at.isoformat(),
+                            "sender_type": row.sender_type})
+    elif subject_type == 'photo':
+        row = db.session.execute(
+            db.select(TeamPhoto).where(TeamPhoto.public_id == subject_ref)
+        ).scalar_one_or_none()
+        if row is not None:
+            # The caption, never the pixels. Copying image bytes into a second
+            # table would double the exposure of the thing being complained
+            # about; the operator can open the photo through the admin route.
+            content_text = row.caption
+            author_id = row.sender_user_id
+            context.update({"created_at": row.created_at.isoformat(),
+                            "filter_key": row.filter_key,
+                            "deleted_at": row.deleted_at.isoformat() if row.deleted_at else None})
+    elif subject_type == 'challenge':
+        row = db.session.execute(
+            db.select(TeamChallenge).where(TeamChallenge.public_id == subject_ref)
+        ).scalar_one_or_none()
+        if row is not None:
+            content_text = getattr(row, 'title', None)
+            author_id = row.created_by_user_id
+            context.update({"created_at": row.created_at.isoformat(),
+                            "target_user_id": row.target_user_id})
+
+    evidence = ReportEvidence(
+        report_id=report.id,
+        content_type=subject_type,
+        content_text=content_text,
+        author_user_id=author_id,
+        context_json=json.dumps(context),
+    )
+    db.session.add(evidence)
+    return evidence, author_id
+
+
+def _int_or_none(value):
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+# --- Moderation: blocking ----------------------------------------------------
+
+@app.route('/api/blocks', methods=['GET'])
+@jwt_required()
+def list_blocks():
+    """Who you have blocked. Yours only -- there is no route that tells
+    anybody who has blocked THEM, by design."""
+    user_id = int(get_jwt_identity())
+    rows = db.session.execute(
+        db.select(UserBlock).where(UserBlock.blocker_user_id == user_id)
+        .order_by(UserBlock.created_at.desc())
+    ).scalars().all()
+    names = _peer_names_for_ids(r.blocked_user_id for r in rows)
+    return jsonify([{
+        "user_id": r.blocked_user_id,
+        # The same peer-safe name the roster uses. A block list that printed
+        # logins would reintroduce the exposure the roster just closed.
+        "name": names.get(r.blocked_user_id) or "Member",
+        "created_at": r.created_at.isoformat(),
+    } for r in rows]), 200
+
+
+@app.route('/api/blocks/<int:target_user_id>', methods=['PUT'])
+@jwt_required()
+@limiter.limit("30 per minute", key_func=user_or_ip_key)
+def create_block(target_user_id):
+    """Block somebody. Idempotent, silent, and reversible.
+
+    Enumeration: this answers 204 whether or not `target_user_id` exists, and
+    whether or not you share a team. A route that 404s on a missing id is a
+    membership oracle -- an attacker walks the integer space and learns which
+    accounts are real. The only input that changes the answer is blocking
+    yourself, which is a client bug rather than a fact about somebody else.
+    """
+    user_id = int(get_jwt_identity())
+    if target_user_id == user_id:
+        return jsonify({"error": "You cannot block yourself."}), 400
+
+    exists = db.session.execute(
+        db.select(UserBlock).where(UserBlock.blocker_user_id == user_id,
+                                   UserBlock.blocked_user_id == target_user_id)
+    ).scalar_one_or_none()
+    if exists is None and db.session.get(User, target_user_id) is not None:
+        db.session.add(UserBlock(blocker_user_id=user_id, blocked_user_id=target_user_id))
+        try:
+            db.session.commit()
+        except IntegrityError:
+            # Two taps racing. The unique constraint settled it; nothing to do.
+            db.session.rollback()
+    # 204 regardless, so a real id and a missing id are indistinguishable.
+    return '', 204
+
+
+@app.route('/api/blocks/<int:target_user_id>', methods=['DELETE'])
+@jwt_required()
+@limiter.limit("30 per minute", key_func=user_or_ip_key)
+def delete_block(target_user_id):
+    """Unblock. Also silent, also 204 either way."""
+    user_id = int(get_jwt_identity())
+    row = db.session.execute(
+        db.select(UserBlock).where(UserBlock.blocker_user_id == user_id,
+                                   UserBlock.blocked_user_id == target_user_id)
+    ).scalar_one_or_none()
+    if row is not None:
+        db.session.delete(row)
+        db.session.commit()
+    return '', 204
+
+
+# --- Moderation: reporting ---------------------------------------------------
+
+@app.route('/api/reports', methods=['POST'])
+@jwt_required()
+@limiter.limit("10 per hour", key_func=user_or_ip_key)
+def create_report():
+    """Report a person or a specific piece of content.
+
+    You may only report something you can already see. The membership and
+    `joined_at` checks below are the same boundaries the read routes enforce,
+    repeated here on purpose: without them, "report this message" becomes a
+    way to ask the server to fetch content you were never shown, which is
+    exactly the shape of the bug where a safety feature becomes the hole.
+    """
+    user_id = int(get_jwt_identity())
+    data = request.get_json(silent=True) or {}
+
+    category = (data.get('category') or '').strip()
+    if category not in REPORT_CATEGORIES:
+        return jsonify({"error": "Choose a reason for the report.",
+                        "categories": list(REPORT_CATEGORIES)}), 400
+
+    subject_type = (data.get('subject_type') or '').strip()
+    if subject_type not in SUBJECT_TYPES:
+        return jsonify({"error": "subject_type must be one of "
+                                 f"{', '.join(SUBJECT_TYPES)}."}), 400
+
+    subject_ref = (data.get('subject_ref') or '').strip() or None
+    team_id = _int_or_none(data.get('team_id'))
+    note = (data.get('note') or '').strip()[:2000] or None
+    reported_user_id = _int_or_none(data.get('reported_user_id'))
+
+    membership = None
+    if team_id is not None:
+        membership = db.session.execute(
+            db.select(TeamMembership).where(TeamMembership.team_id == team_id,
+                                            TeamMembership.user_id == user_id)
+        ).scalar_one_or_none()
+        if membership is None:
+            return jsonify({"error": "Forbidden"}), 403
+
+    if subject_type == 'user':
+        if reported_user_id is None:
+            return jsonify({"error": "reported_user_id is required."}), 400
+        if reported_user_id == user_id:
+            return jsonify({"error": "You cannot report yourself."}), 400
+        # You may report someone you share a team with. Without this, the
+        # route reports on strangers by id and becomes an existence oracle.
+        if membership is None:
+            return jsonify({"error": "team_id is required to report a person."}), 400
+        shares_team = db.session.execute(
+            db.select(db.func.count(TeamMembership.id)).where(
+                TeamMembership.team_id == team_id,
+                TeamMembership.user_id == reported_user_id)
+        ).scalar()
+        if not shares_team:
+            return jsonify({"error": "Forbidden"}), 403
+    elif subject_ref is None:
+        return jsonify({"error": "subject_ref is required for content reports."}), 400
+
+    report = Report(
+        public_id=uuid.uuid4().hex,
+        reporter_user_id=user_id,
+        reported_user_id=reported_user_id,
+        team_id=team_id,
+        category=category,
+        subject_type=subject_type,
+        subject_ref=subject_ref,
+        note=note,
+    )
+    db.session.add(report)
+    db.session.flush()   # need report.id for the evidence row
+
+    if subject_type != 'user':
+        _, author_id = _capture_report_evidence(report, subject_type, subject_ref, team_id)
+        if report.reported_user_id is None:
+            report.reported_user_id = author_id
+        if category in AUTO_RESTRICT_CATEGORIES:
+            db.session.add(ContentRestriction(
+                subject_type=subject_type, subject_ref=subject_ref,
+                reason='auto_' + category))
+            db.session.add(ModerationAction(
+                report_id=report.id, actor='system',
+                action='content_restricted', subject_type=subject_type,
+                subject_ref=subject_ref, team_id=team_id,
+                note='automatic, pending review: ' + category))
+    else:
+        db.session.add(ReportEvidence(
+            report_id=report.id, content_type='user', content_text=None,
+            author_user_id=reported_user_id,
+            context_json=json.dumps({"team_id": team_id})))
+
+    db.session.commit()
+
+    # Deliberately returns nothing about the reported person or the outcome.
+    return jsonify({
+        "report_id": report.public_id,
+        "status": report.status,
+        "message": "Thanks — someone will look at this.",
+    }), 201
+
+
+# --- Moderation: operator review ---------------------------------------------
+
+@app.route('/api/admin/reports', methods=['GET'])
+def admin_list_reports():
+    """The queue. Operator-only, server-enforced by the same X-Admin-Secret
+    gate as every other admin route -- there is no second way in."""
+    _require_admin_secret()
+    status = request.args.get('status', 'pending')
+    q = db.select(Report).order_by(Report.created_at.asc())
+    if status != 'all':
+        q = q.where(Report.status == status)
+    rows = db.session.execute(q.limit(200)).scalars().all()
+    return jsonify([{
+        "report_id": r.public_id,
+        "category": r.category,
+        "subject_type": r.subject_type,
+        "subject_ref": r.subject_ref,
+        "team_id": r.team_id,
+        "reported_user_id": r.reported_user_id,
+        "status": r.status,
+        "disposition": r.disposition,
+        "created_at": r.created_at.isoformat(),
+        # No reporter_user_id in the list view: a queue is glanced at, and a
+        # reporter id on every row is the easiest thing to leak by accident.
+    } for r in rows]), 200
+
+
+@app.route('/api/admin/reports/<string:public_id>', methods=['GET'])
+def admin_report_detail(public_id):
+    """One report, with its preserved evidence and its action history."""
+    _require_admin_secret()
+    report = db.session.execute(
+        db.select(Report).where(Report.public_id == public_id)
+    ).scalar_one_or_none()
+    if report is None:
+        abort(404)
+    evidence = db.session.execute(
+        db.select(ReportEvidence).where(ReportEvidence.report_id == report.id)
+        .order_by(ReportEvidence.captured_at.asc())
+    ).scalars().all()
+    actions = db.session.execute(
+        db.select(ModerationAction).where(ModerationAction.report_id == report.id)
+        .order_by(ModerationAction.created_at.asc())
+    ).scalars().all()
+    return jsonify({
+        "report_id": report.public_id,
+        "category": report.category,
+        "subject_type": report.subject_type,
+        "subject_ref": report.subject_ref,
+        "team_id": report.team_id,
+        "reporter_user_id": report.reporter_user_id,   # operator view only
+        "reported_user_id": report.reported_user_id,
+        "note": report.note,
+        "status": report.status,
+        "disposition": report.disposition,
+        "created_at": report.created_at.isoformat(),
+        "reviewed_at": report.reviewed_at.isoformat() if report.reviewed_at else None,
+        "content_restricted": bool(
+            report.subject_ref and _is_content_restricted(report.subject_type, report.subject_ref)),
+        "evidence": [{
+            "captured_at": e.captured_at.isoformat(),
+            "content_type": e.content_type,
+            "content_text": e.content_text,
+            "author_user_id": e.author_user_id,
+            "context": json.loads(e.context_json) if e.context_json else None,
+        } for e in evidence],
+        "actions": [{
+            "action": a.action, "actor": a.actor, "note": a.note,
+            "target_user_id": a.target_user_id,
+            "created_at": a.created_at.isoformat(),
+        } for a in actions],
+    }), 200
+
+
+MODERATION_ACTIONS = (
+    'dismiss',
+    'restrict_content',
+    'unrestrict_content',
+    'suspend_social',
+    'lift_suspension',
+    'remove_from_team',
+)
+
+
+@app.route('/api/admin/reports/<string:public_id>/action', methods=['POST'])
+def admin_report_action(public_id):
+    """Take a moderation action and record it.
+
+    Every branch writes a ModerationAction row. The audit trail is not a
+    side-effect of a successful action -- it is written in the same
+    transaction, so an action that happened without a record is not a state
+    this code can reach.
+    """
+    _require_admin_secret()
+    report = db.session.execute(
+        db.select(Report).where(Report.public_id == public_id)
+    ).scalar_one_or_none()
+    if report is None:
+        abort(404)
+
+    data = request.get_json(silent=True) or {}
+    action = (data.get('action') or '').strip()
+    if action not in MODERATION_ACTIONS:
+        return jsonify({"error": "Unknown action.",
+                        "actions": list(MODERATION_ACTIONS)}), 400
+    note = (data.get('note') or '').strip()[:2000] or None
+    target_user_id = _int_or_none(data.get('target_user_id')) or report.reported_user_id
+    now = datetime.utcnow()
+
+    if action == 'dismiss':
+        report.status = 'closed'
+        report.disposition = 'dismissed'
+        report.reviewed_at = now
+
+    elif action == 'restrict_content':
+        if not report.subject_ref:
+            return jsonify({"error": "This report names no content."}), 400
+        if not _is_content_restricted(report.subject_type, report.subject_ref):
+            db.session.add(ContentRestriction(
+                subject_type=report.subject_type, subject_ref=report.subject_ref,
+                reason='moderator'))
+        report.status = 'closed'
+        report.disposition = 'content_restricted'
+        report.reviewed_at = now
+
+    elif action == 'unrestrict_content':
+        rows = db.session.execute(
+            db.select(ContentRestriction).where(
+                ContentRestriction.subject_type == report.subject_type,
+                ContentRestriction.subject_ref == report.subject_ref,
+                ContentRestriction.lifted_at.is_(None))
+        ).scalars().all()
+        for r in rows:
+            r.lifted_at = now
+        report.status = 'closed'
+        report.disposition = 'content_allowed'
+        report.reviewed_at = now
+
+    elif action == 'suspend_social':
+        if target_user_id is None:
+            return jsonify({"error": "No user to suspend."}), 400
+        if _social_suspension_for(target_user_id) is None:
+            db.session.add(UserRestriction(
+                user_id=target_user_id, kind='social_suspended',
+                reason=report.category))
+        report.status = 'closed'
+        report.disposition = 'user_suspended'
+        report.reviewed_at = now
+
+    elif action == 'lift_suspension':
+        if target_user_id is None:
+            return jsonify({"error": "No user named."}), 400
+        rows = db.session.execute(
+            db.select(UserRestriction).where(
+                UserRestriction.user_id == target_user_id,
+                UserRestriction.kind == 'social_suspended',
+                UserRestriction.lifted_at.is_(None))
+        ).scalars().all()
+        for r in rows:
+            r.lifted_at = now
+        report.status = 'closed'
+        report.disposition = 'suspension_lifted'
+        report.reviewed_at = now
+
+    elif action == 'remove_from_team':
+        team_id = _int_or_none(data.get('team_id')) or report.team_id
+        if target_user_id is None or team_id is None:
+            return jsonify({"error": "Both a user and a team are required."}), 400
+        membership = db.session.execute(
+            db.select(TeamMembership).where(TeamMembership.team_id == team_id,
+                                            TeamMembership.user_id == target_user_id)
+        ).scalar_one_or_none()
+        if membership is not None:
+            # Membership only. Their streak, XP, acorns and mission history are
+            # untouched, and so is every other team they are in.
+            db.session.delete(membership)
+        report.status = 'closed'
+        report.disposition = 'removed_from_team'
+        report.reviewed_at = now
+
+    db.session.add(ModerationAction(
+        report_id=report.id, actor='operator', action=action,
+        target_user_id=target_user_id, team_id=report.team_id,
+        subject_type=report.subject_type, subject_ref=report.subject_ref,
+        note=note))
+    db.session.commit()
+
+    return jsonify({
+        "report_id": report.public_id,
+        "status": report.status,
+        "disposition": report.disposition,
+        "action": action,
+    }), 200
 
 
 # --- Coach v1 ---

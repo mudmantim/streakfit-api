@@ -319,6 +319,13 @@ UNCALLED_ROUTE_ALLOWLIST = {
     "/api/admin/verify": "admin console",
     "/api/admin/verify/status": "admin console",
     "/api/admin/verify/history": "admin console",
+    # Operator-only by design, same as the rest of /api/admin/*. The people
+    # these serve are not in the app; a frontend caller would be decorative.
+    # Reachability is covered by tests/test_moderation.py, which drives the
+    # queue, the detail view and every action over HTTP.
+    "/api/admin/reports": "admin console — moderation queue",
+    "/api/admin/reports/<string:public_id>": "admin console — report detail and evidence",
+    "/api/admin/reports/<string:public_id>/action": "admin console — moderation actions",
     "/api/challenges/<int:challenge_id>": "single-challenge detail; list view carries the same data",
     "/api/teams/<int:team_id>/campfire": "campfire summary is embedded in GET /api/teams/<id>",
     # Machine-facing by design. Mudman Command's verifier probes a running app

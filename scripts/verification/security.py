@@ -5,8 +5,11 @@ membership rows), so this module should run LAST against any shared
 scenario -- nothing else needs scenario.users["b"] or ["c"] to still be
 members afterward. See Operation: No Dead Ends (R2.8) and Team System
 Baseline Section 4/11 for why remove-member and rotate-invite are the
-creator's only two safety powers, and why nothing else exists (no
-moderation, no message deletion)."""
+creator's only two safety powers.
+
+Moderation proper (blocking, reporting, operator review) now exists and is
+covered by verification/moderation.py -- which runs BEFORE this module,
+because this one ends with role "b" no longer in the team."""
 import os
 import sys
 

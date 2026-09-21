@@ -205,6 +205,10 @@ function _showMissionCompleteNotification() {
 // Set by loadUserPreferences() on every dashboard load. Streak data lives here
 // rather than in the /api/daily response.
 var currentUser = null;
+// Who this person has blocked. Loaded with the team panel so the roster can
+// offer Block or Unblock without a second round trip per row. The server
+// enforces the block regardless of what this holds -- this is only the label.
+var blockedUserIds = [];
 
 // ── Guest state ───────────────────────────────────────────────────────────────
 // In-memory only — intentionally resets on page refresh.
@@ -1157,7 +1161,14 @@ async function _loadTeamInfo(teamId) {
     _refreshPhotoDeletePermissions();
 
     _teamPanelInfo.appendChild(_buildCampfireSection(data));
-    _teamPanelInfo.appendChild(_buildRosterSection(data));
+    var rosterSection = _buildRosterSection(data);
+    _teamPanelInfo.appendChild(rosterSection);
+    // Block labels need the list, but the roster must not wait for it: a slow
+    // or failing /api/blocks should cost a button label, never the roster.
+    _loadBlocks().then(function () {
+        var fresh = _buildRosterSection(data);
+        if (rosterSection.parentNode) rosterSection.replaceWith(fresh);
+    });
     _teamPanelInfo.appendChild(_buildInviteSection(data));
     _teamPanelInfo.appendChild(_buildLeaveTeamRow(data));
 
@@ -1369,6 +1380,15 @@ function _rosterStatusText(m) {
 }
 
 
+async function _loadBlocks() {
+    var res = await api('/api/blocks');
+    if (res && res.status === 200 && Array.isArray(res.data)) {
+        blockedUserIds = res.data.map(function (b) { return b.user_id; });
+    }
+    return blockedUserIds;
+}
+
+
 function _buildRosterSection(data) {
     var wrap = document.createElement('div');
     wrap.className = 'team-panel-info-section';
@@ -1429,11 +1449,123 @@ function _buildRosterSection(data) {
             row.appendChild(removeBtn);
         }
 
+        // Block / Unblock, and Report. Offered for everybody except yourself.
+        //
+        // Blocking is deliberately quiet: no confirmation copy about the other
+        // person, no "they will be notified" reassurance, because they are not
+        // notified and saying so invites the question.
+        if (m.user_id !== currentUser.id) {
+            row.appendChild(_buildMemberModerationControls(data, m));
+        }
+
         roster.appendChild(row);
     });
 
     wrap.appendChild(roster);
     return wrap;
+}
+
+
+function _buildMemberModerationControls(data, member) {
+    var box = document.createElement('div');
+    box.className = 'team-roster-mod';
+
+    var isBlocked = blockedUserIds.indexOf(member.user_id) !== -1;
+
+    var blockBtn = document.createElement('button');
+    blockBtn.type = 'button';
+    blockBtn.className = 'team-roster-mod-btn';
+    blockBtn.textContent = isBlocked ? 'Unblock' : 'Block';
+    blockBtn.setAttribute('aria-label',
+        (isBlocked ? 'Unblock ' : 'Block ') + (member.name || 'this member'));
+    blockBtn.addEventListener('click', async function () {
+        blockBtn.disabled = true;
+        var nowBlocked = blockedUserIds.indexOf(member.user_id) === -1;
+        var res = await api('/api/blocks/' + member.user_id,
+                            nowBlocked ? 'PUT' : 'DELETE');
+        if (res && (res.status === 204 || res.status === 200)) {
+            if (nowBlocked) {
+                blockedUserIds.push(member.user_id);
+            } else {
+                blockedUserIds = blockedUserIds.filter(function (id) {
+                    return id !== member.user_id;
+                });
+            }
+            blockBtn.textContent = nowBlocked ? 'Unblock' : 'Block';
+            // The thread changes as soon as a block lands, so reload it.
+            if (data && data.id) _loadTeamMessages(data.id);
+        }
+        blockBtn.disabled = false;
+    });
+    box.appendChild(blockBtn);
+
+    var reportBtn = document.createElement('button');
+    reportBtn.type = 'button';
+    reportBtn.className = 'team-roster-mod-btn';
+    reportBtn.textContent = 'Report';
+    reportBtn.setAttribute('aria-label', 'Report ' + (member.name || 'this member'));
+    reportBtn.addEventListener('click', function () {
+        _openReportPicker(box, {
+            subject_type: 'user',
+            reported_user_id: member.user_id,
+            team_id: data.id
+        });
+    });
+    box.appendChild(reportBtn);
+
+    return box;
+}
+
+
+// The categories the server accepts. Kept in the same order and wording as
+// REPORT_CATEGORIES in app.py; the server rejects anything else, so a drift
+// here is a 400 rather than a silently mis-filed report.
+var REPORT_CATEGORY_LABELS = [
+    ['harassment', 'Harassment'],
+    ['threats', 'Threats'],
+    ['inappropriate_content', 'Inappropriate content'],
+    ['child_safety', 'Child safety'],
+    ['spam', 'Spam'],
+    ['other', 'Something else']
+];
+
+
+function _openReportPicker(anchorEl, payload) {
+    var existing = anchorEl.querySelector('.report-picker');
+    if (existing) { existing.remove(); return; }
+
+    var picker = document.createElement('div');
+    picker.className = 'report-picker';
+    picker.setAttribute('role', 'group');
+    picker.setAttribute('aria-label', 'Choose a reason for this report');
+
+    var heading = document.createElement('p');
+    heading.className = 'report-picker-heading';
+    heading.textContent = 'What is wrong?';
+    picker.appendChild(heading);
+
+    REPORT_CATEGORY_LABELS.forEach(function (pair) {
+        var btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'report-picker-btn';
+        btn.textContent = pair[1];
+        btn.addEventListener('click', async function () {
+            picker.querySelectorAll('button').forEach(function (b) { b.disabled = true; });
+            var body = Object.assign({ category: pair[0] }, payload);
+            var res = await api('/api/reports', 'POST', body);
+            var done = document.createElement('p');
+            done.className = 'report-picker-done';
+            // Says nothing about the other person or what will happen to them.
+            done.textContent = (res && res.status === 201)
+                ? 'Thanks \u2014 someone will look at this.'
+                : 'That did not send. Try again in a moment.';
+            picker.innerHTML = '';
+            picker.appendChild(done);
+        });
+        picker.appendChild(btn);
+    });
+
+    anchorEl.appendChild(picker);
 }
 
 async function _submitRemoveMember(teamId, memberUserId, btn) {
@@ -1636,6 +1768,28 @@ function _appendTeamMsg(m) {
         sender.className = 'team-msg-sender';
         sender.textContent = isRickie ? '🦝 Rickie' : (m.sender_username || 'Someone');
         wrap.appendChild(sender);
+    }
+
+    // Report this one message. Only somebody else's, and never Rickie's --
+    // Rickie's lines are fixed templates, so there is nothing to report and a
+    // control there would just teach people the button is decorative.
+    if (!isRickie && !isSelf && m.message_id) {
+        var modRow = document.createElement('div');
+        modRow.className = 'team-msg-mod';
+        var reportMsgBtn = document.createElement('button');
+        reportMsgBtn.type = 'button';
+        reportMsgBtn.className = 'team-msg-report-btn';
+        reportMsgBtn.textContent = 'Report';
+        reportMsgBtn.setAttribute('aria-label', 'Report this message');
+        reportMsgBtn.addEventListener('click', function () {
+            _openReportPicker(modRow, {
+                subject_type: m.photo ? 'photo' : 'message',
+                subject_ref: m.photo ? m.photo.public_id : m.message_id,
+                team_id: _teamPanelTeamId
+            });
+        });
+        modRow.appendChild(reportMsgBtn);
+        wrap.appendChild(modRow);
     }
 
     if (m.challenge) {
