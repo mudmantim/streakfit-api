@@ -8,6 +8,7 @@ import re
 import string
 import subprocess
 import threading
+import time
 import urllib.parse
 import urllib.request
 from datetime import datetime, date, timedelta
@@ -1586,6 +1587,222 @@ def build_identity():
         "healthTimestamp": datetime.utcnow().isoformat() + "Z",
     }), 200
 
+
+
+
+# --- Self-Verification (Production Verification Framework) ---
+#
+# The checks only this application can run on itself. A dashboard can prove from
+# outside that StreakFit answers HTTP, refuses anonymous callers and throttles
+# failed logins; it cannot see the database, the schema or the shipped assets.
+# Those live here.
+#
+# Same contract, same exclusion list and the same unauthenticated trade as
+# /api/build-identity above -- read that block before adding a field.
+#
+# Three rules from the contract, because they are what makes this worth having:
+#
+#   UNKNOWN is not FAIL.  A check that could not establish its property reports
+#                         UNKNOWN. Conflating them lets a broken *check*
+#                         masquerade as a broken *product*.
+#   VERIFIED needs a      Every check claiming VERIFIED below has a test that
+#   negative control.     drives it to FAIL. A check nobody has seen fail is a
+#                         check nobody has tested, and it is OBSERVED at best.
+#   Weakest link.         The rolled-up status is never an average.
+#
+# Cost and safety: every check here is free, read-only and non-destructive. No
+# provider is contacted, no row is written, and nothing here touches
+# /api/admin/verify, the VerificationRun table or the background verification
+# thread -- that is a separate, state-changing system and this must never start it.
+
+SELF_CHECK_STATUSES = ('PASS', 'FAIL', 'UNKNOWN')
+
+
+def _self_check(check_id, asserts, method, critical, run):
+    """Run one check, time it, and never let it raise.
+
+    `run` returns (status, level, observed, failure_reason). An unexpected
+    exception is UNKNOWN rather than FAIL: it means the check could not
+    establish anything, which is a different fact from the property being false.
+    """
+    started = time.perf_counter()
+    try:
+        status, level, observed, failure_reason = run()
+    except Exception as exc:
+        status, level = 'UNKNOWN', 'UNKNOWN'
+        observed = 'check did not complete'
+        # Type name only. An exception message can carry a connection string.
+        failure_reason = f'unexpected {type(exc).__name__} while running the check'
+
+    return {
+        "id": check_id,
+        "asserts": asserts,
+        "method": method,
+        "status": status,
+        "level": level,
+        "observed": observed,
+        "failureReason": failure_reason,
+        "durationMs": round((time.perf_counter() - started) * 1000, 1),
+        "timestamp": datetime.utcnow().isoformat() + "Z",
+        "critical": critical,
+    }
+
+
+def _check_db_reachable():
+    """SELECT 1. A connectivity failure is the property being false, so it FAILs.
+
+    Mirrors the probe in `_compute_system_health()` -- deliberately re-issued
+    here rather than reading that function's result, because it collapses every
+    outcome into "healthy"/"unhealthy" and this contract must tell a database
+    that is down apart from a check that could not run.
+    """
+    from sqlalchemy.exc import SQLAlchemyError
+    try:
+        db.session.execute(db.text('SELECT 1'))
+    except SQLAlchemyError as exc:
+        db.session.rollback()
+        return ('FAIL', 'VERIFIED', 'the database did not answer SELECT 1',
+                f'database unreachable or refusing queries ({type(exc).__name__})')
+    return ('PASS', 'VERIFIED', 'SELECT 1 answered', None)
+
+
+def _check_db_schema_current():
+    """The applied Alembic revision against the head this build expects.
+
+    Reuses `_read_migration_state()`, the read-only helper already serving
+    /api/build-identity, so the two endpoints can never disagree about the
+    schema. `state: unknown` means the revision could not be read -- UNKNOWN,
+    not FAIL, because a database we cannot reach has not been shown to be wrong.
+    """
+    migration = _read_migration_state()
+
+    if migration["state"] != 'ok':
+        return ('UNKNOWN', 'UNKNOWN', 'the applied revision could not be read',
+                'migration state is unreadable, so schema currency is unconfirmed')
+
+    if migration["atHead"]:
+        return ('PASS', 'VERIFIED',
+                f'at head, {migration["appliedCount"]} migrations applied', None)
+
+    return ('FAIL', 'VERIFIED',
+            f'applied revision {migration["latest"]} is not the head this build expects',
+            'the database schema does not match the running code')
+
+
+def _check_assets_present():
+    """The PWA assets this build ships: the manifest parses, every icon exists,
+    and the service worker is on disk.
+
+    Re-read here rather than taken from `_compute_system_health()`'s `pwa`
+    booleans for the same reason as the database probe: that function reports
+    `icons_present: False` both for a missing icon and for a manifest it could
+    not parse, and those are FAIL and UNKNOWN respectively.
+    """
+    repo_root = os.path.dirname(os.path.abspath(__file__))
+    static_dir = os.path.join(repo_root, 'static')
+
+    if not os.path.exists(os.path.join(static_dir, 'sw.js')):
+        return ('FAIL', 'VERIFIED', 'static/sw.js is missing',
+                'the service worker is absent, so the app cannot work offline or install')
+
+    manifest_path = os.path.join(static_dir, 'manifest.json')
+    if not os.path.exists(manifest_path):
+        return ('FAIL', 'VERIFIED', 'static/manifest.json is missing',
+                'without a manifest the app is not installable')
+
+    try:
+        with open(manifest_path) as f:
+            manifest = json.load(f)
+    except (OSError, ValueError) as exc:
+        return ('UNKNOWN', 'UNKNOWN', 'static/manifest.json could not be read',
+                f'the manifest is present but unreadable ({type(exc).__name__})')
+
+    icon_paths = [icon.get('src', '') for icon in manifest.get('icons', []) if icon.get('src')]
+    if not icon_paths:
+        return ('FAIL', 'VERIFIED', 'the manifest declares no icons',
+                'without an icon the app is not installable')
+
+    missing = [p for p in icon_paths
+               if not os.path.exists(os.path.join(repo_root, p.lstrip('/')))]
+    if missing:
+        # A count, not the paths -- filesystem layout is not this payload's business.
+        return ('FAIL', 'VERIFIED', f'{len(missing)} of {len(icon_paths)} declared icons are missing',
+                'a declared icon is absent, so the install prompt renders broken artwork')
+
+    return ('PASS', 'VERIFIED',
+            f'service worker present, manifest parses, {len(icon_paths)} icons on disk', None)
+
+
+def _check_coach_configured():
+    """Whether the coach's key is present -- NOT whether Anthropic is working.
+
+    Reads the module-level `_anthropic_api_key` that /api/coach itself gates on,
+    so this predicts that route's 503 exactly. No request is made to Anthropic:
+    that would be a paid call to a third party, which this contract forbids, and
+    it is why the level is OBSERVED rather than VERIFIED. A key that is present
+    has not been shown to work.
+
+    Not critical: the app is designed to fail closed here, and the rest of it is
+    unaffected.
+    """
+    if not _anthropic_api_key:
+        return ('FAIL', 'OBSERVED', 'no coach API key is configured',
+                '/api/coach returns 503 until a key is configured')
+    return ('PASS', 'OBSERVED', 'a coach API key is configured', None)
+
+
+def _run_self_checks():
+    """Every self-check, in a fixed order. Read-only from end to end."""
+    return [
+        _self_check(
+            'db.reachable',
+            'The application can query its database.',
+            "Execute SELECT 1 on the application's own connection.",
+            True, _check_db_reachable),
+        _self_check(
+            'db.schema-current',
+            'The database schema matches the revision this build expects.',
+            "Compare the database's applied Alembic revision against the chain head.",
+            True, _check_db_schema_current),
+        _self_check(
+            'assets.present',
+            'The PWA assets this build ships are on disk and consistent.',
+            'Check static/sw.js exists, parse static/manifest.json, resolve every declared icon.',
+            False, _check_assets_present),
+        _self_check(
+            'coach.configured',
+            'The coach has the configuration it needs to answer.',
+            'Read whether an API key is configured. The provider is never contacted.',
+            False, _check_coach_configured),
+    ]
+
+
+def _roll_up(checks):
+    """Weakest link, never an average.
+
+    Any FAIL makes the application FAIL. Any UNKNOWN with no failures makes it
+    UNKNOWN. Averaging is how one unknown hides behind a crowd of green.
+    """
+    statuses = {c["status"] for c in checks}
+    if 'FAIL' in statuses:
+        return 'FAIL'
+    if 'UNKNOWN' in statuses:
+        return 'UNKNOWN'
+    return 'PASS'
+
+
+@app.route('/api/verification/self', methods=['GET'])
+@limiter.limit("60 per minute")
+def verification_self():
+    """What this application can check about itself. Read-only."""
+    checks = _run_self_checks()
+
+    return jsonify({
+        "application": "streakfit",
+        "status": _roll_up(checks),
+        "timestamp": datetime.utcnow().isoformat() + "Z",
+        "checks": checks,
+    }), 200
 
 
 # --- Admin ---
