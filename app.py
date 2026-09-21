@@ -2241,6 +2241,24 @@ class ModerationNotice(db.Model):
     # error can quote the request body back, and the body names a report.
     last_error = db.Column(db.String(64), nullable=True)
 
+    # A LEASE, not a lock. One worker claims a notice before sending it, and
+    # the claim expires on its own so a worker that dies mid-send does not
+    # strand the notice forever.
+    #
+    # Reproduced before this existed: two workers both read the same
+    # undelivered row and both sent it, because nothing stood between the read
+    # and the irreversible part. The unique constraint protects GENERATION;
+    # it had nothing to say about delivery.
+    claimed_at = db.Column(db.DateTime, nullable=True, index=True)
+    claimed_by = db.Column(db.String(64), nullable=True)
+
+    # The idempotency key handed to the provider, minted ONCE and committed
+    # before the send. A worker that crashes between the provider accepting
+    # and this row recording the receipt retries with the SAME key, so a
+    # provider that honours idempotency collapses the duplicate. One that does
+    # not will deliver twice -- see docs/operations/moderation.md.
+    provider_key = db.Column(db.String(64), nullable=True)
+
     __table_args__ = (
         # Idempotency lives in the database, not in the generator's bookkeeping.
         # A generator that tracked "already sent" in memory would start over
@@ -2248,6 +2266,37 @@ class ModerationNotice(db.Model):
         db.UniqueConstraint('subject_type', 'subject_ref', 'kind',
                             name='uq_moderation_notice_subject_kind'),
     )
+
+
+class NotificationRun(db.Model):
+    """A record that a delivery PASS happened, separately from any notice.
+
+    RetentionRun's lesson, applied to the other promise. Without this row, an
+    idle delivery worker and an absent one are the same observation: no
+    notices went out either way, and an empty queue reads as health.
+
+    So the worker records that it ran even when it had nothing to send, and
+    `source` says whether anybody had to be present for it. A check asking
+    "can an alert reach Tim?" needs an UNATTENDED run here; a manual one
+    proves only that somebody was at a terminal that minute.
+
+    Carries counts and nothing else -- no subject, no recipient, no content.
+    """
+    __tablename__ = 'notification_run'
+    id = db.Column(db.Integer, primary_key=True)
+    ran_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow,
+                       index=True)
+    source = db.Column(db.String(24), nullable=False, index=True)
+    outcome = db.Column(db.String(16), nullable=False, default='ok')
+    error_type = db.Column(db.String(64), nullable=True)
+    # What the pass did. `attempted` is the honest denominator: a pass that
+    # attempted nothing because nothing was due is a real, healthy pass.
+    attempted = db.Column(db.Integer, nullable=False, default=0)
+    delivered = db.Column(db.Integer, nullable=False, default=0)
+    failed = db.Column(db.Integer, nullable=False, default=0)
+    # Was a channel configured when this pass ran? A pass with no channel is
+    # the worker proving it is alive while proving it cannot deliver.
+    channel = db.Column(db.String(24), nullable=True)
 
 
 class VerificationRun(db.Model):
@@ -2277,9 +2326,28 @@ RETENTION_COACH = 'coach'
 RETENTION_MODERATION = 'moderation'
 RETENTION_KINDS = (RETENTION_COACH, RETENTION_MODERATION)
 
+# WHO ran a job, and the distinction monitoring turns on.
+#
+# An audit found a hand-typed `flask moderation-prune` recorded as 'cron' and
+# passing the check for 48 hours, with no scheduler existing anywhere. A run
+# proves a promise is being kept UNATTENDED only if nobody had to be present
+# for it, so the source vocabulary has to be able to say "a person did this".
+#
+# The command cannot tell whether a human or a scheduler invoked it, so it
+# assumes MANUAL and requires --scheduled to claim otherwise. Guessing the
+# other way is how the mislabel happened.
+SOURCE_THREAD = 'thread'      # the in-process worker; nobody present
+SOURCE_CRON = 'cron'          # an external scheduler; nobody present
+SOURCE_MANUAL = 'manual'      # somebody typed it
+SOURCE_REQUEST = 'request'    # piggy-backed on a user's request
+UNATTENDED_SOURCES = (SOURCE_THREAD, SOURCE_CRON)
+
 # How long a promise may go unswept before monitoring calls it broken. 48h is
 # two full cycles of a daily cron plus an hourly thread -- a signal, not a blip.
 RETENTION_STALE_AFTER_HOURS = 48
+
+# A delivery worker runs hourly, so two silent cycles plus slack.
+DELIVERY_STALE_AFTER_HOURS = 3
 
 
 class RetentionRun(db.Model):
@@ -2680,17 +2748,26 @@ def verification_self():
     # scheduled sweep that quietly stops looks identical to one with nothing to
     # do — so the check is about the RUN, not the row count.
     try:
-        # FILTERED BY KIND. Before moderation evidence had its own sweep this
-        # table held one thing, so an unfiltered query meant "the sweep". It
-        # now holds two promises, and an unfiltered query here would report
-        # conversation retention as healthy because moderation swept.
-        last = _last_retention_run(RETENTION_COACH)
-        if last is None:
-            state, evidence, observed = "UNKNOWN", "UNKNOWN", "no sweep has ever been recorded"
-        elif last.outcome != 'ok':
+        # FILTERED BY KIND, and by whether anybody was there. Before
+        # moderation evidence had its own sweep this table held one thing, so
+        # an unfiltered query meant "the sweep"; it now holds two promises.
+        # And as with moderation, a PASS requires an UNATTENDED run -- a
+        # hand-typed prune, or one that happened to piggy-back on a user's
+        # request, says somebody swept once, not that anything sweeps on its
+        # own. An idle service serves no requests and sweeps nothing.
+        any_run = _last_retention_run(RETENTION_COACH)
+        last = _last_retention_run(RETENTION_COACH, unattended_only=True)
+        if any_run is not None and any_run.outcome != 'ok':
             state, evidence = "FAIL", "OBSERVED"
-            observed = (f"last attempt {last.ran_at.isoformat()} via "
-                        f"{last.source} FAILED ({last.error_type})")
+            observed = (f"last attempt {any_run.ran_at.isoformat()} via "
+                        f"{any_run.source} FAILED ({any_run.error_type})")
+        elif last is None:
+            state, evidence = "UNKNOWN", "UNKNOWN"
+            observed = "no unattended sweep has ever been recorded"
+            if any_run is not None:
+                observed += (f" (a {any_run.source} run exists, which proves "
+                             f"somebody swept once, not that anything sweeps "
+                             f"on its own)")
         else:
             age_h = (datetime.utcnow() - last.ran_at).total_seconds() / 3600
             # A daily cron plus an hourly in-process sweep; 48h means both have
@@ -2698,13 +2775,15 @@ def verification_self():
             # blip.
             state = "PASS" if age_h <= RETENTION_STALE_AFTER_HOURS else "FAIL"
             evidence = "VERIFIED" if state == "PASS" else "OBSERVED"
-            observed = (f"last swept {age_h:.1f}h ago via {last.source}, "
-                        f"{last.deleted} deleted")
+            observed = (f"last unattended sweep {age_h:.1f}h ago via "
+                        f"{last.source}, {last.deleted} deleted")
         checks.append(_self_check(
             "retention.recent", "Conversation retention is running",
             f"Expired conversation turns are being deleted on schedule "
             f"({_COACH_TURN_MAX_AGE_DAYS}-day window).",
-            "Read the most recent retention_run record and check its age.",
+            "Read the most recent UNATTENDED retention_run of kind 'coach' "
+            "and check its age and outcome. A manual or request-piggybacked "
+            "run never satisfies this.",
             state, evidence, observed,
             failure_reason=None if state == "PASS" else
             "Nothing has swept expired conversations recently, so the stated "
@@ -2724,28 +2803,38 @@ def verification_self():
     # not choose to hand it over; a sweep that stopped is a promise broken to
     # them, and until this check existed it was invisible.
     try:
-        last = _last_retention_run(RETENTION_MODERATION)
-        if last is None:
-            state, evidence = "UNKNOWN", "UNKNOWN"
-            observed = "no moderation sweep has ever been recorded"
-        elif last.outcome != 'ok':
+        # A PASS requires an UNATTENDED run. One hand-typed `flask
+        # moderation-prune` used to satisfy this for 48 hours with no
+        # scheduler existing anywhere -- and because the command recorded
+        # itself as 'cron', nothing could tell the difference afterwards.
+        any_run = _last_retention_run(RETENTION_MODERATION)
+        last = _last_retention_run(RETENTION_MODERATION, unattended_only=True)
+        if any_run is not None and any_run.outcome != 'ok':
             state, evidence = "FAIL", "OBSERVED"
-            observed = (f"last attempt {last.ran_at.isoformat()} via "
-                        f"{last.source} FAILED ({last.error_type})")
+            observed = (f"last attempt {any_run.ran_at.isoformat()} via "
+                        f"{any_run.source} FAILED ({any_run.error_type})")
+        elif last is None:
+            state, evidence = "UNKNOWN", "UNKNOWN"
+            observed = "no unattended moderation sweep has ever been recorded"
+            if any_run is not None:
+                observed += (f" (a {any_run.source} run exists, which proves "
+                             f"somebody swept once, not that anything sweeps "
+                             f"on its own)")
         else:
             age_h = (datetime.utcnow() - last.ran_at).total_seconds() / 3600
             state = "PASS" if age_h <= RETENTION_STALE_AFTER_HOURS else "FAIL"
             evidence = "VERIFIED" if state == "PASS" else "OBSERVED"
-            observed = (f"last swept {age_h:.1f}h ago via {last.source} "
-                        f"({last.detail or 'no counts'})")
+            observed = (f"last unattended sweep {age_h:.1f}h ago via "
+                        f"{last.source} ({last.detail or 'no counts'})")
         checks.append(_self_check(
             "retention.moderation", "Moderation evidence retention is running",
             f"Reported photos, messages and captions are being deleted on "
             f"schedule ({PHOTO_EVIDENCE_MAX_AGE_DAYS} days from capture for "
             f"images, {EVIDENCE_RETENTION_DAYS_AFTER_CLOSURE} days after "
             f"closure for text).",
-            "Read the most recent retention_run of kind 'moderation' and check "
-            "its age and outcome.",
+            "Read the most recent UNATTENDED retention_run of kind "
+            "'moderation' and check its age and outcome. A manual run never "
+            "satisfies this.",
             state, evidence, observed,
             failure_reason=None if state == "PASS" else
             "Reported private content is not being deleted on the stated "
@@ -2760,23 +2849,78 @@ def verification_self():
             "UNKNOWN", "UNKNOWN", f"{type(exc).__name__}",
             failure_reason="The moderation retention record could not be read."))
 
-    # Generation is not delivery. This is the check that says so out loud: an
-    # urgent notice sitting undelivered means a 24-hour child-safety clock is
-    # running and nobody has been told it started.
+    # Generation is not delivery, and delivery is three separate facts.
+    # Collapsing them reproduced as PASS on an empty database with no provider
+    # configured and no worker running: "no urgent notice is waiting" read as
+    # health when it only meant nothing had been filed yet.
     try:
+        configured, worker_fresh, why_not = _delivery_capability()
+
+        # 1. CONFIGURATION. Knowable from the environment alone.
+        checks.append(_self_check(
+            "moderation.delivery_configured", "A delivery channel is configured",
+            "Something is configured that could carry a moderation alert.",
+            "Resolve STREAKFIT_NOTIFY_CHANNEL against the channel registry, "
+            "and require that the channel it names can certify a delivery.",
+            "PASS" if configured else "FAIL",
+            "VERIFIED" if configured else "OBSERVED",
+            "a channel is configured" if configured else
+            (why_not or "no channel is configured; nothing can be delivered"),
+            failure_reason=None if configured else
+            "No notification channel that can deliver exists, so no report "
+            "can reach a reviewer.",
+            limitations="Configuration only. Says nothing about whether "
+                        "anything has ever run or succeeded."))
+
+        # 2. OBSERVED EXECUTION. Knowable only from a record that a pass ran.
+        run = _last_notification_run(unattended_only=True)
+        if run is None:
+            wstate, wobs = "FAIL", "no unattended delivery pass has ever run"
+        else:
+            age_h = (datetime.utcnow() - run.ran_at).total_seconds() / 3600
+            wstate = "PASS" if worker_fresh else "FAIL"
+            wobs = (f"last unattended pass {age_h:.1f}h ago via {run.source}, "
+                    f"{run.delivered} delivered, {run.failed} failed")
+        checks.append(_self_check(
+            "moderation.delivery_worker", "An unattended delivery worker is running",
+            "Something delivers notices without anybody typing a command.",
+            "Read the most recent notification_run whose source is unattended.",
+            wstate, "VERIFIED" if wstate == "PASS" else "OBSERVED", wobs,
+            failure_reason=None if wstate == "PASS" else
+            "Nothing is delivering alerts on its own; a report would wait for "
+            "somebody to run a command by hand.",
+            limitations="A manual run never satisfies this, by design."))
+
+        # 3. OUTSTANDING WORK -- and it refuses to claim health it cannot see.
         stuck = _undelivered_urgent_notices()
-        state = "PASS" if not stuck else "FAIL"
-        observed = ("no urgent notice is waiting" if not stuck else
-                    f"{len(stuck)} urgent notice(s) undelivered, oldest "
-                    f"{stuck[0].created_at.isoformat()}Z")
+        failing = _persistently_failing_notices()
+        if stuck:
+            state, evidence = "FAIL", "OBSERVED"
+            observed = (f"{len(stuck)} urgent notice(s) undelivered, oldest "
+                        f"{stuck[0].created_at.isoformat()}Z")
+            reason = ("A child-safety report is on a 24-hour clock and nobody "
+                      "has been notified.")
+        elif not (configured and worker_fresh):
+            # THE FIX. An empty queue proves nothing when nothing could have
+            # emptied it. UNKNOWN is the honest answer, not PASS.
+            state, evidence = "UNKNOWN", "UNKNOWN"
+            observed = (f"no urgent notice is waiting, but {why_not} — an "
+                        f"empty queue is not evidence that alerts work")
+            reason = ("Delivery is not operational, so the absence of stuck "
+                      "alerts says nothing.")
+        else:
+            state, evidence = "PASS", "VERIFIED"
+            observed = "no urgent notice is waiting, and delivery is operational"
+            reason = None
+        if failing:
+            observed += f"; {len(failing)} notice(s) failing persistently"
         checks.append(_self_check(
             "moderation.notices_delivered", "Urgent moderation notices reach somebody",
             "Child-safety notices are delivered, not merely generated.",
-            "Count urgent_filed notices with no delivered_at, older than an hour.",
-            state, "VERIFIED" if state == "PASS" else "OBSERVED", observed,
-            failure_reason=None if state == "PASS" else
-            "A child-safety report is on a 24-hour clock and nobody has been "
-            "notified.",
+            "Count undelivered urgent notices past a grace period, and require "
+            "that a configured channel and a live worker exist before calling "
+            "an empty queue healthy.",
+            state, evidence, observed, failure_reason=reason,
             limitations="Counts what was RECORDED as delivered. It cannot see "
                         "whether a person read it."))
     except Exception as exc:
@@ -8703,12 +8847,69 @@ def _sweep_expired_coach_turns(force=False, source='request'):
     return deleted
 
 
-def _last_retention_run(kind):
-    """The most recent run FOR ONE PROMISE. Never 'the most recent run'."""
+def _last_retention_run(kind, unattended_only=False):
+    """The most recent run FOR ONE PROMISE. Never 'the most recent run'.
+
+    `unattended_only` is the difference between "a sweep happened" and "a
+    sweep happens without anybody being there", which is the only version of
+    the claim worth monitoring. A hand-typed command satisfied the check for
+    48 hours before this existed.
+    """
+    q = db.select(RetentionRun).where(RetentionRun.kind == kind)
+    if unattended_only:
+        q = q.where(RetentionRun.source.in_(UNATTENDED_SOURCES))
     return db.session.execute(
-        db.select(RetentionRun).where(RetentionRun.kind == kind)
-        .order_by(RetentionRun.ran_at.desc()).limit(1)
-    ).scalars().first()
+        q.order_by(RetentionRun.ran_at.desc()).limit(1)).scalars().first()
+
+
+def _last_notification_run(unattended_only=False):
+    q = db.select(NotificationRun)
+    if unattended_only:
+        q = q.where(NotificationRun.source.in_(UNATTENDED_SOURCES))
+    return db.session.execute(
+        q.order_by(NotificationRun.ran_at.desc()).limit(1)).scalars().first()
+
+
+def _delivery_capability(now=None):
+    """Can an alert reach anybody right now? (configured, worker, why_not)
+
+    Three separate facts, because they fail separately and a single boolean
+    hides which one is wrong:
+
+      * a channel is CONFIGURED   -- configuration, knowable from env alone
+      * a worker has RUN recently -- observed execution, knowable only from a
+                                     record that a pass happened
+      * therefore an alert could get out
+
+    Configuration without observed execution is the state that reads as
+    healthy and is not: a provider set up perfectly, and nothing ever calling
+    it.
+    """
+    now = now or datetime.utcnow()
+    # `console` resolves to a channel and delivers nothing -- it raises by
+    # design. Counting it as capability would reproduce the same false green
+    # this function exists to prevent, one layer further in: a configured
+    # channel, a live worker, an empty queue, and no alert that could ever
+    # reach anybody.
+    channel = _notification_channel()
+    configured = channel is not None and channel.certifies_delivery
+    run = _last_notification_run(unattended_only=True)
+    worker_fresh = bool(
+        run is not None
+        and (now - run.ran_at) <= timedelta(hours=DELIVERY_STALE_AFTER_HOURS))
+    if channel is not None and not configured:
+        why = (f"the configured channel ({channel.name}) cannot certify "
+               f"delivery, so nothing can be marked delivered through it")
+    elif not configured and not worker_fresh:
+        why = "no channel configured and no unattended delivery pass recorded"
+    elif not configured:
+        why = "a worker is running but no channel is configured"
+    elif not worker_fresh:
+        why = ("a channel is configured but no unattended delivery pass has "
+               "run recently")
+    else:
+        why = None
+    return configured, worker_fresh, why
 
 
 def _moderation_sweep_detail(result):
@@ -8828,7 +9029,11 @@ def _sweep_moderation_evidence(now=None):
 
 
 @app.cli.command("moderation-prune")
-def moderation_prune_command():
+@click.option('--scheduled', is_flag=True, default=False,
+              help='Record this run as UNATTENDED. Pass it only from a real '
+                   'scheduler: monitoring treats it as proof that retention '
+                   'runs without anybody present.')
+def moderation_prune_command(scheduled):
     """Delete aged-out report evidence. For a scheduled run.
 
     The in-process retention thread now runs this same sweep hourly, so a live
@@ -8843,7 +9048,8 @@ def moderation_prune_command():
     """
     try:
         result = _sweep_moderation_evidence()
-        _record_retention_run(RETENTION_MODERATION, 'cron',
+        _record_retention_run(RETENTION_MODERATION,
+                              SOURCE_CRON if scheduled else SOURCE_MANUAL,
                               deleted=result['text_evidence_purged']
                               + result['photo_evidence_purged'],
                               detail=_moderation_sweep_detail(result))
@@ -8852,7 +9058,9 @@ def moderation_prune_command():
         # Record the failure, then fail loudly. A scheduler that reads exit
         # codes must not see 0 from a sweep that deleted nothing because it
         # broke.
-        _record_retention_failure(RETENTION_MODERATION, 'cron', exc)
+        _record_retention_failure(RETENTION_MODERATION,
+                                  SOURCE_CRON if scheduled else SOURCE_MANUAL,
+                                  exc)
         raise
     print(f"purged {result['text_evidence_purged']} text evidence rows, "
           f"{result['photo_evidence_purged']} photo evidence rows; "
@@ -8936,8 +9144,15 @@ class NotificationChannel:
     and must raise instead.
     """
     name = 'base'
+    # Can this channel actually carry an alert to a person? A channel that
+    # always raises is configuration that cannot deliver, and monitoring must
+    # not count it as capability -- see `_delivery_capability`.
+    certifies_delivery = True
 
-    def send(self, subject, body):
+    def send(self, subject, body, idempotency_key=None):
+        """Deliver, or raise. `idempotency_key` is stable across retries of the
+        same notice, so an adapter should pass it to any provider that offers
+        request deduplication."""
         raise NotImplementedError
 
 
@@ -8950,8 +9165,9 @@ class ConsoleChannel(NotificationChannel):
     say-so (`--mark-delivered`), which is a human asserting they have seen it.
     """
     name = 'console'
+    certifies_delivery = False
 
-    def send(self, subject, body):
+    def send(self, subject, body, idempotency_key=None):
         print(f"  [console] {subject}")
         raise NotificationError('console is not a delivery channel')
 
@@ -8971,24 +9187,114 @@ def _notification_channel(name=None):
     return factory() if factory else None
 
 
-# Exponential, capped, and measured from the last attempt. A provider having a
-# bad ten minutes must not become a hundred duplicate sends, and an overdue
-# child-safety notice must not wait a day between tries either.
+# Exponential, then FLAT FOREVER. The schedule is bounded; the number of
+# attempts is not.
+#
+# The previous version stopped after six attempts, which reproduced as a
+# child-safety alert permanently abandoned 5.35 hours into a provider outage,
+# against a 24-hour deadline -- and never retried again even once the provider
+# came back. Giving up is the one thing an urgent alert must not do.
+#
+# Urgent work settles at a 15-minute retry; ordinary work backs off to four
+# hours. Both keep going.
 _NOTIFY_BACKOFF_MINUTES = (0, 1, 5, 15, 60, 240)
-_NOTIFY_MAX_ATTEMPTS = len(_NOTIFY_BACKOFF_MINUTES)
+_NOTIFY_URGENT_MAX_INTERVAL_M = 15
+_NOTIFY_ORDINARY_MAX_INTERVAL_M = 240
+
+# After this many failures a notice is PERSISTENTLY failing. It keeps being
+# retried; monitoring simply stops calling the situation normal.
+_NOTIFY_PERSISTENT_AFTER = 5
+
+# How long one worker holds a claim before another may take it over. Long
+# enough for a slow provider call, short enough that a worker killed
+# mid-send does not strand an urgent alert for an hour.
+_NOTIFY_LEASE = timedelta(minutes=5)
+
+# Never load an unbounded backlog to find the few rows that are due.
+_NOTIFY_SCAN_LIMIT = 500
+
+# Who this process is, for a claim. Not a secret and not an identifier of any
+# person -- a pid and a random suffix, so two workers on one host differ.
+_WORKER_ID = f"{os.getpid()}-{uuid.uuid4().hex[:8]}"
+
+
+def _notice_backoff_minutes(notice):
+    """How long to wait before the next attempt. Bounded, never infinite."""
+    attempts = notice.attempts or 0
+    if attempts < len(_NOTIFY_BACKOFF_MINUTES):
+        return _NOTIFY_BACKOFF_MINUTES[attempts]
+    return (_NOTIFY_URGENT_MAX_INTERVAL_M if notice.kind == 'urgent_filed'
+            else _NOTIFY_ORDINARY_MAX_INTERVAL_M)
 
 
 def _notice_is_due(notice, now):
-    """May this notice be attempted right now?"""
+    """May this notice be attempted right now?
+
+    No attempt cap. A notice is due, or it is waiting out its backoff, or it
+    is currently claimed by a worker -- there is no fourth state in which it
+    is quietly given up on.
+    """
     if notice.delivered_at is not None:
         return False
-    if notice.attempts >= _NOTIFY_MAX_ATTEMPTS:
-        return False            # exhausted; surfaced by monitoring instead
+    # Somebody else is mid-send and their lease has not expired.
+    if notice.claimed_at is not None and now - notice.claimed_at < _NOTIFY_LEASE:
+        return False
     if notice.last_attempt_at is None:
         return True
-    wait = _NOTIFY_BACKOFF_MINUTES[min(notice.attempts,
-                                       len(_NOTIFY_BACKOFF_MINUTES) - 1)]
-    return now - notice.last_attempt_at >= timedelta(minutes=wait)
+    return (now - notice.last_attempt_at
+            >= timedelta(minutes=_notice_backoff_minutes(notice)))
+
+
+def _notices_for_delivery(now, limit):
+    """The next batch, urgent first, ELIGIBILITY APPLIED BEFORE THE LIMIT.
+
+    The order of those two operations is the whole point. Slicing first and
+    filtering second reproduced as a newly filed child-safety alert never
+    being attempted at all, because fifty older notices sitting in backoff
+    filled the batch window ahead of it.
+
+    So: order urgent ahead of ordinary, oldest first within each, scan a
+    bounded window, drop what is not due, and only then take the batch.
+    """
+    rows = db.session.execute(
+        db.select(ModerationNotice)
+        .where(ModerationNotice.delivered_at.is_(None))
+        .order_by(
+            db.case((ModerationNotice.kind == 'urgent_filed', 0), else_=1),
+            ModerationNotice.created_at.asc())
+        .limit(_NOTIFY_SCAN_LIMIT)
+    ).scalars().all()
+    return [n for n in rows if _notice_is_due(n, now)][:limit]
+
+
+def _claim_notice(notice_id, now):
+    """Take an exclusive, expiring claim on one notice. True if we got it.
+
+    A single conditional UPDATE, committed on its own. Two workers racing here
+    both issue it; the database serialises them and exactly one sees a row
+    changed. The loser skips the notice rather than sending it a second time.
+
+    The claim is also where `provider_key` is minted and COMMITTED -- before
+    the send, so a retry after a crash reuses the same key.
+    """
+    stmt = (db.update(ModerationNotice)
+            .where(ModerationNotice.id == notice_id,
+                   ModerationNotice.delivered_at.is_(None),
+                   db.or_(ModerationNotice.claimed_at.is_(None),
+                          ModerationNotice.claimed_at <= now - _NOTIFY_LEASE))
+            .values(claimed_at=now, claimed_by=_WORKER_ID[:64])
+            .execution_options(synchronize_session=False))
+    try:
+        won = db.session.execute(stmt).rowcount == 1
+        if won:
+            notice = db.session.get(ModerationNotice, notice_id)
+            if notice is not None and not notice.provider_key:
+                notice.provider_key = uuid.uuid4().hex
+        db.session.commit()
+        return won
+    except Exception:
+        db.session.rollback()
+        return False
 
 
 # What a notice is ALLOWED to say. The table carries no content by design and
@@ -9024,46 +9330,131 @@ def _notice_message(notice, base_url=None):
     return subject, body
 
 
-def _deliver_pending_notices(channel=None, now=None, limit=50):
-    """Attempt every notice that is due, and record what actually happened.
+def _deliver_pending_notices(channel=None, now=None, limit=50,
+                             source=SOURCE_MANUAL, record_run=True):
+    """Attempt every notice that is due, recording each one on its own.
 
-    Returns {'delivered': n, 'failed': n, 'skipped': n}.
+    Returns {'delivered', 'failed', 'skipped', 'contended'}.
 
-    The only place `delivered_at` is ever set outside an operator's explicit
-    say-so, and it is set beside a receipt or not at all. A failure increments
-    the attempt count, stores the exception TYPE, and leaves `delivered_at`
-    NULL so the next pass retries it -- which is the behaviour that makes a
-    transient provider outage a delay instead of a lost obligation.
+    ONE TRANSACTION PER NOTICE, deliberately. A single commit for the whole
+    batch reproduced as three messages accepted by the provider and zero
+    recorded, because one failing commit erased the lot -- and with `attempts`
+    erased too, the retry had no backoff to slow it down.
+
+    The order of operations is the contract:
+
+      1. claim (committed)  -- nobody else may send this one
+      2. send               -- the irreversible step
+      3. record (committed) -- what actually happened
+
+    A crash between 2 and 3 leaves the claim in place until its lease expires,
+    then retries with the SAME provider_key. A provider honouring idempotency
+    collapses that; one that does not delivers twice. That residual risk is
+    real and documented rather than papered over.
     """
     now = now or datetime.utcnow()
-    counts = {'delivered': 0, 'failed': 0, 'skipped': 0}
+    counts = {'delivered': 0, 'failed': 0, 'skipped': 0, 'contended': 0}
     if channel is None:
         channel = _notification_channel()
-    if channel is None:
-        return counts       # nothing configured; every notice stays undelivered
 
-    for notice in _undelivered_notices()[:limit]:
-        if not _notice_is_due(notice, now):
-            counts['skipped'] += 1
-            continue
-        subject, body = _notice_message(notice)
+    if channel is not None:
+        for candidate in _notices_for_delivery(now, limit):
+            if not _claim_notice(candidate.id, now):
+                # Another worker got there first, or it was delivered between
+                # the scan and the claim. Either way it is not ours to send.
+                counts['contended'] += 1
+                continue
+
+            notice = db.session.get(ModerationNotice, candidate.id)
+            if notice is None or notice.delivered_at is not None:
+                counts['skipped'] += 1
+                continue
+
+            try:
+                subject, body = _notice_message(notice)
+            except Exception:
+                # Composing a message must never abort the batch and take
+                # other notices' records down with it.
+                _record_notice_failure(notice, 'MessageError', now)
+                counts['failed'] += 1
+                continue
+
+            try:
+                receipt = channel.send(subject, body,
+                                       idempotency_key=notice.provider_key)
+                if not receipt:
+                    raise NotificationError('channel returned no receipt')
+            except Exception as exc:
+                _record_notice_failure(notice, type(exc).__name__, now)
+                counts['failed'] += 1
+                continue
+
+            # Delivered. Recording it is a separate transaction from every
+            # other notice's, so a failure here costs this one record and
+            # nothing else.
+            try:
+                notice.attempts = (notice.attempts or 0) + 1
+                notice.last_attempt_at = now
+                notice.delivered_at = now
+                notice.channel = channel.name[:24]
+                notice.receipt = str(receipt)[:120]
+                notice.last_error = None
+                notice.claimed_at = None
+                notice.claimed_by = None
+                db.session.commit()
+                counts['delivered'] += 1
+            except Exception:
+                # The provider accepted it and we could not write that down.
+                # The claim stands until its lease expires; the retry reuses
+                # provider_key. Counted as failed because, as far as this
+                # system can prove, nobody was told.
+                db.session.rollback()
+                counts['failed'] += 1
+
+    if record_run:
+        _record_notification_run(source, counts, channel, now)
+    return counts
+
+
+def _record_notice_failure(notice, error_type, now):
+    """One failed attempt, committed alone, claim released for the retry."""
+    try:
         notice.attempts = (notice.attempts or 0) + 1
         notice.last_attempt_at = now
-        try:
-            receipt = channel.send(subject, body)
-            if not receipt:
-                # A channel that returns nothing has not told us it arrived.
-                raise NotificationError('channel returned no receipt')
-            notice.delivered_at = now
-            notice.channel = channel.name[:24]
-            notice.receipt = str(receipt)[:120]
-            notice.last_error = None
-            counts['delivered'] += 1
-        except Exception as exc:
-            notice.last_error = type(exc).__name__[:64]
-            counts['failed'] += 1
-    db.session.commit()
-    return counts
+        notice.last_error = error_type[:64]
+        notice.claimed_at = None
+        notice.claimed_by = None
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+
+
+def _record_notification_run(source, counts, channel, now):
+    """That a delivery pass happened at all, and whether it could deliver.
+
+    Written even when the pass sent nothing, and written even when no channel
+    is configured -- a worker proving it is alive while proving it cannot
+    deliver is exactly the state monitoring has to be able to see.
+    """
+    try:
+        db.session.add(NotificationRun(
+            ran_at=now, source=source, outcome='ok',
+            attempted=counts['delivered'] + counts['failed'],
+            delivered=counts['delivered'], failed=counts['failed'],
+            channel=channel.name[:24] if channel is not None else None))
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+        app.logger.warning('could not record notification run')
+
+
+def _persistently_failing_notices(now=None):
+    """Undelivered notices that have failed enough times to stop being noise."""
+    return db.session.execute(
+        db.select(ModerationNotice).where(
+            ModerationNotice.delivered_at.is_(None),
+            ModerationNotice.attempts >= _NOTIFY_PERSISTENT_AFTER)
+    ).scalars().all()
 
 
 def _undelivered_urgent_notices(now=None, older_than_minutes=60):
@@ -9091,10 +9482,12 @@ def _undelivered_notices():
 
 
 @app.cli.command("moderation-notify")
+@click.option('--scheduled', is_flag=True, default=False,
+              help='Record this run as UNATTENDED. Only from a real scheduler.')
 @click.option('--mark-delivered', is_flag=True, default=False,
               help='Mark the printed notices delivered. Off by default so the '
                    'command is safe to run just to look.')
-def moderation_notify_command(mark_delivered):
+def moderation_notify_command(scheduled, mark_delivered):
     """Generate review notices and print the ones nobody has acted on.
 
     This is generation plus a console channel. It is NOT a notification system:
@@ -9110,7 +9503,8 @@ def moderation_notify_command(mark_delivered):
     # true state of the system rather than a failure of this command.
     channel = _notification_channel()
     if channel is not None:
-        sent = _deliver_pending_notices(channel)
+        sent = _deliver_pending_notices(
+            channel, source=SOURCE_CRON if scheduled else SOURCE_MANUAL)
         print(f"delivery via {channel.name}: {sent['delivered']} delivered, "
               f"{sent['failed']} failed, {sent['skipped']} waiting on backoff")
     else:
@@ -9157,9 +9551,18 @@ def moderation_queue_command():
 
 
 @app.cli.command("coach-prune")
-def coach_prune_command():
-    """Delete expired coach turns for every user. For a scheduled run."""
-    deleted = _sweep_expired_coach_turns(force=True, source='cron')
+@click.option('--scheduled', is_flag=True, default=False,
+              help='Record this run as UNATTENDED. Only from a real scheduler.')
+def coach_prune_command(scheduled):
+    """Delete expired coach turns for every user. For a scheduled run.
+
+    Recorded as `manual` unless --scheduled says otherwise, and the
+    conversation-retention check now believes the label: only a `cron` or
+    `thread` row can make it PASS. A row that claimed a scheduler ran when a
+    person did is the mislabel that hid a missing cron for weeks.
+    """
+    deleted = _sweep_expired_coach_turns(
+        force=True, source=SOURCE_CRON if scheduled else SOURCE_MANUAL)
     db.session.commit()
     print(f"deleted {deleted} coach turns older than "
           f"{_COACH_TURN_MAX_AGE_DAYS} days")
@@ -9879,6 +10282,29 @@ def _retention_sweeper_loop():
         except Exception as exc:
             db.session.rollback()
             app.logger.warning('moderation notice generation failed: %s',
+                               type(exc).__name__)
+
+        # DELIVERY, in its own try for the same reason as the others.
+        #
+        # This is the step that was missing entirely: notices were generated
+        # hourly and delivered only when somebody typed `flask
+        # moderation-notify`, so the whole system depended on a human being
+        # at a terminal. An alert nobody is awake to trigger is not an alert.
+        #
+        # Records the pass even when it sends nothing, and even when no
+        # channel is configured, so monitoring can tell an idle worker from
+        # an absent one.
+        try:
+            with app.app_context():
+                sent = _deliver_pending_notices(source=SOURCE_THREAD)
+                if sent['delivered'] or sent['failed']:
+                    app.logger.info(
+                        'event=moderation_delivery delivered=%d failed=%d '
+                        'contended=%d',
+                        sent['delivered'], sent['failed'], sent['contended'])
+        except Exception as exc:
+            db.session.rollback()
+            app.logger.warning('moderation delivery failed: %s',
                                type(exc).__name__)
 
 

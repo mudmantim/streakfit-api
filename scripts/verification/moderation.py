@@ -246,6 +246,7 @@ def run(api, results, scenario):
     by_id = {c.get("id"): c for c in (payload or {}).get("checks", [])}
 
     for name in ("retention.recent", "retention.moderation",
+                 "moderation.delivery_configured", "moderation.delivery_worker",
                  "moderation.notices_delivered"):
         results.check(f"moderation.check_present::{name}", name in by_id,
                       f"{name} is not among {sorted(by_id)}")
@@ -272,6 +273,55 @@ def run(api, results, scenario):
             results.check(f"moderation.failure_says_why::{name}",
                           bool(c.get("failureReason") or c.get("observed")),
                           "a failing check with nothing to say is not actionable")
+
+    # Delivery is THREE facts and they fail separately. An empty notice queue
+    # used to report PASS on a database with no provider configured and
+    # nothing running to empty it -- "no urgent notice is waiting" read as
+    # health when it only meant nothing had been filed yet.
+    configured = by_id.get("moderation.delivery_configured") or {}
+    worker = by_id.get("moderation.delivery_worker") or {}
+    delivered = by_id.get("moderation.notices_delivered") or {}
+    for name, c in (("moderation.delivery_configured", configured),
+                    ("moderation.delivery_worker", worker)):
+        results.check(f"moderation.check_state_is_legible::{name}",
+                      c.get("status") in ("PASS", "FAIL", "UNKNOWN"),
+                      f"status={c.get('status')!r}")
+
+    # The invariant, true of any live service whatever its state: the outcome
+    # check may not be greener than the capability it depends on.
+    results.check(
+        "moderation.delivery_health_requires_capability",
+        delivered.get("status") != "PASS"
+        or (configured.get("status") == "PASS" and worker.get("status") == "PASS"),
+        f"notices_delivered=PASS while configured="
+        f"{configured.get('status')!r} worker={worker.get('status')!r}",
+    )
+
+    # Configuration is not execution. A provider set up perfectly with nothing
+    # ever calling it is the state that reads as healthy and is not, so the
+    # two must not be answered by the same sentence.
+    results.check(
+        "moderation.delivery_configuration_and_execution_are_separate",
+        configured.get("observed") != worker.get("observed"),
+        f"configured={configured.get('observed')!r} "
+        f"worker={worker.get('observed')!r}",
+    )
+
+    # A manual run must never be the evidence behind an unattended claim. The
+    # method line is the promise this check makes to whoever reads the board.
+    results.check(
+        "moderation.worker_check_excludes_manual_runs",
+        "manual" in (worker.get("method") or "").lower()
+        or "unattended" in (worker.get("method") or "").lower(),
+        f"method={worker.get('method')!r}",
+    )
+    for name in ("retention.recent", "retention.moderation"):
+        c = by_id.get(name) or {}
+        results.check(
+            f"moderation.retention_check_requires_unattended::{name}",
+            "unattended" in (c.get("method") or "").lower(),
+            f"method={c.get('method')!r}",
+        )
 
     # Nothing about a retention or delivery record may identify a report, a
     # person or a piece of content. It is served without a credential.

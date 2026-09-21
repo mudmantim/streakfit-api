@@ -89,6 +89,68 @@ def test_the_lookup_helper_never_crosses_kinds(client):
     assert _last_retention_run(RETENTION_MODERATION).kind == RETENTION_MODERATION
 
 
+# --- R3: a hand-typed sweep is not a scheduler --------------------------------
+
+def test_R3_a_manual_sweep_never_passes_the_retention_check(client):
+    """Reproduced: `flask moderation-prune` typed by hand recorded itself as
+    'cron', so the board read PASS for 48 hours with no scheduler anywhere."""
+    a_run(RETENTION_MODERATION, hours_ago=0, source=appmod.SOURCE_MANUAL)
+
+    check = checks(client)['retention.moderation']
+    assert check['status'] == 'UNKNOWN', \
+        "somebody typing a command was read as unattended retention"
+    assert 'not that anything sweeps on its own' in check['observed']
+
+
+def test_R3_the_command_labels_itself_by_how_it_was_invoked(client):
+    """The label comes from the invocation, not from the command's own wishes."""
+    runner = appmod.app.test_cli_runner()
+
+    runner.invoke(args=['moderation-prune'])
+    assert _last_retention_run(RETENTION_MODERATION).source == appmod.SOURCE_MANUAL
+    assert _last_retention_run(RETENTION_MODERATION, unattended_only=True) is None
+
+    runner.invoke(args=['moderation-prune', '--scheduled'])
+    assert _last_retention_run(RETENTION_MODERATION).source == appmod.SOURCE_CRON
+    assert _last_retention_run(RETENTION_MODERATION, unattended_only=True) is not None
+
+
+def test_R3_a_manual_run_does_not_hide_a_dead_scheduler(client):
+    """Manual sweeps every hour must not paper over a scheduler that stopped."""
+    a_run(RETENTION_MODERATION, hours_ago=RETENTION_STALE_AFTER_HOURS + 6,
+          source=appmod.SOURCE_CRON)
+    a_run(RETENTION_MODERATION, hours_ago=0, source=appmod.SOURCE_MANUAL)
+
+    assert state(client, 'retention.moderation') == 'FAIL', \
+        "a fresh manual sweep masked an unattended sweeper that had stopped"
+
+
+def test_R3_an_unattended_sweep_is_what_passes(client):
+    a_run(RETENTION_MODERATION, hours_ago=0, source=appmod.SOURCE_CRON)
+    assert state(client, 'retention.moderation') == 'PASS'
+
+    a_run(RETENTION_COACH, hours_ago=0, source=appmod.SOURCE_THREAD)
+    assert state(client, 'retention.recent') == 'PASS'
+
+
+def test_R3_the_helper_filters_manual_runs_out(client):
+    a_run(RETENTION_COACH, hours_ago=2, source=appmod.SOURCE_THREAD)
+    a_run(RETENTION_COACH, hours_ago=0, source=appmod.SOURCE_MANUAL)
+
+    assert _last_retention_run(RETENTION_COACH).source == appmod.SOURCE_MANUAL
+    unattended = _last_retention_run(RETENTION_COACH, unattended_only=True)
+    assert unattended.source == appmod.SOURCE_THREAD
+
+
+def test_R3_a_request_piggybacked_sweep_is_not_unattended_either(client):
+    """`source='request'` means a user happened to arrive, not that anything
+    runs on its own. An idle service stops sweeping and nobody is told."""
+    a_run(RETENTION_COACH, hours_ago=0, source=appmod.SOURCE_REQUEST)
+
+    assert _last_retention_run(RETENTION_COACH, unattended_only=True) is None
+    assert state(client, 'retention.recent') == 'UNKNOWN'
+
+
 # --- a sweeper that stopped ---------------------------------------------------
 
 def test_a_sweeper_that_stopped_is_detected(client):

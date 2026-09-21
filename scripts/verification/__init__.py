@@ -12,5 +12,5 @@ module contract new subsystems should follow.
 # lets "128/128 passed" mean something specific six months from now
 # instead of an ambiguous number. Update VERIFICATION_SUITE_UPDATED_AT
 # (ISO date, UTC) in the same commit.
-VERIFICATION_SUITE_VERSION = 5
-VERIFICATION_SUITE_UPDATED_AT = "2026-09-18"
+VERIFICATION_SUITE_VERSION = 6
+VERIFICATION_SUITE_UPDATED_AT = "2026-09-21"

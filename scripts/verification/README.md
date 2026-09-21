@@ -35,6 +35,7 @@ Exit codes: `0` all passed, `1` at least one check failed, `2` a setup step (e.g
 | `rickie.py` | Rickie's team reactions (welcome, first-log) — fixed templates, `sender_user_id` null |
 | `photos.py` | Private team photos: filter catalog and lock state, upload, who can read the bytes (member 200 / non-member 403 / anonymous 401), non-JPEG and locked-filter rejection, the thread entry and history moment. Deletes what it uploads. |
 | `security.py` | Invite rotation, remove member, leave team, unauthorized access — mutates membership |
+| `moderation.py` | Blocking and reporting end to end, the operator boundary (queue and appeals reject a non-operator), the appeals UI being reachable in the served markup, and the honesty of the monitoring: retention answered separately per promise, delivery split into configuration / observed execution / outstanding work, no check greener than the capability it depends on, and no identifiers in a payload served without a credential |
 | `admin.py` | StreakFit Control's own routes (R3.0) are reachable and reject unauthenticated requests. Independent of the team scenario; runs last. Never triggers `POST /api/admin/verify` itself — that would recurse |
 
 ## What this suite does not cover
