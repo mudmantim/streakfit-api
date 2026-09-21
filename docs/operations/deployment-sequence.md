@@ -79,6 +79,17 @@ exactly the property the first constraint needs.
       non-zero on anything else. It never prints the API key. A receipt means
       Resend *accepted* it — a person still has to confirm it arrived.
       **Gate: owner — authorizes one real email.**
+
+      **2026-09-21 — sent, and ACCEPTED by Resend.** `onboarding@resend.dev`
+      → the account owner's address; provider receipt
+      `01a0c63b-a783-772c-bb3f-5fd8ab6d8330`.
+
+      **This step is not complete.** Acceptance is Resend agreeing to attempt
+      delivery; it is not an email in an inbox, and the two come apart for
+      spam filtering, a wrong recipient, or a silent provider drop. The
+      receipt is the last thing this codebase can observe, so the remaining
+      half is the owner confirming arrival. Until that happens, delivery is
+      *configured and accepted*, not *proven*, and A3 stays unticked.
 - [ ] **A4 · Preflight.** `python scripts/notification_preflight.py --live`
       confirms Resend accepts the key. Prints no values, sends no mail.
 
