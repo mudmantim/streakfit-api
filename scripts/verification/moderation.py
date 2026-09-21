@@ -229,10 +229,69 @@ def run(api, results, scenario):
                   'id="moderation-panel"' in html,
                   "aria-controls points at an element that does not exist")
 
+    # --- retention monitoring, from outside the process ----------------------
+    #
+    # Production-safe: /api/verification/self needs no credential, and these
+    # assertions are about the SHAPE of the answer and the honesty of its
+    # states, never about forcing a particular verdict on a live service.
+    #
+    # The reason this is here at all: the moderation evidence sweep ran for a
+    # whole milestone without recording anything, so "is reported private
+    # content actually being deleted?" had no answer from outside. A check
+    # that cannot be interrogated remotely is a check nobody runs.
+    status, payload = api.request("GET", "/api/verification/self")
+    results.check("moderation.self_verification_readable",
+                  status == 200 and isinstance(payload, dict),
+                  f"status={status}")
+    by_id = {c.get("id"): c for c in (payload or {}).get("checks", [])}
+
+    for name in ("retention.recent", "retention.moderation",
+                 "moderation.notices_delivered"):
+        results.check(f"moderation.check_present::{name}", name in by_id,
+                      f"{name} is not among {sorted(by_id)}")
+
+    # The two promises must be answered SEPARATELY. One check covering both is
+    # how a moderation sweep ends up vouching for conversation retention.
+    coach = by_id.get("retention.recent") or {}
+    eviden = by_id.get("retention.moderation") or {}
+    results.check(
+        "moderation.retention_promises_are_reported_separately",
+        coach.get("observed") != eviden.get("observed")
+        or coach.get("status") == eviden.get("status") == "UNKNOWN",
+        f"coach={coach.get('observed')!r} evidence={eviden.get('observed')!r}",
+    )
+
+    # A check may say PASS, FAIL or UNKNOWN. What it must never do is report a
+    # promise as kept without having looked -- UNKNOWN exists for that.
+    for name in ("retention.moderation", "moderation.notices_delivered"):
+        c = by_id.get(name) or {}
+        results.check(f"moderation.check_state_is_legible::{name}",
+                      c.get("status") in ("PASS", "FAIL", "UNKNOWN"),
+                      f"status={c.get('status')!r}")
+        if c.get("status") in ("FAIL", "UNKNOWN"):
+            results.check(f"moderation.failure_says_why::{name}",
+                          bool(c.get("failureReason") or c.get("observed")),
+                          "a failing check with nothing to say is not actionable")
+
+    # Nothing about a retention or delivery record may identify a report, a
+    # person or a piece of content. It is served without a credential.
+    blob = json.dumps(payload)
+    logins = {u["username"] for u in users.values()}
+    results.check(
+        "moderation.self_verification_carries_no_identifiers",
+        not any(login in blob for login in logins),
+        f"payload={blob[:200]}",
+    )
+
     return scenario
 
 
 if __name__ == "__main__":
+    # (description, build_scenario, run_checks) -- this module had the first
+    # and last swapped since it was written, so `python scripts/verification/
+    # moderation.py` died with "'str' object is not callable" every time.
+    # verify_all.py imports run() directly and never took this path, which is
+    # why a module the README calls standalone-runnable never was.
     run_module_standalone(
-        run, build_team_scenario,
-        "Moderation — blocking, reporting, and the operator boundary")
+        "Moderation — blocking, reporting, and the operator boundary",
+        build_team_scenario, run)

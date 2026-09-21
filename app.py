@@ -2226,6 +2226,21 @@ class ModerationNotice(db.Model):
     delivered_at = db.Column(db.DateTime, nullable=True, index=True)
     channel = db.Column(db.String(24), nullable=True)   # how it was delivered
 
+    # What the provider said when it accepted this. `delivered_at` is only ever
+    # set beside a receipt, so "delivered" means something outside this process
+    # acknowledged it -- not that this process finished running.
+    receipt = db.Column(db.String(120), nullable=True)
+
+    # Retry bookkeeping. In the database rather than in memory for the same
+    # reason the unique constraint is: a deploy must not reset it and start the
+    # backoff over.
+    attempts = db.Column(db.Integer, nullable=False, default=0,
+                         server_default='0')
+    last_attempt_at = db.Column(db.DateTime, nullable=True, index=True)
+    # The exception TYPE of the last failure, never its text -- a provider
+    # error can quote the request body back, and the body names a report.
+    last_error = db.Column(db.String(64), nullable=True)
+
     __table_args__ = (
         # Idempotency lives in the database, not in the generator's bookkeeping.
         # A generator that tracked "already sent" in memory would start over
@@ -2256,6 +2271,17 @@ class VerificationRun(db.Model):
     results_json = db.Column(db.Text, nullable=True)
 
 
+# The two retention promises, named once so a query cannot silently ask about
+# the wrong one. A string literal at a call site is how these get mixed up.
+RETENTION_COACH = 'coach'
+RETENTION_MODERATION = 'moderation'
+RETENTION_KINDS = (RETENTION_COACH, RETENTION_MODERATION)
+
+# How long a promise may go unswept before monitoring calls it broken. 48h is
+# two full cycles of a daily cron plus an hourly thread -- a signal, not a blip.
+RETENTION_STALE_AFTER_HOURS = 48
+
+
 class RetentionRun(db.Model):
     """A record that the retention sweep actually happened.
 
@@ -2273,6 +2299,34 @@ class RetentionRun(db.Model):
     ran_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, index=True)
     deleted = db.Column(db.Integer, nullable=False, default=0)
     source = db.Column(db.String(24), nullable=False)   # cron | thread | request
+
+    # WHICH promise this run is evidence for.
+    #
+    # Added when moderation evidence got its own sweep. Without it the two
+    # promises share one table and a moderation sweep would satisfy a check
+    # asking whether CONVERSATIONS are being deleted -- monitoring that passes
+    # because a different process ran is worse than no monitoring, because it
+    # is believed. Every query against this table filters on it.
+    #
+    # server_default so the rows written before this column existed keep their
+    # meaning: they were all coach sweeps, because that was the only sweep.
+    kind = db.Column(db.String(16), nullable=False, default=RETENTION_COACH,
+                     server_default=RETENTION_COACH, index=True)
+
+    # 'ok' or 'failed'. A failed run is RECORDED rather than left absent,
+    # because "it broke" and "nothing ran" need different responses and look
+    # identical when the only evidence is silence.
+    outcome = db.Column(db.String(16), nullable=False, default='ok',
+                        server_default='ok')
+
+    # The exception TYPE on a failure -- never its text. A database error can
+    # carry a row's contents back in its message, and this table is read by
+    # an endpoint. Same rule the sweeper's logging already follows.
+    error_type = db.Column(db.String(64), nullable=True)
+
+    # Counts only, as a short fixed-shape string: "text=2 photos=1 held=0".
+    # Never a report id, never a username, never content.
+    detail = db.Column(db.String(200), nullable=True)
 
 
 class CoachTurn(db.Model):
@@ -2626,15 +2680,23 @@ def verification_self():
     # scheduled sweep that quietly stops looks identical to one with nothing to
     # do — so the check is about the RUN, not the row count.
     try:
-        last = (RetentionRun.query.order_by(RetentionRun.ran_at.desc()).first())
+        # FILTERED BY KIND. Before moderation evidence had its own sweep this
+        # table held one thing, so an unfiltered query meant "the sweep". It
+        # now holds two promises, and an unfiltered query here would report
+        # conversation retention as healthy because moderation swept.
+        last = _last_retention_run(RETENTION_COACH)
         if last is None:
             state, evidence, observed = "UNKNOWN", "UNKNOWN", "no sweep has ever been recorded"
+        elif last.outcome != 'ok':
+            state, evidence = "FAIL", "OBSERVED"
+            observed = (f"last attempt {last.ran_at.isoformat()} via "
+                        f"{last.source} FAILED ({last.error_type})")
         else:
             age_h = (datetime.utcnow() - last.ran_at).total_seconds() / 3600
             # A daily cron plus an hourly in-process sweep; 48h means both have
             # been silent for two cycles, which is a real signal rather than a
             # blip.
-            state = "PASS" if age_h <= 48 else "FAIL"
+            state = "PASS" if age_h <= RETENTION_STALE_AFTER_HOURS else "FAIL"
             evidence = "VERIFIED" if state == "PASS" else "OBSERVED"
             observed = (f"last swept {age_h:.1f}h ago via {last.source}, "
                         f"{last.deleted} deleted")
@@ -2656,6 +2718,74 @@ def verification_self():
             "Read the most recent retention_run record and check its age.",
             "UNKNOWN", "UNKNOWN", f"{type(exc).__name__}",
             failure_reason="The retention record could not be read."))
+
+    # The SECOND retention promise, checked separately and never by the same
+    # row. Moderation evidence is private content belonging to people who did
+    # not choose to hand it over; a sweep that stopped is a promise broken to
+    # them, and until this check existed it was invisible.
+    try:
+        last = _last_retention_run(RETENTION_MODERATION)
+        if last is None:
+            state, evidence = "UNKNOWN", "UNKNOWN"
+            observed = "no moderation sweep has ever been recorded"
+        elif last.outcome != 'ok':
+            state, evidence = "FAIL", "OBSERVED"
+            observed = (f"last attempt {last.ran_at.isoformat()} via "
+                        f"{last.source} FAILED ({last.error_type})")
+        else:
+            age_h = (datetime.utcnow() - last.ran_at).total_seconds() / 3600
+            state = "PASS" if age_h <= RETENTION_STALE_AFTER_HOURS else "FAIL"
+            evidence = "VERIFIED" if state == "PASS" else "OBSERVED"
+            observed = (f"last swept {age_h:.1f}h ago via {last.source} "
+                        f"({last.detail or 'no counts'})")
+        checks.append(_self_check(
+            "retention.moderation", "Moderation evidence retention is running",
+            f"Reported photos, messages and captions are being deleted on "
+            f"schedule ({PHOTO_EVIDENCE_MAX_AGE_DAYS} days from capture for "
+            f"images, {EVIDENCE_RETENTION_DAYS_AFTER_CLOSURE} days after "
+            f"closure for text).",
+            "Read the most recent retention_run of kind 'moderation' and check "
+            "its age and outcome.",
+            state, evidence, observed,
+            failure_reason=None if state == "PASS" else
+            "Reported private content is not being deleted on the stated "
+            "schedule.",
+            limitations="Says a sweep ran, not that every expired row is gone; "
+                        "deletion does not reach database backups."))
+    except Exception as exc:
+        checks.append(_self_check(
+            "retention.moderation", "Moderation evidence retention is running",
+            "Reported photos, messages and captions are being deleted on schedule.",
+            "Read the most recent retention_run of kind 'moderation'.",
+            "UNKNOWN", "UNKNOWN", f"{type(exc).__name__}",
+            failure_reason="The moderation retention record could not be read."))
+
+    # Generation is not delivery. This is the check that says so out loud: an
+    # urgent notice sitting undelivered means a 24-hour child-safety clock is
+    # running and nobody has been told it started.
+    try:
+        stuck = _undelivered_urgent_notices()
+        state = "PASS" if not stuck else "FAIL"
+        observed = ("no urgent notice is waiting" if not stuck else
+                    f"{len(stuck)} urgent notice(s) undelivered, oldest "
+                    f"{stuck[0].created_at.isoformat()}Z")
+        checks.append(_self_check(
+            "moderation.notices_delivered", "Urgent moderation notices reach somebody",
+            "Child-safety notices are delivered, not merely generated.",
+            "Count urgent_filed notices with no delivered_at, older than an hour.",
+            state, "VERIFIED" if state == "PASS" else "OBSERVED", observed,
+            failure_reason=None if state == "PASS" else
+            "A child-safety report is on a 24-hour clock and nobody has been "
+            "notified.",
+            limitations="Counts what was RECORDED as delivered. It cannot see "
+                        "whether a person read it."))
+    except Exception as exc:
+        checks.append(_self_check(
+            "moderation.notices_delivered", "Urgent moderation notices reach somebody",
+            "Child-safety notices are delivered, not merely generated.",
+            "Count undelivered urgent_filed notices.",
+            "UNKNOWN", "UNKNOWN", f"{type(exc).__name__}",
+            failure_reason="The notice records could not be read."))
 
     # The content store is a deploy artefact: files on disk that must ship with
     # the build. An app that starts with an empty library looks entirely healthy
@@ -8565,9 +8695,66 @@ def _sweep_expired_coach_turns(force=False, source='request'):
     cutoff = now - timedelta(days=_COACH_TURN_MAX_AGE_DAYS)
     deleted = db.session.query(CoachTurn).filter(
         CoachTurn.created_at < cutoff).delete(synchronize_session=False)
-    # Recorded even when it deleted nothing — see RetentionRun.
-    db.session.add(RetentionRun(ran_at=now, deleted=deleted, source=source))
+    # Recorded even when it deleted nothing — see RetentionRun. The kind is
+    # named rather than defaulted: this row is the evidence behind the COACH
+    # promise specifically, and a check asking about conversations must never
+    # be satisfied by a moderation sweep.
+    _record_retention_run(RETENTION_COACH, source, deleted=deleted, now=now)
     return deleted
+
+
+def _last_retention_run(kind):
+    """The most recent run FOR ONE PROMISE. Never 'the most recent run'."""
+    return db.session.execute(
+        db.select(RetentionRun).where(RetentionRun.kind == kind)
+        .order_by(RetentionRun.ran_at.desc()).limit(1)
+    ).scalars().first()
+
+
+def _moderation_sweep_detail(result):
+    """Counts only, fixed shape, no identifiers. Read by an HTTP endpoint."""
+    return (f"text={result['text_evidence_purged']} "
+            f"photos={result['photo_evidence_purged']} "
+            f"held={result['held_by_legal_hold']}")
+
+
+def _record_retention_run(kind, source, deleted=0, detail=None, now=None):
+    """Add a success record to the CURRENT transaction, deliberately.
+
+    Not committed here. The row has to land in the same transaction as the
+    deletions it describes, so that a sweep which raises after deleting some
+    rows rolls back the deletions AND the record that claimed success. A
+    record committed separately could outlive the work it attests to, which is
+    the one thing this table must never do.
+    """
+    db.session.add(RetentionRun(
+        ran_at=now or datetime.utcnow(), deleted=deleted, source=source,
+        kind=kind, outcome='ok', detail=detail))
+
+
+def _record_retention_failure(kind, source, exc):
+    """Record that a sweep FAILED, in its own transaction.
+
+    Called after a rollback, so it cannot share the failed transaction. Commits
+    immediately: a failure nobody recorded is indistinguishable from a sweep
+    that never started, and those need different responses.
+
+    Stores the exception TYPE and nothing else. A database error can carry row
+    contents back in its message and this table is served over HTTP.
+
+    Itself defensive: if the database is the thing that is broken, recording
+    the failure will fail too. That is logged and swallowed rather than raised,
+    because a monitoring write must never become the reason the caller dies.
+    """
+    try:
+        db.session.rollback()
+        db.session.add(RetentionRun(
+            ran_at=datetime.utcnow(), deleted=0, source=source, kind=kind,
+            outcome='failed', error_type=type(exc).__name__[:64]))
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+        app.logger.error('could not record %s retention failure', kind)
 
 
 def _sweep_moderation_evidence(now=None):
@@ -8654,8 +8841,19 @@ def moderation_prune_command():
     deployment requirement. Until it exists, evidence retention depends on the
     web service being up.
     """
-    result = _sweep_moderation_evidence()
-    db.session.commit()
+    try:
+        result = _sweep_moderation_evidence()
+        _record_retention_run(RETENTION_MODERATION, 'cron',
+                              deleted=result['text_evidence_purged']
+                              + result['photo_evidence_purged'],
+                              detail=_moderation_sweep_detail(result))
+        db.session.commit()
+    except Exception as exc:
+        # Record the failure, then fail loudly. A scheduler that reads exit
+        # codes must not see 0 from a sweep that deleted nothing because it
+        # broke.
+        _record_retention_failure(RETENTION_MODERATION, 'cron', exc)
+        raise
     print(f"purged {result['text_evidence_purged']} text evidence rows, "
           f"{result['photo_evidence_purged']} photo evidence rows; "
           f"{result['held_by_legal_hold']} skipped under legal hold")
@@ -8712,6 +8910,179 @@ def _generate_moderation_notices(now=None):
     return created
 
 
+# ── Notification delivery ─────────────────────────────────────────────────────
+#
+# A notice is a RECORD that an obligation came due. Delivery is a separate
+# thing that may or may not have happened, and this section is the boundary
+# between them. The rule the whole design serves: `delivered_at` is set only
+# when something outside this process acknowledged the message.
+
+class NotificationError(Exception):
+    """A delivery attempt did not succeed. Never carries provider text."""
+
+
+class NotificationChannel:
+    """Somewhere a notice can be sent. Providers are adapters over this.
+
+    Deliberately tiny, and deliberately not a provider. Choosing an email
+    vendor is an owner decision with an account and a bill attached, so the
+    interface is what exists in the repository and the adapter is written when
+    that decision is made. Everything around it -- retries, backoff, the
+    delivery record, the redaction rules -- is testable today against a fake,
+    which is the part that is easy to get wrong.
+
+    `send` returns a RECEIPT: whatever the far side calls this message. A
+    channel that cannot produce one cannot honestly mark anything delivered,
+    and must raise instead.
+    """
+    name = 'base'
+
+    def send(self, subject, body):
+        raise NotImplementedError
+
+
+class ConsoleChannel(NotificationChannel):
+    """Prints. Emphatically NOT a delivery channel.
+
+    It exists so an operator can look, and it raises rather than returning a
+    receipt because a terminal nobody is watching is not a person being told.
+    Marking notices delivered from here is possible only by explicit operator
+    say-so (`--mark-delivered`), which is a human asserting they have seen it.
+    """
+    name = 'console'
+
+    def send(self, subject, body):
+        print(f"  [console] {subject}")
+        raise NotificationError('console is not a delivery channel')
+
+
+_NOTIFICATION_CHANNELS = {'console': ConsoleChannel}
+
+
+def _notification_channel(name=None):
+    """The configured channel, or None when delivery is not configured.
+
+    None is the honest default. An app with no channel configured must leave
+    every notice undelivered and say so, rather than falling back to something
+    that looks like success.
+    """
+    name = name or os.environ.get('STREAKFIT_NOTIFY_CHANNEL', '').strip()
+    factory = _NOTIFICATION_CHANNELS.get(name)
+    return factory() if factory else None
+
+
+# Exponential, capped, and measured from the last attempt. A provider having a
+# bad ten minutes must not become a hundred duplicate sends, and an overdue
+# child-safety notice must not wait a day between tries either.
+_NOTIFY_BACKOFF_MINUTES = (0, 1, 5, 15, 60, 240)
+_NOTIFY_MAX_ATTEMPTS = len(_NOTIFY_BACKOFF_MINUTES)
+
+
+def _notice_is_due(notice, now):
+    """May this notice be attempted right now?"""
+    if notice.delivered_at is not None:
+        return False
+    if notice.attempts >= _NOTIFY_MAX_ATTEMPTS:
+        return False            # exhausted; surfaced by monitoring instead
+    if notice.last_attempt_at is None:
+        return True
+    wait = _NOTIFY_BACKOFF_MINUTES[min(notice.attempts,
+                                       len(_NOTIFY_BACKOFF_MINUTES) - 1)]
+    return now - notice.last_attempt_at >= timedelta(minutes=wait)
+
+
+# What a notice is ALLOWED to say. The table carries no content by design and
+# the message must not reintroduce any: this maps a kind to a fixed sentence
+# and interpolates nothing but the subject's own public id.
+_NOTICE_SUBJECTS = {
+    'urgent_filed': 'StreakFit: child-safety report, due in 24h',
+    'overdue': 'StreakFit: report is past its review deadline',
+    'appeal_filed': 'StreakFit: somebody has appealed a decision',
+}
+
+
+def _notice_message(notice, base_url=None):
+    """(subject, body) for one notice. Carries a pointer, never a copy.
+
+    Never the reported content, the caption, any evidence, the reporter, the
+    reported person, any name, or the admin secret. Email is the least
+    controlled surface in the system -- it lands in an inbox that syncs to
+    every device the reviewer owns -- so what travels is a report id and a
+    link, and the case stays behind the operator boundary.
+    """
+    subject = _NOTICE_SUBJECTS.get(notice.kind, 'StreakFit: moderation notice')
+    where = (base_url or os.environ.get('STREAKFIT_PUBLIC_URL', '')).rstrip('/')
+    link = f"{where}/admin" if where else "the moderation queue"
+    body = (
+        f"{subject}\n\n"
+        f"{notice.subject_type} {notice.subject_ref}\n"
+        f"noticed {notice.created_at.isoformat()}Z\n\n"
+        f"Open {link} to review it.\n\n"
+        f"This message deliberately contains no report content, no evidence "
+        f"and nobody's name."
+    )
+    return subject, body
+
+
+def _deliver_pending_notices(channel=None, now=None, limit=50):
+    """Attempt every notice that is due, and record what actually happened.
+
+    Returns {'delivered': n, 'failed': n, 'skipped': n}.
+
+    The only place `delivered_at` is ever set outside an operator's explicit
+    say-so, and it is set beside a receipt or not at all. A failure increments
+    the attempt count, stores the exception TYPE, and leaves `delivered_at`
+    NULL so the next pass retries it -- which is the behaviour that makes a
+    transient provider outage a delay instead of a lost obligation.
+    """
+    now = now or datetime.utcnow()
+    counts = {'delivered': 0, 'failed': 0, 'skipped': 0}
+    if channel is None:
+        channel = _notification_channel()
+    if channel is None:
+        return counts       # nothing configured; every notice stays undelivered
+
+    for notice in _undelivered_notices()[:limit]:
+        if not _notice_is_due(notice, now):
+            counts['skipped'] += 1
+            continue
+        subject, body = _notice_message(notice)
+        notice.attempts = (notice.attempts or 0) + 1
+        notice.last_attempt_at = now
+        try:
+            receipt = channel.send(subject, body)
+            if not receipt:
+                # A channel that returns nothing has not told us it arrived.
+                raise NotificationError('channel returned no receipt')
+            notice.delivered_at = now
+            notice.channel = channel.name[:24]
+            notice.receipt = str(receipt)[:120]
+            notice.last_error = None
+            counts['delivered'] += 1
+        except Exception as exc:
+            notice.last_error = type(exc).__name__[:64]
+            counts['failed'] += 1
+    db.session.commit()
+    return counts
+
+
+def _undelivered_urgent_notices(now=None, older_than_minutes=60):
+    """Urgent notices nobody has been told about, past a grace period.
+
+    `urgent_filed` is the 24-hour clock. A handful of minutes undelivered is a
+    retry in progress; an hour is a channel that is not working.
+    """
+    now = now or datetime.utcnow()
+    cutoff = now - timedelta(minutes=older_than_minutes)
+    return db.session.execute(
+        db.select(ModerationNotice).where(
+            ModerationNotice.delivered_at.is_(None),
+            ModerationNotice.kind == 'urgent_filed',
+            ModerationNotice.created_at <= cutoff)
+        .order_by(ModerationNotice.created_at.asc())
+    ).scalars().all()
+
+
 def _undelivered_notices():
     return db.session.execute(
         db.select(ModerationNotice).where(ModerationNotice.delivered_at.is_(None))
@@ -8733,6 +9104,18 @@ def moderation_notify_command(mark_delivered):
     """
     created = _generate_moderation_notices()
     db.session.commit()
+
+    # Attempt real delivery if a channel is configured. With none configured
+    # this does nothing at all and every notice stays undelivered, which is the
+    # true state of the system rather than a failure of this command.
+    channel = _notification_channel()
+    if channel is not None:
+        sent = _deliver_pending_notices(channel)
+        print(f"delivery via {channel.name}: {sent['delivered']} delivered, "
+              f"{sent['failed']} failed, {sent['skipped']} waiting on backoff")
+    else:
+        print("no delivery channel configured (STREAKFIT_NOTIFY_CHANNEL unset) "
+              "— nothing below has been sent to anybody")
 
     rows = _undelivered_notices()
     print(f"generated {created['urgent_filed']} urgent, {created['overdue']} overdue, "
@@ -9456,6 +9839,15 @@ def _retention_sweeper_loop():
         try:
             with app.app_context():
                 result = _sweep_moderation_evidence()
+                # Recorded in the SAME transaction as the deletions, and
+                # recorded even when nothing expired: "it ran and there was
+                # nothing to do" is the answer monitoring needs most often,
+                # and it is the one a silent sweep cannot give.
+                _record_retention_run(
+                    RETENTION_MODERATION, 'thread',
+                    deleted=result['text_evidence_purged']
+                    + result['photo_evidence_purged'],
+                    detail=_moderation_sweep_detail(result))
                 db.session.commit()
                 if result['text_evidence_purged'] or result['photo_evidence_purged']:
                     app.logger.info(
@@ -9464,7 +9856,11 @@ def _retention_sweeper_loop():
                         result['photo_evidence_purged'],
                         result['held_by_legal_hold'])
         except Exception as exc:
-            db.session.rollback()
+            # Rolls back the deletions and the success row together, then
+            # records the failure separately. A partial sweep therefore leaves
+            # a 'failed' row and no deletions, never a row claiming success.
+            with app.app_context():
+                _record_retention_failure(RETENTION_MODERATION, 'thread', exc)
             app.logger.warning('moderation evidence sweep failed: %s',
                                type(exc).__name__)
 
