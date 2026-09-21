@@ -87,6 +87,26 @@ were written without dashboard access.
 
 Until they exist, both sweeps depend entirely on the web service being up.
 
+### 3.2b Retention monitoring now exists, and says when it is not running
+
+`retention_run` rows carry a `kind`, and each promise is checked separately by
+`GET /api/verification/self`:
+
+| Check | Answers |
+|---|---|
+| `retention.recent` | are expired **conversations** being deleted? |
+| `retention.moderation` | is expired **evidence** being deleted? |
+| `moderation.notices_delivered` | has anybody been told about urgent work? |
+
+Before the `kind` column these shared one row, so a moderation sweep could
+report conversation retention as healthy. They can no longer vouch for each
+other, and a check with no evidence says `UNKNOWN` rather than passing.
+
+A failed sweep is recorded as `outcome='failed'` with the exception type only,
+and a recent failure outranks an older success. **A sweep that dies partway
+leaves no success record at all** — the success row is written in the same
+transaction as the deletions, so both roll back together.
+
 ### 3.3 There is no delivery channel — the real gap
 
 This is the one that matters most and the one nothing in this repo fixes.
@@ -103,6 +123,23 @@ configured, the owner finds out by running the command and looking.
 `GET /api/admin/reports` surfaces `counts.undelivered_notices` next to the
 queue, because a calm-looking queue and a growing undelivered count is exactly
 what "nobody is being notified" looks like from the outside.
+
+**A provider-independent delivery interface now exists** (`NotificationChannel`),
+with retries, exponential backoff, and the rule that `delivered_at` is set only
+beside a receipt from outside the process. What does NOT exist is an adapter for
+any actual provider — that is the owner decision below.
+
+To wire one up once a provider is chosen:
+
+1. Write a `NotificationChannel` subclass whose `send()` returns the provider's
+   message id and raises on anything else.
+2. Register it in `_NOTIFICATION_CHANNELS`.
+3. Set `STREAKFIT_NOTIFY_CHANNEL` to its name and `STREAKFIT_PUBLIC_URL` to the
+   site root, plus whatever credential the provider needs.
+
+Until step 3, every notice stays undelivered and `moderation.notices_delivered`
+fails once an urgent notice is more than an hour old — which is the true state
+of the system, reported rather than hidden.
 
 ### 3.4 Staffing — still a decision, not a bug
 
@@ -141,9 +178,18 @@ that suppresses deletion, and it requires a written reason.
 - `scripts/uicheck.py` — `check_appeals_are_reachable` and
   `check_appeals_stay_hidden_for_everybody_else`, because the appeals UI once
   shipped with working endpoints and no way in, and every API test still passed.
+- `tests/test_retention_monitoring.py` — that monitoring can tell a dead
+  sweeper from a quiet one, that neither promise can vouch for the other, and
+  that a failure record never carries the exception's text. Verified by
+  mutation: removing the `kind` filter or ignoring a failed outcome both make
+  these tests fail.
+- `tests/test_notification_delivery.py` — that a failed send, and a send with
+  no receipt, are both refused as delivery; that backoff holds; and that a
+  message never carries a name, content, evidence or the admin secret.
 - `scripts/verification/moderation.py` — blocking and reporting against a
   running app; the operator side only as a boundary, since the suite is built
-  to be safe against production without an admin secret.
+  to be safe against production without an admin secret. Also asserts that the
+  three monitoring checks are present, legible, and separate from one another.
 
 What is **not** verified anywhere: that a notice reaches a person. There is
 nothing to verify.
