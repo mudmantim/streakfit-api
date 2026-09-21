@@ -9011,9 +9011,18 @@ _COACH_TURN_PROMPT_LEN = 600    # cap when threading into the model context
 # message for as long as the account existed. Ten turns is a context window;
 # this is the part that says "and not forever".
 #
-# OWNER DECISION: thirty days is a placeholder chosen to be clearly better than
-# unbounded, not a considered policy. The right number for a product used by
-# children is a decision for Tim, and possibly not only for Tim.
+# OWNER DECISION, taken 2026-09-21: thirty days, confirmed. It arrived here as
+# a placeholder picked to be clearly better than unbounded; it is now the
+# policy, chosen so that ONE number covers conversations and photo evidence
+# (EVIDENCE_RETENTION_DAYS_AFTER_CLOSURE) and matches the 30-day deletion the
+# rest of the product already promises. A single promise is one a person can
+# actually hold you to; two different windows would have needed explaining
+# every time either was quoted.
+#
+# Shortening it stays cheap if that becomes the preference: Rickie's context
+# is only _COACH_MEMORY_WINDOW turns, so a shorter window costs almost nothing
+# in behaviour. What it must never do is drift LONGER than the promise made to
+# users, which is why the two constants are named together here.
 _COACH_TURN_MAX_AGE_DAYS = 30
 
 # ── What Rickie is allowed to remember between conversations ─────────────────

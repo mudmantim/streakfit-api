@@ -84,28 +84,56 @@ the ones whose streaks depend on showing up.
    answers a ping and refuses every write. Measured — that state used to
    report PASS while no limit could be recorded at all.
 
-### Cost — check this, do not take it from me
+### Plan — FREE, decided 2026-09-21
 
-Render's Key Value has historically offered a free tier (small, no
-persistence) and paid tiers from roughly a few dollars a month for the
-smallest persistent instance.
+**Decision: the free Key Value plan**, with `noeviction`. Paid is not needed
+and is not to be provisioned without separate approval.
 
-**I have not verified current pricing and you should not treat these figures
-as quotes.** Check the Render pricing page before provisioning. What I can say
-with confidence is the *shape* of the requirement: rate-limit counters are
-small and short-lived, so the smallest available instance is sufficient —
-this is not a sizing problem.
+Verified against Render's documentation (2026-09-21), not inferred:
 
-A free, non-persistent tier would still be a large improvement over
-`memory://`, because it is shared across workers even if it does not survive
-a restart of the store itself. Sharing is the half that matters for security:
-`memory://` multiplies every limit by the worker count, and losing counters on
-a restart is something `memory://` already does on every deploy.
+| | Free Key Value |
+|---|---|
+| Memory | **25 MB** |
+| Persistence | **None.** "whenever an instance restarts, all of its data is lost" |
+| Restarts | Render "might restart a Free Render Key Value instance at any time (thereby deleting its data)" |
+| Idle spin-down | **No.** Unlike free web services, free Key Value has no 15-minute idle spin-down |
+| Instances | **One free instance per workspace** — check nothing else is using it |
+| Maxmemory policy | Selected at creation, changeable later; `noeviction` is offered. The docs state this generally with no free-plan exception |
 
-The restart behaviour is also now safe to rely on rather than something to
-hope about: an instance going away degrades instead of erroring, and recovers
-on its own without a redeploy. Both measured against a real Valkey 8 — see
-[rate-limit-backend-outage.md](rate-limit-backend-outage.md).
+**Why free is sufficient here.** The security gap this closes is that
+`memory://` is per-worker, so every limit is multiplied by the worker count in
+front of an invite-code lookup with a measured 321 probes/second enumeration
+oracle. The free plan is *shared*, which closes exactly that. It does not
+persist across a restart — but neither does `memory://`, which loses its
+counters on **every deploy** and partitions them besides. Free is strictly
+better on both axes, at no cost.
+
+**What free does not buy, stated plainly.** Counters are cleared whenever
+Render restarts the instance, at a time you do not control and will not be
+told about. An attacker cannot *cause* that restart, but one that happens
+mid-attack hands back a fresh budget. Durable throttling across restarts is a
+paid-plan property, and if that ever becomes the requirement it is a
+deliberate upgrade decision — note that upgrading free→paid also loses the
+data in transit.
+
+**25 MB with `noeviction`.** Rate-limit keys are small and expire on their
+own, so ordinary use is nowhere near the cap. A sustained flood of distinct
+keys could reach it, and then writes are refused rather than counters silently
+dropped — which `ratelimit.shared_storage` now detects and reports as FAIL,
+degrading to the per-process cap. Loud, and that is the point of `noeviction`
+over `allkeys-lru`.
+
+**Confirm at creation:** that the Maxmemory Policy dropdown offers
+`noeviction`, and that the workspace's one free instance is not already
+spoken for. If either is not true, stop — do not upgrade to a paid plan to
+work around it without asking.
+
+The restart behaviour is safe to rely on rather than something to hope about:
+an instance going away degrades instead of erroring, and recovers on its own
+without a redeploy. Measured against a real Valkey 8, the engine Render Key
+Value runs — see [rate-limit-backend-outage.md](rate-limit-backend-outage.md).
+That measurement is what makes the free plan's "restarts at any time" an
+acceptable property rather than an unknown one.
 
 ---
 
