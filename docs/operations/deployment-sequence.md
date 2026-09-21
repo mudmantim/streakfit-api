@@ -62,8 +62,19 @@ exactly the property the first constraint needs.
       passphrase somewhere independent of this machine → `verify` **in a new
       shell**. It refuses to certify until it has decrypted the file, passed
       gpg's integrity check, round-tripped a real Fernet operation and matched
-      the fingerprint. Then `reveal` and set `STREAKFIT_EVIDENCE_KEY` in
-      Render. *Inert until deploy.* **Gate: owner — key custody.**
+      the fingerprint. **Gate: owner — key custody.**
+
+      `reveal` and the Render entry are deliberately NOT part of this step —
+      they belong to Phase A′, where every environment variable is set in one
+      visit. Generating and proving a key changes nothing in production;
+      installing it does, and the two should not share an approval.
+
+      Environment verified ready 2026-09-21: gpg 2.4.9, `cryptography`
+      present, key directory exists, no sealed key to overwrite. The script
+      was re-validated end to end against the current system Python, and a key
+      it produced was confirmed usable by `app._evidence_cipher()` under the
+      app's pinned `cryptography` — same fingerprint across both versions, and
+      `moderation.evidence_key` reported PASS.
 - [ ] **A2 · Resend account.** Create it, generate an API key, set
       `RESEND_API_KEY`, `STREAKFIT_NOTIFY_FROM=onboarding@resend.dev`,
       `STREAKFIT_NOTIFY_TO=<owner address>`, `STREAKFIT_NOTIFY_CHANNEL=resend`,
@@ -124,6 +135,33 @@ exactly the property the first constraint needs.
 
 **Do not proceed to Phase B until A1–A4 are done.** A deploy without them is
 the thing constraint 1 forbids.
+
+### Phase A′ — one Render visit, six variables
+
+Custody (A1) and account setup (A2) produce values; this is where they are
+*installed*. Batched deliberately: each save in Render can trigger a redeploy
+of the current commit, so six separate visits means six redeploys of a build
+that ignores all of them. One visit, one production change, one approval.
+
+- [ ] Set, in one session:
+
+      STREAKFIT_EVIDENCE_KEY     (from A1 `reveal`)
+      RESEND_API_KEY             (from A2)
+      STREAKFIT_NOTIFY_CHANNEL   resend
+      STREAKFIT_NOTIFY_FROM      onboarding@resend.dev
+      STREAKFIT_NOTIFY_TO        <the Resend account owner's address>
+      STREAKFIT_PUBLIC_URL       https://streakfit.pro
+
+- [ ] **Do NOT set `RATELIMIT_STORAGE_URI` here.** It is the one variable the
+      deployed build actually reads, and that build has none of the outage
+      protections. It belongs in Phase C, after the new code is live.
+
+**Gate: owner — production configuration change.**
+
+All six are inert on the deployed build (verified per-variable, zero
+occurrences each), so the redeploy this triggers is a no-op restart of the
+current code and its `flask db upgrade` is already at head. They become live
+the moment the new code boots, which is exactly when reporting appears.
 
 ### Phase B — the deploy
 
