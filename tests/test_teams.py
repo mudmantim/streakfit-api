@@ -1,6 +1,6 @@
 """R2.1 Team Foundations — covers exactly the verification list from the brief:
 create team, invite code generated, join via code, leave team, multiple teams
-per user, 10-team cap enforced, 8-member cap enforced, Plus override logic.
+per user, unlimited teams on every plan, 8-member cap enforced, Plus override.
 Plus a handful of correctness checks (wrong code, permissions, duplicates)
 that the manual smoke pass also exercised.
 """
@@ -101,15 +101,31 @@ def test_multiple_teams_per_user(client):
     assert {t['name'] for t in teams} == {'Hill Family', 'Beta Testers'}
 
 
-def test_ten_team_cap_enforced_for_free_users(client):
-    token = register_and_login(client, 'creator')
-    for i in range(10):
-        resp = create_team(client, token, f'Team {i}')
-        assert resp.status_code == 201
+def test_a_free_user_may_create_unlimited_teams(client):
+    """Teams are never a paid permission.
 
-    resp = create_team(client, token, 'Team 11')
-    assert resp.status_code == 403
-    assert 'error' in resp.get_json()
+    This asserted the opposite — a 10-team cap on Free — which contradicted the
+    confirmed membership model. Paying buys premium FEATURES across teams, not
+    the right to have another one. The cap could only ever have bitten somebody
+    organising several small family or friend groups, which is the behaviour the
+    product exists to encourage.
+    """
+    token = register_and_login(client, 'creator')
+    for i in range(14):                       # comfortably past the old cap of 10
+        resp = create_team(client, token, f'Team {i}')
+        assert resp.status_code == 201, (
+            f"a free user was refused team {i + 1}: {resp.get_json()}")
+
+
+def test_a_free_user_may_JOIN_unlimited_teams(client):
+    """Creating and joining were capped separately; both are now uncapped."""
+    host = register_and_login(client, 'host')
+    joiner = register_and_login(client, 'joiner')
+    for i in range(12):
+        team = create_team(client, host, f'Hosted {i}').get_json()['team']
+        resp = join_team(client, joiner, team['id'], team['invite_code'])
+        assert resp.status_code in (200, 201), (
+            f"a free user was refused joining team {i + 1}: {resp.get_json()}")
 
 
 def test_eight_member_cap_enforced_for_free_team(client):
@@ -161,7 +177,7 @@ def test_plus_user_has_no_team_count_cap(client, app):
         user.is_plus = True
         db.session.commit()
 
-    for i in range(12):  # more than the free 10-team cap
+    for i in range(12):  # Plus, like Free, has no team-count cap
         resp = create_team(client, token, f'Team {i}')
         assert resp.status_code == 201
 

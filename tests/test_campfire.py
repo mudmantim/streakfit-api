@@ -117,3 +117,54 @@ def test_campfire_stage_advances_past_kindling(client):
     complete_full_mission(client, token)
     resp = client.get(f"/api/teams/{team['id']}/campfire", headers=auth_headers(token))
     assert resp.get_json()['stage'] == 'Kindling'
+
+
+# ── Campfire progress (added when the campfire got a real UI) ───────────────
+
+def test_campfire_progress_reports_the_next_stage_and_distance():
+    import app as appmod
+
+    p = appmod._campfire_progress(42)
+    assert p['stage'] == 'Kindling'
+    assert p['next_stage'] == 'Small Flame'
+    assert p['next_stage_at'] == 100
+    assert p['logs_to_next_stage'] == 58
+    assert p['progress_to_next_stage'] == 0.42
+
+
+def test_campfire_progress_resets_at_each_stage_boundary():
+    import app as appmod
+
+    at_boundary = appmod._campfire_progress(100)
+    assert at_boundary['stage'] == 'Small Flame'
+    assert at_boundary['progress_to_next_stage'] == 0.0
+    assert at_boundary['next_stage'] == 'Campfire'
+
+    nearly = appmod._campfire_progress(299)
+    assert nearly['stage'] == 'Small Flame'
+    assert nearly['logs_to_next_stage'] == 1
+
+
+def test_campfire_at_the_top_stage_has_no_next():
+    """A campfire that has arrived is not 0% of the way to nothing."""
+    import app as appmod
+
+    top = appmod._campfire_progress(2000)
+    assert top['stage'] == 'Beacon'
+    assert top['next_stage'] is None
+    assert top['logs_to_next_stage'] is None
+    assert top['progress_to_next_stage'] is None
+    assert appmod._campfire_progress(99999)['stage'] == 'Beacon'
+
+
+def test_team_detail_exposes_campfire_progress(client):
+    """The UI must never hard-code the thresholds."""
+    token = register_and_login(client, 'progress_viewer')
+    team = create_team(client, token, 'Progress Team').get_json()['team']
+
+    campfire = client.get(f"/api/teams/{team['id']}",
+                          headers=auth_headers(token)).get_json()['campfire']
+
+    assert campfire['stage'] == 'Kindling'
+    assert campfire['next_stage'] == 'Small Flame'
+    assert campfire['next_stage_at'] == 100

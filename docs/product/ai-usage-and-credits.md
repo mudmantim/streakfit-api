@@ -1,0 +1,371 @@
+# AI usage allowances and credit packs — proposed architecture
+
+**Status: PROPOSED. Nothing here is implemented, no payments code exists, and
+no prices are settled.** This document exists so the decision can be made on
+measured numbers instead of guesses. The suggested 20 / 300 allowances and the
+$1.99-per-100 pack were explicitly not approved, and the audit below says why at
+least one of them cannot work as stated.
+
+Scope note: this is planning. The cost audit is arithmetic over usage already
+recorded (`scripts/rickie_cost_audit.py` makes no API calls). Prompt caching was
+additionally measured against live traffic patterns for $0.12 — see 1b; it is
+implemented behind a default-off flag and nothing about pricing is implemented.
+
+---
+
+## 1. What a Rickie reply actually costs
+
+From `scripts/rickie_cost_audit.py`, which reads the real constants out of
+`app.py` and calibrates against usage the provider reported during evaluations
+this project already ran (82 real replies across three runs).
+
+### Where the tokens go
+
+| Share | Bytes | What |
+|---|---|---|
+| **63%** | 13,642 | The system prompt — personality, feature list, safety rules |
+| 28% | 6,000 | Conversation history (10 turns × 600 chars) |
+| 3% | 681 | Weather tool schema |
+| 2% | 500 | The user's own message (capped) |
+| 2% | 400 | User context block (streak, level, name) |
+| 1% | 300 | Coach Notes block |
+
+### Measured per-reply cost
+
+| Run | Input/reply | Output/reply | Cost/reply |
+|---|---|---|---|
+| 56-prompt eval (prompt 8.4k) | 3,773 | 99 | **$0.0085** |
+| 7-case retest (prompt 11.3k) | 4,507 | 89 | **$0.0099** |
+| 19-case retest (prompt 12.7k) | 4,978 | 103 | **$0.0110** |
+
+- typical reply: **$0.0099**
+- worst case (full 10-turn history, 768-token output cap): **$0.0199**
+- **planning figure: $0.0149**
+
+### Two findings that matter before any price is set
+
+**(a) The prompt is the cost, and it grew 62% this month.** Per-reply cost rose
+from $0.0085 to $0.0110 — +29% — purely because the system prompt went from
+8.4k to 12.7k characters as safety and feature rules were added. Every rule
+added to Rickie is billed on every reply every user ever sends. Prompt size is
+now a product cost decision, not just a quality one.
+
+**(b) Prompt caching — MEASURED, not modelled.** Implemented behind
+`STREAKFIT_COACH_CACHE=1` (default off) and probed with real requests at three
+spacings: `scripts/coach_cache_probe.py`, 14 paid replies, $0.12.
+
+| | Cost/reply | vs uncached |
+|---|---|---|
+| Uncached baseline (n=7) | **$0.01137** | — |
+| Cache **hit** | **$0.00240** | **79% cheaper** |
+| Cache **write** (miss) | **$0.01357** | **19% dearer** |
+| Cached run overall (n=7, 5 hits) | $0.00559 | 51% cheaper |
+
+**Breakeven: 20% of requests must hit a warm cache.**
+
+The finding that decides it: **the cached prefix is identical for every user**,
+so any one user's request warms the cache for everybody. The hit rate depends on
+*app-wide* request spacing, not per-user habits. The probe confirmed the TTL
+directly — a hit after a 90-second gap, a write after 330 seconds.
+
+Treating arrivals as Poisson, 20% breakeven needs roughly **63 Rickie replies
+per day app-wide**. Below that most requests arrive cold, pay the write premium,
+and **caching costs about 19% MORE than doing nothing**.
+
+Real traffic is bursty rather than uniform, which raises the hit rate for a given
+daily volume, so 63/day is a conservative crossover. The 1-hour TTL does not
+rescue the low-traffic case: its write costs ~2x input, and at ~10 replies/day
+the arithmetic still lands worse than no caching.
+
+**What this means right now:** at pre-launch traffic — Tim and Olivia, a handful
+of replies a day — turning caching on would *increase* cost. It stays off until
+the app is doing roughly 60+ replies/day, at which point it is a large win. The
+flag makes that switch one environment variable, and the spend guard's per-call
+record reports the real hit rate once there is traffic to measure.
+
+---
+
+## 2. Usage profiles, including sponsorship
+
+At the $0.0149 planning figure, uncached:
+
+| Profile | Replies/mo | Cost/mo |
+|---|---|---|
+| Light | 5 | $0.07 |
+| Typical | 30 | $0.45 |
+| Engaged | 100 | $1.49 |
+| Heavy | 300 | $4.48 |
+| Extreme | 1,000 | $14.94 |
+| Rate-limit ceiling (10/day) | 310 | $4.63 |
+
+Note the existing per-user rate limit of **10/day** already caps any single
+account at ~310 replies/month — roughly $4.63. That is the true worst case
+today, and it is a useful backstop: no allowance can be exceeded catastrophically
+by one account.
+
+### Against revenue, at a 20% COGS budget
+
+| Plan | Revenue | 20% budget | Replies it buys (uncached) | (cached hit) |
+|---|---|---|---|---|
+| Plus | $4.99 | $1.00 | **66** | ~380 |
+| Sponsored | $0.99 | $0.20 | **13** | ~76 |
+
+### The sponsorship problem, stated plainly
+
+Sponsored users get *identical* Plus features and allowances — that is a
+confirmed product decision, and it is the right one. But a sponsor at the cap
+pays **$4.99 + 5 × $0.99 = $9.94/month for six accounts**, an average of
+**$1.66 per account**.
+
+If all six used a 300-reply allowance fully, that is 1,800 replies =
+**$26.89/month against $9.94 revenue** — a 2.7× loss. Even at the 10/day rate
+limit the ceiling is 1,860 replies ≈ $27.78.
+
+**This is the number that decides the allowance.** Three honest ways out:
+
+1. **Set the allowance where the worst case is survivable.** At 150 replies,
+   six accounts fully consuming = $13.44 vs $9.94. Still a loss at the extreme,
+   but only for a household where all six are heavy users every month.
+2. **Implement caching first, then set a higher allowance against measured hit
+   rates.** At a 70% hit rate the effective cost is ~$0.0063/reply, and 300
+   replies × 6 = $11.34 — close to break-even at the extreme, comfortable at
+   realistic usage.
+3. **Price sponsorship higher.** Not recommended; $0.99 is the point of it.
+
+**Expected cost is far below worst case.** AI usage is long-tailed: most users
+never approach an allowance. If a household of six averages the *typical* 30
+replies, that is 180 replies = **$2.69/month against $9.94** — comfortable. The
+allowance is a ceiling that protects against the tail, not a forecast.
+
+---
+
+## 3. Recommended allowances — and what they depend on
+
+**Recommendation: do not set 300 for Plus until caching is measured.** At
+today's uncached cost 300 replies is $4.48, which is **90% of a $4.99
+subscription** before any other cost. That is not a margin, it is a rounding
+error away from losing money on every engaged subscriber.
+
+Proposed launch numbers, deliberately conservative and explicitly revisable:
+
+| | Monthly allowance | Worst-case cost | As % of revenue |
+|---|---|---|---|
+| **Free** | **15** | $0.22 | n/a — acquisition cost |
+| **Plus** | **150** | $2.24 | 45% of $4.99 |
+| **Sponsored** | **150** (identical) | $2.24 | 226% of $0.99 alone, 22% of the $9.94 household |
+
+Sponsored users must get the same allowance — anything else makes them
+second-class, which defeats the feature. The economics work at the *household*
+level, not per sponsored seat, and that is the right frame: a sponsor is buying
+six seats for $9.94.
+
+**Revisit trigger:** caching is now measured (section 1b) and the crossover is
+about **63 Rickie replies/day app-wide**. Below that, turning it on makes things
+worse. Once real traffic is above it, recompute these allowances against the
+observed hit rate — at a sustained 70% hit rate the effective cost is
+~$0.0047/reply and 300 for Plus becomes comfortable.
+
+Free at 15 is enough to meet Rickie properly (a real conversation is 3-6 turns)
+without making the free tier the product. It costs $0.22/month per active free
+user, which is a defensible acquisition cost.
+
+---
+
+## 4. Credit packs
+
+**Never auto-charge.** When the allowance runs out the app keeps working and
+offers a pack; it does not bill anyone automatically. That is a stated
+requirement and it is also the right default.
+
+Pricing must clear cost with room for payment fees. At $0.0149/reply, 100
+replies cost **$1.49** — so a $1.99 pack for 100 leaves $0.50, which after
+payment processing (~$0.36 on a $1.99 transaction at 2.9% + $0.30) is
+**$0.14**. That is too thin, and it is worse on a cache miss.
+
+| Pack | Cost to serve | Price | After fees | Margin |
+|---|---|---|---|---|
+| 100 replies | $1.49 | $1.99 | $1.63 | $0.14 — **too thin** |
+| 100 replies | $1.49 | $2.99 | $2.60 | $1.11 — workable |
+| 250 replies | $3.73 | $5.99 | $5.52 | $1.79 — better |
+| 500 replies | $7.47 | $9.99 | $9.40 | $1.93 |
+
+Small packs are punished by fixed payment fees. **Recommendation: no pack below
+$2.99, and make the larger packs the obvious value** — this also reduces
+transaction count, which reduces fees.
+
+### Credit rules
+
+- **Unused allowance does not roll over.** It resets on the renewal date. This
+  is the norm, it is simple to explain, and rollover creates an unbounded
+  liability.
+- **Purchased credits DO roll over and never expire.** They were paid for
+  separately. Expiring them is the thing users rightly resent.
+- **Consumption order: monthly allowance first, then purchased credits.** Always.
+  Otherwise a user burns money they paid for while a free allowance sits unused.
+- **Cancellation:** purchased credits survive a downgrade to Free and remain
+  spendable. The monthly allowance drops to the Free level at the end of the
+  paid period.
+- **Refunds:** unused *purchased* credits refundable pro-rata within 30 days;
+  consumed credits are not. The allowance is not refundable — it is part of the
+  subscription, not a separate purchase.
+- **Sponsorship ends:** the sponsored user keeps their account, history, teams
+  and any credits they bought themselves. Their allowance drops to Free. They
+  can subscribe independently with no loss — a confirmed product requirement,
+  and the credit system must not create an exception to it.
+- **Sponsored users may buy their own packs.** Their credits are theirs and do
+  not return to the sponsor.
+- **Gifting** (sponsor buys credits for a sponsored user) requires the
+  recipient's explicit acceptance, is a one-off purchase, and never creates a
+  recurring charge.
+
+---
+
+## 5. Accounting correctness
+
+This is where a usage system actually fails. Requirements:
+
+**Never charge for a failure.** Reserve on request, commit only on a successful
+reply. A 503, a timeout, a refusal, a rate limit, or any exception refunds the
+reservation. Today's `coach()` already returns 503 on any exception — the
+reservation must be released on that path, which means the release belongs in a
+`finally`, not after the return.
+
+**Idempotency.** Every request carries a client-generated idempotency key.
+A retry with the same key returns the original reply and charges once. Without
+this, a flaky mobile connection charges a user for one answer three times.
+
+**Concurrency.** Two simultaneous requests must not both see "1 credit left" and
+both proceed. The decrement must be atomic — a conditional UPDATE
+(`... SET used = used + 1 WHERE used < allowance`) with the row count checked,
+not a read-then-write. SQLAlchemy makes it easy to write the racy version.
+
+**One ledger, append-only.** A `credit_event` table recording every grant,
+consumption, refund and expiry with a reason and a timestamp. Balances are
+derived from it, not stored as a mutable counter. When a user disputes a charge,
+the ledger is the answer.
+
+**Reset boundaries.** Store an explicit `allowance_period_start`; do not infer
+"this month" from `created_at` arithmetic at read time. Timezones and month
+lengths make that wrong at the edges, and the edges are where support tickets
+come from.
+
+---
+
+## 6. Privacy — sponsors must not see conversations
+
+**A sponsor pays for a seat. They do not get a window into it.** This is the
+single hardest line in the feature and it must be structural, not a policy note:
+
+- A sponsor may see **that** a sponsored seat exists, its cost, and whether it
+  is active. Nothing else.
+- A sponsor may **not** see the sponsored user's messages, Rickie's replies,
+  Coach Notes, or per-day usage detail. Not aggregated, not summarized, not
+  "just the count per day" — a daily count of a teenager's conversations with a
+  companion is itself revealing.
+- If a sponsor needs a spend signal, the correct one is **household spend**, not
+  per-seat usage.
+- A sponsored user's Forget Conversations must work exactly as it does for
+  anybody else, with no sponsor visibility or veto.
+- Teammates see what Teams already shows — name, today's status, streak. The
+  credit system must add nothing to that surface.
+
+This deserves its own tests before any sponsor UI exists, in the same spirit as
+`tests/test_coach_privacy.py`.
+
+---
+
+## 7. What must NOT cost credits
+
+Confirmed and worth writing into the code as a single gate: credits are consumed
+**only** by a successful Ask Rickie model reply. Not by:
+
+- completing exercises or missions, or anything in the Daily Mission;
+- Brain Boost questions (the library is static content on disk — there is no
+  model call, and there must never be one for serving a question);
+- Today's Insight, riddles, experiments, Rickie's written asides — all static;
+- teams, campfire, photos, challenges, memory book;
+- streaks, XP, acorns, filters.
+
+The clean way to guarantee this is that the only call site of the metering
+function is inside `coach()`. If a second call site ever appears, that is the
+review moment.
+
+**This is now enforced by a test, not by intention.**
+`tests/test_ai_boundary.py` asserts that exactly one function in `app.py`
+reaches the Anthropic client, and names the routes the promise is actually about
+— teams, photos, messages, challenges, campfire, brain-boost, daily, moments,
+memory-book — checking none of them reaches it. It also guards the guard: it
+asserts `coach()` still *does* reach the client, so a rename cannot make the
+test pass by silently checking nothing.
+
+A future "summarise this team's week" or "suggest a caption for this photo"
+would add a second call site. The test turns that from a billing surprise into
+a failing build, and the correct order is allowance accounting first, then an
+entry in `ALLOWED_MODEL_CALLERS` — never the reverse.
+
+---
+
+## 8. AI photo transformations — open question
+
+Not built, and it changes the shape of this model if it is. An image generation
+or transformation call is **one to two orders of magnitude more expensive than a
+text reply**, so it cannot share a "responses" allowance without either
+bankrupting it or making the allowance meaningless.
+
+If it is built, the recommendation is a **separate, explicitly-priced credit
+type** — "1 photo transformation = N Rickie replies", with N shown before the
+user commits, and a confirmation step. Never silently draw a photo transform
+from a conversation allowance.
+
+**This needs a cost audit of its own before any number is chosen**, and that
+audit needs a decision on which model/provider would do it.
+
+---
+
+## 9. The membership model these numbers serve
+
+Confirmed, and unchanged by anything in this document:
+
+| | |
+|---|---|
+| **Free** | $0. Creates and joins **unlimited** teams. |
+| **Individual Plus** | proposed **$4.99/month**, premium features across unlimited teams |
+| **Sponsored Plus** | proposed **$0.99/month** per person, up to **5** per active Plus subscriber |
+
+**Sponsored Plus provides exactly the same features and AI allowance as a
+Plus subscription somebody bought themselves.** Anything less makes sponsored
+users second-class and defeats the point of the feature.
+
+Every user owns their own account, progress, teams, privacy settings and AI
+allowance. A sponsored user who later subscribes independently keeps everything,
+and a sponsorship ending never touches their history or team memberships.
+
+Two things follow from that and are worth stating because they constrain the
+numbers above:
+
+- **The economics work at the household level, not per seat.** A sponsor at the
+  cap pays $9.94 for six accounts. Judging a $0.99 seat against its own AI cost
+  in isolation will always look alarming and is the wrong frame.
+- **Sponsorship is a billing relationship, not a supervisory one.** A sponsor
+  learns nothing about a sponsored person's conversations — not the content, not
+  a per-day count. See `docs/operations/minors-and-consent.md`, which also notes
+  that this means sponsorship cannot double as parental oversight.
+
+The free tier removing the old 10-team cap costs nothing in AI terms: teams,
+chat, photos and challenges make no model calls at all, which the boundary test
+above now enforces.
+
+## 10. Decisions needed
+
+1. **Allowances.** 15 Free / 150 Plus as proposed, or different? The audit says
+   300 Plus is not sustainable uncached.
+2. **Caching first?** Implementing prompt caching and measuring the hit rate
+   would let the allowance be roughly double. It is a contained change to
+   `coach()`. Should it precede the pricing decision?
+3. **Pack pricing.** $1.99/100 is too thin after payment fees. $2.99/100 or a
+   larger-pack-only structure?
+4. **Household worst case.** Is a $13.44-vs-$9.94 extreme acceptable as tail
+   risk, given expected usage is ~$2.69?
+5. **Photo transformations** — in scope at all? If so it needs its own audit.
+6. **Prompt size budget.** Should there be one? Rickie's prompt grew 62% this
+   month and every character is billed on every reply forever.

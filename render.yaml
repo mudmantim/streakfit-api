@@ -29,7 +29,11 @@ services:
     # Migrations run first (a failure short-circuits via && and gunicorn never starts).
     # STREAKFIT_ENFORCE_DB_HEAD=1 is set INLINE on gunicorn ONLY — it must NOT be a global
     # env var, or the boot guard would fire during `flask db upgrade` and deadlock the deploy.
-    startCommand: flask db upgrade && STREAKFIT_ENFORCE_DB_HEAD=1 gunicorn app:app
+    # STREAKFIT_RETENTION_SWEEPER=1 starts the in-process thread that deletes
+    # expired coach turns on a timer, so retention does not depend on somebody
+    # using the app. Inline like the DB-head guard: neither may be a global env
+    # var, or both would fire during `flask db upgrade`.
+    startCommand: flask db upgrade && STREAKFIT_ENFORCE_DB_HEAD=1 STREAKFIT_RETENTION_SWEEPER=1 gunicorn app:app
     healthCheckPath: /health
     envVars:
       # Secrets — set in the dashboard, never committed. `sync: false` = Render won't
@@ -50,3 +54,113 @@ services:
       #   sync: false
     # Single worker today. Scaling out requires shared rate-limit storage + weather-cache
     # decision first — see docs/operations/production-readiness.md.
+
+  # ── Retention, when the web service is not running ────────────────────────
+  #
+  # The in-process thread above covers a live service. It cannot cover a service
+  # that is down, mid-deploy, or crash-looping — and "we delete your child's
+  # conversations after 30 days" should not quietly depend on our uptime.
+  #
+  # This cron runs the same sweep on its own schedule, from the same code path
+  # (`flask coach-prune`), so the promise holds whatever the web service is
+  # doing. Daily at 03:17 UTC — an odd minute on purpose, to avoid the top-of-
+  # hour crowd on shared infrastructure.
+  #
+  # ⚠️ THIS CRON IS INERT, and editing this file will not change that.
+  # CONFIRMED against docs/operations/setup.md: the live service is configured
+  # in the Render DASHBOARD and git-linked to main. It was not created from a
+  # Blueprint, so Render never reads this file. A cron declared here is a
+  # statement of intent.
+  #
+  # To make it real, create a Render Cron Job in the dashboard with the command
+  # and schedule below — the exact steps are in
+  # docs/operations/privacy-retention.md. Until then the in-process thread is
+  # the only automatic sweep, and it stops when the web service does.
+  - type: cron
+    name: streakfit-retention-sweep
+    runtime: python
+    region: oregon          # VERIFY against dashboard — must match the web service
+    plan: starter           # VERIFY against dashboard
+    branch: main
+    schedule: "17 3 * * *"
+    buildCommand: pip install -r requirements.txt
+    startCommand: flask coach-prune
+    envVars:
+      # The same database the web service uses. Nothing else is needed: the
+      # command touches coach_turn only and sends nothing to any model.
+      - key: DATABASE_URL
+        sync: false
+      - key: SECRET_KEY
+        sync: false
+      - key: JWT_SECRET_KEY
+        sync: false
+
+  # ── Moderation evidence retention ─────────────────────────────────────────
+  #
+  # Decisions 4 and 6: photo bytes go 30 days from CAPTURE, text and caption
+  # evidence 30 days after the report CLOSES, and a legal hold is the only
+  # thing that suppresses either. The in-process thread runs this too, so a
+  # live service sweeps hourly; this cron is what covers a service that is
+  # down or mid-deploy.
+  #
+  # ⚠️ INERT, for the same reason as the cron above — Render does not read this
+  # file. Creating it in the dashboard is an OUTSTANDING DEPLOYMENT REQUIREMENT.
+  # Until it exists, evidence retention depends on the web service being up.
+  #
+  # 04:17 UTC, an hour after the coach sweep: both walk the same database and
+  # there is no reason to have them contend.
+  - type: cron
+    name: streakfit-moderation-evidence-sweep
+    runtime: python
+    region: oregon          # VERIFY against dashboard — must match the web service
+    plan: starter           # VERIFY against dashboard
+    branch: main
+    schedule: "17 4 * * *"
+    buildCommand: pip install -r requirements.txt
+    startCommand: flask moderation-prune
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: SECRET_KEY
+        sync: false
+      - key: JWT_SECRET_KEY
+        sync: false
+      # Required to purge PHOTO evidence: the sweep deletes ciphertext without
+      # reading it, but the app refuses to start its evidence paths without a
+      # key configured. Set from the same secret as the web service — a
+      # DIFFERENT key here would leave photos undecryptable and unpurgeable.
+      - key: STREAKFIT_EVIDENCE_KEY
+        sync: false
+
+  # ── Review-deadline notices ───────────────────────────────────────────────
+  #
+  # Decision 2: 24h for child_safety, 72h otherwise. This generates a durable
+  # notice the first time a report turns urgent or passes its deadline.
+  #
+  # ⚠️ INERT, and more importantly INCOMPLETE even once created: `--mark-
+  # delivered` records that a notice was carried by the CLI, but a cron's
+  # stdout is not a person. There is no email, push or pager in this app.
+  # A REAL DELIVERY CHANNEL IS AN OUTSTANDING REQUIREMENT — until one exists,
+  # the owner finds out by running `flask moderation-notify` and looking.
+  # Do not read a green cron here as "the owner was told".
+  #
+  # Hourly: a 24h clock is not well served by a daily check, which could burn
+  # a sixth of the window before anyone is told.
+  - type: cron
+    name: streakfit-moderation-notices
+    runtime: python
+    region: oregon          # VERIFY against dashboard — must match the web service
+    plan: starter           # VERIFY against dashboard
+    branch: main
+    schedule: "7 * * * *"
+    buildCommand: pip install -r requirements.txt
+    # No --mark-delivered: marking a notice delivered because a cron printed it
+    # to a log nobody reads is the lie this table was built to prevent.
+    startCommand: flask moderation-notify
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: SECRET_KEY
+        sync: false
+      - key: JWT_SECRET_KEY
+        sync: false

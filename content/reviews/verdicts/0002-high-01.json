@@ -1,0 +1,164 @@
+{
+  "verdicts": [
+    {
+      "id": "SF-EXP-000004",
+      "verdict": "accept",
+      "reason": "Safe, performable, and it teaches a real thing (heart rate is demand-driven). Wrist pulse rather than carotid, mild activity, no dose or comparative claim to overreach on."
+    },
+    {
+      "id": "SF-EXP-000005",
+      "verdict": "revise",
+      "reason": "Two problems. The instruction is ambiguous - 'press your finger' does not say press what against what (the nail bed, held a couple of seconds). And 'it takes about a second' is a dose stated more precisely than the evidence: published medians are ~0.8s for young men but ~1.5-1.8s for elderly readers, and cold ambient temperature roughly doubles it (median 1.3s warm vs 2.9s after cold immersion). A senior or a reader with cold hands will get 3 seconds and conclude something is wrong with them."
+    },
+    {
+      "id": "SF-EXP-000006",
+      "verdict": "revise",
+      "reason": "The safety hedge is good, but the experiment cannot show what it claims. A second toe-reach goes further than the first from stretch tolerance and the repeated-bout effect alone, with no warming involved, so the demo attributes to temperature a change that would happen anyway. 'One walk is enough to feel it' also fixes a dose (two minutes) that nobody has measured for this; warm-up ROM studies generally use far longer."
+    },
+    {
+      "id": "SF-EXP-000007",
+      "verdict": "accept",
+      "reason": "True mechanics (widening the base of support improves lateral stability), safe, and the stepladder analogy genuinely explains rather than restates. No unearned comparative - 'steadier' is the whole point and is correct."
+    },
+    {
+      "id": "SF-EXP-000008",
+      "verdict": "revise",
+      "reason": "The arm-swing mechanism is real, but two defects. 'It feels obviously wrong' is asserted as a universal subjective result that many readers will not get. More importantly, folding the arms while walking removes the arm reactions an unsteady reader would use to catch themselves; 'a clear bit of floor' covers tripping but not that, and the audience includes seventy-year-olds. The text should name the risk or restrict the invitation."
+    },
+    {
+      "id": "SF-EXP-000009",
+      "verdict": "revise",
+      "reason": "'Notice you can't do it convincingly' is false for a large share of readers - voluntary yawns are common and frequently tip into genuine ones - so the item tells the reader their own result is wrong. The second half is not performable on demand (it requires somebody else to yawn while you watch). Calling contagious yawning a 'reflex' also states a mechanism that is still argued over, in an item labelled simplified rather than contested."
+    },
+    {
+      "id": "SF-EXP-000011",
+      "verdict": "accept",
+      "reason": "Accurate and safe: the masseter is palpable exactly where the text says, clenching briefly carries no meaningful risk, and 'the muscle that bites' is a fair simplification at min_age 9. It teaches something a reader can verify on themselves in five seconds."
+    },
+    {
+      "id": "SF-EXP-000012",
+      "verdict": "revise",
+      "reason": "Safety: 'hopping if you like' is offered casually to an audience that includes seventy-year-olds, and no risk is named - single-leg hopping is a real fall and fracture risk for an older reader, and the hold-on/chair alternatives are framed as preferences rather than as the safe default. Separately, 'dozens of them' is an invented count for postural corrections nobody has measured in this context."
+    },
+    {
+      "id": "SF-EXP-000014",
+      "verdict": "reject",
+      "reason": "The payload claim is unsupported folklore in plausible dress. 'The drop afterwards is lower than where you started' is a measurable postural outcome nobody has measured, and the general law 'muscles relax further after being asked to tighten' comes from post-isometric relaxation, where the documented effect is a transient depression of spinal reflex excitability that has recovered by about five seconds - not a lasting drop in resting shoulder position. The whole item is that claim, stated as certain fact."
+    },
+    {
+      "id": "SF-EXP-000015",
+      "verdict": "revise",
+      "reason": "Two firmness problems. 'You are measurably taller now than you'll be tonight' assumes the reader is opening the app in the morning; over 50% of daily height loss occurs within the first hour of rising and 80% within three hours, so the statement is simply false for an afternoon reader. And 'about a centimetre' understates the usual figure - total diurnal stature loss is around 1.5-2 cm, or roughly 1% of height."
+    },
+    {
+      "id": "SF-FCT-000301",
+      "verdict": "reject",
+      "reason": "'Most of the work it does is digestion' is not just unearned, it is backwards. Saliva's functions are conventionally grouped as lubrication and protection, buffering and clearance, tooth integrity, antimicrobial activity, and taste/digestion - and salivary amylase contributes only a limited share of starch breakdown because most of it is done by pancreatic amylase. The volume figure (two pints, ~1.1 L) is fine, but the ranking is the item's entire point and it is wrong."
+    },
+    {
+      "id": "SF-FCT-000302",
+      "verdict": "accept",
+      "reason": "Accurate physiology (peripheral vasoconstriction preserving core temperature), properly hedged with 'usually' so it does not overreach into telling a reader that cold hands can never mean anything, and no diagnosis offered. Age-appropriate and it reframes something readers experience."
+    },
+    {
+      "id": "SF-FCT-000303",
+      "verdict": "accept",
+      "reason": "Correctly labelled contested and the text says so plainly. The diaphragm mechanism is right and the honest 'nobody has a convincing account of what hiccups are for' matches the state of the literature rather than overstating any of the competing hypotheses."
+    },
+    {
+      "id": "SF-FCT-000304",
+      "verdict": "revise",
+      "reason": "'Almost entirely operated from the forearm' is an unearned proportion, and it is contradicted by this packet's own SF-TRV-000301 explanation, which correctly says the hand's small intrinsic muscles do the fine control. A fast piano passage is precisely fine control - lumbricals and interossei are central to it, not an afterthought. The true core (fingers contain no muscle bellies; the long flexors and extensors are in the forearm) survives without the proportion."
+    },
+    {
+      "id": "SF-FCT-000305",
+      "verdict": "accept",
+      "reason": "Both halves are well established - uphill walking has the higher metabolic cost, downhill is eccentric work and is what produces delayed soreness - so the comparative is earned rather than invented. 'Two different systems, two different bills' is a genuine explanation, not a restatement."
+    },
+    {
+      "id": "SF-FCT-000306",
+      "verdict": "accept",
+      "reason": "Correct and useful: vision, vestibular and proprioceptive input, with vision degraded in the dark. It states a fact about darkness without inviting anyone to close their eyes while standing, which matters given the audience."
+    },
+    {
+      "id": "SF-FCT-000308",
+      "verdict": "accept",
+      "reason": "Correctly labelled contested and the text says so. Parietal peritoneum irritation is genuinely the leading hypothesis for exercise-related transient abdominal pain, and the item presents it as a guess rather than an answer."
+    },
+    {
+      "id": "SF-FCT-000309",
+      "verdict": "revise",
+      "reason": "The debunk is right and worth having, but 'It is unusually tireless' is an unearned comparative doing load-bearing work - it is the item's proposed explanation for the myth. There is no comparative fatigue-resistance measurement that puts the tongue ahead of other muscles, and the obvious counter-examples are the heart and the diaphragm, which are more tireless than the tongue by any measure. Drop or hedge the clause and the item is fine."
+    },
+    {
+      "id": "SF-FCT-000311",
+      "verdict": "accept",
+      "reason": "True (respiratory water loss is real and visible breath is exhaled vapour condensing), safe, short, and it gives the reader something to notice. No dose or comparative to overreach on."
+    },
+    {
+      "id": "SF-FCT-000312",
+      "verdict": "revise",
+      "reason": "'On us it achieves nothing at all' is an absolute that current evidence does not support. The thermoregulatory payoff is indeed lost in humans, but the arrector pili muscle is not functionless: 2020 work in Cell showed it forms part of a dual-component niche with sympathetic nerves that regulates hair follicle stem cells, and cold-driven contraction activates them. Soften to the thermoregulatory point ('it no longer keeps us warm') and the fact stands."
+    },
+    {
+      "id": "SF-FCT-000313",
+      "verdict": "accept",
+      "reason": "Established paediatrics - greater bone plasticity and the greenstick pattern. Safe framing, no comparison of bodies, and it explains a difference a nine-year-old may have direct experience of."
+    },
+    {
+      "id": "SF-FCT-000314",
+      "verdict": "revise",
+      "reason": "The anticipatory cardiorespiratory response is real and well documented, so the substance is sound, but the two sentences contradict each other as written: the first denies that the decision to run raises heart rate, and the second says the rise comes 'from the intention alone'. At min_age 9 that is not a rhetorical flourish, it is a comprehension failure. The opening negation also reads as denying that the work itself drives heart rate during running, which is the main effect."
+    },
+    {
+      "id": "SF-FCT-000315",
+      "verdict": "accept",
+      "reason": "Accurate description of the transient orthostatic drop, stated descriptively rather than as diagnosis or advice, and it explains the sensation rather than naming it. Note the trivia twin SF-TRV-000310 adds 'standing up slowly is the entire fix', which this version wisely does not."
+    },
+    {
+      "id": "SF-TRV-000301",
+      "verdict": "accept",
+      "reason": "Checked both sources: NBK537229 (Anatomy, Shoulder and Upper Limb, Hand Muscles) does support the split the item makes - extrinsic forearm muscles for gross/powerful movement, intrinsics for fine motor movements - so the 'established' label is earned. All four options are locations a reader could genuinely believe, and the explanation credits the intrinsics for fine control without demoting them with an invented comparative."
+    },
+    {
+      "id": "SF-TRV-000302",
+      "verdict": "revise",
+      "reason": "Option 2, 'It stays the same but weakens', is substantively true and is scored wrong: early detraining loses strength faster than it loses size, and the initial loss is largely neural rather than atrophic. The explanation makes it worse by asserting 'It gets smaller, and that is all', which is false. Keep the muscle-to-fat debunk (the car/garage analogy is good) but the third option and the 'that is all' both have to go."
+    },
+    {
+      "id": "SF-TRV-000303",
+      "verdict": "accept",
+      "reason": "Sound test craft and sound science. Eccentric (lengthening) contraction is the accepted cause of downhill soreness, the correct option is neither the longest nor the only mechanistic one, all four distractors are things people actually believe, and the explanation adds the uphill/downhill trade-off rather than restating the answer."
+    },
+    {
+      "id": "SF-TRV-000304",
+      "verdict": "revise",
+      "reason": "Test-craft: the correct option is the only one that is not a specific mechanism, and it is also the shortest and the only non-committal one. A reader who knows nothing about stitches but knows how quiz questions are built picks the odd option out. The content is valuable - teaching that something common is unexplained is worth doing - but the three distractors need to be made structurally comparable, or the question reframed so 'nobody knows' is not the visible outlier."
+    },
+    {
+      "id": "SF-TRV-000305",
+      "verdict": "revise",
+      "reason": "Same guessability failure as SF-TRV-000304 and worse: 'The question has no settled answer' is both the longest option and the only one that is not a specific named muscle, so it is findable by shape alone. The explanation itself is excellent and accurate (competing definitions, jaw/heart/uterus/calf all claimed, tongue wins on none). The question construction is what needs the work."
+    },
+    {
+      "id": "SF-TRV-000307",
+      "verdict": "revise",
+      "reason": "This is the demote-a-true-mechanism pattern. Option 3, 'They are furthest from the heart, so blood arrives cooler', describes a real contributor to why extremities cool first, and the explanation concedes it is true and then ranks it below vasoconstriction ('the narrowing is what you are feeling') with a comparison nobody has measured - so a reader is scored down for choosing a true statement. Option 1 ('Fingers have no blood vessels of their own') is also too implausible to function as a distractor."
+    },
+    {
+      "id": "SF-TRV-000308",
+      "verdict": "revise",
+      "reason": "Two of the three distractors are true components of the thing being asked about. Option 2, 'The vocal cords closing on an in-breath', is part of the hiccup reflex - the explanation itself says the cords snap shut a fraction later and that this is the sound - and option 3 is near-true because the external intercostals participate alongside the diaphragm. A reader who picks either is picking a correct description and being marked wrong. The correct option is also the longest."
+    },
+    {
+      "id": "SF-TRV-000309",
+      "verdict": "revise",
+      "reason": "Test-craft: all three distractors are extreme, self-evidently false absolutes (no calcium, no blood supply, hollow bones), so the answer is reachable by elimination with no knowledge of paediatric fractures. The correct option is also the only non-absolute one. The fact and the greenstick explanation are both sound; the distractors need to be things a reader might actually believe."
+    },
+    {
+      "id": "SF-TRV-000310",
+      "verdict": "revise",
+      "reason": "'Standing up slowly is the entire fix' is an unearned absolute and, for the senior half of this audience, an unhelpful reassurance - recurrent greying-out on standing has other common causes (dehydration, medication) and 'the entire fix' discourages mentioning it to anyone. Option 3 is also half-true, since blood genuinely does pool in the legs on standing and only 'and stays there' makes it wrong, which is a fine distinction to hang a wrong answer on at min_age 9."
+    }
+  ]
+}

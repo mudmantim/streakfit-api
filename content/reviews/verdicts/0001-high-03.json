@@ -1,0 +1,229 @@
+{
+  "verdicts": [
+    {
+      "id": "SF-FCT-000092",
+      "verdict": "revise",
+      "reason": "Overstated: 'Going down stairs is what makes your legs ache the next day' names one cause as the cause. Delayed soreness follows unaccustomed eccentric loading generally (downhill walking, lowering weights, new activity of any kind), not stairs specifically. Also near-duplicate of SF-FCT-000130, which states the same mechanism correctly and generally."
+    },
+    {
+      "id": "SF-FCT-000093",
+      "verdict": "accept",
+      "reason": ""
+    },
+    {
+      "id": "SF-FCT-000094",
+      "verdict": "accept",
+      "reason": "Contralateral trunk side-flexors working harder under a one-sided load is sound biomechanics."
+    },
+    {
+      "id": "SF-FCT-000095",
+      "verdict": "revise",
+      "reason": "Marked 'established', but the cited source contradicts the firmness. Xu & Rhodes, 'Oxygen uptake kinetics during exercise', Sports Medicine 1999 (PMID 10368878) states that TWO COMPETING THEORIES debate whether oxygen delivery capacity or muscle utilization capacity limits the rate of VO2 rise at exercise onset. The item presents the delivery explanation ('your heart and lungs take a couple of minutes to catch up') as settled fact. Either soften to the observed phenomenon (VO2 lags behind demand at onset) or mark the mechanism as contested."
+    },
+    {
+      "id": "SF-FCT-000096",
+      "verdict": "accept",
+      "reason": ""
+    },
+    {
+      "id": "SF-FCT-000097",
+      "verdict": "accept",
+      "reason": ""
+    },
+    {
+      "id": "SF-FCT-000098",
+      "verdict": "accept",
+      "reason": ""
+    },
+    {
+      "id": "SF-FCT-000099",
+      "verdict": "accept",
+      "reason": ""
+    },
+    {
+      "id": "SF-FCT-000100",
+      "verdict": "accept",
+      "reason": ""
+    },
+    {
+      "id": "SF-FCT-000101",
+      "verdict": "accept",
+      "reason": ""
+    },
+    {
+      "id": "SF-FCT-000102",
+      "verdict": "accept",
+      "reason": ""
+    },
+    {
+      "id": "SF-FCT-000103",
+      "verdict": "accept",
+      "reason": ""
+    },
+    {
+      "id": "SF-FCT-000104",
+      "verdict": "accept",
+      "reason": ""
+    },
+    {
+      "id": "SF-FCT-000105",
+      "verdict": "accept",
+      "reason": ""
+    },
+    {
+      "id": "SF-FCT-000106",
+      "verdict": "accept",
+      "reason": ""
+    },
+    {
+      "id": "SF-FCT-000107",
+      "verdict": "accept",
+      "reason": ""
+    },
+    {
+      "id": "SF-FCT-000108",
+      "verdict": "accept",
+      "reason": ""
+    },
+    {
+      "id": "SF-FCT-000109",
+      "verdict": "accept",
+      "reason": ""
+    },
+    {
+      "id": "SF-FCT-000110",
+      "verdict": "accept",
+      "reason": ""
+    },
+    {
+      "id": "SF-FCT-000111",
+      "verdict": "revise",
+      "reason": "Dangling referent: the item opens with 'That's why' but nothing precedes it. These are served one at a time, so a reader who does not get SF-FCT-000110 immediately before it is being told 'that's why' about nothing. Needs to be self-contained (state the evaporation mechanism, then the humidity consequence) or merged into SF-FCT-000110."
+    },
+    {
+      "id": "SF-FCT-000112",
+      "verdict": "accept",
+      "reason": ""
+    },
+    {
+      "id": "SF-FCT-000113",
+      "verdict": "accept",
+      "reason": ""
+    },
+    {
+      "id": "SF-FCT-000114",
+      "verdict": "accept",
+      "reason": ""
+    },
+    {
+      "id": "SF-FCT-000115",
+      "verdict": "revise",
+      "reason": "Factually wrong as written. 'Your lungs contain no muscle of their own' is false: the lungs contain airway (bronchial) smooth muscle throughout the bronchial tree down to the terminal bronchioles, plus vascular smooth muscle. Airway smooth muscle is precisely what contracts in an asthma attack, so this is not a harmless simplification for a 9-year-old audience. The true claim is that the lungs contain no SKELETAL muscle and cannot move air by themselves - the diaphragm and intercostals do that."
+    },
+    {
+      "id": "SF-FCT-000116",
+      "verdict": "accept",
+      "reason": "Haem/heme as an iron-bearing porphyrin ring is correct. Note the British spelling 'haem' is inconsistent with the rest of the library's US spelling."
+    },
+    {
+      "id": "SF-FCT-000117",
+      "verdict": "accept",
+      "reason": ""
+    },
+    {
+      "id": "SF-FCT-000118",
+      "verdict": "accept",
+      "reason": ""
+    },
+    {
+      "id": "SF-FCT-000119",
+      "verdict": "accept",
+      "reason": ""
+    },
+    {
+      "id": "SF-FCT-000120",
+      "verdict": "accept",
+      "reason": ""
+    },
+    {
+      "id": "SF-FCT-000121",
+      "verdict": "accept",
+      "reason": ""
+    },
+    {
+      "id": "SF-FCT-000122",
+      "verdict": "revise",
+      "reason": "The stated mechanism misleads. 'Your stomach has no teeth' implies the stomach does no mechanical breakdown, but the gastric antrum grinds food by muscular contraction until particles are small enough to pass the pylorus - mechanical breakdown is a large part of what the stomach does. The benefit claim ('makes everything after it easier') is also broader and firmer than the evidence, which is mostly small studies on bolus particle size, gastric emptying and satiety, not a general digestive benefit. This reads as the familiar chew-your-food folklore."
+    },
+    {
+      "id": "SF-FCT-000123",
+      "verdict": "accept",
+      "reason": ""
+    },
+    {
+      "id": "SF-FCT-000124",
+      "verdict": "revise",
+      "reason": "'One of the very few body reactions nobody can do on purpose' is false. Nearly every autonomic response is involuntary in exactly the same way: pupil dilation, goosebumps, sweating, gut motility, heart rate. Blushing is unremarkable in this respect, so the claim that makes the item interesting is the part that is wrong. The first half (facial vasodilation) is fine."
+    },
+    {
+      "id": "SF-FCT-000125",
+      "verdict": "accept",
+      "reason": ""
+    },
+    {
+      "id": "SF-FCT-000126",
+      "verdict": "accept",
+      "reason": "Red cell lifespan is about 120 days, so 'not more than a few months old' holds."
+    },
+    {
+      "id": "SF-FCT-000127",
+      "verdict": "revise",
+      "reason": "Fails the quality bar: a bare list with no explanation, no mechanism and nothing a reader learns beyond naming umami 'savory'. It also states 'there are five basic tastes' as settled, when fat (oleogustus) is an actively argued candidate sixth - if the item is kept at this confidence it should not be phrased as a closed count. Needs an actual idea attached (e.g. why bitter detection exists) to earn a slot."
+    },
+    {
+      "id": "SF-FCT-000128",
+      "verdict": "accept",
+      "reason": ""
+    },
+    {
+      "id": "SF-FCT-000129",
+      "verdict": "revise",
+      "reason": "The reasoning is a non-sequitur: a drink feeling good before you consciously wanted one is not evidence that thirst lags your fluid state. The item is also vague about what thirst supposedly lags behind, and in that vagueness it points at the contested 'if you're thirsty it's already too late / drink ahead of thirst' advice, which is not the current consensus for ordinary activity. Either state the specific, supportable version (thirst is often satisfied before rehydration is complete, and during hard sweating people typically under-drink) or cut it."
+    },
+    {
+      "id": "SF-FCT-000130",
+      "verdict": "accept",
+      "reason": ""
+    },
+    {
+      "id": "SF-FCT-000131",
+      "verdict": "accept",
+      "reason": "Repeated bout effect, well established."
+    },
+    {
+      "id": "SF-FCT-000132",
+      "verdict": "accept",
+      "reason": ""
+    },
+    {
+      "id": "SF-FCT-000133",
+      "verdict": "revise",
+      "reason": "States a mechanism more firmly than the evidence supports. Light movement does raise blood flow, but 'which is why a gentle walk often feels better than lying down' asserts blood flow as the cause of the relief. Active recovery's effect on delayed soreness is modest and short-lived in the literature, and its mechanism is not settled. Drop the causal 'which is why', or present the walk as something people report rather than something blood flow explains."
+    },
+    {
+      "id": "SF-FCT-000134",
+      "verdict": "accept",
+      "reason": "Overlaps SF-FCT-000135; consider whether both are needed."
+    },
+    {
+      "id": "SF-FCT-000135",
+      "verdict": "revise",
+      "reason": "Internally contradictory. It opens 'isn't paying anything back', then describes the body putting fuel stores back where they belong - which is, in plain English, paying something back. The point being aimed at (that post-exercise oxygen use is not a lactate 'oxygen debt') is worth making, but as written the reader is told the opposite of the sentence that follows."
+    },
+    {
+      "id": "SF-FCT-000136",
+      "verdict": "accept",
+      "reason": "Tendon and ligament hypovascularity relative to muscle is standard."
+    }
+  ]
+}

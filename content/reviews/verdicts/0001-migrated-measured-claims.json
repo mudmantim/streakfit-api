@@ -1,0 +1,49 @@
+{
+  "verdicts": [
+    {
+      "id": "SF-TRV-000105",
+      "verdict": "revise",
+      "reason": "measured claim 'faster than' with no sources \u2014 a comparative, proportion or dose needs one whatever the confidence tier says; hedge it or cite it"
+    },
+    {
+      "id": "SF-TRV-000112",
+      "verdict": "revise",
+      "reason": "measured claim 'most of' with no sources \u2014 a comparative, proportion or dose needs one whatever the confidence tier says; hedge it or cite it"
+    },
+    {
+      "id": "SF-TRV-000117",
+      "verdict": "revise",
+      "reason": "measured claim 'most food' with no sources \u2014 a comparative, proportion or dose needs one whatever the confidence tier says; hedge it or cite it"
+    },
+    {
+      "id": "SF-TRV-000123",
+      "verdict": "revise",
+      "reason": "measured claim 'better than' with no sources \u2014 a comparative, proportion or dose needs one whatever the confidence tier says; hedge it or cite it"
+    },
+    {
+      "id": "SF-TRV-000126",
+      "verdict": "revise",
+      "reason": "measured claim 'most of' with no sources \u2014 a comparative, proportion or dose needs one whatever the confidence tier says; hedge it or cite it"
+    },
+    {
+      "id": "SF-TRV-000139",
+      "verdict": "revise",
+      "reason": "measured claim 'most involved' with no sources \u2014 a comparative, proportion or dose needs one whatever the confidence tier says; hedge it or cite it"
+    },
+    {
+      "id": "SF-TRV-000148",
+      "verdict": "revise",
+      "reason": "measured claim 'most people' with no sources \u2014 a comparative, proportion or dose needs one whatever the confidence tier says; hedge it or cite it"
+    },
+    {
+      "id": "SF-TRV-000185",
+      "verdict": "revise",
+      "reason": "measured claim 'more than' with no sources \u2014 a comparative, proportion or dose needs one whatever the confidence tier says; hedge it or cite it"
+    },
+    {
+      "id": "SF-TRV-000192",
+      "verdict": "revise",
+      "reason": "measured claim 'nearly all of' with no sources \u2014 a comparative, proportion or dose needs one whatever the confidence tier says; hedge it or cite it"
+    }
+  ]
+}

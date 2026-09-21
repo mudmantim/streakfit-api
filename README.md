@@ -54,3 +54,21 @@ python scripts/verify_all.py https://streakfit.pro
 ```
 
 To iterate on one subsystem while developing, run its module directly, e.g. `python scripts/verification/chat.py`. See `scripts/verification/README.md` for the full module list and what's covered.
+
+### UI checks
+
+`scripts/uicheck.py` (`make uicheck`) drives the real app in headless Chrome at
+phone width and asserts on what a person would actually see — Rickie reacting to
+every completion, a guest getting the celebration, the team roster showing who
+moved today, tap targets, broken images, console errors. It exists because the
+worst bugs this project has shipped were invisible to both pytest and the
+verification suite: every API response was correct and every test passed while
+the companion had gone silent on day two.
+
+Local-only by design (it needs a browser and writes to the database to simulate
+a returning user), so it is deliberately not part of `verify_all.py`.
+
+```bash
+make run        # in one terminal
+make uicheck    # in another
+```

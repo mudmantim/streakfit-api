@@ -1,0 +1,14 @@
+{
+  "verdicts": [
+    {
+      "id": "SF-TRV-000351",
+      "verdict": "revise",
+      "reason": "corpus gate: all three distractors start 'It', so the correct option is the odd one out by grammar. Reworded in the generator; needs re-review because the author made the change."
+    },
+    {
+      "id": "SF-TRV-000398",
+      "verdict": "revise",
+      "reason": "corpus gate: all three distractors start 'It'. Same fix, same reason for re-review."
+    }
+  ]
+}

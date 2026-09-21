@@ -35,7 +35,12 @@ def run(api, results, scenario):
     created_moment = next((m for m in moments if m["moment_type"] == "team_created"), None)
     results.check(
         "moments.team_created_names_creator",
-        created_moment is not None and bool(created_moment.get("subject_username")),
+        # The moment exists and names SOMEBODY — but never the login. Team
+        # history is permanent, so a login written into it stays there.
+        created_moment is not None
+        and bool((created_moment.get("subject_username") or "").strip() or
+                 created_moment.get("display_text"))
+        and scenario.users["a"]["username"] not in str(created_moment),
         f"moment={created_moment}",
     )
     logins = {u["username"] for u in scenario.users.values()}

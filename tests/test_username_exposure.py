@@ -96,18 +96,30 @@ def test_roster_labels_are_not_derived_from_the_login(client):
 
 
 def test_team_history_never_names_a_member_by_login(client):
+    """Team history is permanent, so a login written into it stays there.
+
+    Read as the CREATOR, not the joiner. When this test was written every
+    member saw the whole history; team history is now bounded by
+    `TeamMembership.joined_at` (see tests/test_team_history_boundary.py), so a
+    joiner cannot see `team_created` at all. That is a deliberate feature and
+    not something to weaken here — the creator was present from the start, so
+    reading as the creator asserts the same guarantee against the same rows.
+    """
     creator, joiner, team, _ = build_team(client)
 
+    for token in (creator, joiner):
+        moments = client.get(f'/api/teams/{team["id"]}/moments',
+                             headers=auth_headers(token)).get_json()
+        for m in moments:
+            assert m['subject_username'] not in (CREATOR, JOINER)
+            if m['display_text']:
+                assert CREATOR not in m['display_text']
+                assert JOINER not in m['display_text']
+
     moments = client.get(f'/api/teams/{team["id"]}/moments',
-                         headers=auth_headers(joiner)).get_json()
+                         headers=auth_headers(creator)).get_json()
     kinds = {m['moment_type'] for m in moments}
     assert {'team_created', 'member_joined'} <= kinds
-
-    for m in moments:
-        assert m['subject_username'] not in (CREATOR, JOINER)
-        if m['display_text']:
-            assert CREATOR not in m['display_text']
-            assert JOINER not in m['display_text']
 
     created = next(m for m in moments if m['moment_type'] == 'team_created')
     assert created['display_text'] == 'Member 1 created the team'
@@ -207,3 +219,70 @@ def test_your_own_account_still_tells_you_your_username(client):
     creator, _, _, _ = build_team(client)
     me = client.get('/api/me', headers=auth_headers(creator)).get_json()
     assert me['username'] == CREATOR
+
+
+# ── Cached-client compatibility ──────────────────────────────────────────────
+#
+# Bumping the service-worker cache version does NOT help a browser that is
+# already holding the previous bundle: that client keeps issuing requests from
+# the old app.js until the new worker activates. During a deploy window that
+# client is the normal case, not the edge case, so the compatibility key is
+# tested here rather than assumed away.
+#
+# The old bundle read `m.username` and rendered `undefined (Creator)` when the
+# key vanished. The shim keeps the key and fills it with the SAME per-team
+# label as `name`, so the old client renders a correct label and still never
+# receives a login.
+
+def _old_cached_client_render(member):
+    """Exactly what the pre-hotfix static/app.js did with a roster row."""
+    return str(member.get('username')) + (' (Creator)' if member.get('is_creator') else '')
+
+
+def test_a_cached_client_reading_username_never_renders_undefined(client):
+    creator, joiner, team, _ = build_team(client)
+
+    roster = client.get(f'/api/teams/{team["id"]}',
+                        headers=auth_headers(joiner)).get_json()['members']
+    assert roster, 'no members to render'
+
+    for m in roster:
+        rendered = _old_cached_client_render(m)
+        assert 'undefined' not in rendered, \
+            f'a cached client would render {rendered!r} for {m}'
+        assert 'None' not in rendered, \
+            f'a cached client would render {rendered!r} for {m}'
+
+
+def test_the_compatibility_key_is_a_label_and_never_a_login(client):
+    """The shim must not become a way back in for the very thing that leaked."""
+    creator, joiner, team, _ = build_team(client)
+
+    for token in (creator, joiner):
+        roster = client.get(f'/api/teams/{team["id"]}',
+                            headers=auth_headers(token)).get_json()['members']
+        for m in roster:
+            assert m['username'] not in (CREATOR, JOINER, THIRD)
+            # Same value as `name`, so the two can never disagree about who
+            # somebody is, and removing the shim later changes nothing but the key.
+            assert m['username'] == m['name']
+
+
+def test_every_member_is_distinguishable_without_a_display_name(client):
+    """Nobody here sets a display name, so every label must be an ordinal.
+
+    A bare "Member" for everyone is the failure this guards: the person with no
+    display name is exactly the person the privacy fix protects, and rendering
+    them all identically makes the roster useless to read.
+    """
+    creator, joiner, team, code = build_team(client)
+    third = register_and_login(client, THIRD)
+    join_team(client, third, team['id'], code)
+
+    roster = client.get(f'/api/teams/{team["id"]}',
+                        headers=auth_headers(joiner)).get_json()['members']
+    names = [m['name'] for m in roster]
+
+    assert len(names) == 3
+    assert len(set(names)) == 3, f'members are indistinguishable: {names}'
+    assert names == ['Member 1', 'Member 2', 'Member 3'], names

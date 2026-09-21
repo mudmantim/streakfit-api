@@ -1,0 +1,229 @@
+{
+  "verdicts": [
+    {
+      "id": "SF-FCT-000001",
+      "verdict": "accept",
+      "reason": "Supported by acute-exercise affect meta-analyses; 'most people' and the low-to-moderate intensity case make the during-the-walk part defensible."
+    },
+    {
+      "id": "SF-FCT-000002",
+      "verdict": "accept",
+      "reason": "Matches the sedentary-break literature and is hedged appropriately."
+    },
+    {
+      "id": "SF-FCT-000003",
+      "verdict": "revise",
+      "reason": "Unevidenced folklore. 'Stretching overhead wakes up your whole body' has no mechanism and no study behind it; 'wake up your whole body' is not even a checkable claim. If the intended point is that any movement raises alertness, say that instead of attributing it to the overhead stretch."
+    },
+    {
+      "id": "SF-FCT-000004",
+      "verdict": "accept",
+      "reason": "True and worth saying; dancing is moderate-intensity aerobic activity."
+    },
+    {
+      "id": "SF-FCT-000005",
+      "verdict": "revise",
+      "reason": "Unsupported superlative. 'More muscles at once than almost any other everyday movement' is a comparative ranking with nothing behind it; stair climbing is demanding but is predominantly lower-body, and carrying, sweeping or swimming recruit at least as much. Either drop the comparison or state what stairs actually do (high effort per minute, legs plus heart)."
+    },
+    {
+      "id": "SF-FCT-000006",
+      "verdict": "accept",
+      "reason": "True; postural muscles and basal metabolism both apply."
+    },
+    {
+      "id": "SF-FCT-000007",
+      "verdict": "revise",
+      "reason": "Overstated and partly wrong. Collins et al. 2009 (Proc R Soc B) found arm swing cuts the net cost of transport roughly 7-13% at speeds of about 1.0 m/s and above, with no measurable benefit at slow speeds. It lowers the energy cost of a given speed; it does not make you move faster, and the benefit does not apply to a slow stroll. As written it claims both."
+    },
+    {
+      "id": "SF-FCT-000008",
+      "verdict": "accept",
+      "reason": "Well supported by the postprandial-walking glucose literature, and hedged at the right level for a nine-year-old."
+    },
+    {
+      "id": "SF-FCT-000009",
+      "verdict": "accept",
+      "reason": ""
+    },
+    {
+      "id": "SF-FCT-000010",
+      "verdict": "revise",
+      "reason": "The second clause is garbled — 'unlike a hot drink it works on the way to being useful' does not parse into a claim a reader can evaluate — and it smuggles in an unevidenced comparison against caffeine. The first clause duplicates SF-FCT-000003's territory without adding anything."
+    },
+    {
+      "id": "SF-FCT-000011",
+      "verdict": "revise",
+      "reason": "Audience mismatch that could cause harm. Thirst is a reliable cue for healthy children and adults, but thirst sensation is blunted with age, and this app is explicitly used by seniors — the group most often advised NOT to wait for thirst. As written it tells exactly the wrong audience to stop paying attention. Needs the age caveat, or should not be stated as a general rule."
+    },
+    {
+      "id": "SF-FCT-000012",
+      "verdict": "accept",
+      "reason": "Hedged to 'a small workout', which is the correct firmness."
+    },
+    {
+      "id": "SF-FCT-000013",
+      "verdict": "accept",
+      "reason": "Arithmetic checks out (~70 bpm x 1440 min is about 100,000 beats); fist comparison is standard anatomy."
+    },
+    {
+      "id": "SF-FCT-000014",
+      "verdict": "accept",
+      "reason": "Satiety-signal delay is well established, and the framing is about noticing fullness rather than restricting food."
+    },
+    {
+      "id": "SF-FCT-000015",
+      "verdict": "accept",
+      "reason": "True and hedged ('one of the simplest'). Slightly thin on teaching value but it earns its place."
+    },
+    {
+      "id": "SF-FCT-000016",
+      "verdict": "accept",
+      "reason": "Defensible simplification, though 'vitamins' is loose — much of what varies by color is carotenoids, anthocyanins and other phytochemicals rather than vitamins as such. 'Usually' carries it."
+    },
+    {
+      "id": "SF-FCT-000017",
+      "verdict": "accept",
+      "reason": "Comparative is a little brisk, but the direction is supported: acute activity lowers state anxiety while rumination sustains it."
+    },
+    {
+      "id": "SF-FCT-000018",
+      "verdict": "accept",
+      "reason": ""
+    },
+    {
+      "id": "SF-FCT-000019",
+      "verdict": "accept",
+      "reason": "Mild dehydration and subjective fatigue are well documented, and the second sentence is encouragement rather than a claim."
+    },
+    {
+      "id": "SF-FCT-000020",
+      "verdict": "accept",
+      "reason": ""
+    },
+    {
+      "id": "SF-FCT-000021",
+      "verdict": "revise",
+      "reason": "'It isn't injury' is stated flatly and is too firm on both counts. DOMS is a symptom of exercise-induced microdamage, and more importantly the sentence is unqualified — it teaches a reader that any post-exercise soreness is benign, which is exactly the belief that gets a real strain walked on. The packet's own SF-FCT-000029 makes the correct distinction; this item contradicts the spirit of it."
+    },
+    {
+      "id": "SF-FCT-000022",
+      "verdict": "accept",
+      "reason": "Standard, defensible adaptation simplification. Note it overlaps heavily with SF-FCT-000028 and SF-FCT-000030."
+    },
+    {
+      "id": "SF-FCT-000023",
+      "verdict": "accept",
+      "reason": "'Can help' is the right firmness for active-recovery evidence, which is real but modest and short-lived."
+    },
+    {
+      "id": "SF-FCT-000024",
+      "verdict": "accept",
+      "reason": "Matches the documented DOMS course (onset ~8-12h, peak ~24-72h)."
+    },
+    {
+      "id": "SF-FCT-000025",
+      "verdict": "reject",
+      "reason": "This is the 'stretching prevents injury' folklore in a new coat. The Cochrane review (Herbert, de Noronha & Kamper 2011, CD004577) pooled 12 studies including a 2,377-participant field trial and found stretching before, after, or both produces no clinically important reduction in post-exercise muscle soreness. Reframing it as 'less tight' rather than 'less sore' does not rescue the claim — there is no evidence for a next-day tightness benefit either. The claim itself is the problem, not the wording."
+    },
+    {
+      "id": "SF-FCT-000026",
+      "verdict": "revise",
+      "reason": "Teaches nothing. 'Helps your body keep up with everything else you do' names no mechanism, no timeframe and no observable effect, and it is the third near-identical rest-day item in this block (022, 028, 030). A true but empty item is still a failure under the rubric."
+    },
+    {
+      "id": "SF-FCT-000027",
+      "verdict": "revise",
+      "reason": "'Relax faster' is a comparative with no stated comparator and weak evidence behind it. Systematic reviews of post-exercise heat and warm-water immersion show modest and mixed effects on soreness and recovery, with no clear advantage over passive rest. Also, given a nine-year-old audience, a claim about hot water should not be issued without a temperature caution."
+    },
+    {
+      "id": "SF-FCT-000028",
+      "verdict": "revise",
+      "reason": "The negation is false. Muscle protein synthesis and the repair/adaptation signalling cascade begin during and immediately after exercise, not only once you stop; 'not while you're still exercising' asserts a hard boundary that does not exist. It is also a near-duplicate of SF-FCT-000022, which makes the same point without the false half."
+    },
+    {
+      "id": "SF-FCT-000029",
+      "verdict": "accept",
+      "reason": "Genuinely useful safety content, correctly firm."
+    },
+    {
+      "id": "SF-FCT-000030",
+      "verdict": "revise",
+      "reason": "Motivational filler, not a fact. 'Come back stronger for the next one' restates SF-FCT-000022 and SF-FCT-000026 with no added content and no mechanism a reader learns anything from."
+    },
+    {
+      "id": "SF-FCT-000031",
+      "verdict": "revise",
+      "reason": "'Most' is an unquantified proportional claim nobody has measured. Tissue repair runs around the clock; what is supported is that some repair-related processes (growth hormone release, elevated protein synthesis) are concentrated in deep sleep. State that instead of a share of the total."
+    },
+    {
+      "id": "SF-FCT-000032",
+      "verdict": "accept",
+      "reason": "Good — the 'doesn't buy you fewer hours' clause is exactly the kind of honest limit the library needs more of."
+    },
+    {
+      "id": "SF-FCT-000033",
+      "verdict": "accept",
+      "reason": "Melatonin suppression by evening light is established; 'can trick' is the right firmness given that device-screen effect sizes are debated."
+    },
+    {
+      "id": "SF-FCT-000034",
+      "verdict": "accept",
+      "reason": ""
+    },
+    {
+      "id": "SF-FCT-000035",
+      "verdict": "revise",
+      "reason": "The condition that makes this true is missing. Short naps do not disrupt night sleep when taken in the early afternoon; naps taken late in the day, or long ones, demonstrably do. The item states 'without ruining your night's sleep' flatly while omitting the timing caveat, so a reader who naps at 6pm has been misinformed by it."
+    },
+    {
+      "id": "SF-FCT-000036",
+      "verdict": "accept",
+      "reason": "Supported by the thermoregulatory sleep-onset literature and hedged to 'most people'."
+    },
+    {
+      "id": "SF-FCT-000037",
+      "verdict": "accept",
+      "reason": "The sleep-need claim matches AASM/CDC age guidance; 'because their bodies are still growing' is a loose but acceptable child-level reason."
+    },
+    {
+      "id": "SF-FCT-000038",
+      "verdict": "accept",
+      "reason": ""
+    },
+    {
+      "id": "SF-FCT-000039",
+      "verdict": "revise",
+      "reason": "Imprecise as stated. The deep muscle relaxation people mean here is REM atonia, a feature of one sleep stage, not of sleep generally; muscle tone during NREM is not obviously lower than during quiet waking rest. The 'more than almost any other time' superlative is not supported for sleep as a whole, and the item teaches nothing actionable either way."
+    },
+    {
+      "id": "SF-FCT-000040",
+      "verdict": "accept",
+      "reason": ""
+    },
+    {
+      "id": "SF-FCT-000041",
+      "verdict": "revise",
+      "reason": "The dose is invented. Balance-training studies that show improvement use roughly 10-15 minutes of practice three or more times a week over 4-6 weeks; 'a few seconds a day' is far below any studied dose and there is no evidence it produces the promised gain. The activity is fine and safe — the quantity attached to it is not supportable."
+    },
+    {
+      "id": "SF-FCT-000042",
+      "verdict": "accept",
+      "reason": "Supported by the falls-prevention evidence, and the 'not just for athletes' framing suits the senior audience."
+    },
+    {
+      "id": "SF-FCT-000043",
+      "verdict": "accept",
+      "reason": "Correct at a child's level: vision, vestibular system, proprioception."
+    },
+    {
+      "id": "SF-FCT-000044",
+      "verdict": "accept",
+      "reason": ""
+    },
+    {
+      "id": "SF-FCT-000045",
+      "verdict": "reject",
+      "reason": "Safety violation — the rubric explicitly bans eyes-closed movement, and this item is an invitation to try it. It tells a nine-year-old or a senior to close their eyes while standing, and the fall risk IS the demonstration, so the danger is the point of the item rather than an incidental side effect. It carries no instruction to hold onto something or sit down. In a falls-aware app aimed partly at older adults this should not ship in any form; the same teaching point is already made safely by SF-FCT-000043."
+    }
+  ]
+}

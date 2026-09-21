@@ -34,7 +34,7 @@ def test_delete_user_with_progress_and_coach_data(app):
         DailyCompletion(user_id=u.id, date=datetime.date(2026, 7, 24), exercise_key="pushups"),
         ProgressEvent(user_id=u.id, event_type="mission_complete", xp_delta=25),
         CoachTurn(user_id=u.id, role="user", content="hi"),
-        CoachNote(user_id=u.id, goals='["x"]', preferences='[]', notes='[]'),
+        CoachNote(user_id=u.id, activities='["yoga"]', avoid_movements='[]', session_prefs='[]'),
     ])
     db.session.commit()
     rep = appmod.delete_user_account(u.id, dry_run=False)

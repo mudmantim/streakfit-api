@@ -12,6 +12,121 @@ decisions lives in `PROJECT_JOURNAL.md`.
 
 ---
 
+## v0768 — Impress Olivia: challenges, real content, filters worth using (branch `product-completion`, NOT deployed)
+
+**Not deployed.** Adds a second migration (`s3t4u5v6w7x8`), so a deploy from this
+branch now runs two migrations. Service worker `v0761` → `v0768`.
+
+Additive by design: everything here sits on top of the solo movement app rather than
+replacing it, and one of the first findings was a violation of exactly that.
+
+- **Filters were unusable without a team.** They are earned by moving and could only be
+  applied in a team photo composer, so a solo user earned the best rewards in the product
+  and never saw them. The composer now has a solo mode from the Journey card — same
+  filters, saves to the phone, nothing uploaded.
+- **Filters judged by rendering them, not by reading the catalog.** `golden_hour` was
+  indistinguishable from no filter at 20 acorns; `goofy_specs` promised glasses and gave
+  Rickie in a corner; Rickie was the same asset in a corner in five of twelve. Three new
+  primitives (`vignette`, `burst`, and a `stat` badge that prints your **real streak and
+  level onto the photo**), plus `bleed` so Rickie leans into frame. 14 filters now.
+- **Content depth.** 90 insights → 270, 40 Brain Boost questions → 190, all held to the
+  same accuracy rules with anything uncertain dropped. Selection is a shuffled per-user
+  order: no repeats until the library is exhausted, and two people in a house almost never
+  get the same fact. The original 40 questions had the answer at index 1 thirty times and
+  never at 2 or 3 — "always pick the second one" scored 75%. Now evenly spread.
+- **Challenges.** Presets only, never free text. Eight equipment-free movement challenges,
+  aimed at the team or one person, landing as a card in the existing thread. Completing
+  pays 15 XP (against 40 for your own mission — a test pins that ordering), Rickie reacts,
+  and the card offers "Prove it — send a victory picture" straight into the composer with
+  the Challenge Won filter selected. No loser, no failure state, and nothing anywhere names
+  who did not do it.
+- **Celebrations queue instead of overwriting.** "+60 XP, Level 2 — Adventurer" — the
+  biggest moment of a first day — was on screen for 900ms before the milestone toast
+  replaced it.
+- **Chat aliveness.** Timestamps, new messages animating in while the backlog does not,
+  and optimistic send so a message appears immediately on a bad connection instead of
+  freezing the input. Tactile press states across the primary controls.
+- **Earning something now says what it unlocked** — filter unlocks are announced at the
+  moment they happen rather than being discovered three taps deep in a composer.
+
+**Results:** 291+ pytest, `verify_all` 108/108, `uicheck` 30/30, all gates clean.
+
+## v0761 — Team photos with StreakFit filters (branch `product-completion`, NOT deployed)
+
+**Not deployed.** Adds a migration (`r2s3t4u5v6w7`), so unlike the rest of this branch
+a deploy here is *not* code-only — it runs DDL and the rollback is correspondingly less
+trivial. Service worker `v0756` → `v0761`.
+
+Private photo sharing into an existing team, asked for by the target user: take or
+choose a photo, preview, apply a StreakFit filter, caption, send. Twelve filters across
+free / missions / streak / level / milestone / acorns, with Rickie in several of them.
+
+- **Storage is Postgres, deliberately.** Render's web filesystem is wiped every deploy so
+  disk is not an option; object storage is a new paid service and has not been enabled.
+  Bounded by a 2 MB upload cap, a 150 MB per-team quota (clear `507`) and 30-day
+  retention. `docs/team-photos.md` has the migration path and costs when it outgrows this.
+- **Filters are data.** One catalog in `app.py` carrying its own render spec; the client
+  implements five primitives and is otherwise generic. Adding a filter is a dict.
+- **Acorns have a sink at last.** `acorns_total` stays lifetime-earned so `acorns_100`
+  still means earned; `acorns_spent` is new. Named filters at visible fixed prices — no
+  randomised unlocks, no bundles, no buying acorns with money.
+- **Safety:** membership re-checked on every read; no signed-URL or token-in-query path,
+  so a leaked photo URL is useless; opaque random ids; cross-team reads are 404 not 403;
+  server-side EXIF/GPS/comment stripping by rebuilding the JPEG; JPEG-only by parsing;
+  `private, no-store`; deletion nulls the bytes. Users are told plainly that anyone who
+  can see a photo can screenshot it.
+- **Mobile:** `capture="environment"` opens the camera directly. Team panel split into
+  Campfire / Photos & Chat tabs — the thread was a 160px window, now ~464px.
+- Raises `MAX_CONTENT_LENGTH` to the photo ceiling with a `before_request` guard holding
+  every other route at the original 256 KB.
+
+**Results:** 242 pytest (was 199), `verify_all` **108/108** (was 88), `uicheck` 30/30.
+Suite version 3 → 4. `verify_all` caught a bug pytest could not: a team-history moment
+staged after the commit, invisible over HTTP but visible to a session-sharing unit test.
+
+## v0756 — Product completion: the day-2 experience (branch `product-completion`, NOT deployed)
+
+**Not deployed.** Sits on the `product-completion` branch; production still serves the
+maintenance-mode build. Service-worker cache went `v0748` → `v0756` across the pass. No
+migration and no new environment variable, so whenever it does ship, rollback is code-only.
+
+StreakFit came out of maintenance mode for a product-completion push, aimed at the app
+being something a child actually returns to. The reconstruction found Day 1 in good shape
+and Day 2 broken.
+
+- **Rickie went silent on day two.** `new_exercise` pays once ever and the mission bonuses
+  only land on the 5th, so a returning user earned 0 XP on four of five taps — and `app.js`
+  gated the reaction toast on XP, so the companion said nothing at all for those four. Only
+  reachable by being a returning user, which no test or manual pass had ever been. The
+  reaction is now decided by Rickie's mode alone.
+- **Repeat completions now pay 5 XP**, sized against the economy rather than picked: five
+  taps must stay worth less than the 40 XP for *finishing* (so repeat < 8), a discovery must
+  stay 4× a repeat, and below 5 the bar barely moves. Simulated over 365 days × 40 users.
+  Reasoning and table in `docs/reward-economy.md`. No acorns — they still have no sink.
+- **Teams finally witness.** The roster had no "did they move today" and no streak, in the
+  API as well as the UI, so a parent could not see whether their kid had moved. Added
+  batched (`_witness_for_ids`), with no "missed today" state and no ordering by streak —
+  tests pin that it stays a witness and never becomes a leaderboard.
+- **`/api/teams/<id>/moments` got its first caller**, having shipped working, humanised and
+  tested with no frontend consumer at all. The campfire gained a stage, a progress bar and
+  the distance to the next stage.
+- **Three beginner exercises were unreachable forever** — every beginner saw 27 of 30,
+  because beginner's only high-fun moves are all in one category and the fun floor forced
+  it. All 30 reachable now; 90% of days still include something high-energy.
+- **Milestones announce themselves** instead of only appearing later in the Memory Book.
+- **Guests get the celebration too** (they previously got no Rickie line and no confetti at
+  5/5 — the moment whose job is to earn the signup), Side Quests can now fail visibly
+  instead of rendering an error as an empty state, exercise illustrations show in the
+  mission row, and `.btn-primary` reaches the 44px tap target it was 2px short of.
+
+**New gates, both fault-injected.** `scripts/uicheck.py` (`make uicheck`) drives the real UI
+in headless Chrome and asserts on what a person sees — the layer where both headline bugs
+lived, invisible to pytest and to `verify_all` alike. `build_check.py` now fails if any
+`/api/` route has no caller in the frontend, so nothing else ships unreachable.
+
+**Results:** 199 pytest (was 167), `verify_all` **88/88** (was 81), `uicheck` 18/18, ruff,
+mypy and build check clean. Verification suite version 2 → 3.
+
 ## v0748 (2) — Rate limits keyed on the real client (`d262336`, deployed 2026-07-26)
 
 **Deployed and verified.** Pushed `6a6eedf..d262336` at 21:15:13Z; `/health` returned 200 on every

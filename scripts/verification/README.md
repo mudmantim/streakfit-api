@@ -33,8 +33,24 @@ Exit codes: `0` all passed, `1` at least one check failed, `2` a setup step (e.g
 | `moments.py` | Team Moments history (`team_created`, `member_joined`, `campfire_log_added`, ordering) |
 | `chat.py` | Team Chat post/read, empty/over-length rejection, emoji reactions as plain messages |
 | `rickie.py` | Rickie's team reactions (welcome, first-log) — fixed templates, `sender_user_id` null |
+| `photos.py` | Private team photos: filter catalog and lock state, upload, who can read the bytes (member 200 / non-member 403 / anonymous 401), non-JPEG and locked-filter rejection, the thread entry and history moment. Deletes what it uploads. |
 | `security.py` | Invite rotation, remove member, leave team, unauthorized access — mutates membership |
+| `moderation.py` | Blocking and reporting end to end, the operator boundary (queue and appeals reject a non-operator), the appeals UI being reachable in the served markup, and the honesty of the monitoring: retention answered separately per promise, delivery split into configuration / observed execution / outstanding work, no check greener than the capability it depends on, and no identifiers in a payload served without a credential |
 | `admin.py` | StreakFit Control's own routes (R3.0) are reachable and reject unauthenticated requests. Independent of the team scenario; runs last. Never triggers `POST /api/admin/verify` itself — that would recurse |
+
+## What this suite does not cover
+
+These modules check the **API**. They cannot see whether the app *shows* any of
+it — and the two worst bugs this project has shipped lived precisely there: a
+correct API response that the UI then ignored (Rickie's reaction gated on XP,
+so he fell silent on day two) and a working endpoint no screen ever called
+(team moments). `scripts/uicheck.py` (`make uicheck`) covers that layer by
+driving the real UI in headless Chrome. It is local-only and deliberately not
+part of `verify_all.py`, which stays standard-library-only and production-safe.
+
+`scripts/build_check.py` also now asserts that every `/api/` route has a caller
+in the frontend, so a route can no longer ship unreachable without the build
+gate saying so.
 
 Suite version and last-changed date live in `__init__.py` (`VERIFICATION_SUITE_VERSION`) — bump it by hand whenever this table changes, same discipline as the `static/sw.js` cache-version rule.
 

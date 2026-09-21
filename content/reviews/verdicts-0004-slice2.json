@@ -1,0 +1,186 @@
+{
+  "verdicts": [
+    {
+      "id": "SF-TRV-000435",
+      "verdict": "accept",
+      "reason": "",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000436",
+      "verdict": "revise",
+      "reason": "Guessability: the key is the only hedged option among three absolutes (\"Nothing...same way\", \"removes the need\", \"should be longer\"), and its own wording (\"not skipped\") telegraphs the responsible answer. A reader knowing nothing picks it. Also the explanation's physiology is loose: \"heat loosens skin and surface muscle\" is not a real mechanism. Rewrite so at least two distractors are genuinely held beliefs stated with the same confidence as the key, and replace the skin/muscle line with the actual point (ambient heat raises tissue temperature but does not rehearse the movement pattern).",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000437",
+      "verdict": "revise",
+      "reason": "Guessability: two distractors are disqualified by their own absolutes (\"only happens in the morning\", \"always worse than\") and the fourth (\"arrive at the same time\") does not answer the question asked, leaving the key as the only option that states a difference at all. Restate the distractors as plausible differences a reader might actually believe (e.g. \"soreness shows up straight away\", \"stiffness means damage\") so the item tests the stiffness/soreness distinction rather than option grammar.",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000438",
+      "verdict": "revise",
+      "reason": "Two of three distractors are throwaways: \"skip it\" is the bare-dismissal option and \"walk briskly for eight of them\" leaves two minutes for the work, which no reader will choose. That makes it a coin flip against the one real belief (floor stretching). Replace both with warm-up choices people actually make on a short clock, e.g. \"two minutes of arm swings and leg swings\" or \"a few hard reps to wake the muscles up\".",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000439",
+      "verdict": "accept",
+      "reason": "",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000440",
+      "verdict": "revise",
+      "reason": "Only one distractor is a real belief (\"stays with you for about an hour\"); \"counts as your cool-down instead\" and \"works better after a rest\" are not positions anyone holds, so the field collapses to two. The key is also the only option carrying an instruction, which marks it as the sensible answer. Additionally the twenty-minute figure and the implied decay rate are asserted with no source under `simplified` — either soften to \"it fades sooner than people expect\" or promote to `established` with a warm-up-decay citation.",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000441",
+      "verdict": "revise",
+      "reason": "Guessability: the key is the only qualified option (\"though usually less\") against \"gone for good\", \"worse than the very first\" and \"only if the routine changed\" — the exact pattern where form, not knowledge, picks the answer. Rewrite so the distractors are hedged too (e.g. \"it comes back just as strong\" vs \"it comes back milder\" vs \"it comes back only in the muscles you rested\"), so the reader has to know the repeated-bout effect fades partially rather than fully.",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000442",
+      "verdict": "revise",
+      "reason": "Goldilocks structure: the key is the moderate option flanked by a dismissal (\"Nothing, it is gentle already\"), an extreme (\"a full stretch of every muscle\") and a mismatch (\"five minutes of brisk walking\", which is also the wrong recommendation to put in front of someone doing a seated routine precisely because walking is hard for them). Replace the distractors with warm-up choices that are all defensible in scale, so the item tests the scaling principle rather than spotting the middle answer.",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000443",
+      "verdict": "revise",
+      "reason": "The item explicitly marks \"You injured something small there\" as wrong and the explanation closes the door on injury (\"the soreness is really just an introduction\") without giving the reader any way to tell delayed muscle soreness from a strain. For a mixed child/senior audience that is a rule-out with no test attached. Add the distinguishing detail to the explanation — soreness that arrives hours later, is spread across a muscle and eases with gentle movement, versus pain that came on suddenly during the movement, is sharp, or is on one side only — and reword the distractor so ruling it out teaches that difference.",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000444",
+      "verdict": "accept",
+      "reason": "",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000445",
+      "verdict": "accept",
+      "reason": "",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000446",
+      "verdict": "accept",
+      "reason": "",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000447",
+      "verdict": "accept",
+      "reason": "",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000448",
+      "verdict": "revise",
+      "reason": "Safety framing. The item tells a reader — including seniors — that a heart rate above the age-predicted maximum is not worth attending to, and offers \"how you actually feel is the better instrument\" as the whole answer. That is reassurance functioning as medical advice, with no boundary. Keep the (correct) point that 220-minus-age is a population average with a wide spread, but add the line that stops it being advice: chest pain, dizziness, feeling faint or a rate that will not settle are reasons to stop and get checked, whatever the number says. Distractors also need work — two of the three are alarm framings, leaving the key as the only skeptical option.",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000449",
+      "verdict": "accept",
+      "reason": "",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000450",
+      "verdict": "revise",
+      "reason": "Firmness beyond the evidence in the explanation: \"stopping there costs you almost nothing, because the messy reps were never the ones doing the work\" states as settled something the training literature actively disputes — proximity to failure is one of the better-supported drivers of adaptation, and the final hard reps are generally held to contribute most. The stop-when-form-degrades message is good and worth keeping; rest it on the real reason (a rep you cannot control is the one that hurts you, and the stimulus you lose is small) rather than on a claim that those reps do nothing.",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000451",
+      "verdict": "revise",
+      "reason": "This is the safety-item failure mode named in the review brief: \"It is there for the unplanned slip\" is the only plausible option. \"Keeps you walking more slowly\" and \"stops your arms from swinging\" are not beliefs anyone holds, and the remaining distractor (weight off the knees) is the only competition. Replace them with genuinely tempting wrong beliefs — that handrails are for people who are unsteady, that using one makes your balance worse over time, that it only matters going down — so the item tests why a steady person still uses it.",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000452",
+      "verdict": "revise",
+      "reason": "Tests nothing. A chair on wheels is obviously the unsafe one and the other three options (arms, no cushion, tall back) are self-evidently harmless, so any reader gets this at 100% with zero knowledge. The explanation even concedes the point (\"cushions, arms and back height change nothing\"). Rebuild with four chairs that could all arguably be wrong — one that is too low to reach without stooping, a light folding chair, one positioned so you have to lean to reach it, one on carpet versus a slick floor — and make the answer turn on whether it stays put under load.",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000453",
+      "verdict": "revise",
+      "reason": "Safety. The item is addressed to children, encourages lifting something heavy, and explicitly marks \"whether their back stays straight\" as the wrong answer — which reads to a nine-year-old as technique not mattering. It also has no adult-present framing anywhere. Keep control as the answer if you like, but the explanation must not leave technique discredited (control includes keeping the load close and the spine in a position you chose, not one the weight chose), and the scenario needs a grown-up in it.",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000454",
+      "verdict": "revise",
+      "reason": "Stem-key word match: the question says \"becomes very familiar\" and the key says \"on familiar ground\" — the only option that echoes the stem, which is enough to pick it without knowing anything. The other three are specific mechanical claims about stride and pace that no reader will prefer. Reword the key so it does not repeat the stem's vocabulary, and make the distractors about attention too (e.g. \"you scan further ahead\", \"you spot changes faster\") so the item tests automaticity rather than word matching.",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000455",
+      "verdict": "revise",
+      "reason": "Two firmness problems in one explanation, both under `simplified` with no source: \"roughly quadruples\" is a quantified claim (and it is wrong as stated — a four-second rep does not quadruple the stimulus, only the duration, and slower tempo usually means less total load moved), and \"the simplest way to make a movement harder\" is a superlative. Time under tension as a driver of adaptation is also weaker than the text implies. Recast as the experiential truth — slowing down removes momentum, so the muscle does more of the work — and drop both the multiplier and the superlative.",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000456",
+      "verdict": "revise",
+      "reason": "All three distractors claim full range makes the work easier or faster (\"less effort\", \"less work overall\", \"more reps before you get tired\"), so the key is the only option offering a benefit and the only one a reader would ever pick. Replace them with plausible alternative benefits that are wrong here — more flexibility only, faster results, less soreness — so the item actually tests the position-specificity point the explanation makes.",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000457",
+      "verdict": "revise",
+      "reason": "The core claim is defensible, but the closing sentence — \"the old idea that lifting makes you stiff came from watching people train through half a range\" — is an invented origin story presented as fact, with no source. Cut it or mark it as a guess. Separately, \"Yes, full-range work does it\" is a firm answer to a question the evidence answers as \"resistance training through full range improves range of motion about as much as stretching does in the studies we have\"; either carry that hedge in the explanation or promote the item to `established` with the systematic-review citation. Two distractors are also disqualified by their own absolutes (\"always\", \"only\").",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000458",
+      "verdict": "accept",
+      "reason": "",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000459",
+      "verdict": "accept",
+      "reason": "",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000460",
+      "verdict": "revise",
+      "reason": "Citation resolves and supports the answer: the CDC page states adults need \"at least 2 days of muscle-strengthening activity each week\". But the explanation then says the guideline \"does not say what kind\", and the same page does specify it — activities that \"work all major muscle groups (legs, hips, back, abdomen, chest, shoulders, and arms)\". Under `established` the explanation has to stay inside the source. The follow-on claim that \"carrying, climbing and bodyweight movements all count\" is the item's own assertion, not the CDC's, and carrying groceries in particular does not cover all major muscle groups. Rewrite the second sentence to state what the guideline actually specifies, or drop it.",
+      "sources_checked": [
+        "https://www.cdc.gov/physical-activity-basics/guidelines/adults.html"
+      ]
+    },
+    {
+      "id": "SF-TRV-000461",
+      "verdict": "accept",
+      "reason": "",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000462",
+      "verdict": "accept",
+      "reason": "",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000463",
+      "verdict": "revise",
+      "reason": "Distractors are too weak — \"your bones take more of the load\" and \"the muscle slowly stretches out\" are not beliefs a reader holds, so the key is the only fatigue explanation on offer for a question that plainly asks about fatigue. The mechanism is also stated more firmly than it is settled: motor-unit rotation (\"fibers take turns\") is a teaching model that holds at low forces and is disputed at the forces a plank involves, where added recruitment and rising firing rate matter more. Soften the mechanism and give the distractors competing fatigue accounts (e.g. \"the core gives out before the shoulders\", \"you start holding the position less well\") so the item discriminates.",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000464",
+      "verdict": "accept",
+      "reason": "",
+      "sources_checked": []
+    }
+  ]
+}

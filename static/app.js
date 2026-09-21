@@ -52,18 +52,12 @@ function _getOrCreatePromptsContainer() {
     if (!el) {
         el = document.createElement('div');
         el.id = 'retention-prompts';
+        // A one-time permission ask is not part of today. It lives in
+        // Progress with the other utilities, so it never sits under the
+        // mission taking up 124px of the screen a person came here to use.
+        el.className = 'pane-progress';
         var main = document.querySelector('#dashboard-view main');
-        // Place retention prompts BELOW Today's Mission — the mission should
-        // lead the screen; a permission ask never sits on top of it or pushes
-        // it down on load.
-        var missionSection = (document.getElementById('daily-exercises-list') || {}).closest
-            ? document.getElementById('daily-exercises-list').closest('section')
-            : null;
-        if (missionSection) {
-            missionSection.insertAdjacentElement('afterend', el);
-        } else if (main) {
-            main.appendChild(el);
-        }
+        if (main) main.appendChild(el);
     }
     return el;
 }
@@ -211,6 +205,10 @@ function _showMissionCompleteNotification() {
 // Set by loadUserPreferences() on every dashboard load. Streak data lives here
 // rather than in the /api/daily response.
 var currentUser = null;
+// Who this person has blocked. Loaded with the team panel so the roster can
+// offer Block or Unblock without a second round trip per row. The server
+// enforces the block regardless of what this holds -- this is only the label.
+var blockedUserIds = [];
 
 // ── Guest state ───────────────────────────────────────────────────────────────
 // In-memory only — intentionally resets on page refresh.
@@ -227,6 +225,9 @@ var guestCompleteFired = false;
 // Picked once per page load, reused across re-renders — see renderJourneyCard's
 // caller and the Rickie intro line below.
 var _cachedGreetingLine = null;
+// Held separately so finishing the mission changes what Rickie says rather
+// than bolting a clause onto a line written for before it.
+var _cachedDoneLine = null;
 
 // ── Rickie's Journey ──────────────────────────────────────────────────────────
 // Never guilt, never shame, never mention losing progress — only encouragement.
@@ -260,9 +261,20 @@ function renderJourneyCard() {
     var track = document.querySelector('.journey-xp-track');
     if (track) track.setAttribute('aria-valuenow', Math.round(pct));
 
-    document.getElementById('journey-xp-caption').textContent = xpToNext + ' XP to next level';
+    // Say what they HAVE, not only what is missing.
+    //
+    // This read "107 XP to next level" and nothing else, so the one screen
+    // that exists to show progress never stated the current figure. A bar with
+    // no number on it is a mood, not a fact: a reviewer could not tell whether
+    // they were at 13 XP or 113, and "107 to next level" on day one reads as a
+    // wall rather than as a start. Naming the destination level matters too —
+    // "next level" is abstract, "Level 2" is somewhere you can get to.
+    var nextLevel = (currentUser.level || 1) + 1;
+    document.getElementById('journey-xp-caption').textContent =
+        xpIntoLevel + ' / ' + xpRequired + ' XP · ' + xpToNext + ' to Level ' + nextLevel;
 
-    document.getElementById('journey-acorns-value').textContent = currentUser.acorns_total || 0;
+    document.getElementById('journey-acorns-value').textContent = _acornsAvailable();
+    _renderWeekStrip();
     var messageEl = document.getElementById('journey-message');
     if (_rickieMode() === 'minimal') {
         messageEl.hidden = true;
@@ -273,6 +285,74 @@ function renderJourneyCard() {
 
     journeyCard.hidden = false;
 }
+
+// Spendable acorns, not lifetime earned. Showing a number the person cannot
+// actually spend is the kind of small dishonesty that makes a reward feel fake.
+function _acornsAvailable() {
+    if (!currentUser) return 0;
+    // Prefer the server's own figure; fall back to the subtraction for any
+    // response that predates it. The subtraction silently returned LIFETIME
+    // earnings for months because /api/me never sent acorns_spent, and a
+    // missing field reads exactly like zero spent.
+    if (typeof currentUser.acorns_available === 'number') {
+        return currentUser.acorns_available;
+    }
+    var earned = currentUser.acorns_total || 0;
+    var spent = currentUser.acorns_spent || 0;
+    return Math.max(0, earned - spent);
+}
+
+// The last seven days as dots. "Am I actually getting anywhere" was previously
+// answered with a level number and an XP bar, which is a claim rather than
+// evidence. Days that happened glow; days that did not are simply plain —
+// never red, never crossed out, never totted up.
+function _renderWeekStrip() {
+    var card = document.getElementById('journey-card');
+    if (!card || !currentUser) return;
+    var week = currentUser.recent_week;
+    if (!week || !week.length) return;
+
+    var existing = card.querySelector('.week-strip');
+    if (existing) existing.remove();
+    var oldCaption = card.querySelector('.week-caption');
+    if (oldCaption) oldCaption.remove();
+
+    var strip = document.createElement('div');
+    strip.className = 'week-strip';
+    week.forEach(function (day) {
+        var cell = document.createElement('div');
+        cell.className = 'week-day';
+        var dot = document.createElement('span');
+        dot.className = 'week-dot' + (day.done ? ' is-done' : '') + (day.is_today ? ' is-today' : '');
+        dot.textContent = day.done ? '\u2713' : '';
+        dot.setAttribute('role', 'img');
+        dot.setAttribute('aria-label', day.date + (day.done ? ': mission done' : ''));
+        var label = document.createElement('span');
+        label.className = 'week-label';
+        label.textContent = day.letter;
+        cell.appendChild(dot);
+        cell.appendChild(label);
+        strip.appendChild(cell);
+    });
+
+    var caption = document.createElement('p');
+    caption.className = 'week-caption';
+    var moved = week.filter(function (d) { return d.done; }).length;
+    // Always phrased as what happened. Never "you missed 3 days".
+    caption.textContent = moved === 0
+        ? 'This week is a fresh page.'
+        : (moved === 7 ? 'Every day this week.' : moved + (moved === 1 ? ' day' : ' days') + ' moved this week.');
+
+    var anchorEl = card.querySelector('.journey-acorns-row');
+    if (anchorEl) {
+        card.insertBefore(strip, anchorEl);
+        card.insertBefore(caption, anchorEl);
+    } else {
+        card.appendChild(strip);
+        card.appendChild(caption);
+    }
+}
+
 
 // ── Teams (R2.2 Team List UI) ────────────────────────────────────────────────
 // Read-only display of R2.1's team data. No create/join actions wired here —
@@ -295,6 +375,7 @@ async function loadTeams() {
 
     if (isGuest) {
         renderTeamsSection({ guest: true });
+        updateTeamPaneVisibility(0);
         return;
     }
 
@@ -307,6 +388,7 @@ async function loadTeams() {
     }
 
     renderTeamsSection({ teams: result.data });
+    updateTeamPaneVisibility((result.data || []).length);
 }
 
 function renderTeamsSection(state) {
@@ -402,7 +484,10 @@ function _buildTeamRickieCard() {
     var streak = (currentUser && currentUser.current_streak) || 0;
     var stats = document.createElement('p');
     stats.className = 'team-card-stats';
-    stats.textContent = '🔥 ' + streak + (streak === 1 ? ' day' : ' days') + ' together';
+    // "days together" reads oddly for someone with no team — Rickie IS the
+    // company here, so he counts the days he has been along for.
+    stats.textContent = '\uD83D\uDD25 ' + streak + (streak === 1 ? ' day' : ' days')
+        + ' with Rickie';
     card.appendChild(stats);
 
     return card;
@@ -436,6 +521,24 @@ function _applyCampfireUpdates(updates) {
     });
 }
 
+// Compared against what this device last saw. Deliberately not a server-side
+// read receipt: nobody needs to know who has looked at what, and a family app
+// should not quietly build that.
+function _teamSeenKey(teamId) { return 'sf_team_seen_' + teamId; }
+
+function _teamHasNewActivity(team) {
+    if (!team.last_activity_at) return false;
+    var seen = null;
+    try { seen = localStorage.getItem(_teamSeenKey(team.id)); } catch (e) { return false; }
+    if (!seen) return false;           // never opened it: not "new", just new to them
+    var latest = _parseServerTime(team.last_activity_at);
+    return !!latest && latest > new Date(seen);
+}
+
+function _markTeamSeen(teamId) {
+    try { localStorage.setItem(_teamSeenKey(teamId), new Date().toISOString()); } catch (e) { /* private mode */ }
+}
+
 function _buildTeamCard(team) {
     var card = document.createElement('div');
     card.className = 'team-card';
@@ -465,9 +568,46 @@ function _buildTeamCard(team) {
         team.total_team_missions + (team.total_team_missions === 1 ? ' log' : ' logs');
     card.appendChild(stats);
 
+    // The same-day witness line: the one thing you actually open the app to
+    // find out about the people you share a campfire with. A count of who
+    // moved, never a list of who didn't.
+    var moved = document.createElement('p');
+    moved.className = 'team-card-witness';
+    var movedToday = team.moved_today || 0;
+    if (movedToday > 0) {
+        moved.classList.add('has-moved');
+        moved.textContent = movedToday === team.member_count
+            ? (team.member_count === 1 ? '\u2713 You moved today' : '\u2713 Everyone moved today')
+            : '\u2713 ' + movedToday + ' of ' + team.member_count + ' moved today';
+    } else {
+        moved.textContent = 'No one has logged a mission yet today';
+    }
+    card.appendChild(moved);
+
+    // "Something happened while I wasn't here." A dot, never a count: a rising
+    // number is an anxiety mechanic, and this product does not use those. Read
+    // state lives in localStorage on the device, so the server never has to
+    // track who has seen what.
+    if (_teamHasNewActivity(team)) {
+        var isNew = document.createElement('p');
+        isNew.className = 'team-card-new';
+        isNew.textContent = 'New since you were here';
+        card.appendChild(isNew);
+    }
+
+    // A challenge waiting is the single best reason to open the app tomorrow,
+    // so it says so here rather than hiding two taps inside the chat tab.
+    if (team.open_challenges > 0) {
+        var waiting = document.createElement('p');
+        waiting.className = 'team-card-challenge';
+        waiting.textContent = '\u26A1 ' + team.open_challenges
+            + (team.open_challenges === 1 ? ' challenge waiting' : ' challenges waiting');
+        card.appendChild(waiting);
+    }
+
     var openBtn = document.createElement('button');
     openBtn.className = 'team-card-open-btn team-card-open-btn-active';
-    openBtn.textContent = 'Open';
+    openBtn.textContent = team.open_challenges > 0 ? 'Take it on' : 'Open';
     openBtn.addEventListener('click', function () { openTeamPanel(team); });
     card.appendChild(openBtn);
 
@@ -769,6 +909,14 @@ var _teamPanelOverlay  = null;
 var _teamPanelThread   = null;
 var _teamPanelInput    = null;
 var _teamPanelSendBtn  = null;
+// Mirrors data.is_creator for the open panel: the creator may remove any
+// photo, the same narrow safety exception they already have for members and
+// the invite code. Reset on close so it can't leak into the next team.
+var _teamPanelIsCreator = false;
+var _teamPanelChatPane = null;
+var _teamPanelMembers = [];
+// False while the backlog paints, so only genuinely new messages animate.
+var _teamThreadPainted = false;
 var _teamPanelTeamId   = null;
 var _teamPanelInfo     = null;
 var _teamPanelMeta     = null;
@@ -822,13 +970,55 @@ function openTeamPanel(team) {
         team.total_team_missions + (team.total_team_missions === 1 ? ' log' : ' logs');
     panel.appendChild(_teamPanelStats);
 
+    // Two panes rather than one long scroll. With photos in the thread, the
+    // single-column panel left the thread a 160px window at the bottom of an
+    // 877px sheet -- too small to actually look at a picture in. This is the
+    // Campfire / Team Chat split the UI baseline already described, done with
+    // the least machinery that works.
+    var tabs = document.createElement('div');
+    tabs.className = 'team-panel-tabs';
+    tabs.setAttribute('role', 'tablist');
+    panel.appendChild(tabs);
+
     _teamPanelInfo = document.createElement('div');
-    _teamPanelInfo.className = 'team-panel-info';
+    _teamPanelInfo.className = 'team-panel-info team-panel-pane';
     panel.appendChild(_teamPanelInfo);
+
+    var chatPane = document.createElement('div');
+    chatPane.className = 'team-panel-pane team-panel-chat-pane';
+    chatPane.hidden = true;
+    panel.appendChild(chatPane);
 
     _teamPanelThread = document.createElement('div');
     _teamPanelThread.className = 'team-panel-thread';
-    panel.appendChild(_teamPanelThread);
+    chatPane.appendChild(_teamPanelThread);
+
+    var paneTabs = [
+        { label: '\uD83D\uDD25 Campfire', pane: _teamPanelInfo },
+        { label: '\uD83D\uDCF7 Photos & Chat', pane: chatPane },
+    ];
+    paneTabs.forEach(function (t, i) {
+        var btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'team-panel-tab' + (i === 0 ? ' is-active' : '');
+        btn.setAttribute('role', 'tab');
+        btn.setAttribute('aria-selected', String(i === 0));
+        btn.textContent = t.label;
+        btn.addEventListener('click', function () {
+            paneTabs.forEach(function (other, j) {
+                other.pane.hidden = j !== i;
+                var b = tabs.children[j];
+                b.classList.toggle('is-active', j === i);
+                b.setAttribute('aria-selected', String(j === i));
+            });
+            if (i === 1 && _teamPanelThread) {
+                _teamPanelThread.scrollTop = _teamPanelThread.scrollHeight;
+            }
+        });
+        tabs.appendChild(btn);
+        t.pane.setAttribute('role', 'tabpanel');
+    });
+    _teamPanelChatPane = chatPane;
 
     var reactionRow = document.createElement('div');
     reactionRow.className = 'team-panel-reaction-row';
@@ -840,7 +1030,7 @@ function openTeamPanel(team) {
         btn.addEventListener('click', function () { _sendTeamMessage(emoji); });
         reactionRow.appendChild(btn);
     });
-    panel.appendChild(reactionRow);
+    chatPane.appendChild(reactionRow);
 
     var inputRow = document.createElement('div');
     inputRow.className = 'team-panel-input-row';
@@ -860,19 +1050,52 @@ function openTeamPanel(team) {
     _teamPanelSendBtn.textContent = 'Send';
     _teamPanelSendBtn.addEventListener('click', _submitTeamMessage);
 
+    // Camera first. `capture="environment"` makes a phone open the camera
+    // straight away instead of a file browser, and accept="image/*" still
+    // leaves "choose an existing one" available underneath it.
+    var photoBtn = document.createElement('button');
+    photoBtn.type = 'button';
+    photoBtn.className = 'team-panel-photo-btn';
+    photoBtn.setAttribute('aria-label', 'Share a photo with your team');
+    photoBtn.textContent = '\uD83D\uDCF7';
+    photoBtn.addEventListener('click', function () { _photoInput.click(); });
+
+    var _photoInput = document.createElement('input');
+    _photoInput.type = 'file';
+    _photoInput.accept = 'image/*';
+    _photoInput.setAttribute('capture', 'environment');
+    _photoInput.className = 'visually-hidden';
+    _photoInput.addEventListener('change', function () {
+        var file = _photoInput.files && _photoInput.files[0];
+        _photoInput.value = '';        // so picking the same file twice re-fires
+        if (file) openPhotoComposer(file);
+    });
+
+    var challengeBtn = document.createElement('button');
+    challengeBtn.type = 'button';
+    challengeBtn.className = 'team-panel-photo-btn';
+    challengeBtn.setAttribute('aria-label', 'Challenge your team to move');
+    challengeBtn.textContent = '\u26A1';
+    challengeBtn.addEventListener('click', function () { openChallengePicker(team.id); });
+
+    inputRow.appendChild(challengeBtn);
+    inputRow.appendChild(photoBtn);
+    inputRow.appendChild(_photoInput);
     inputRow.appendChild(_teamPanelInput);
     inputRow.appendChild(_teamPanelSendBtn);
-    panel.appendChild(inputRow);
+    chatPane.appendChild(inputRow);
 
     _teamPanelOverlay.appendChild(panel);
     _teamPanelOverlay.classList.add('open');
     document.body.style.overflow = 'hidden';
 
+    _markTeamSeen(team.id);
     _loadTeamInfo(team.id);
     _loadTeamMessages(team.id);
 }
 
 function closeTeamPanel() {
+    _teamPanelIsCreator = false;
     if (_teamPanelOverlay) {
         _teamPanelOverlay.classList.remove('open');
         document.body.style.overflow = '';
@@ -917,16 +1140,397 @@ async function _loadTeamInfo(teamId) {
         _teamPanelMeta.textContent = data.member_count + (data.member_count === 1 ? ' member' : ' members');
     }
     if (_teamPanelStats) {
-        var stage = data.campfire.stage;
-        var total = data.campfire.total_team_missions;
-        var stageEmoji = CAMPFIRE_STAGE_EMOJI[stage] || '✨';
-        _teamPanelStats.textContent = stageEmoji + ' ' + stage + ' · ' + total + (total === 1 ? ' log' : ' logs');
+        // The campfire section below owns stage and log count now, so this
+        // line carries the thing you actually opened the panel to find out.
+        var movedToday = (data.members || []).filter(function (m) { return m.completed_today; }).length;
+        var totalMembers = (data.members || []).length;
+        _teamPanelStats.classList.toggle('has-moved', movedToday > 0);
+        if (movedToday === 0) {
+            _teamPanelStats.textContent = 'No one has logged a mission yet today';
+        } else if (movedToday === totalMembers) {
+            _teamPanelStats.textContent = totalMembers === 1
+                ? '\u2713 You moved today'
+                : '\u2713 Everyone moved today';
+        } else {
+            _teamPanelStats.textContent = '\u2713 ' + movedToday + ' of ' + totalMembers + ' moved today';
+        }
     }
 
-    _teamPanelInfo.appendChild(_buildRosterSection(data));
+    _teamPanelIsCreator = !!data.is_creator;
+    _teamPanelMembers = data.members || [];
+    _refreshPhotoDeletePermissions();
+
+    _teamPanelInfo.appendChild(_buildCampfireSection(data));
+    var rosterSection = _buildRosterSection(data);
+    _teamPanelInfo.appendChild(rosterSection);
+    // Block labels need the list, but the roster must not wait for it: a slow
+    // or failing /api/blocks should cost a button label, never the roster.
+    _loadBlocks().then(function () {
+        var fresh = _buildRosterSection(data);
+        if (rosterSection.parentNode) rosterSection.replaceWith(fresh);
+    });
     _teamPanelInfo.appendChild(_buildInviteSection(data));
     _teamPanelInfo.appendChild(_buildLeaveTeamRow(data));
+
+    // Moments last: it is history, not news. Loaded separately so a slow or
+    // failing history never holds up the roster, which is what people open
+    // the panel for.
+    var momentsSection = _buildMomentsSection();
+    _teamPanelInfo.appendChild(momentsSection);
+    _loadTeamMoments(teamId, momentsSection);
 }
+
+
+// The campfire is the team's shared object -- the thing that grows because
+// everyone kept showing up. It was previously one line of text, which is a
+// poor showing for the only thing a team collectively owns. Thresholds come
+// from the API (`_campfire_progress`) so they are never duplicated here.
+function _buildCampfireSection(data) {
+    var wrap = document.createElement('div');
+    wrap.className = 'team-panel-info-section team-campfire-section';
+
+    var c = data.campfire || {};
+    var total = c.total_team_missions || 0;
+
+    var head = document.createElement('div');
+    head.className = 'campfire-head';
+
+    var flame = document.createElement('span');
+    flame.className = 'campfire-flame campfire-flame-' +
+        String(c.stage || 'Kindling').toLowerCase().replace(/\s+/g, '-');
+    flame.setAttribute('aria-hidden', 'true');
+    flame.textContent = CAMPFIRE_STAGE_EMOJI[c.stage] || '\u2728';
+    head.appendChild(flame);
+
+    var headText = document.createElement('div');
+    var stageEl = document.createElement('p');
+    stageEl.className = 'campfire-stage';
+    stageEl.textContent = c.stage || 'Kindling';
+    headText.appendChild(stageEl);
+
+    var logsEl = document.createElement('p');
+    logsEl.className = 'campfire-logs';
+    logsEl.textContent = total + (total === 1 ? ' log' : ' logs') + ' on the fire';
+    headText.appendChild(logsEl);
+    head.appendChild(headText);
+    wrap.appendChild(head);
+
+    if (c.next_stage) {
+        var track = document.createElement('div');
+        track.className = 'campfire-track';
+        track.setAttribute('role', 'progressbar');
+        track.setAttribute('aria-valuemin', '0');
+        track.setAttribute('aria-valuemax', '100');
+        var pct = Math.round((c.progress_to_next_stage || 0) * 100);
+        track.setAttribute('aria-valuenow', String(pct));
+        track.setAttribute('aria-label', 'Progress to ' + c.next_stage);
+
+        var fill = document.createElement('div');
+        fill.className = 'campfire-fill';
+        // Always show a sliver so a brand-new campfire doesn't look broken.
+        fill.style.width = Math.max(pct, 2) + '%';
+        track.appendChild(fill);
+        wrap.appendChild(track);
+
+        var cap = document.createElement('p');
+        cap.className = 'campfire-caption';
+        cap.textContent = c.logs_to_next_stage + ' more to reach ' + c.next_stage;
+        wrap.appendChild(cap);
+    } else {
+        var top = document.createElement('p');
+        top.className = 'campfire-caption';
+        top.textContent = "The brightest it gets \u2014 and still burning.";
+        wrap.appendChild(top);
+    }
+
+    return wrap;
+}
+
+
+function _buildMomentsSection() {
+    var wrap = document.createElement('div');
+    wrap.className = 'team-panel-info-section team-moments-section';
+
+    var label = document.createElement('p');
+    label.className = 'team-panel-section-label';
+    label.textContent = 'Team history';
+    wrap.appendChild(label);
+
+    var body = document.createElement('div');
+    body.className = 'team-moments-body';
+    var loading = document.createElement('p');
+    loading.className = 'team-moments-empty';
+    loading.textContent = 'Looking back through it\u2026';
+    body.appendChild(loading);
+    wrap.appendChild(body);
+
+    return wrap;
+}
+
+
+// `/api/teams/<id>/moments` has existed, humanised and tested, with no caller
+// in the app at all -- the "shipped but unreachable through the UI" failure
+// CLAUDE.md's verification standard was written after. This is its first
+// consumer.
+var TEAM_MOMENT_ICON = {
+    team_created:          '\uD83C\uDFD5\uFE0F',
+    member_joined:         '\uD83D\uDC4B',
+    member_left:           '\uD83D\uDC4B',
+    campfire_log_added:    '\uD83E\uDeB5',
+    campfire_stage_reached:'\u2B50'
+};
+var TEAM_MOMENTS_SHOWN = 8;
+
+async function _loadTeamMoments(teamId, section) {
+    var body = section.querySelector('.team-moments-body');
+    if (!body) return;
+
+    var result = await api('/api/teams/' + teamId + '/moments');
+    if (_teamPanelTeamId !== teamId) return;   // panel moved on while we waited
+    body.innerHTML = '';
+
+    if (!result || result.status !== 200) {
+        var err = document.createElement('p');
+        err.className = 'team-moments-empty';
+        err.textContent = "Couldn't load the team's history just now.";
+        body.appendChild(err);
+        return;
+    }
+
+    var moments = result.data || [];
+    if (!moments.length) {
+        var empty = document.createElement('p');
+        empty.className = 'team-moments-empty';
+        empty.textContent = 'Your history starts here.';
+        body.appendChild(empty);
+        return;
+    }
+
+    // Newest first, and only a recent slice: this is a glance back, not an
+    // audit log. The Memory Book is where a full history would belong.
+    moments.slice(0, TEAM_MOMENTS_SHOWN).forEach(function (m) {
+        var row = document.createElement('div');
+        row.className = 'team-moment-row';
+
+        var icon = document.createElement('span');
+        icon.className = 'team-moment-icon';
+        icon.setAttribute('aria-hidden', 'true');
+        icon.textContent = TEAM_MOMENT_ICON[m.moment_type] || '\u2022';
+        row.appendChild(icon);
+
+        var textWrap = document.createElement('div');
+        var text = document.createElement('p');
+        text.className = 'team-moment-text';
+        text.textContent = m.display_text;
+        textWrap.appendChild(text);
+
+        var when = _momentWhen(m.occurred_at);
+        if (when) {
+            var whenEl = document.createElement('p');
+            whenEl.className = 'team-moment-when';
+            whenEl.textContent = when;
+            textWrap.appendChild(whenEl);
+        }
+        row.appendChild(textWrap);
+        body.appendChild(row);
+    });
+}
+
+
+// Server timestamps are naive UTC. Without the marker the browser reads them as
+// LOCAL time, which silently shifts everything by the timezone offset — it made
+// "just now" hours wrong, and then made every team look like it had new
+// activity forever. One parser, used everywhere, so that can only be fixed or
+// broken in one place.
+function _parseServerTime(iso) {
+    if (!iso) return null;
+    var d = new Date(/[Zz]|[+-]\d{2}:?\d{2}$/.test(iso) ? iso : iso + 'Z');
+    return isNaN(d.getTime()) ? null : d;
+}
+
+function _momentWhen(iso) {
+    if (!iso) return '';
+    var then = _parseServerTime(iso);
+    if (!then) return '';
+    var mins = Math.floor((Date.now() - then.getTime()) / 60000);
+    if (mins < 1) return 'just now';
+    if (mins < 60) return mins + (mins === 1 ? ' minute ago' : ' minutes ago');
+    var hrs = Math.floor(mins / 60);
+    if (hrs < 24) return hrs + (hrs === 1 ? ' hour ago' : ' hours ago');
+    var days = Math.floor(hrs / 24);
+    if (days < 7) return days + (days === 1 ? ' day ago' : ' days ago');
+    return then.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+}
+
+// What a member's row says about today. Deliberately has no "missed it" state:
+// someone who hasn't moved yet simply has nothing said about their day, which
+// is the difference between witnessing and supervising. Never punish who
+// showed up -- and never report on who hasn't.
+function _rosterStatusText(m) {
+    var parts = [];
+    if (m.completed_today) {
+        parts.push('\u2713 Moved today');
+    } else if (m.completed_today_count > 0) {
+        parts.push(m.completed_today_count + ' of 5 today');
+    }
+    if (m.current_streak > 0) {
+        parts.push('\uD83D\uDD25 ' + m.current_streak + (m.current_streak === 1 ? ' day' : ' days'));
+    }
+    return parts.join('  \u00b7  ');
+}
+
+
+// --- Moderation decisions and appeals ---------------------------------------
+//
+// Only surfaced to somebody who actually has a decision against them. A
+// permanent "Appeals" entry in a movement app's settings reads as an
+// accusation to the overwhelming majority of people who will never see one.
+
+async function refreshModerationVisibility() {
+    var row = document.getElementById('settings-row-moderation');
+    if (!row) return;
+    var res = await api('/api/moderation/decisions');
+    var has = res && res.status === 200 && Array.isArray(res.data) && res.data.length > 0;
+    row.hidden = !has;
+}
+
+
+async function openModerationDecisions() {
+    // The panel is in the markup, beside its button. It used to be created
+    // here and appended to #settings-menu, which placed it after the Log Out
+    // button at the bottom of the menu -- nowhere near the control that
+    // opened it, and unreachable in reading order for anyone using the
+    // keyboard to get there.
+    var host = document.getElementById('moderation-panel');
+    if (!host) return;
+
+    var btn = document.getElementById('btn-moderation-decisions');
+
+    // A second press closes it. A control with aria-expanded has to be able
+    // to go back to false, or the state it reports becomes a lie.
+    if (!host.hidden) {
+        host.hidden = true;
+        if (btn) btn.setAttribute('aria-expanded', 'false');
+        return;
+    }
+    host.hidden = false;
+    if (btn) btn.setAttribute('aria-expanded', 'true');
+    host.innerHTML = '';
+
+    var heading = document.createElement('h3');
+    heading.className = 'moderation-panel-heading';
+    heading.textContent = 'Decisions about your account';
+    host.appendChild(heading);
+
+    var decisions = await api('/api/moderation/decisions');
+    var appeals = await api('/api/appeals');
+    // Keyed by the decision, not the action name: two decisions can share a
+    // name, and appealing one of them must not make the other look appealed.
+    var byDecision = {};
+    if (appeals && appeals.status === 200) {
+        (appeals.data || []).forEach(function (a) { byDecision[a.decision_id] = a; });
+    }
+
+    var rows = (decisions && decisions.status === 200) ? (decisions.data || []) : [];
+    if (!rows.length) {
+        var none = document.createElement('p');
+        none.className = 'moderation-empty';
+        none.textContent = 'Nothing here. No decisions have been made about your account.';
+        host.appendChild(none);
+        return;
+    }
+
+    rows.forEach(function (d) {
+        var card = document.createElement('div');
+        card.className = 'moderation-decision';
+
+        var what = document.createElement('p');
+        what.className = 'moderation-decision-what';
+        what.textContent = MODERATION_DECISION_LABELS[d.action] || d.action;
+        card.appendChild(what);
+
+        var when = document.createElement('p');
+        when.className = 'moderation-decision-when';
+        when.textContent = new Date(d.decided_at).toLocaleDateString();
+        card.appendChild(when);
+
+        var existing = byDecision[d.decision_id];
+        if (existing) {
+            var state = document.createElement('p');
+            state.className = 'moderation-decision-state';
+            state.textContent = existing.status === 'closed'
+                ? ('Appeal ' + existing.outcome + (existing.outcome_note
+                    ? ' \u2014 ' + existing.outcome_note : ''))
+                : 'Appeal submitted. Someone will look at this.';
+            card.appendChild(state);
+        } else if (d.appealable) {
+            card.appendChild(_buildAppealForm(d, card));
+        }
+        host.appendChild(card);
+    });
+}
+
+
+var MODERATION_DECISION_LABELS = {
+    'suspend_social': 'Posting to teams is paused',
+    'remove_from_team': 'Removed from a team',
+    'restrict_content': 'Something you posted was hidden',
+    'restrict_reporting': 'Reporting is paused on your account'
+};
+
+
+function _buildAppealForm(decision, card) {
+    var form = document.createElement('div');
+    form.className = 'moderation-appeal-form';
+
+    var labelId = 'appeal-reason-' + decision.decision_id;
+    var label = document.createElement('label');
+    label.className = 'moderation-appeal-label';
+    label.setAttribute('for', labelId);
+    label.textContent = 'Why should this be looked at again?';
+    form.appendChild(label);
+
+    var input = document.createElement('textarea');
+    input.id = labelId;
+    input.className = 'moderation-appeal-input';
+    input.rows = 3;
+    input.maxLength = 2000;
+    form.appendChild(input);
+
+    var send = document.createElement('button');
+    send.type = 'button';
+    send.className = 'moderation-appeal-btn';
+    send.textContent = 'Appeal this';
+    send.addEventListener('click', async function () {
+        send.disabled = true;
+        var res = await api('/api/appeals', 'POST', {
+            decision_id: decision.decision_id,
+            reason: input.value.trim() || null
+        });
+        var out = document.createElement('p');
+        out.className = 'moderation-decision-state';
+        out.setAttribute('role', 'status');
+        // Says nothing about who reported anything or what happens next.
+        out.textContent = (res && res.status === 201)
+            ? 'Appeal submitted. Someone will look at this.'
+            : (res && res.status === 409)
+                ? 'You have already appealed this one.'
+                : 'That did not send. Try again in a moment.';
+        form.replaceWith(out);
+    });
+    form.appendChild(send);
+    return form;
+}
+
+
+async function _loadBlocks() {
+    var res = await api('/api/blocks');
+    if (res && res.status === 200 && Array.isArray(res.data)) {
+        blockedUserIds = res.data.map(function (b) { return b.user_id; });
+    }
+    return blockedUserIds;
+}
+
 
 function _buildRosterSection(data) {
     var wrap = document.createElement('div');
@@ -944,11 +1548,30 @@ function _buildRosterSection(data) {
         var row = document.createElement('div');
         row.className = 'team-roster-row';
 
+        // Name + today's status + streak, and nothing else. This is the
+        // witness-only model from Teams v1: enough to see that the people you
+        // share a campfire with showed up, never enough to rank them.
+        var main = document.createElement('div');
+        main.className = 'team-roster-main';
+
         var name = document.createElement('span');
         name.className = 'team-roster-name';
-        // `m.name` is a neutral per-team label ("Member 2"), never the login.
+        // `m.name`, not `m.username`: the server no longer sends other
+        // people's logins at all. It sends a display name, or a stable
+        // "Member N" for anybody who has not set one.
         name.textContent = (m.name || 'Member') + (m.is_creator ? ' (Creator)' : '');
-        row.appendChild(name);
+        main.appendChild(name);
+
+        var status = _rosterStatusText(m);
+        if (status) {
+            var statusEl = document.createElement('span');
+            statusEl.className = 'team-roster-status';
+            if (m.completed_today) statusEl.classList.add('is-done');
+            statusEl.textContent = status;
+            main.appendChild(statusEl);
+        }
+
+        row.appendChild(main);
 
         // Creator can remove any other member -- never themselves (Leave
         // Team is that action) and never rendered for anyone but the creator.
@@ -969,11 +1592,123 @@ function _buildRosterSection(data) {
             row.appendChild(removeBtn);
         }
 
+        // Block / Unblock, and Report. Offered for everybody except yourself.
+        //
+        // Blocking is deliberately quiet: no confirmation copy about the other
+        // person, no "they will be notified" reassurance, because they are not
+        // notified and saying so invites the question.
+        if (m.user_id !== currentUser.id) {
+            row.appendChild(_buildMemberModerationControls(data, m));
+        }
+
         roster.appendChild(row);
     });
 
     wrap.appendChild(roster);
     return wrap;
+}
+
+
+function _buildMemberModerationControls(data, member) {
+    var box = document.createElement('div');
+    box.className = 'team-roster-mod';
+
+    var isBlocked = blockedUserIds.indexOf(member.user_id) !== -1;
+
+    var blockBtn = document.createElement('button');
+    blockBtn.type = 'button';
+    blockBtn.className = 'team-roster-mod-btn';
+    blockBtn.textContent = isBlocked ? 'Unblock' : 'Block';
+    blockBtn.setAttribute('aria-label',
+        (isBlocked ? 'Unblock ' : 'Block ') + (member.name || 'this member'));
+    blockBtn.addEventListener('click', async function () {
+        blockBtn.disabled = true;
+        var nowBlocked = blockedUserIds.indexOf(member.user_id) === -1;
+        var res = await api('/api/blocks/' + member.user_id,
+                            nowBlocked ? 'PUT' : 'DELETE');
+        if (res && (res.status === 204 || res.status === 200)) {
+            if (nowBlocked) {
+                blockedUserIds.push(member.user_id);
+            } else {
+                blockedUserIds = blockedUserIds.filter(function (id) {
+                    return id !== member.user_id;
+                });
+            }
+            blockBtn.textContent = nowBlocked ? 'Unblock' : 'Block';
+            // The thread changes as soon as a block lands, so reload it.
+            if (data && data.id) _loadTeamMessages(data.id);
+        }
+        blockBtn.disabled = false;
+    });
+    box.appendChild(blockBtn);
+
+    var reportBtn = document.createElement('button');
+    reportBtn.type = 'button';
+    reportBtn.className = 'team-roster-mod-btn';
+    reportBtn.textContent = 'Report';
+    reportBtn.setAttribute('aria-label', 'Report ' + (member.name || 'this member'));
+    reportBtn.addEventListener('click', function () {
+        _openReportPicker(box, {
+            subject_type: 'user',
+            reported_user_id: member.user_id,
+            team_id: data.id
+        });
+    });
+    box.appendChild(reportBtn);
+
+    return box;
+}
+
+
+// The categories the server accepts. Kept in the same order and wording as
+// REPORT_CATEGORIES in app.py; the server rejects anything else, so a drift
+// here is a 400 rather than a silently mis-filed report.
+var REPORT_CATEGORY_LABELS = [
+    ['harassment', 'Harassment'],
+    ['threats', 'Threats'],
+    ['inappropriate_content', 'Inappropriate content'],
+    ['child_safety', 'Child safety'],
+    ['spam', 'Spam'],
+    ['other', 'Something else']
+];
+
+
+function _openReportPicker(anchorEl, payload) {
+    var existing = anchorEl.querySelector('.report-picker');
+    if (existing) { existing.remove(); return; }
+
+    var picker = document.createElement('div');
+    picker.className = 'report-picker';
+    picker.setAttribute('role', 'group');
+    picker.setAttribute('aria-label', 'Choose a reason for this report');
+
+    var heading = document.createElement('p');
+    heading.className = 'report-picker-heading';
+    heading.textContent = 'What is wrong?';
+    picker.appendChild(heading);
+
+    REPORT_CATEGORY_LABELS.forEach(function (pair) {
+        var btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'report-picker-btn';
+        btn.textContent = pair[1];
+        btn.addEventListener('click', async function () {
+            picker.querySelectorAll('button').forEach(function (b) { b.disabled = true; });
+            var body = Object.assign({ category: pair[0] }, payload);
+            var res = await api('/api/reports', 'POST', body);
+            var done = document.createElement('p');
+            done.className = 'report-picker-done';
+            // Says nothing about the other person or what will happen to them.
+            done.textContent = (res && res.status === 201)
+                ? 'Thanks \u2014 someone will look at this.'
+                : 'That did not send. Try again in a moment.';
+            picker.innerHTML = '';
+            picker.appendChild(done);
+        });
+        picker.appendChild(btn);
+    });
+
+    anchorEl.appendChild(picker);
 }
 
 async function _submitRemoveMember(teamId, memberUserId, btn) {
@@ -1048,25 +1783,68 @@ function _buildInviteSection(data) {
     return wrap;
 }
 
+// Leaving a team is the one irreversible control on this screen, and it was
+// the only one without a confirmation.
+//
+// An independent walkthrough tapped it once and was out of the team within
+// 200ms: the panel closed, the Team tab vanished from the nav, and the user
+// landed on Progress with nothing said. No confirmation beforehand, no
+// acknowledgement afterwards, and no way back except being re-invited. A
+// failed leave was silent too — the handler re-enabled the button and
+// returned without showing an error.
+//
+// Meanwhile this codebase already asks twice for strictly LESS destructive
+// things: removing a member, deleting a photo, spending acorns. Leaving sat
+// directly under the invite row, styled identically to Rotate Code.
+//
+// Two taps, the same pattern as everywhere else, plus the sentence that
+// actually matters: your own streak and history are not affected. That is the
+// thing somebody hesitating over this button is afraid of.
 function _buildLeaveTeamRow(data) {
     var wrap = document.createElement('div');
     wrap.className = 'team-panel-info-section team-panel-leave-row';
 
+    var note = document.createElement('p');
+    note.className = 'team-panel-leave-note';
+    note.hidden = true;
+
+    var pending = false;
     var leaveBtn = document.createElement('button');
     leaveBtn.type = 'button';
     leaveBtn.className = 'retention-btn retention-btn-ghost';
     leaveBtn.textContent = 'Leave Team';
     leaveBtn.addEventListener('click', async function () {
+        if (!pending) {
+            pending = true;
+            leaveBtn.textContent = 'Tap again to leave ' + (data.name || 'this team');
+            leaveBtn.classList.add('is-confirming');
+            note.hidden = false;
+            note.textContent = 'Your streak, XP and acorns stay exactly as they '
+                + 'are. You would need a new invite to come back.';
+            return;
+        }
         leaveBtn.disabled = true;
         var result = await api('/api/teams/' + data.id + '/leave', 'POST');
         if (!result || result.status !== 200) {
             leaveBtn.disabled = false;
+            pending = false;
+            leaveBtn.textContent = 'Leave Team';
+            leaveBtn.classList.remove('is-confirming');
+            note.hidden = false;
+            note.textContent = (result && result.data && result.data.error)
+                || 'Could not leave just now — try again in a moment.';
             return;
         }
         closeTeamPanel();
         loadTeams();
+        // Say it happened. The walkthrough's complaint was not only the
+        // missing confirmation but the silence afterwards — the Team tab
+        // simply disappeared from the nav.
+        showRickieReaction('You left ' + (data.name || 'the team')
+            + '. Your streak is untouched.');
     });
     wrap.appendChild(leaveBtn);
+    wrap.appendChild(note);
 
     return wrap;
 }
@@ -1110,16 +1888,20 @@ async function _loadTeamMessages(teamId) {
         return;
     }
 
+    _teamThreadPainted = false;
     result.data.forEach(function (m) { _appendTeamMsg(m); });
+    _teamThreadPainted = true;
     _teamPanelThread.scrollTop = _teamPanelThread.scrollHeight;
 }
 
 function _appendTeamMsg(m) {
     var isRickie = m.sender_type === 'rickie';
-    // Compare ids, not names. The server no longer sends anybody's login, and
-    // labels are per-team ordinals so two people can share "Member 2" across
-    // different teams — an id is the only thing that identifies "me" here.
-    var isSelf = !isRickie && currentUser && m.sender_user_id === currentUser.id;
+    // Compare IDS. This compared sender_username to the viewer's own
+    // username, which only worked because the server was sending logins —
+    // the very thing being fixed. Two people who both chose the display name
+    // "Sam" would also have seen each other's messages as their own.
+    var isSelf = !isRickie && currentUser && m.sender_user_id != null
+        && m.sender_user_id === currentUser.id;
 
     var wrap = document.createElement('div');
     wrap.className = 'team-msg ' + (isRickie ? 'team-msg-rickie' : (isSelf ? 'team-msg-self' : 'team-msg-other'));
@@ -1131,14 +1913,420 @@ function _appendTeamMsg(m) {
         wrap.appendChild(sender);
     }
 
-    var body = document.createElement('p');
-    body.className = 'team-msg-body';
-    body.textContent = m.body; // textContent — never innerHTML
-    wrap.appendChild(body);
+    // Report this one message. Only somebody else's, and never Rickie's --
+    // Rickie's lines are fixed templates, so there is nothing to report and a
+    // control there would just teach people the button is decorative.
+    if (!isRickie && !isSelf && m.message_id) {
+        var modRow = document.createElement('div');
+        modRow.className = 'team-msg-mod';
+        var reportMsgBtn = document.createElement('button');
+        reportMsgBtn.type = 'button';
+        reportMsgBtn.className = 'team-msg-report-btn';
+        reportMsgBtn.textContent = 'Report';
+        reportMsgBtn.setAttribute('aria-label', 'Report this message');
+        reportMsgBtn.addEventListener('click', function () {
+            _openReportPicker(modRow, {
+                subject_type: m.photo ? 'photo' : 'message',
+                subject_ref: m.photo ? m.photo.public_id : m.message_id,
+                team_id: _teamPanelTeamId
+            });
+        });
+        modRow.appendChild(reportMsgBtn);
+        wrap.appendChild(modRow);
+    }
+
+    if (m.challenge) {
+        wrap.appendChild(_buildChallengeCard(m.challenge));
+    } else if (m.photo) {
+        wrap.appendChild(_buildPhotoBubble(m.photo));
+    } else {
+        var body = document.createElement('p');
+        body.className = 'team-msg-body';
+        body.textContent = m.body; // textContent — never innerHTML
+        wrap.appendChild(body);
+    }
+
+    // When it happened. A thread with no times reads as a database list, and
+    // "2 minutes ago" is also the cheapest possible signal that the family is
+    // actually around right now.
+    if (m.created_at) {
+        var when = document.createElement('p');
+        when.className = 'team-msg-when';
+        when.textContent = _momentWhen(m.created_at);
+        wrap.appendChild(when);
+    }
 
     _teamPanelThread.appendChild(wrap);
     _teamPanelThread.scrollTop = _teamPanelThread.scrollHeight;
+    // New arrivals animate in; the backlog painted on open does not, or opening
+    // the panel would look like a slot machine.
+    if (_teamThreadPainted) {
+        wrap.classList.add('team-msg-enter');
+        requestAnimationFrame(function () { wrap.classList.remove('team-msg-enter'); });
+    }
     return wrap;
+}
+
+function _photoUrl(publicId) {
+    // Built here rather than taken from the response's `url`. The server sends
+    // one, but a client that follows a server-supplied path would fetch
+    // wherever a tampered response pointed it; deriving it from the open team
+    // and the photo's own id can only ever address this team's photos.
+    return '/api/teams/' + _teamPanelTeamId + '/photos/' + encodeURIComponent(publicId);
+}
+
+// Picking a challenge. A short list of presets and, optionally, one person to
+// aim it at -- there is deliberately no free-text box, because a typed dare in
+// a family app used by children is a safety hole no moderation closes.
+async function openChallengePicker(teamId) {
+    if (document.querySelector('.tchallenge-picker-overlay')) return;
+
+    var presets = await api('/api/challenge-presets');
+    if (!presets || presets.status !== 200) return;
+
+    var overlay = document.createElement('div');
+    overlay.className = 'tchallenge-picker-overlay';
+    var sheet = document.createElement('div');
+    sheet.className = 'tchallenge-picker';
+
+    var head = document.createElement('div');
+    head.className = 'photo-composer-head';
+    var title = document.createElement('p');
+    title.className = 'photo-composer-title';
+    title.textContent = 'Challenge your team';
+    var close = document.createElement('button');
+    close.type = 'button';
+    close.className = 'photo-composer-close';
+    close.setAttribute('aria-label', 'Cancel');
+    close.textContent = '\u2715';
+    close.addEventListener('click', function () { overlay.remove(); });
+    head.appendChild(title);
+    head.appendChild(close);
+    sheet.appendChild(head);
+
+    var whoLabel = document.createElement('p');
+    whoLabel.className = 'tchallenge-picker-label';
+    whoLabel.textContent = 'Who?';
+    sheet.appendChild(whoLabel);
+
+    var whoRow = document.createElement('div');
+    whoRow.className = 'tchallenge-who-row';
+    var target = { id: null };
+    var options = [{ id: null, name: 'Everyone' }].concat(
+        (_teamPanelMembers || [])
+            .filter(function (m) { return !currentUser || m.user_id !== currentUser.id; })
+            .map(function (m) { return { id: m.user_id, name: m.name }; })
+    );
+    options.forEach(function (opt, i) {
+        var chip = document.createElement('button');
+        chip.type = 'button';
+        chip.className = 'photo-filter-chip' + (i === 0 ? ' is-active' : '');
+        chip.textContent = opt.name;
+        chip.addEventListener('click', function () {
+            target.id = opt.id;
+            [].forEach.call(whoRow.children, function (c) { c.classList.remove('is-active'); });
+            chip.classList.add('is-active');
+        });
+        whoRow.appendChild(chip);
+    });
+    sheet.appendChild(whoRow);
+
+    var what = document.createElement('p');
+    what.className = 'tchallenge-picker-label';
+    what.textContent = 'What?';
+    sheet.appendChild(what);
+
+    var list = document.createElement('div');
+    list.className = 'tchallenge-preset-list';
+    presets.data.forEach(function (p) {
+        var row = document.createElement('button');
+        row.type = 'button';
+        row.className = 'tchallenge-preset';
+        var e = document.createElement('span');
+        e.className = 'tchallenge-emoji';
+        e.setAttribute('aria-hidden', 'true');
+        e.textContent = p.emoji;
+        var txt = document.createElement('span');
+        var t = document.createElement('span');
+        t.className = 'tchallenge-preset-title';
+        t.textContent = p.title;
+        var b = document.createElement('span');
+        b.className = 'tchallenge-preset-blurb';
+        b.textContent = p.blurb;
+        txt.appendChild(t);
+        txt.appendChild(b);
+        row.appendChild(e);
+        row.appendChild(txt);
+        row.addEventListener('click', function () {
+            row.disabled = true;
+            _sendChallenge(teamId, p.key, target.id, overlay);
+        });
+        list.appendChild(row);
+    });
+    sheet.appendChild(list);
+
+    overlay.appendChild(sheet);
+    document.body.appendChild(overlay);
+}
+
+async function _sendChallenge(teamId, presetKey, targetUserId, overlay) {
+    var body = { preset_key: presetKey };
+    if (targetUserId) body.target_user_id = targetUserId;
+    var result = await api('/api/teams/' + teamId + '/challenges', 'POST', body);
+    overlay.remove();
+    if (!result || result.status !== 201) return;
+    var empty = _teamPanelThread && _teamPanelThread.querySelector('.team-panel-empty');
+    if (empty) empty.remove();
+    if (_teamPanelTeamId === teamId) _appendTeamMsg(result.data);
+}
+
+
+// A challenge in the thread. Movement is the message -- this is the one thing
+// a chat app cannot do, because it does not know whether you actually moved.
+function _buildChallengeCard(ch) {
+    var box = document.createElement('div');
+    box.className = 'tchallenge-card' + (ch.completed_by_me ? ' is-done' : '');
+
+    var head = document.createElement('div');
+    head.className = 'tchallenge-head';
+    var emoji = document.createElement('span');
+    emoji.className = 'tchallenge-emoji';
+    emoji.setAttribute('aria-hidden', 'true');
+    emoji.textContent = ch.emoji;
+    head.appendChild(emoji);
+
+    var headText = document.createElement('div');
+    var title = document.createElement('p');
+    title.className = 'tchallenge-title';
+    title.textContent = ch.title;
+    headText.appendChild(title);
+
+    var who = document.createElement('p');
+    who.className = 'tchallenge-who';
+    who.textContent = ch.for_everyone
+        ? (ch.from_username || 'Someone') + ' challenged the team'
+        : (ch.from_username || 'Someone') + ' challenged ' + (ch.to_username || 'someone');
+    headText.appendChild(who);
+    head.appendChild(headText);
+    box.appendChild(head);
+
+    if (ch.blurb) {
+        var blurb = document.createElement('p');
+        blurb.className = 'tchallenge-blurb';
+        blurb.textContent = ch.blurb;
+        box.appendChild(blurb);
+    }
+
+    // Who has done it. Never who hasn't — there is no list of the absent here,
+    // the same rule the team roster follows.
+    if (ch.completed_by && ch.completed_by.length) {
+        var done = document.createElement('p');
+        done.className = 'tchallenge-done-by';
+        done.textContent = '\u2713 ' + ch.completed_by.join(', ')
+            + (ch.completed_by.length === 1 ? ' did it' : ' did it');
+        box.appendChild(done);
+    }
+
+    if (ch.completed_by_me) {
+        var mine = document.createElement('p');
+        mine.className = 'tchallenge-done-by is-me';
+        mine.textContent = 'You did this one.';
+        box.appendChild(mine);
+    } else if (ch.open) {
+        var btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'btn-primary tchallenge-do-btn';
+        btn.textContent = 'I did it';
+        btn.addEventListener('click', function () { _completeChallenge(ch, btn, box); });
+        box.appendChild(btn);
+    } else {
+        // Expired. Stated as a fact about the challenge, never as something
+        // the person failed to do.
+        var over = document.createElement('p');
+        over.className = 'tchallenge-blurb';
+        over.textContent = 'This one has wrapped up.';
+        box.appendChild(over);
+    }
+
+    return box;
+}
+
+async function _completeChallenge(ch, btn, box) {
+    var teamId = _teamPanelTeamId;
+    if (!teamId) return;
+    btn.disabled = true;
+    btn.textContent = 'Nice…';
+
+    var path = '/api/teams/' + teamId + '/challenges/' + encodeURIComponent(ch.public_id) + '/complete';
+    var result = await api(path, 'POST');
+    if (!result || result.status !== 200) {
+        btn.disabled = false;
+        btn.textContent = 'I did it';
+        return;
+    }
+
+    var data = result.data;
+    var summary = _summarizeProgress(data);
+    summary.confetti = true;
+    summary.celebrate = true;
+    if (_rickieAllowsReaction(true)) {
+        showRickieReaction(_pickRickieLine('challengeDone'), summary);
+    }
+    _announceMilestones(data.milestones_unlocked);
+    _announceFilters(data.filters_unlocked);
+
+    btn.remove();
+    box.classList.add('is-done');
+    var mine = document.createElement('p');
+    mine.className = 'tchallenge-done-by is-me';
+    mine.textContent = 'You did this one.';
+    box.appendChild(mine);
+
+    // The natural next beat: you did the thing, now show them. Offered, never
+    // required -- it sits there until tapped or ignored.
+    if (data.suggest_photo) {
+        var prove = document.createElement('button');
+        prove.type = 'button';
+        prove.className = 'tchallenge-prove-btn';
+        prove.textContent = '\uD83D\uDCF8 Prove it — send a victory picture';
+        prove.addEventListener('click', function () {
+            _challengePhotoFilter = data.suggested_filter || null;
+            var input = document.querySelector('.team-panel-input-row input[type=file]');
+            if (input) input.click();
+        });
+        box.appendChild(prove);
+    }
+    if (currentUser) loadUserPreferences();
+}
+
+function _buildPhotoBubble(photo) {
+    var box = document.createElement('div');
+    box.className = 'team-photo';
+
+    if (photo.removed) {
+        var removed = document.createElement('p');
+        removed.className = 'team-photo-gone';
+        removed.textContent = 'Photo removed';
+        box.appendChild(removed);
+        return box;
+    }
+    if (!photo.available) {
+        var expired = document.createElement('p');
+        expired.className = 'team-photo-gone';
+        expired.textContent = 'This photo has expired';
+        box.appendChild(expired);
+        return box;
+    }
+
+    var frame = document.createElement('div');
+    frame.className = 'team-photo-frame';
+    if (photo.width && photo.height) {
+        // Reserve the space before the bytes arrive so the thread doesn't jump.
+        frame.style.aspectRatio = photo.width + ' / ' + photo.height;
+    }
+    var img = document.createElement('img');
+    img.className = 'team-photo-img';
+    img.alt = photo.caption || 'A photo shared with your team';
+    // No loading="lazy" here: the bytes are fetched by _loadAuthedImage and
+    // handed over as a blob that is already in memory, so deferring the decode
+    // buys nothing -- and inside the hidden Photos tab it left an <img> with a
+    // src that never painted.
+    frame.appendChild(img);
+    box.appendChild(frame);
+
+    // The photo URL is not a public link: it needs the Authorization header, so
+    // it is fetched and handed to the page as a blob. That is the whole reason
+    // there is no signed-URL or token-in-query path -- a leaked URL is useless.
+    _loadAuthedImage(_photoUrl(photo.public_id), img, frame);
+
+    if (photo.caption) {
+        var cap = document.createElement('p');
+        cap.className = 'team-photo-caption';
+        cap.textContent = photo.caption;
+        box.appendChild(cap);
+    }
+
+    // Kept on the node so permissions can be re-applied later: the thread and
+    // the team info load concurrently, and until the info lands we do not yet
+    // know whether this viewer is the team's creator.
+    box._photo = photo;
+    _applyPhotoDeletePermission(box);
+
+    return box;
+}
+
+function _mayDeletePhoto(photo) {
+    return !!(currentUser && (photo.sender_user_id === currentUser.id || _teamPanelIsCreator));
+}
+
+function _applyPhotoDeletePermission(box) {
+    var photo = box._photo;
+    if (!photo || photo.removed || !photo.available) return;
+
+    var existing = box.querySelector('.team-photo-delete');
+    if (!_mayDeletePhoto(photo)) {
+        if (existing) existing.remove();
+        return;
+    }
+    if (existing) return;
+
+    var del = document.createElement('button');
+    del.type = 'button';
+    del.className = 'team-photo-delete';
+    del.textContent = 'Delete';
+    // Two taps, never a window.confirm: a modal dialog freezes the PWA.
+    del.addEventListener('click', function () {
+        if (del.dataset.confirming) {
+            _deleteTeamPhoto(photo, box);
+            return;
+        }
+        del.dataset.confirming = '1';
+        del.textContent = 'Really delete?';
+        setTimeout(function () {
+            delete del.dataset.confirming;
+            del.textContent = 'Delete';
+        }, 4000);
+    });
+    box.appendChild(del);
+}
+
+// Called once the team info arrives, because the creator's right to remove any
+// photo is only known then -- and a photo bubble rendered before that would
+// otherwise never grow its Delete control.
+function _refreshPhotoDeletePermissions() {
+    if (!_teamPanelThread) return;
+    var boxes = _teamPanelThread.querySelectorAll('.team-photo');
+    for (var i = 0; i < boxes.length; i++) _applyPhotoDeletePermission(boxes[i]);
+}
+
+async function _loadAuthedImage(url, img, frame) {
+    var token = localStorage.getItem('streakfit_token');
+    try {
+        var resp = await fetch(url, { headers: { 'Authorization': 'Bearer ' + token } });
+        if (!resp.ok) throw new Error(String(resp.status));
+        var blob = await resp.blob();
+        var objectUrl = URL.createObjectURL(blob);
+        img.src = objectUrl;
+        // Released once painted: a long thread of blobs would otherwise pin
+        // every photo in memory for the life of the session.
+        img.addEventListener('load', function () { URL.revokeObjectURL(objectUrl); }, { once: true });
+    } catch (e) {
+        frame.classList.add('is-failed');
+        var msg = document.createElement('p');
+        msg.className = 'team-photo-gone';
+        msg.textContent = "Couldn't load this photo";
+        frame.appendChild(msg);
+    }
+}
+
+async function _deleteTeamPhoto(photo, box) {
+    var result = await api(_photoUrl(photo.public_id), 'DELETE');
+    if (!result || result.status !== 200) return;
+    box.innerHTML = '';
+    var gone = document.createElement('p');
+    gone.className = 'team-photo-gone';
+    gone.textContent = 'Photo removed';
+    box.appendChild(gone);
 }
 
 function _submitTeamMessage() {
@@ -1152,15 +2340,33 @@ async function _sendTeamMessage(body) {
     var teamId = _teamPanelTeamId;
     if (!teamId) return;
 
-    _teamPanelInput.disabled   = true;
     _teamPanelSendBtn.disabled = true;
+
+    // Show it straight away, dimmed, rather than freezing the input until the
+    // server answers. On a phone on bad signal that wait is the difference
+    // between "alive" and "broken".
+    var empty0 = _teamPanelThread.querySelector('.team-panel-empty');
+    if (empty0) empty0.remove();
+    var pending = _appendTeamMsg({
+        sender_type: 'user',
+        // The optimistic echo must match what the server will send back, or
+        // the message jumps sides when the thread reloads.
+        sender_user_id: currentUser ? currentUser.id : null,
+        sender_username: currentUser
+            ? (currentUser.rickie_calls_you || currentUser.display_name || 'You')
+            : null,
+        body: body,
+        created_at: new Date().toISOString(),
+    });
+    if (pending) pending.classList.add('is-sending');
 
     var result = await api('/api/teams/' + teamId + '/messages', 'POST', { body: body });
 
-    _teamPanelInput.disabled   = false;
     _teamPanelSendBtn.disabled = false;
 
     if (_teamPanelTeamId !== teamId) return; // panel closed/switched while sending
+
+    if (pending) pending.remove();
 
     if (!result || result.status !== 201) {
         var errEl = document.createElement('p');
@@ -1177,6 +2383,804 @@ async function _sendTeamMessage(body) {
     _appendTeamMsg(result.data);
     _teamPanelInput.focus();
 }
+
+// ── Your data: seeing it, and taking it back ──────────────────────────────────
+
+async function handleExportData() {
+    var btn = document.getElementById('btn-export-data');
+    if (btn) { btn.disabled = true; btn.textContent = 'Gathering…'; }
+
+    var result = await api('/api/me/data');
+    if (btn) { btn.disabled = false; btn.textContent = 'Download my data'; }
+    if (!result || result.status !== 200) {
+        if (btn) btn.textContent = "Couldn't get it";
+        return;
+    }
+
+    var blob = new Blob([JSON.stringify(result.data, null, 2)], { type: 'application/json' });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = 'streakfit-my-data.json';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    if (btn) btn.textContent = 'Downloaded ✓';
+    setTimeout(function () { if (btn) btn.textContent = 'Download my data'; }, 2500);
+}
+
+// Deleting an account is the one action with no undo, so it gets a real screen
+// rather than a confirm() -- which would also freeze the PWA. The password is
+// asked for again because a token left on a shared family tablet must not be
+// able to destroy an account.
+function openDeleteAccount() {
+    if (document.querySelector('.danger-overlay')) return;
+    toggleSettings(false);
+
+    var overlay = document.createElement('div');
+    overlay.className = 'danger-overlay';
+
+    var sheet = document.createElement('div');
+    sheet.className = 'danger-sheet';
+
+    var h = document.createElement('h2');
+    h.className = 'danger-title';
+    h.textContent = 'Delete your account?';
+    sheet.appendChild(h);
+
+    var body = document.createElement('p');
+    body.className = 'danger-body';
+    body.textContent = 'This removes your streak, your progress, your Memory Book, '
+        + 'anything Rickie remembers, and any photos you have shared with a team. '
+        + 'It cannot be undone.';
+    sheet.appendChild(body);
+
+    var keepNote = document.createElement('p');
+    keepNote.className = 'danger-note';
+    keepNote.textContent = 'Messages you sent to a team stay in that team, without your name on them.';
+    sheet.appendChild(keepNote);
+
+    var pw = document.createElement('input');
+    pw.type = 'password';
+    pw.className = 'danger-input';
+    pw.placeholder = 'Your password';
+    pw.setAttribute('autocomplete', 'current-password');
+    sheet.appendChild(pw);
+
+    var err = document.createElement('p');
+    err.className = 'danger-error';
+    err.setAttribute('role', 'alert');
+    sheet.appendChild(err);
+
+    var row = document.createElement('div');
+    row.className = 'danger-actions';
+
+    var cancel = document.createElement('button');
+    cancel.type = 'button';
+    cancel.className = 'btn-primary danger-cancel';
+    cancel.textContent = 'Keep my account';
+    cancel.addEventListener('click', function () { overlay.remove(); });
+
+    var go = document.createElement('button');
+    go.type = 'button';
+    go.className = 'danger-confirm';
+    go.textContent = 'Delete everything';
+    go.addEventListener('click', async function () {
+        err.textContent = '';
+        if (!pw.value) { err.textContent = 'Enter your password to confirm.'; return; }
+        go.disabled = true;
+        go.textContent = 'Deleting…';
+
+        var result = await api('/api/me', 'DELETE', { password: pw.value });
+        go.disabled = false;
+        go.textContent = 'Delete everything';
+
+        if (result && result.status === 200) {
+            overlay.remove();
+            localStorage.removeItem('streakfit_token');
+            window.location.reload();
+            return;
+        }
+        var data = (result && result.data) || {};
+        err.textContent = data.message
+            || (result && result.status === 403 ? "That password doesn't match." : null)
+            || "Couldn't delete the account just now.";
+    });
+
+    // Cancel first, and styled as the primary button: the safe choice should be
+    // the easy one to hit.
+    row.appendChild(cancel);
+    row.appendChild(go);
+    sheet.appendChild(row);
+    overlay.appendChild(sheet);
+    document.body.appendChild(overlay);
+    pw.focus();
+}
+
+
+// ── StreakFit photo filters ────────────────────────────────────────────────────
+//
+// Composition happens here, in the browser, for three reasons: the server never
+// pays to process an image, the upload is one small finished JPEG instead of a
+// full-resolution original, and drawing through a canvas drops EXIF as a side
+// effect (the server strips it again anyway -- a client is not a safety layer).
+//
+// The catalog, including each filter's render spec, comes from the server. This
+// file implements PRIMITIVES, not filters: adding "Rickie in a party hat" is a
+// dict in app.py, and only a genuinely new kind of effect needs code here.
+
+var PHOTO_MAX_EDGE = 1080;      // plenty for a phone screen, ~200 KB as JPEG
+var PHOTO_JPEG_QUALITY = 0.82;
+
+var _photoFilters = [];         // as served, including lock state
+var _photoAcorns = 0;
+var _composerFilterKey = 'none';
+var _composerImage = null;
+var _composerOverlay = null;
+var _overlayImageCache = {};
+
+function _loadOverlayImage(src) {
+    if (_overlayImageCache[src]) return _overlayImageCache[src];
+    var p = new Promise(function (resolve) {
+        var img = new Image();
+        // Same-origin SVGs, so the canvas stays untainted and toBlob works.
+        img.onload = function () { resolve(img); };
+        img.onerror = function () { resolve(null); };   // a missing overlay must not break the photo
+        img.src = src;
+    });
+    _overlayImageCache[src] = p;
+    return p;
+}
+
+function _anchorPosition(anchor, cw, ch, w, h) {
+    var pad = Math.round(cw * 0.03);
+    var x = pad, y = pad;
+    if (anchor.indexOf('right') !== -1) x = cw - w - pad;
+    if (anchor.indexOf('bottom') !== -1) y = ch - h - pad;
+    if (anchor.indexOf('center') !== -1) { x = (cw - w) / 2; y = (ch - h) / 2; }
+    return { x: x, y: y };
+}
+
+// Deterministic scatter: the same photo and filter always land the glyphs in
+// the same places, so a preview is honest about what gets sent. Nothing in
+// StreakFit should be a surprise draw.
+function _scatterSeed(i, salt) {
+    var x = Math.sin((i + 1) * 12.9898 + salt * 78.233) * 43758.5453;
+    return x - Math.floor(x);
+}
+
+async function renderPhotoToCanvas(canvas, img, spec) {
+    spec = spec || {};
+    var scale = Math.min(1, PHOTO_MAX_EDGE / Math.max(img.naturalWidth, img.naturalHeight));
+    var w = Math.max(1, Math.round(img.naturalWidth * scale));
+    var h = Math.max(1, Math.round(img.naturalHeight * scale));
+    canvas.width = w;
+    canvas.height = h;
+
+    var ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, w, h);
+
+    ctx.save();
+    if (spec.tint) ctx.filter = spec.tint;
+    ctx.drawImage(img, 0, 0, w, h);
+    ctx.restore();
+
+    if (spec.confetti) {
+        var c = spec.confetti;
+        var size = Math.round(Math.min(w, h) * (c.size || 0.07));
+        ctx.save();
+        ctx.font = size + 'px serif';
+        ctx.textBaseline = 'middle';
+        ctx.textAlign = 'center';
+        for (var i = 0; i < (c.count || 12); i++) {
+            var gx = _scatterSeed(i, 1) * w;
+            var gy = _scatterSeed(i, 2) * h;
+            ctx.save();
+            ctx.translate(gx, gy);
+            ctx.rotate((_scatterSeed(i, 3) - 0.5) * 0.9);
+            ctx.globalAlpha = 0.75 + _scatterSeed(i, 4) * 0.25;
+            ctx.fillText(c.glyph, 0, 0);
+            ctx.restore();
+        }
+        ctx.restore();
+    }
+
+    if (spec.overlays) {
+        for (var j = 0; j < spec.overlays.length; j++) {
+            var o = spec.overlays[j];
+            var oimg = await _loadOverlayImage(o.src);
+            if (!oimg) continue;
+            var ow = Math.round(Math.min(w, h) * (o.scale || 0.3));
+            var oh = Math.round(ow * (oimg.naturalHeight / oimg.naturalWidth || 1));
+            var pos = _anchorPosition(o.anchor || 'bottom-right', w, h, ow, oh);
+            // `bleed` pushes an overlay past the edge so it reads as leaning
+            // into the shot rather than sitting politely inside it.
+            if (o.bleed) {
+                var bx = ow * o.bleed, by = oh * o.bleed;
+                if ((o.anchor || '').indexOf('right') !== -1) pos.x += bx;
+                if ((o.anchor || '').indexOf('left') !== -1) pos.x -= bx;
+                if ((o.anchor || '').indexOf('bottom') !== -1) pos.y += by;
+                if ((o.anchor || '').indexOf('top') !== -1) pos.y -= by;
+            }
+            ctx.save();
+            ctx.globalAlpha = o.opacity === undefined ? 1 : o.opacity;
+            ctx.translate(pos.x + ow / 2, pos.y + oh / 2);
+            ctx.rotate(((o.rotate || 0) * Math.PI) / 180);
+            ctx.drawImage(oimg, -ow / 2, -oh / 2, ow, oh);
+            ctx.restore();
+        }
+    }
+
+    // Vignette: darkened corners. Cheap, and it makes almost any phone photo
+    // look composed rather than snapped.
+    if (spec.vignette) {
+        var vr = Math.max(w, h) * 0.75;
+        var vg = ctx.createRadialGradient(w / 2, h / 2, vr * 0.35, w / 2, h / 2, vr);
+        vg.addColorStop(0, 'rgba(0,0,0,0)');
+        vg.addColorStop(1, 'rgba(0,0,0,' + (spec.vignette.strength || 0.45) + ')');
+        ctx.save();
+        ctx.fillStyle = vg;
+        ctx.fillRect(0, 0, w, h);
+        ctx.restore();
+    }
+
+    // Burst: rays from behind the subject. This is what a victory looks like
+    // when you cannot afford an animation.
+    if (spec.burst) {
+        var rays = spec.burst.rays || 16;
+        var cx = w / 2, cy = h * (spec.burst.cy || 0.42);
+        var reach = Math.max(w, h);
+        ctx.save();
+        ctx.globalCompositeOperation = 'overlay';
+        ctx.globalAlpha = spec.burst.alpha === undefined ? 0.5 : spec.burst.alpha;
+        for (var b = 0; b < rays; b++) {
+            var a0 = (b / rays) * Math.PI * 2;
+            var a1 = a0 + (Math.PI * 2 / rays) * 0.45;
+            ctx.beginPath();
+            ctx.moveTo(cx, cy);
+            ctx.arc(cx, cy, reach, a0, a1);
+            ctx.closePath();
+            ctx.fillStyle = b % 2 ? (spec.burst.to || '#fde68a') : (spec.burst.from || '#fbbf24');
+            ctx.fill();
+        }
+        ctx.restore();
+    }
+
+    if (spec.frame) {
+        var fw = Math.max(3, Math.round(Math.min(w, h) * (spec.frame.width || 0.03)));
+        var grad = ctx.createLinearGradient(0, 0, w, h);
+        grad.addColorStop(0, spec.frame.from || '#f59e0b');
+        grad.addColorStop(1, spec.frame.to || '#ef4444');
+        ctx.save();
+        ctx.strokeStyle = grad;
+        ctx.lineWidth = fw;
+        ctx.strokeRect(fw / 2, fw / 2, w - fw, h - fw);
+        ctx.restore();
+    }
+
+    // The real number, burned into the picture. A generic camera app cannot
+    // print your actual streak on a photo, because it does not know it. This is
+    // the one filter primitive that only StreakFit can have, so it reads the
+    // live values rather than any decoration the client made up.
+    if (spec.stat) {
+        var facts = _photoStatFacts(spec.stat.show || ['streak']);
+        if (facts.length) {
+            var padX = Math.round(w * 0.045);
+            var chipH = Math.round(h * 0.085);
+            var y = spec.stat.position === 'top' ? padX : h - chipH - padX;
+            ctx.save();
+            ctx.font = '800 ' + Math.round(chipH * 0.46) + 'px system-ui, sans-serif';
+            ctx.textBaseline = 'middle';
+            var x = padX;
+            facts.forEach(function (f) {
+                var tw = ctx.measureText(f).width + chipH * 0.8;
+                ctx.globalAlpha = 0.88;
+                ctx.fillStyle = spec.stat.dark ? 'rgba(17,24,39,.82)' : 'rgba(255,255,255,.92)';
+                _roundRect(ctx, x, y, tw, chipH, chipH / 2);
+                ctx.fill();
+                ctx.globalAlpha = 1;
+                ctx.fillStyle = spec.stat.dark ? '#fff' : '#111827';
+                ctx.textAlign = 'left';
+                ctx.fillText(f, x + chipH * 0.4, y + chipH / 2);
+                x += tw + padX * 0.5;
+            });
+            ctx.restore();
+        }
+    }
+
+    if (spec.ribbon) {
+        var r = spec.ribbon;
+        var bandH = Math.round(h * 0.11);
+        var bandY = r.position === 'top' ? 0 : h - bandH;
+        var rg = ctx.createLinearGradient(0, bandY, w, bandY + bandH);
+        rg.addColorStop(0, r.from || '#4338ca');
+        rg.addColorStop(1, r.to || '#7c3aed');
+        ctx.save();
+        ctx.globalAlpha = 0.92;
+        ctx.fillStyle = rg;
+        ctx.fillRect(0, bandY, w, bandH);
+        ctx.globalAlpha = 1;
+        ctx.fillStyle = '#fff';
+        ctx.font = '700 ' + Math.round(bandH * 0.46) + 'px system-ui, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.letterSpacing = '2px';
+        ctx.fillText(r.text || '', w / 2, bandY + bandH / 2);
+        ctx.restore();
+    }
+
+    return canvas;
+}
+
+function _roundRect(ctx, x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+}
+
+// Live values, never invented ones -- a badge claiming a streak the person does
+// not have would be the one dishonest thing in the product.
+function _photoStatFacts(show) {
+    if (!currentUser) return [];
+    var out = [];
+    show.forEach(function (kind) {
+        if (kind === 'streak' && currentUser.current_streak > 0) {
+            out.push('\uD83D\uDD25 Day ' + currentUser.current_streak);
+        } else if (kind === 'level') {
+            out.push('\u2B50 Level ' + currentUser.level + ' \u00b7 ' + currentUser.level_title);
+        } else if (kind === 'missions' && currentUser.total_missions > 0) {
+            out.push('\u2713 ' + currentUser.total_missions + ' missions');
+        } else if (kind === 'acorns' && currentUser.acorns_total > 0) {
+            out.push('\uD83C\uDF30 ' + currentUser.acorns_total);
+        }
+    });
+    return out;
+}
+
+function _specForKey(key) {
+    var f = _photoFilters.find(function (x) { return x.key === key; });
+    return f ? f.render : {};
+}
+
+async function _refreshPhotoFilters() {
+    var result = await api('/api/photo-filters');
+    if (result && result.status === 200) {
+        _photoFilters = result.data.filters || [];
+        _photoAcorns = result.data.acorns_available || 0;
+    }
+    return _photoFilters;
+}
+
+
+// ── The composer: take a photo -> preview -> filter -> caption -> send ────────
+
+// Solo picture-making: no team required, nothing uploaded. The camera opens
+// directly on a phone, same as the team one.
+function startSoloPicture() {
+    var input = document.getElementById('solo-photo-input');
+    if (!input) return;
+    if (!input.dataset.wired) {
+        input.dataset.wired = '1';
+        input.addEventListener('change', function () {
+            var file = input.files && input.files[0];
+            input.value = '';
+            if (file) openPhotoComposer(file, { solo: true });
+        });
+    }
+    input.click();
+}
+
+
+async function openPhotoComposer(file, opts) {
+    opts = opts || {};
+    // Solo mode. Filters are earned by moving, and until now the only place to
+    // USE one was a team photo composer -- so a person with no team could earn
+    // the best rewards in the product and never see them. Solo composes the same
+    // picture and saves it to the phone.
+    var solo = !!opts.solo;
+    var teamId = solo ? null : _teamPanelTeamId;
+    if (!solo && !teamId) return;
+
+    var img = new Image();
+    var objectUrl = URL.createObjectURL(file);
+    var loaded = await new Promise(function (resolve) {
+        img.onload = function () { resolve(true); };
+        img.onerror = function () { resolve(false); };
+        img.src = objectUrl;
+    });
+    if (!loaded) {
+        URL.revokeObjectURL(objectUrl);
+        alertlessPhotoError("That file didn't look like a photo Rickie can use.");
+        return;
+    }
+    _composerImage = img;
+    _composerFilterKey = 'none';
+    if (_challengePhotoFilter) {
+        _composerFilterKey = _challengePhotoFilter;
+        _challengePhotoFilter = null;
+    }
+
+    await _refreshPhotoFilters();
+    _buildPhotoComposer(teamId, objectUrl, solo);
+}
+
+// Deliberately not window.alert: a modal dialog would freeze the PWA and is a
+// jarring way to tell a child their photo didn't work.
+function alertlessPhotoError(message) {
+    if (!_teamPanelThread) return;
+    var el = document.createElement('p');
+    el.className = 'team-msg-send-error';
+    el.textContent = message;
+    _teamPanelThread.appendChild(el);
+    _teamPanelThread.scrollTop = _teamPanelThread.scrollHeight;
+}
+
+function _buildPhotoComposer(teamId, objectUrl, solo) {
+    // Drop a previous sheet without going through _closePhotoComposer(), which
+    // also clears _composerImage -- the image this one is about to draw.
+    if (_composerOverlay) {
+        _composerOverlay.remove();
+        _composerOverlay = null;
+    }
+
+    var overlay = document.createElement('div');
+    overlay.className = 'photo-composer-overlay';
+    _composerOverlay = overlay;
+
+    var sheet = document.createElement('div');
+    sheet.className = 'photo-composer';
+
+    var head = document.createElement('div');
+    head.className = 'photo-composer-head';
+    var title = document.createElement('p');
+    title.className = 'photo-composer-title';
+    title.textContent = solo ? 'Make a picture' : 'Share with your team';
+    var closeBtn = document.createElement('button');
+    closeBtn.type = 'button';
+    closeBtn.className = 'photo-composer-close';
+    closeBtn.setAttribute('aria-label', 'Cancel');
+    closeBtn.textContent = '✕';
+    closeBtn.addEventListener('click', _closePhotoComposer);
+    head.appendChild(title);
+    head.appendChild(closeBtn);
+    sheet.appendChild(head);
+
+    var canvas = document.createElement('canvas');
+    canvas.className = 'photo-composer-canvas';
+    sheet.appendChild(canvas);
+
+    var strip = document.createElement('div');
+    strip.className = 'photo-filter-strip';
+    sheet.appendChild(strip);
+
+    var note = document.createElement('p');
+    note.className = 'photo-filter-note';
+    sheet.appendChild(note);
+
+    var captionRow = document.createElement('div');
+    captionRow.className = 'photo-caption-row';
+    var caption = document.createElement('input');
+    caption.type = 'text';
+    caption.className = 'photo-caption-input';
+    caption.placeholder = 'Say something (optional)';
+    caption.maxLength = 140;
+    if (!solo) {
+        captionRow.appendChild(caption);
+        sheet.appendChild(captionRow);
+    }
+
+    var privacy = document.createElement('p');
+    privacy.className = 'photo-privacy-note';
+    // Honest, not reassuring-sounding: the one promise never made here is that
+    // a photo cannot be screenshotted, because it can.
+    privacy.textContent = solo
+        ? 'This stays on your phone. Nothing is uploaded and nobody else sees it.'
+        : ('Only your team can open this. It disappears from the '
+           + 'app after 30 days, and you can delete it sooner — but anyone who can '
+           + 'see it can screenshot it.');
+    sheet.appendChild(privacy);
+
+    var actions = document.createElement('div');
+    actions.className = 'photo-composer-actions';
+    var sendBtn = document.createElement('button');
+    sendBtn.type = 'button';
+    sendBtn.className = 'btn-primary photo-send-btn';
+    sendBtn.textContent = solo ? 'Save to my phone' : 'Send to team';
+    actions.appendChild(sendBtn);
+    sheet.appendChild(actions);
+
+    overlay.appendChild(sheet);
+    document.body.appendChild(overlay);
+    document.body.style.overflow = 'hidden';
+
+    function repaint() {
+        renderPhotoToCanvas(canvas, _composerImage, _specForKey(_composerFilterKey));
+    }
+
+    function paintStrip() {
+        strip.innerHTML = '';
+        _photoFilters.forEach(function (f) {
+            var chip = document.createElement('button');
+            chip.type = 'button';
+            chip.className = 'photo-filter-chip'
+                + (f.key === _composerFilterKey ? ' is-active' : '')
+                + (f.unlocked ? '' : ' is-locked');
+            chip.setAttribute('aria-pressed', String(f.key === _composerFilterKey));
+
+            var label = document.createElement('span');
+            label.className = 'photo-filter-chip-name';
+            label.textContent = f.name;
+            chip.appendChild(label);
+
+            if (!f.unlocked) {
+                var lock = document.createElement('span');
+                lock.className = 'photo-filter-chip-lock';
+                lock.textContent = f.unlock_type === 'acorns'
+                    ? f.cost + ' 🌰'
+                    : '🔒';
+                chip.appendChild(lock);
+            }
+
+            chip.addEventListener('click', function () {
+                if (f.unlocked) {
+                    _composerFilterKey = f.key;
+                    note.textContent = f.blurb;
+                    note.className = 'photo-filter-note';
+                    paintStrip();
+                    repaint();
+                    return;
+                }
+                if (f.unlock_type === 'acorns') {
+                    _offerFilterPurchase(f, note, paintStrip, repaint);
+                } else {
+                    note.textContent = f.requirement + ' to unlock this one.';
+                    note.className = 'photo-filter-note is-locked';
+                }
+            });
+            strip.appendChild(chip);
+        });
+    }
+
+    sendBtn.addEventListener('click', function () {
+        if (solo) {
+            _savePhotoLocally(canvas, sendBtn, objectUrl);
+            return;
+        }
+        _sendPhoto(teamId, canvas, caption.value.trim(), sendBtn, objectUrl);
+    });
+
+    paintStrip();
+    repaint();
+    note.textContent = 'Pick a look. Rickie has opinions.';
+}
+
+// Two taps, not one.
+//
+// A priced chip looked exactly like a free one, so a single exploratory tap
+// spent the acorns instantly and irreversibly. An independent reviewer spent
+// two thirds of everything they had earned by tapping a chip to see what it
+// looked like. Acorns take days to earn and nothing refunds them, so the first
+// tap now only asks.
+var _pendingFilterKey = null;
+
+async function _offerFilterPurchase(filter, note, paintStrip, repaint) {
+    if (_photoAcorns < filter.cost) {
+        _pendingFilterKey = null;
+        note.className = 'photo-filter-note is-locked';
+        note.textContent = 'That one costs ' + filter.cost + ' acorns — you have '
+            + _photoAcorns + '. Acorns come from showing up.';
+        return;
+    }
+    if (_pendingFilterKey !== filter.key) {
+        _pendingFilterKey = filter.key;
+        note.className = 'photo-filter-note';
+        note.textContent = filter.name + ' costs ' + filter.cost
+            + ' acorns, and you have ' + _photoAcorns
+            + '. Tap it again to spend them.';
+        return;
+    }
+    _pendingFilterKey = null;
+    note.className = 'photo-filter-note';
+    note.textContent = 'Unlocking ' + filter.name + '…';
+
+    var result = await api('/api/photo-filters/' + filter.key + '/unlock', 'POST');
+    if (!result || result.status !== 200) {
+        note.className = 'photo-filter-note is-locked';
+        note.textContent = "Couldn't unlock that one just now.";
+        return;
+    }
+    _photoAcorns = result.data.acorns_available;
+    filter.unlocked = true;
+    _composerFilterKey = filter.key;
+    note.textContent = filter.name + ' unlocked. ' + _photoAcorns + ' acorns left.';
+    paintStrip();
+    repaint();
+    if (currentUser) loadUserPreferences();
+}
+
+function _closePhotoComposer() {
+    if (_composerOverlay) {
+        _composerOverlay.remove();
+        _composerOverlay = null;
+    }
+    _composerImage = null;
+    document.body.style.overflow = _teamPanelOverlay && _teamPanelOverlay.classList.contains('open')
+        ? 'hidden' : '';
+}
+
+function _savePhotoLocally(canvas, sendBtn, objectUrl) {
+    sendBtn.disabled = true;
+    sendBtn.textContent = 'Saving…';
+    canvas.toBlob(function (blob) {
+        if (!blob) {
+            sendBtn.disabled = false;
+            sendBtn.textContent = 'Save to my phone';
+            return;
+        }
+        var url = URL.createObjectURL(blob);
+        var a = document.createElement('a');
+        a.href = url;
+        a.download = 'streakfit-' + Date.now() + '.jpg';
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+        if (objectUrl) URL.revokeObjectURL(objectUrl);
+        sendBtn.textContent = 'Saved ✓';
+        setTimeout(_closePhotoComposer, 900);
+    }, 'image/jpeg', PHOTO_JPEG_QUALITY);
+}
+
+
+async function _sendPhoto(teamId, canvas, caption, sendBtn, objectUrl) {
+    sendBtn.disabled = true;
+    sendBtn.textContent = 'Sending…';
+
+    var blob = await new Promise(function (resolve) {
+        canvas.toBlob(resolve, 'image/jpeg', PHOTO_JPEG_QUALITY);
+    });
+    if (!blob) {
+        sendBtn.disabled = false;
+        sendBtn.textContent = 'Send to team';
+        return;
+    }
+
+    var form = new FormData();
+    form.append('photo', blob, 'streakfit.jpg');
+    if (caption) form.append('caption', caption);
+    if (_composerFilterKey && _composerFilterKey !== 'none') {
+        form.append('filter_key', _composerFilterKey);
+    }
+
+    var token = localStorage.getItem('streakfit_token');
+    var resp;
+    try {
+        resp = await fetch('/api/teams/' + teamId + '/photos', {
+            method: 'POST',
+            headers: { 'Authorization': 'Bearer ' + token },   // no Content-Type: the browser sets the boundary
+            body: form,
+        });
+    } catch (e) {
+        sendBtn.disabled = false;
+        sendBtn.textContent = 'Send to team';
+        return;
+    }
+
+    if (objectUrl) URL.revokeObjectURL(objectUrl);
+
+    if (!resp.ok) {
+        var problem = await resp.json().catch(function () { return {}; });
+        sendBtn.disabled = false;
+        sendBtn.textContent = 'Send to team';
+        var msg = problem.message
+            || (problem.error === 'team_photo_quota_reached' ? "This team's album is full." : null)
+            || (resp.status === 429 ? "That's a lot of photos at once — try again in a minute." : null)
+            || "Couldn't send that photo — try again.";
+        alertlessPhotoError(msg);
+        _closePhotoComposer();
+        return;
+    }
+
+    var message = await resp.json();
+    _closePhotoComposer();
+
+    var empty = _teamPanelThread && _teamPanelThread.querySelector('.team-panel-empty');
+    if (empty) empty.remove();
+    if (_teamPanelTeamId === teamId) _appendTeamMsg(message);
+}
+
+
+// The today strip: Rickie, one line from him, and the streak at the size the
+// streak deserves. It replaces a bordered notice inside the mission card, and
+// it is the first thing on the page for a reason — what can I do now, and how
+// am I doing, answered before any scrolling.
+// Put the person's name on a greeting, sometimes.
+//
+// The display name setting shipped with nowhere to show itself: it reached only
+// the Ask Rickie system prompt, so somebody could type their name, save it, and
+// never once see the app use it. An independent review called that "reads as
+// broken", and it was right — a setting that changes nothing observable is
+// worse than no setting.
+//
+// Sometimes, not always. A companion who opens every single greeting with your
+// name is a salesperson. Deterministic per day rather than random, so it does
+// not flicker between re-renders of the same screen.
+// `dayOverride` exists so this is testable. Without it a check of "does the
+// name ever reach the greeting" is a one-in-three coin flip on the day it runs,
+// which is a flaky test dressed up as a feature test.
+function _withName(line, dayOverride) {
+    if (!line || isGuest) return line;
+    var name = currentUser && currentUser.rickie_calls_you;
+    if (!name) return line;                       // no safe name: use none
+    var day = (dayOverride === undefined)
+        ? Math.floor(Date.now() / 86400000) : dayOverride;
+    if (day % 3 !== 0) return line;
+    return line.replace(/[.!?]?$/, ', ' + name + '.');
+}
+
+function _renderTodayStrip(daily) {
+    var greetingEl = document.getElementById('today-greeting');
+    if (greetingEl) {
+        if (_rickieMode() === 'minimal') {
+            greetingEl.textContent = daily.completed_count >= 5
+                ? 'Today’s mission is done.'
+                : 'Today’s mission is ready.';
+        } else {
+            if (!_cachedGreetingLine) {
+                var pool = isGuest ? 'guest' : _rickieTimeOfDayPool();
+                _cachedGreetingLine = _withName(_pickRickieLine(pool));
+            }
+            // A separate line once the mission is done. Appending to the
+            // pre-mission greeting produced things like "The day's not over
+            // yet. That's today done."
+            if (daily.completed_count >= 5) {
+                if (!_cachedDoneLine) _cachedDoneLine = _pickRickieLine('missionComplete');
+                greetingEl.textContent = _cachedDoneLine;
+            } else {
+                greetingEl.textContent = _cachedGreetingLine;
+            }
+        }
+    }
+
+    var avatar = document.getElementById('today-rickie');
+    if (avatar) avatar.src = RICKIE_EXPRESSION_SVG[currentRickieExpression] || '/static/rickie.svg';
+
+    var slot = document.getElementById('today-streak-slot');
+    if (!slot) return;
+    slot.innerHTML = '';
+
+    var streak = (currentUser && currentUser.current_streak) || 0;
+    if (streak > 0) {
+        var row = document.createElement('p');
+        row.className = 'today-streak';
+        var n = document.createElement('span');
+        n.className = 'today-streak-number';
+        n.textContent = '\uD83D\uDD25 ' + streak;
+        var label = document.createElement('span');
+        label.className = 'today-streak-label';
+        label.textContent = streak === 1 ? 'day streak' : 'day streak';
+        row.appendChild(n);
+        row.appendChild(label);
+        slot.appendChild(row);
+        return;
+    }
+
+    // No streak yet, or none right now. This says what is available today and
+    // never what was lost — there is no "your streak ended" state anywhere in
+    // StreakFit, by design.
+    var none = document.createElement('p');
+    none.className = 'today-streak-none';
+    none.textContent = daily.completed_count >= 5
+        ? 'Day 1. The streak starts here.'
+        : 'Finish all five to start a streak.';
+    slot.appendChild(none);
+}
+
 
 // ── Rickie's voice ──────────────────────────────────────────────────────────────
 // Every line in here follows the same rules, everywhere Rickie speaks:
@@ -1221,7 +3225,9 @@ var RICKIE_LINES = {
         "Small wins still count.",
         "Rickie is proud of that one.",
         "That's one more for the books.",
-        "Rickie noticed that.",
+        "Something's different about today already.",
+        "That's the hard part done — starting.",
+        "One down. The rest are easier.",
         "Nice. Onward."
     ],
     brainBoostCorrect: [
@@ -1268,6 +3274,37 @@ var RICKIE_LINES = {
         "One week in the books.",
         "That's a habit forming.",
         "A week together. Rickie likes this."
+    ],
+    // Distinct from `milestone`, which is written for *browsing* the Memory
+    // Book ("Rickie flips back through these sometimes") -- the wrong register
+    // for the moment one is earned, and plainly wrong for a first one.
+    // Rickie at a challenge: pleased and a little competitive, never a referee.
+    // He has opinions about the challenge, never about the person.
+    // The first movement of a day, before any streak or level is involved.
+    // This is the moment a solo user most needs someone to notice, and the one
+    // the product previously passed over in silence.
+    firstMoveOfDay: [
+        "There it is. First one of the day.",
+        "Rickie was hoping you'd show up.",
+        "Day's officially started now.",
+        "One down. Rickie's paying attention.",
+        "That's the hardest one out of the way.",
+    ],
+    challengeDone: [
+        "Challenge accepted, challenge finished.",
+        "Rickie watched the whole thing. Solid work.",
+        "That's how that's done.",
+        "Rickie would have joined in, but somebody had to hold the snacks.",
+        "Consider it proven.",
+        "Rickie is telling everyone about this one.",
+    ],
+    milestoneUnlocked: [
+        "That one's worth keeping.",
+        "Rickie's adding this to the book.",
+        "A new one for the collection.",
+        "That just became a milestone.",
+        "Something to look back on later.",
+        "Rickie noticed that one."
     ],
     milestone: [
         "Rickie's been keeping track — you've earned a few of these.",
@@ -1320,16 +3357,28 @@ var _lastRickieLineByPool = {};
 // Picks from a named pool in RICKIE_LINES, never repeating the immediately
 // previous pick *within that same pool* (each pool tracks its own history,
 // so an exercise-completion pick can't be blocked by a Brain Boost pick).
+// Avoids the last FEW lines, not just the last one.
+//
+// Blocking only the immediately previous string is enough to stop a literal
+// repeat and not enough to stop the feeling of one: an independent walkthrough
+// of five exercises in a row got "Rickie noticed that." twice and then "Rickie
+// saw that.", all three distinct strings and all three the same sentence. A
+// third of the pool is remembered, so a short session spreads across it.
+var _RECENT_LINE_MEMORY = 3;
+
 function _pickRickieLine(poolKey) {
     var pool = RICKIE_LINES[poolKey];
     if (!pool || pool.length === 0) return '';
     if (pool.length === 1) return pool[0];
-    var last = _lastRickieLineByPool[poolKey];
-    var choice;
-    do {
-        choice = pool[Math.floor(Math.random() * pool.length)];
-    } while (choice === last);
-    _lastRickieLineByPool[poolKey] = choice;
+    var recent = _lastRickieLineByPool[poolKey];
+    if (!Array.isArray(recent)) recent = recent ? [recent] : [];
+    var depth = Math.min(_RECENT_LINE_MEMORY, pool.length - 1);
+    var eligible = pool.filter(function (line) { return recent.indexOf(line) === -1; });
+    if (!eligible.length) eligible = pool;
+    var choice = eligible[Math.floor(Math.random() * eligible.length)];
+    recent.push(choice);
+    while (recent.length > depth) recent.shift();
+    _lastRickieLineByPool[poolKey] = recent;
     return choice;
 }
 
@@ -1408,11 +3457,18 @@ function getRickieExpression(eventContext) {
 // Minimal mode always displays neutral regardless of the computed expression —
 // same "branding only" rule _updateRickieMoodBadge already applies to the mood
 // badge, applied here to the avatar itself.
+// How long a celebration owns Rickie's face. Long enough to outlast the
+// dashboard re-render that fires 480ms after a completion.
+var _expressionHoldUntil = 0;
+
+function _holdExpression(ms) { _expressionHoldUntil = Date.now() + (ms || 6000); }
+
 function _applyRickieExpression() {
     var expr = (_rickieMode() === 'minimal') ? 'neutral' : currentRickieExpression;
     var src = RICKIE_EXPRESSION_SVG[expr] || RICKIE_EXPRESSION_SVG.neutral;
     var avatarEls = document.querySelectorAll(
-        '.journey-avatar, .rickie-avatar-sm, .rickie-reaction-avatar, .coach-avatar, .mb-avatar'
+        '.journey-avatar, .rickie-avatar-sm, .rickie-reaction-avatar, .coach-avatar, '
+        + '.mb-avatar, .today-rickie'
     );
     avatarEls.forEach(function (el) { el.src = src; });
 }
@@ -1484,12 +3540,38 @@ function fireConfetti(origin) {
 var _rickieReactionHideTimer = null;
 var _rickieReactionRemoveTimer = null;
 
-function showRickieReaction(line, summary) {
-    summary = summary || {};
-    var toast = document.getElementById('rickie-reaction');
-    if (!toast) return;
+// Toasts are queued, not overwritten. Finishing a mission and unlocking a
+// milestone happen in the same instant, and the second used to replace the
+// first after 900ms -- so the biggest moment of a first day ("+60 XP, Level 2 —
+// Adventurer") was on screen for under a second. Each reaction now plays for
+// its full length and the next one waits its turn.
+var _rickieToastQueue = [];
+var _rickieToastPlaying = false;
 
-    document.getElementById('rickie-reaction-line').textContent = line;
+function showRickieReaction(line, summary) {
+    _rickieToastQueue.push({ line: line, summary: summary || {} });
+    if (!_rickieToastPlaying) _playNextRickieToast();
+    // The roaming Rickie reacts too, and picks a different celebration each
+    // time. Same event, same moment, two different bits of him.
+    if (window.RickieRoam) {
+        window.RickieRoam.react((summary && summary.perfectMission)
+            ? 'mission_done' : 'exercise_done');
+    }
+}
+
+function _playNextRickieToast() {
+    var toast = document.getElementById('rickie-reaction');
+    if (!toast) { _rickieToastQueue.length = 0; _rickieToastPlaying = false; return; }
+
+    var next = _rickieToastQueue.shift();
+    if (!next) {
+        _rickieToastPlaying = false;
+        return;
+    }
+    _rickieToastPlaying = true;
+
+    var summary = next.summary;
+    document.getElementById('rickie-reaction-line').textContent = next.line;
 
     var progressEl = document.getElementById('rickie-reaction-progress');
     var xp = summary.xp || 0;
@@ -1504,30 +3586,76 @@ function showRickieReaction(line, summary) {
         progressEl.hidden = true;
     }
 
+    // `badge` is how a queued toast carries its own second line. The milestone
+    // announcer used to set this element directly after calling show(), which
+    // with a queue would have written onto whichever toast happened to be up.
     var levelUpEl = document.getElementById('rickie-reaction-levelup');
-    if (summary.leveledUp) {
-        levelUpEl.textContent = _pickRickieLine('levelUp') + ' 🎉 Level ' + summary.newLevel + ' — ' + summary.levelTitle;
-        levelUpEl.hidden = false;
-    } else {
-        levelUpEl.hidden = true;
-    }
+    var badge = summary.badge
+        || (summary.leveledUp
+            ? _pickRickieLine('levelUp') + ' 🎉 Level ' + summary.newLevel + ' — ' + summary.levelTitle
+            : '');
+    levelUpEl.textContent = badge;
+    levelUpEl.hidden = !badge;
 
-    toast.classList.toggle('celebrate', !!summary.leveledUp);
+    toast.classList.toggle('celebrate', !!(summary.leveledUp || summary.celebrate));
 
     if (_rickieReactionHideTimer) clearTimeout(_rickieReactionHideTimer);
     if (_rickieReactionRemoveTimer) clearTimeout(_rickieReactionRemoveTimer);
     toast.classList.remove('leaving');
     toast.hidden = false;
 
-    var displayMs = summary.leveledUp ? 4600 : 3600;
+    // Confetti belongs to its own toast, so a queued celebration does not throw
+    // it while a different line is still on screen.
+    if (summary.confetti) fireConfetti(document.getElementById('daily-count-badge'));
+
+    var displayMs = (summary.leveledUp || summary.celebrate) ? 4600 : 3600;
     _rickieReactionHideTimer = setTimeout(function () {
         toast.classList.add('leaving');
         _rickieReactionRemoveTimer = setTimeout(function () {
             toast.hidden = true;
             toast.classList.remove('leaving');
+            // A short beat between reactions, so two celebrations read as two
+            // moments rather than one flickering element.
+            setTimeout(_playNextRickieToast, 280);
         }, 300);
     }, displayMs);
 }
+
+// A milestone used to unlock in silence -- the only way to find out you had
+// passed 100 exercises was to open the Memory Book later and notice a line had
+// changed. These are rare by design (the nearest is 100 exercises, roughly
+// three weeks in), so they get their own beat rather than being folded into the
+// completion toast, and they wait for that toast to clear so two celebrations
+// don't stack on top of each other.
+var _challengePhotoFilter = null;
+
+// Earning something should say what it unlocked. Without this a person finished
+// a mission, quietly gained a filter, and only met it later three taps deep in
+// a composer.
+function _announceFilters(filters) {
+    if (!filters || !filters.length) return;
+    if (!_rickieAllowsReaction(true)) return;
+    filters.forEach(function (f) {
+        showRickieReaction('New filter: ' + f.name, {
+            badge: '\uD83D\uDCF8 ' + f.blurb,
+            celebrate: true,
+        });
+    });
+}
+
+function _announceMilestones(milestones) {
+    if (!milestones || !milestones.length) return;
+    if (!_rickieAllowsReaction(true)) return;   // milestone-significant: quiet mode still shows these
+
+    milestones.forEach(function (m) {
+        showRickieReaction(_pickRickieLine('milestoneUnlocked'), {
+            badge: '\uD83C\uDFC5 ' + m.label + ' unlocked',
+            celebrate: true,
+            confetti: true,
+        });
+    });
+}
+
 
 // ── Rickie's Memory Book ────────────────────────────────────────────────────────
 // This is a scrapbook, not a stats page. Memories lead; numbers only ever
@@ -1574,6 +3702,18 @@ var MEMORY_CATEGORY_LABELS = {
 var MEMORY_MILESTONE_COPY = {
     first_mission:    { unlocked: "🎉 Your first mission — that's when this all began.",
                          locked:  "Your first mission is still ahead." },
+    days_3:           { unlocked: "🎉 Three days of showing up. That's the hard part started.",
+                         locked:  "days here so far, on the way to three." },
+    exercises_25:     { unlocked: "🎉 25 exercises done. Properly under way now.",
+                         locked:  "exercises completed so far, on the way to 25." },
+    streak_7:         { unlocked: "🎉 A full week in a row. Your best streak yet stands at seven.",
+                         locked:  "days in your best streak so far, on the way to seven." },
+    brain_boost_10:   { unlocked: "🎉 10 Brain Boost questions answered. You're curious.",
+                         locked:  "Brain Boost questions answered so far, on the way to 10." },
+    exercises_50:     { unlocked: "🎉 50 exercises done. Halfway to a hundred.",
+                         locked:  "exercises completed so far, on the way to 50." },
+    streak_14:        { unlocked: "🎉 Two weeks in a row, at your best. That's a habit.",
+                         locked:  "days in your best streak so far, on the way to fourteen." },
     exercises_100:    { unlocked: "🎉 100 exercises completed. That adds up to something real.",
                          locked:  "exercises completed so far, on the way to 100." },
     exercises_500:    { unlocked: "🎉 500 exercises completed. That's a lot of showing up.",
@@ -1732,12 +3872,16 @@ function _mbBuildNotes(data) {
     if (lifetime.missions_completed >= 1) {
         notes.push("Rickie remembers your first mission — that's when this all started.");
     }
+    // "Done most often", not "your favourite". The app picks the five daily
+    // moves, so the user never chose one — a preference claim was never
+    // something this data could support, however much data there is.
     if (favorites.favorite_exercise) {
-        notes.push("Your favorite move seems to be " + favorites.favorite_exercise + ". Rickie's noticed.");
+        notes.push("You've done " + favorites.favorite_exercise
+            + " more than anything else so far.");
     }
     if (favorites.favorite_category) {
         var label = MEMORY_CATEGORY_LABELS[favorites.favorite_category] || favorites.favorite_category;
-        notes.push("You gravitate toward " + label + " days.");
+        notes.push("Most of your moves so far have been " + label + ".");
     }
     if (lifetime.days_active >= 1) {
         notes.push("You've shown up on " + lifetime.days_active +
@@ -1926,15 +4070,94 @@ async function api(path, method, body) {
         return null;
     }
 
-    var data = await res.json();
+    // Not every response is JSON, and the ones that are not are exactly the
+    // ones that arrive when something has gone wrong: a platform 502, a
+    // gateway timeout, a proxy error page. Unguarded, res.json() rejects,
+    // nothing catches it — the try above only wraps the fetch itself — and the
+    // caller gets an unhandled rejection. That is the same failure shape as
+    // the Side Quest regression: a button that silently does nothing.
+    var data;
+    try {
+        data = await res.json();
+    } catch (err) {
+        data = {
+            error: res.status >= 500
+                ? 'Something went wrong at our end. Try again in a moment.'
+                : 'That did not go through. Try again in a moment.'
+        };
+    }
     return { status: res.status, data: data };
 }
 
 // ── View helpers ──────────────────────────────────────────────────────────────
 
+
+// ── Panes ─────────────────────────────────────────────────────────────────────
+//
+// Three sections of one page, switched with a data attribute the stylesheet
+// reads. Nothing is unmounted: five separate render paths write into these
+// regions in a single pass and several of them never run a second time, so
+// removing a section from the DOM is how you end up with a Journey card that
+// can never come back. The problem worth solving was scroll length — the home
+// screen measured 2,800-3,200px at phone width, with the mission card alone
+// accounting for half of it — and display:none solves that without touching
+// anything else.
+//
+// Team is deliberately NOT a permanent tab. It appears once the person
+// actually has a team; before that there is one quiet row at the foot of
+// Progress. A standing tab labelled Team is a daily nudge at someone who has
+// chosen not to use it, and the solo experience is meant to be whole on its
+// own rather than a version of the app with a gap in it.
+
+function showPane(name) {
+    var main = document.querySelector('main.container');
+    if (!main) return;
+    if (name === 'team' && document.getElementById('pane-nav-team').hidden) name = 'progress';
+    main.dataset.pane = name;
+    var buttons = document.querySelectorAll('.pane-nav-btn');
+    for (var i = 0; i < buttons.length; i++) {
+        var on = buttons[i].dataset.paneTarget === name;
+        buttons[i].classList.toggle('is-active', on);
+        if (on) { buttons[i].setAttribute('aria-current', 'page'); }
+        else { buttons[i].removeAttribute('aria-current'); }
+    }
+    window.scrollTo(0, 0);
+}
+
+// Called whenever the teams list is known. A person who leaves their last team
+// gets the tab back off them, and lands on Progress rather than on a pane that
+// has just stopped existing.
+function updateTeamPaneVisibility(teamCount) {
+    var tab = document.getElementById('pane-nav-team');
+    var invite = document.getElementById('solo-team-invite');
+    if (!tab) return;
+    var has = teamCount > 0;
+    tab.hidden = !has;
+    if (invite) invite.hidden = has || isGuest;
+    var main = document.querySelector('main.container');
+    if (!has && main && main.dataset.pane === 'team') showPane('progress');
+}
+
+document.addEventListener('click', function (e) {
+    var btn = e.target.closest && e.target.closest('.pane-nav-btn');
+    if (btn) showPane(btn.dataset.paneTarget);
+    // Asking for it is what makes the tab appear. Until then the Team pane is
+    // reachable but not advertised — the difference between available and
+    // suggested, which is the whole point of keeping it conditional.
+    var invite = e.target.closest && e.target.closest('#solo-team-invite-btn');
+    if (invite) {
+        var teamTab = document.getElementById('pane-nav-team');
+        if (teamTab) teamTab.hidden = false;
+        showPane('team');
+    }
+});
+
 function showView(name) {
     document.getElementById('auth-view').hidden      = (name !== 'auth');
     document.getElementById('dashboard-view').hidden = (name !== 'dashboard');
+    // Rickie lives on the dashboard. He has no business on the sign-up form,
+    // where the only thing that matters is the two fields in front of you.
+    if (name === 'dashboard' && window.RickieRoam) window.RickieRoam.mount();
 }
 
 // ── Settings menu ─────────────────────────────────────────────────────────────
@@ -1996,6 +4219,18 @@ function handleGuestMode() {
     showView('dashboard');
 }
 
+// Leaving guest mode with intent. handleExitGuest drops you on the LOGIN tab,
+// which is the wrong one for somebody who has just decided to start.
+function handleGuestSignup() {
+    isGuest = false;
+    guestCompleted = new Set();
+    guestCompleteFired = false;
+    setGuestUI(false);
+    clearErrors();
+    showTab('register');
+    showView('auth');
+}
+
 function handleExitGuest() {
     isGuest = false;
     guestCompleted = new Set();
@@ -2021,6 +4256,23 @@ function setGuestUI(guest) {
     // Coach memory is per-account server state — guests have none, so hide it.
     var forgetRow = document.getElementById('settings-row-forget');
     if (forgetRow) forgetRow.hidden = guest;
+
+    // Same reason: a display name is stored on the account. Hide the help line
+    // with it, or a guest gets a stray sentence about a control that is gone.
+    var nameRow = document.getElementById('settings-row-name');
+    if (nameRow) nameRow.hidden = guest;
+    var nameHelp = document.getElementById('display-name-help');
+    if (nameHelp) nameHelp.hidden = guest;
+
+    // "Download my data" and "Delete my account" were offered to guests, who
+    // have neither. An independent reviewer found the download returning
+    // "Couldn't get it." and the delete button doing nothing at all — no
+    // modal, no message, not even a console error. Both are account
+    // operations; a guest has no account for them to operate on.
+    var dataRow = document.getElementById('settings-row-yourdata');
+    if (dataRow) dataRow.hidden = guest;
+    var deleteRow = document.getElementById('settings-row-delete');
+    if (deleteRow) deleteRow.hidden = guest;
 
     var sideQuests = document.getElementById('side-quests-section');
     if (sideQuests) sideQuests.hidden = guest;
@@ -2128,11 +4380,36 @@ async function loadUserPreferences() {
     var result = await api('/api/me');
     if (!result || result.status !== 200) return;
     currentUser = result.data;
+    refreshModerationVisibility();
     applyTheme(result.data.display_mode);
     var sel = document.getElementById('skill-level-select');
     if (sel && result.data.skill_level) sel.value = result.data.skill_level;
     var rickieSel = document.getElementById('rickie-mode-select');
     if (rickieSel && result.data.rickie_mode) rickieSel.value = result.data.rickie_mode;
+    _syncDisplayNameField();
+}
+
+// The field shows what the USER set, which is not the same as what Rickie
+// actually calls them: an unset name falls back to the username only when the
+// username already looks like a name. Showing the fallback in the box would
+// make a blank field look filled in, and then clearing it would look broken.
+function _syncDisplayNameField() {
+    var input = document.getElementById('display-name-input');
+    if (!input || !currentUser) return;
+    input.value = currentUser.display_name || '';
+    var help = document.getElementById('display-name-help');
+    if (!help) return;
+    var calls = currentUser.rickie_calls_you;
+    if (!calls) {
+        help.textContent = "Not your login. Rickie isn't using a name for you.";
+    } else if (!currentUser.display_name && calls === currentUser.username) {
+        // The fallback IS the login, so "Not your login" contradicted the very
+        // next clause. Say what is actually happening instead.
+        help.textContent = 'Rickie is using your username, "' + calls
+            + '". Type something here if you would rather he used that.';
+    } else {
+        help.textContent = 'Not your login. Rickie calls you "' + calls + '".';
+    }
 }
 
 var THEME_COLORS = { game: '#4338ca', bright: '#0891b2', classic: '#4f46e5' };
@@ -2159,6 +4436,29 @@ async function handleDisplayModeChange(mode) {
         // Server rejected it — reload preferences to restore correct state
         await loadUserPreferences();
     }
+}
+
+// Set, change, or clear. An empty box is a deliberate choice, not a no-op:
+// it clears the stored name and Rickie goes back to using none.
+async function handleDisplayNameChange(value) {
+    var input = document.getElementById('display-name-input');
+    var help = document.getElementById('display-name-help');
+    var result = await api('/api/me', 'PATCH', { display_name: value });
+    if (!result) return;
+    if (result.status !== 200) {
+        // Say what was wrong and put the box back to the stored value, rather
+        // than leaving a rejected string sitting there looking saved.
+        if (help) {
+            help.textContent = (result.data && result.data.error)
+                || "That name didn't work — try a shorter one.";
+            help.classList.add('settings-help-error');
+        }
+        if (input && currentUser) input.value = currentUser.display_name || '';
+        return;
+    }
+    if (help) help.classList.remove('settings-help-error');
+    currentUser = Object.assign(currentUser || {}, result.data);
+    _syncDisplayNameField();
 }
 
 async function handleRickieModeChange(mode) {
@@ -2236,6 +4536,18 @@ async function loadDailyExercises() {
         currentRickieExpression = getRickieExpression({ type: 'guest_mode' });
     } else if (daily.rise_again) {
         currentRickieExpression = getRickieExpression({ type: 'returning_user' });
+    } else if (Date.now() < _expressionHoldUntil) {
+        // A celebration set his face moments ago. This re-render runs 480ms
+        // after a completion, and resetting here is why the whole expression
+        // language was effectively invisible: Rickie went happy and then
+        // straight back to neutral before anyone could see it.
+        /* keep what the celebration set */
+    } else if (daily.completed_count >= 5) {
+        // Finished today. He stays pleased about it for the rest of the day
+        // rather than snapping back to a blank stare.
+        currentRickieExpression = 'proud';
+    } else if ((currentUser && currentUser.current_streak) >= 3) {
+        currentRickieExpression = 'happy';
     } else {
         currentRickieExpression = getRickieExpression({ type: 'idle_dashboard' });
     }
@@ -2266,56 +4578,25 @@ async function loadDailyExercises() {
     // Varies by time of day (and by guest vs. registered) instead of a single
     // fixed line every visit — small thing, but it's the difference between
     // software and a companion who's actually there in the moment.
-    var rickieIntro = document.getElementById('rickie-mission-intro');
-    if (rickieIntro) {
-        rickieIntro.hidden = daily.completed_count >= 5;
-        var introTextEl = document.getElementById('rickie-intro-text');
-        if (introTextEl && !rickieIntro.hidden) {
-            if (_rickieMode() === 'minimal') {
-                // No personality greeting — plain functional line only.
-                introTextEl.textContent = 'Complete today’s mission and come see me afterward.';
-            } else {
-                // Picked once per page load and reused across re-renders (e.g.
-                // after each of exercises 1-4) so the greeting doesn't flicker
-                // to a new line after every click — just once per visit.
-                if (!_cachedGreetingLine) {
-                    var greetingPool = isGuest ? 'guest' : _rickieTimeOfDayPool();
-                    _cachedGreetingLine = _pickRickieLine(greetingPool);
-                }
-                introTextEl.textContent = _cachedGreetingLine + ' Complete today’s mission and come see me afterward.';
-            }
-        }
-    }
+    _renderTodayStrip(daily);
 
     // Populate streak helper text (below progress bar, hidden when mission complete)
     var helperEl = document.getElementById('daily-streak-helper');
     if (helperEl) {
         if (daily.completed_count < 5) {
-            var helperStreak = (currentUser && currentUser.current_streak) || 0;
-            helperEl.textContent = helperStreak > 0
-                ? 'Complete all 5 to keep your streak'
-                : 'Complete all 5 to start your streak';
+            // The today strip above already carries the streak, so this says
+            // what is left to do rather than repeating the number a third time.
+            helperEl.textContent = 'Five small moves. Any order.';
             helperEl.hidden = false;
         } else {
             helperEl.hidden = true;
         }
     }
 
-    // Populate streak badge (hidden when streak is 0)
-    var streakBadge = document.getElementById('daily-streak-badge');
-    if (streakBadge) {
-        var streak = (currentUser && currentUser.current_streak) || 0;
-        if (streak > 0) {
-            // Days 1–6: journey framing ("Day N") — you are at a point on a path
-            // Day 7+:   record framing ("N days") — you have built something
-            streakBadge.textContent = streak <= 6
-                ? '🔥 Day ' + streak
-                : '🔥 ' + streak + ' days';
-            streakBadge.hidden = false;
-        } else {
-            streakBadge.hidden = true;
-        }
-    }
+    // The streak badge that used to sit in the mission card is gone entirely —
+    // the today strip above states the streak once, at the size it deserves.
+    // It was being said three times on one screen: badge, helper line, stats
+    // row. The markup went with it rather than staying as hidden furniture.
 
     // Populate stats row (current streak · best streak · total missions)
     var statsRow = document.getElementById('daily-stats-row');
@@ -2327,13 +4608,18 @@ async function loadDailyExercises() {
         // "you're behind" on a screen that should feel like a fresh start. The
         // streak helper below the bar carries the message until there's real
         // progress worth showing.
-        if (cs > 0 || bs > 0 || tm > 0) {
-            document.getElementById('stat-current-streak').textContent  =
-                '🔥 ' + cs + (cs === 1 ? ' day' : ' days');
+        if (bs > 0 || tm > 0) {
+            // Current streak is omitted here — the today strip owns it. What is
+            // left is the longer story: the best run so far, and the total.
+            document.getElementById('stat-current-streak').textContent =
+                '\uD83C\uDFC5 Best: ' + bs + (bs === 1 ? ' day' : ' days');
             document.getElementById('stat-best-streak').textContent =
-                '🏅 Best: ' + bs + (bs === 1 ? ' day' : ' days');
-            document.getElementById('stat-total-missions').textContent =
-                '✓ ' + tm + (tm === 1 ? ' mission' : ' missions');
+                '\u2713 ' + tm + (tm === 1 ? ' mission' : ' missions');
+            document.getElementById('stat-total-missions').textContent = '';
+            // Hide the separator that belonged to the third stat, or the row
+            // ends on a stray dot.
+            var seps = statsRow.querySelectorAll('.daily-stat-sep');
+            if (seps.length > 1) seps[seps.length - 1].hidden = true;
             statsRow.hidden = false;
         } else {
             statsRow.hidden = true;
@@ -2351,6 +4637,8 @@ async function loadDailyExercises() {
         if (daily.completed_count === 5) bar.classList.add('complete');
         else bar.classList.remove('complete');
     }
+
+    renderEffortChoice(daily);
 
     // Update count badge
     var badge = document.getElementById('daily-count-badge');
@@ -2410,8 +4698,9 @@ async function loadDailyExercises() {
         rBtn.addEventListener('click', function () {
             localStorage.setItem('rise_again_dismissed', daily.date);
             list.removeChild(ceremony);
+            var nextKey = (daily.exercises.find(function (e) { return !e.completed; }) || {}).key;
             daily.exercises.forEach(function (ex) {
-                list.appendChild(renderDailyExercise(ex));
+                list.appendChild(renderDailyExercise(ex, ex.key === nextKey));
             });
             var pt = document.getElementById('daily-progress-text');
             if (pt) pt.textContent = daily.completed_count + ' / 5 completed';
@@ -2425,6 +4714,51 @@ async function loadDailyExercises() {
         ceremony.appendChild(rBtn);
         list.appendChild(ceremony);
         return;
+    }
+
+    // "The next level exists." Shown once per person, dismissible, and never
+    // again — it is an offer, and an offer repeated daily is a nag. Nothing in
+    // the app changes if it is ignored.
+    if (daily.tier_readiness && localStorage.getItem('tier_readiness_seen') !== daily.tier_readiness.next_level) {
+        var ready = document.createElement('div');
+        ready.className = 'tier-readiness';
+
+        var readyTitle = document.createElement('p');
+        readyTitle.className = 'tier-readiness-title';
+        readyTitle.textContent = 'Whenever you like';
+
+        var readyBody = document.createElement('p');
+        readyBody.className = 'tier-readiness-body';
+        readyBody.textContent = daily.tier_readiness.message;
+
+        var readyRow = document.createElement('div');
+        readyRow.className = 'tier-readiness-row';
+
+        var readyGo = document.createElement('button');
+        readyGo.className = 'btn-primary';
+        readyGo.textContent = 'Take a look';
+        readyGo.addEventListener('click', function () {
+            localStorage.setItem('tier_readiness_seen', daily.tier_readiness.next_level);
+            ready.remove();
+            toggleSettings(true);
+            var sel = document.getElementById('skill-level-select');
+            if (sel) { sel.focus(); sel.scrollIntoView({ block: 'center' }); }
+        });
+
+        var readyNo = document.createElement('button');
+        readyNo.className = 'btn-secondary';
+        readyNo.textContent = "I'm happy here";
+        readyNo.addEventListener('click', function () {
+            localStorage.setItem('tier_readiness_seen', daily.tier_readiness.next_level);
+            ready.remove();
+        });
+
+        readyRow.appendChild(readyGo);
+        readyRow.appendChild(readyNo);
+        ready.appendChild(readyTitle);
+        ready.appendChild(readyBody);
+        ready.appendChild(readyRow);
+        list.appendChild(ready);
     }
 
     if (daily.completed_count === 5) {
@@ -2488,9 +4822,11 @@ async function loadDailyExercises() {
         }
     }
 
-    // Render exercises
+    // Render exercises. The first undone one is marked so the eye has somewhere
+    // to land; every one of them stays tappable in any order.
+    var _nextUndoneKey = (daily.exercises.find(function (e) { return !e.completed; }) || {}).key;
     daily.exercises.forEach(function (ex) {
-        list.appendChild(renderDailyExercise(ex));
+        list.appendChild(renderDailyExercise(ex, ex.key === _nextUndoneKey));
     });
 
     // Before completion, tease what's coming so a first-timer knows Insight and
@@ -2624,16 +4960,28 @@ function renderInsightCard(insight) {
     teaserAvatar.src = '/static/rickie.svg';
     teaserAvatar.alt = 'Rickie';
 
+    // The slot rotates across kinds of discovery now, so the teaser says which
+    // one is behind it. "Rickie found today's Insight" in front of a riddle
+    // reads as a mislabel, and the tease is the whole point of the card.
+    var KINDS = {
+        fact:       { tease: "Rickie found something out.",      label: 'Did you know' },
+        movement:   { tease: "Rickie found something out.",      label: 'Did you know' },
+        riddle:     { tease: "Rickie has a riddle for you.",     label: 'Riddle' },
+        experiment: { tease: "Rickie wants you to try something.", label: 'Try this' },
+        rickie:     { tease: "Rickie has an opinion.",           label: 'Rickie says' }
+    };
+    var kind = KINDS[insight.type] || KINDS.fact;
+
     var teaserText = document.createElement('p');
     teaserText.className = 'insight-teaser-text';
-    teaserText.textContent = '🦝 Rickie found today\'s Insight...';
+    teaserText.textContent = '🦝 ' + kind.tease;
 
     teaserTop.appendChild(teaserAvatar);
     teaserTop.appendChild(teaserText);
 
     var revealBtn = document.createElement('button');
     revealBtn.className = 'insight-reveal-btn';
-    revealBtn.textContent = 'Reveal Insight';
+    revealBtn.textContent = insight.type === 'riddle' ? 'Hear the riddle' : 'Reveal';
 
     teaser.appendChild(teaserTop);
     teaser.appendChild(revealBtn);
@@ -2644,16 +4992,42 @@ function renderInsightCard(insight) {
 
     var category = document.createElement('p');
     category.className = 'insight-category';
-    category.textContent = insight.category;
-
-    var text = document.createElement('p');
-    text.className = 'insight-text';
-    text.textContent = insight.text;
+    category.textContent = kind.label;
 
     revealed.appendChild(category);
-    revealed.appendChild(text);
 
-    if (!isGuest) {
+    if (insight.type === 'riddle') {
+        // The answer is stored after a blank line. Showing both at once is
+        // just telling somebody a fact in the shape of a question.
+        var parts = insight.text.split('\n\n');
+        var riddleQ = document.createElement('p');
+        riddleQ.className = 'insight-text';
+        riddleQ.textContent = parts[0];
+        revealed.appendChild(riddleQ);
+
+        var answer = document.createElement('p');
+        answer.className = 'insight-text insight-riddle-answer';
+        answer.textContent = parts.slice(1).join('\n\n');
+        answer.hidden = true;
+
+        var showAnswer = document.createElement('button');
+        showAnswer.className = 'insight-tell-more';
+        showAnswer.textContent = 'Give up? →';
+        showAnswer.addEventListener('click', function () {
+            answer.hidden = false;
+            showAnswer.remove();
+        });
+        revealed.appendChild(answer);
+        revealed.appendChild(showAnswer);
+    } else {
+        var text = document.createElement('p');
+        text.className = 'insight-text';
+        text.textContent = insight.text;
+        revealed.appendChild(text);
+    }
+
+    if (!isGuest && (insight.type === 'fact' || insight.type === 'movement'
+                     || insight.type === 'experiment')) {
         var tellMore = document.createElement('button');
         tellMore.className = 'insight-tell-more';
         tellMore.textContent = 'Tell me more →';
@@ -2763,7 +5137,12 @@ function renderBrainBoostQuestion(brainBoost) {
             explanation.hidden = false;
         }
 
-        pointsNote.textContent = '+' + points + ' points';
+        // "XP", not "points". The same award was announced as "+3 points"
+        // inline and "+3 XP" in the toast a second later, which reads as two
+        // different currencies to anybody not reading the source. The app has
+        // two real currencies already (XP and acorns); it does not need a
+        // third name for one of them.
+        pointsNote.textContent = '+' + points + ' XP';
         pointsNote.hidden = false;
     }
 
@@ -2796,6 +5175,10 @@ function renderBrainBoostQuestion(brainBoost) {
                 if ((summary.xp > 0 || summary.acorns > 0) && _rickieMode() === 'full') {
                     var poolKey = result.data.correct ? 'brainBoostCorrect' : 'brainBoostIncorrect';
                     showRickieReaction(_pickRickieLine(poolKey), summary);
+                    if (window.RickieRoam) {
+                        window.RickieRoam.react(result.data.correct
+                            ? 'answered_right' : 'answered_wrong');
+                    }
                     // Only "correct" has a defined expression mapping — incorrect
                     // answers leave the current expression as-is rather than
                     // inventing an unspecified one.
@@ -2804,6 +5187,12 @@ function renderBrainBoostQuestion(brainBoost) {
                         _applyRickieExpression();
                     }
                 }
+
+                // A milestone crossed here (100 Brain Boosts, or a level/XP
+                // threshold the answer pushed past) is announced even in quiet
+                // mode -- it is milestone-significant, unlike the answer itself.
+                _announceMilestones(result.data.milestones_unlocked);
+            _announceFilters(result.data.filters_unlocked);
 
                 // Brain Boost now awards XP/acorns too, so refresh from /api/me
                 // rather than hand-patching a single counter.
@@ -4285,9 +6674,79 @@ var COACH_DATA = {
     }
 };
 
-function renderDailyExercise(ex) {
+// ── How hard today should be ────────────────────────────────────────────────
+//
+// The app asks because it genuinely cannot know. A completion records a user,
+// a date and an exercise key — nothing about whether it was hard, whether it
+// was finished comfortably, or whether the person has a knee that decides
+// these things for them. Difficulty used to escalate on its own once someone
+// had finished fourteen missions, which treated being consistent as evidence
+// of being ready for more, and those are different facts about a person.
+//
+// Every option is worth exactly the same XP. The moment a harder choice pays
+// better it stops being a question about today and becomes something you are
+// losing by not picking.
+
+var _effortBusy = false;
+
+function renderEffortChoice(daily) {
+    var wrap = document.getElementById('daily-effort');
+    var optionsWrap = document.getElementById('daily-effort-options');
+    var noteEl = document.getElementById('daily-effort-note');
+    if (!wrap || !optionsWrap || !daily.effort) return;
+    if (isGuest || !daily.effort.show) { wrap.hidden = true; return; }
+
+    wrap.hidden = false;
+    noteEl.hidden = !daily.effort.note;
+    noteEl.textContent = daily.effort.note || '';
+
+    optionsWrap.innerHTML = '';
+    daily.effort.options.forEach(function (opt) {
+        var btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'effort-btn' + (opt.level === daily.effort.level ? ' is-on' : '');
+        btn.setAttribute('role', 'radio');
+        btn.setAttribute('aria-checked', String(opt.level === daily.effort.level));
+        btn.title = opt.note;
+
+        var label = document.createElement('span');
+        label.className = 'effort-btn-label';
+        label.textContent = opt.label;
+        btn.appendChild(label);
+
+        btn.addEventListener('click', function () { setEffort(opt.level); });
+        optionsWrap.appendChild(btn);
+    });
+}
+
+async function setEffort(level) {
+    if (_effortBusy) return;
+    _effortBusy = true;
+    try {
+        var result = await api('/api/daily/effort', 'PUT', { level: level });
+        if (result && result.status === 409) {
+            // Asking for MORE once the mission has been started would change
+            // the five exercises underneath completions that already exist.
+            // Easing off is always allowed; this only ever fires upward.
+            var note = document.getElementById('daily-effort-note');
+            if (note) {
+                note.hidden = false;
+                note.textContent = (result.data && result.data.message)
+                    || "You're partway through today — a bigger day is there tomorrow.";
+            }
+            return;
+        }
+        await loadDailyExercises();
+    } finally {
+        _effortBusy = false;
+    }
+}
+
+
+function renderDailyExercise(ex, isNext) {
     var row = document.createElement('div');
-    row.className = 'daily-exercise-row' + (ex.completed ? ' daily-exercise-done' : '');
+    row.className = 'daily-exercise-row' + (ex.completed ? ' daily-exercise-done' : '')
+        + (isNext ? ' is-next' : '');
 
     // ── Exercise info (name + reps + how-to toggle) ──────────────────────────────
     var info = document.createElement('div');
@@ -4297,9 +6756,19 @@ function renderDailyExercise(ex) {
     name.className = 'daily-exercise-name';
     name.textContent = ex.name; // textContent — never innerHTML
 
+    // Category and prescription share one line. The category used to have a
+    // pill on a line of its own, which cost 21px per row for a word most
+    // people read once.
     var meta = document.createElement('span');
     meta.className = 'daily-exercise-meta';
-    meta.textContent = ex.reps_or_duration;
+    var catTag = document.createElement('span');
+    catTag.className = 'daily-category-tag ' + (CATEGORY_PILL[ex.category] || '');
+    catTag.textContent = ex.category.replace(/_/g, ' ');
+    var metaText = document.createElement('span');
+    metaText.className = 'daily-exercise-reps';
+    metaText.textContent = ex.reps_or_duration;
+    meta.appendChild(catTag);
+    meta.appendChild(metaText);
 
     var howBtn = document.createElement('button');
     howBtn.className = 'btn-how-to';
@@ -4316,15 +6785,71 @@ function renderDailyExercise(ex) {
     linkRow.appendChild(howBtn);
     linkRow.appendChild(coachLink);
 
-    info.appendChild(name);
-    info.appendChild(meta);
-    info.appendChild(linkRow);
+    // The illustration was only ever visible after tapping "How to do this",
+    // so the mission read as a wall of text -- a poor showing for 90 drawings,
+    // and hard going for the youngest users the app is built for. Showing it
+    // inline makes the row scannable at a glance. It opens the same Exercise
+    // Tips content as the button, because a picture is the thing a child taps.
+    var thumbBtn = document.createElement('button');
+    thumbBtn.type = 'button';
+    thumbBtn.className = 'daily-exercise-thumb-btn';
+    thumbBtn.setAttribute('aria-label', 'How to do ' + ex.name);
+    thumbBtn.addEventListener('click', function () { openExerciseModal(ex); });
 
-    // ── Category pill ──────────────────────────────────────────────────────────────────────
-    var cat = document.createElement('span');
-    var pillClass = CATEGORY_PILL[ex.category] || '';
-    cat.className = 'daily-category-pill ' + pillClass;
-    cat.textContent = ex.category.replace(/_/g, ' ');
+    var thumb = document.createElement('img');
+    thumb.className = 'daily-exercise-thumb';
+    thumb.src = ex.image_url;
+    thumb.alt = '';               // decorative: the name sits right beside it
+    thumb.loading = 'lazy';
+    thumb.decoding = 'async';
+    thumbBtn.appendChild(thumb);
+
+    var infoText = document.createElement('div');
+    infoText.className = 'daily-exercise-text';
+    infoText.appendChild(name);
+    infoText.appendChild(meta);
+
+    // A movement borrowed from the level above. Said out loud, because a
+    // harder exercise turning up unannounced reads as the app getting it
+    // wrong rather than as progress.
+    if ((ex.from_next_tier || ex.from_easier_tier) && isNext) {
+        var flag = document.createElement('span');
+        flag.className = 'daily-exercise-flag';
+        flag.textContent = ex.from_next_tier
+            ? 'A step up — from the next level'
+            : 'A gentler one — from the level below';
+        infoText.appendChild(flag);
+    }
+
+    // The optional bigger version. Never replaces the prescription above it:
+    // the mission is complete either way, and this is an offer, so it reads
+    // as one.
+    if (ex.step_up && !ex.completed && isNext) {
+        var more = document.createElement('button');
+        more.type = 'button';
+        more.className = 'daily-exercise-stepup';
+        more.textContent = 'Want a little more? ' + ex.step_up;
+        more.addEventListener('click', function () {
+            meta.textContent = ex.step_up;
+            more.remove();
+        });
+        infoText.appendChild(more);
+    }
+
+    // Progressive disclosure, and the reason it is safe: the how-to controls
+    // are expanded on the exercise you are ABOUT TO DO, which is the one where
+    // form and safety actually matter, and they cost 44px on one row instead
+    // of on five. On the other four the illustration is still a button whose
+    // label is "How to do <name>", so nothing is unreachable and nothing is
+    // hidden from a beginner — the row for the movement in front of them is
+    // always the expanded one, and it moves down as they work through it.
+    // Appended to the ROW rather than the text column, so it gets the full
+    // card width and sits on one line — nested inside the narrower column the
+    // two chips wrapped and cost 94px instead of 44px.
+    var showDetails = isNext && !ex.completed;
+
+    info.appendChild(thumbBtn);
+    info.appendChild(infoText);
 
     // ── "I did this" / Done button ───────────────────────────────────────────────────────────────
     var btn = document.createElement('button');
@@ -4363,9 +6888,17 @@ function renderDailyExercise(ex) {
         howBtn.setAttribute('aria-expanded', String(opening));
     };
 
-    row.appendChild(info);
-    row.appendChild(cat);
-    row.appendChild(btn);
+    // The row is a column of at most three things: the main line (illustration,
+    // name, prescription, button — always one line), then the how-to controls
+    // and the instructions panel, which only exist on the exercise in front of
+    // you and get the full card width when they do.
+    var mainLine = document.createElement('div');
+    mainLine.className = 'daily-exercise-main';
+    mainLine.appendChild(info);
+    mainLine.appendChild(btn);
+
+    row.appendChild(mainLine);
+    if (showDetails) row.appendChild(linkRow);
     row.appendChild(instrPanel); // wraps to full width via flex-wrap
     return row;
 }
@@ -4378,6 +6911,24 @@ async function handleCompleteExercise(key, btn, row) {
 
     if (isGuest) {
         guestCompleted.add(key);
+        // A guest doing the exact same thing as a registered user used to get
+        // none of the response: no Rickie line, no confetti, not even on 5/5 --
+        // the one moment that is supposed to make signing up feel worth it was
+        // the weakest version of itself. There is no XP to report for a guest,
+        // and showRickieReaction already omits that line when there is nothing
+        // to say, so the moment lands without promising numbers we aren't
+        // keeping for them.
+        var guestDone = guestCompleted.size >= 5;
+        showRickieReaction(_pickRickieLine(guestDone ? 'perfectMission' : 'missionComplete'),
+                           { confetti: guestDone, celebrate: guestDone });
+        if (guestDone) {
+            currentRickieExpression = getRickieExpression({
+                type: 'mission_complete', perfectMission: true
+            });
+        } else {
+            currentRickieExpression = getRickieExpression({ type: 'mission_complete' });
+        }
+        _applyRickieExpression();
         setTimeout(function () { loadDailyExercises(); }, 480);
         return;
     }
@@ -4394,34 +6945,44 @@ async function handleCompleteExercise(key, btn, row) {
         var summary = _summarizeProgress(result.data);
         var isMilestoneMoment = result.data.completed_count === 5 || summary.leveledUp;
         var allowsReaction = _rickieAllowsReaction(isMilestoneMoment);
-        if (summary.xp > 0 || summary.acorns > 0) {
-            if (allowsReaction) {
-                var poolKey = 'missionComplete';
-                var wasFirstMission = result.data.completed_count === 5 && wasFirstMissionEver;
-                var wasPerfectMission = result.data.completed_count === 5;
-                if (wasFirstMission) {
-                    poolKey = 'firstMission';
-                } else if (wasPerfectMission) {
-                    poolKey = 'perfectMission';
-                }
-                showRickieReaction(_pickRickieLine(poolKey), summary);
-                // Confetti only for the moments that have earned it: a full
-                // mission or a level-up. The badge is the natural origin point.
-                if (wasPerfectMission || summary.leveledUp) {
-                    fireConfetti(document.getElementById('daily-count-badge'));
-                }
-                currentRickieExpression = getRickieExpression({
-                    type: 'mission_complete',
-                    firstMissionEver: wasFirstMission,
-                    leveledUp: summary.leveledUp,
-                    perfectMission: wasPerfectMission
-                });
-            } else {
-                currentRickieExpression = 'neutral';
+        // Whether Rickie reacts is decided by Rickie's mode alone -- never by
+        // whether the completion happened to pay XP. `new_exercise` only pays
+        // the first time ever, so from day 2 on a returning user earns 0 XP on
+        // taps 1-4; gating the reaction on XP made Rickie silent for four of
+        // every five taps, which is the opposite of a companion who is glad you
+        // showed up. showRickieReaction() already hides the "+XP" line when
+        // there is nothing to report, so a zero-XP completion still gets a line.
+        if (allowsReaction) {
+            var poolKey = 'missionComplete';
+            var wasFirstMission = result.data.completed_count === 5 && wasFirstMissionEver;
+            var wasPerfectMission = result.data.completed_count === 5;
+            if (wasFirstMission) {
+                poolKey = 'firstMission';
+            } else if (wasPerfectMission) {
+                poolKey = 'perfectMission';
+            } else if (result.data.completed_count === 1) {
+                // Someone just started moving today. Worth its own line.
+                poolKey = 'firstMoveOfDay';
             }
-            _applyRickieExpression();
+            // Confetti only for the moments that have earned it: a full
+            // mission or a level-up. It rides on the toast so it lands with
+            // its own line rather than over whatever is currently showing.
+            summary.confetti = wasPerfectMission || summary.leveledUp;
+            showRickieReaction(_pickRickieLine(poolKey), summary);
+            currentRickieExpression = getRickieExpression({
+                type: 'mission_complete',
+                firstMissionEver: wasFirstMission,
+                leveledUp: summary.leveledUp,
+                perfectMission: wasPerfectMission
+            });
+            _holdExpression(6000);
+        } else {
+            currentRickieExpression = 'neutral';
         }
+        _applyRickieExpression();
         _applyCampfireUpdates(result.data.team_campfire_updates);
+        _announceMilestones(result.data.milestones_unlocked);
+        _announceFilters(result.data.filters_unlocked);
         // Let the flash animation play, then reload
         setTimeout(function () { loadDailyExercises(); }, 480);
     } else {
@@ -4439,13 +7000,49 @@ async function handleSkillLevelChange(value) {
 }
 
 async function loadChallenges() {
-    var result = await api('/api/challenges');
-    if (!result) return;
-
     var list = document.getElementById('challenges-list');
+    if (!list) return;
+
+    // Loading state: every other section on this page has one. Without it a
+    // slow request leaves the last render on screen with no sign anything is
+    // happening.
+    list.innerHTML = '';
+    var loading = document.createElement('div');
+    loading.className = 'state-loading';
+    var spinner = document.createElement('div');
+    spinner.className = 'spinner';
+    var loadingText = document.createElement('p');
+    loadingText.textContent = 'Loading your side quests…';
+    loading.appendChild(spinner);
+    loading.appendChild(loadingText);
+    list.appendChild(loading);
+
+    var result = await api('/api/challenges');
+
     list.innerHTML = ''; // safe: content added via createElement below
 
-    if (result.status !== 200) return;
+    // A failed fetch used to leave this section silently blank -- visually
+    // identical to "you have no side quests", so a server error read as an
+    // empty state and the user had nothing to retry.
+    if (!result || result.status !== 200) {
+        var err = document.createElement('div');
+        err.className = 'empty-state';
+
+        var errText = document.createElement('p');
+        errText.className = 'empty-sub';
+        errText.textContent = "Couldn't load your side quests — try again in a moment.";
+        err.appendChild(errText);
+
+        var retry = document.createElement('button');
+        retry.type = 'button';
+        retry.className = 'btn-primary teams-retry-btn';
+        retry.textContent = 'Retry';
+        retry.addEventListener('click', function () { loadChallenges(); });
+        err.appendChild(retry);
+
+        list.appendChild(err);
+        return;
+    }
 
     var challenges = result.data;
 
@@ -4484,7 +7081,7 @@ function renderChallenge(c) {
     var atRisk      = !alreadyDone && c.last_check_in === yesterday && c.current_streak > 0;
 
     var card = document.createElement('div');
-    card.className = 'challenge-card';
+    card.className = 'tchallenge-card';
     if (alreadyDone)          card.classList.add('done-today');
     else if (atRisk)          card.classList.add('at-risk');
     else if (c.current_streak > 0) card.classList.add('has-streak');
@@ -4493,7 +7090,7 @@ function renderChallenge(c) {
     info.className = 'challenge-info';
 
     var title = document.createElement('p');
-    title.className = 'challenge-title';
+    title.className = 'tchallenge-title';
     title.textContent = (c.current_streak > 0 ? '🔥 ' : '') + c.title; // 🔥
 
     var streakRow = document.createElement('div');
@@ -4533,13 +7130,115 @@ function renderChallenge(c) {
 
     card.appendChild(info);
     card.appendChild(btn);
+
+    // Edit — the thing a Side Quest has never had.
+    //
+    // Side Quests are the only content a person types into this app, and they
+    // were write-once: no rename, no removal, and no DELETE route to build one
+    // on. So a typo was permanent, and a habit you stopped doing sat in the
+    // list forever with "Not started" beside it — a daily reminder of a thing
+    // you gave up, inside an app whose first design rule is never to punish
+    // somebody for showing up.
+    //
+    // No confirm() anywhere: a browser modal blocks the page, and this is a
+    // habit tracker, not a bank. Removal takes a second deliberate tap on a
+    // button that has changed its own label to say exactly what it will do.
+    var editBtn = document.createElement('button');
+    editBtn.type = 'button';
+    editBtn.className = 'challenge-edit-btn';
+    editBtn.textContent = 'Edit';
+    editBtn.setAttribute('aria-label', 'Edit ' + c.title);
+    editBtn.addEventListener('click', function () {
+        if (card.querySelector('.challenge-editor')) return;
+        editBtn.hidden = true;
+        card.appendChild(_buildChallengeEditor(c, card, editBtn));
+    });
+    card.appendChild(editBtn);
     return card;
+}
+
+function _buildChallengeEditor(c, card, editBtn) {
+    var box = document.createElement('div');
+    box.className = 'challenge-editor';
+
+    var field = document.createElement('input');
+    field.type = 'text';
+    field.className = 'challenge-edit-input';
+    field.value = c.title;
+    field.maxLength = 100;
+    field.setAttribute('aria-label', 'New name for ' + c.title);
+
+    var note = document.createElement('p');
+    note.className = 'challenge-edit-note';
+
+    var save = document.createElement('button');
+    save.type = 'button';
+    save.className = 'btn-primary challenge-edit-save';
+    save.textContent = 'Save';
+    save.addEventListener('click', async function () {
+        var title = field.value.trim();
+        if (!title || title === c.title) { close(); return; }
+        save.disabled = true;
+        var r = await api('/api/challenges/' + c.id, 'PATCH', { title: title });
+        save.disabled = false;
+        if (r && r.status === 200) { await loadChallenges(); return; }
+        note.textContent = (r && r.data && r.data.error) || 'Could not rename that.';
+    });
+
+    // Two taps. Acorns get the same treatment for the same reason: an action
+    // nothing can undo should not be one tap away from an exploratory finger.
+    var pending = false;
+    var remove = document.createElement('button');
+    remove.type = 'button';
+    remove.className = 'challenge-edit-remove';
+    remove.textContent = 'Remove';
+    remove.addEventListener('click', async function () {
+        if (!pending) {
+            pending = true;
+            remove.textContent = 'Tap again to remove';
+            remove.classList.add('is-confirming');
+            note.textContent = 'Your mission streak, XP and levels are not affected.';
+            return;
+        }
+        remove.disabled = true;
+        var r = await api('/api/challenges/' + c.id, 'DELETE');
+        if (r && r.status === 200) { await loadChallenges(); return; }
+        remove.disabled = false;
+        note.textContent = 'Could not remove that — try again in a moment.';
+    });
+
+    var cancel = document.createElement('button');
+    cancel.type = 'button';
+    cancel.className = 'challenge-edit-cancel';
+    cancel.textContent = 'Cancel';
+    cancel.addEventListener('click', close);
+
+    function close() {
+        box.remove();
+        editBtn.hidden = false;
+    }
+
+    var row = document.createElement('div');
+    row.className = 'challenge-edit-row';
+    row.appendChild(save);
+    row.appendChild(cancel);
+    row.appendChild(remove);
+
+    box.appendChild(field);
+    box.appendChild(row);
+    box.appendChild(note);
+    return box;
 }
 
 async function handleCreateChallenge(event) {
     event.preventDefault();
     setError('create-error', '');
 
+    // NOT 'tchallenge-title': that prefix belongs to the TEAM challenge cards.
+    // This is the Side Quests form input, id="challenge-title" in index.html.
+    // A blanket rename caught it and broke side-quest creation silently — the
+    // handler is async, so the TypeError became an unhandled rejection rather
+    // than a visible error.
     var titleInput = document.getElementById('challenge-title');
     var title = titleInput.value.trim();
     if (!title) return;
@@ -4848,8 +7547,18 @@ function openCoach(context) {
         _coachPanel.appendChild(_coachThread);
         _coachPanel.appendChild(inputRow);
 
-        var sideQuests = document.querySelector('.side-quests-section');
-        sideQuests.parentNode.insertBefore(_coachPanel, sideQuests);
+        // Appended to the page itself rather than inserted before Side
+        // Quests. The old mount point was an unguarded
+        // `querySelector('.side-quests-section').parentNode`, which happened
+        // to keep working when Side Quests moved to the Progress pane — the
+        // panel was its sibling, not its child. That is luck, not design, and
+        // it stops being lucky the moment anyone wraps the panes in container
+        // elements. Anchoring to the page is the thing that was actually meant.
+        // No pane class on purpose: Rickie is opened from Today, from the
+        // insight card and from the Team Rickie card, and belongs in all three.
+        var host = document.querySelector('main.container');
+        if (!host) return;
+        host.appendChild(_coachPanel);
     }
 
     _coachPanel.hidden = false;
@@ -4860,8 +7569,67 @@ function openCoach(context) {
     if (context && context.type === 'insight') {
         _sendCoachMessage('Tell me more about today’s insight', context);
     } else {
+        _showCoachOpener();
         _coachInput.focus();
     }
+}
+
+// The blank page, and why it was worth fixing.
+//
+// "Ask Rickie" opened an empty thread with an "Ask Rickie…" placeholder and
+// nothing else — no greeting, no statement of what he is for, no sign that
+// he knows anything about you. A reviewer sat in front of it and could not
+// think of a question. That is the ordinary blank-page problem, except here
+// a wrong guess costs a real API call and gets a deflection back, which
+// teaches somebody that he is not much use before he has had a chance to be.
+//
+// So: one line from him, and three things to tap. Entirely local — nothing
+// here calls /api/coach until the person chooses to, so the opener is free
+// and the starters are not guesses at what he can answer, they are the
+// things his prompt is actually built to handle.
+//
+// Deliberately NOT here: anything that implies he was waiting, remembering,
+// or pleased to see you again. See the character rules — he is a companion,
+// not something you owe attention to.
+var _coachOpenerShown = false;
+
+function _coachStarters() {
+    var starters = [
+        'What should I do if a move hurts?',
+        'How do streaks work here?',
+        'What are acorns for?'
+    ];
+    // If they have a mission in front of them, the most useful question is
+    // about the thing they are about to do.
+    var next = document.querySelector('.daily-exercise-row.is-next .daily-exercise-name');
+    if (next && next.textContent.trim()) {
+        starters[0] = 'How do I do a ' + next.textContent.trim() + ' properly?';
+    }
+    return starters;
+}
+
+function _showCoachOpener() {
+    if (_coachOpenerShown || !_coachThread || _coachThread.children.length) return;
+    _coachOpenerShown = true;
+
+    _appendCoachMsg('coach',
+        'Ask me anything about StreakFit, or about moving your body. '
+        + 'If I do not know something, I will say so.');
+
+    var row = document.createElement('div');
+    row.className = 'coach-starters';
+    _coachStarters().forEach(function (q) {
+        var b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'coach-starter';
+        b.textContent = q;
+        b.addEventListener('click', function () {
+            row.remove();
+            _sendCoachMessage(q, { type: 'general' });
+        });
+        row.appendChild(b);
+    });
+    _coachThread.appendChild(row);
 }
 
 function _submitCoachMessage() {

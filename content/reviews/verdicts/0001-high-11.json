@@ -1,0 +1,84 @@
+{
+  "verdicts": [
+    {
+      "id": "SF-TRV-000176",
+      "verdict": "accept",
+      "reason": "Postural sway is continuous and largely unperceived; the correct option is true and the distractors (settling, alternating, static tension) are all plausible and none is longest or uniquely specific. 'Dozens of times a minute' is a quantification but sits comfortably inside the measured 0.1-1 Hz range of centre-of-pressure correction, so it is not overstated. Explanation teaches the mechanism rather than restating the answer."
+    },
+    {
+      "id": "SF-TRV-000177",
+      "verdict": "revise",
+      "reason": "Option 0 is 'Closing your eyes, so you attend to what you feel' - an eyes-closed balancing instruction in a distractor. Wrong options still get read, and the library's safety rule on eyes-closed movement applies to distractors; a nine-year-old reading a balance item should not encounter 'close your eyes' as a suggestion at all. Replace that distractor. Secondary: 'Looking at your feet gives you a reference that's moving with you, which is no help at all' overstates - looking down also changes head and trunk position, and 'no help at all' is firmer than anything measured."
+    },
+    {
+      "id": "SF-TRV-000178",
+      "verdict": "accept",
+      "reason": "Spotting is correctly described and correctly explained (head fixed, then whipped round, so the eyes spend most of the turn not rotating). All four options are plausible dance-adjacent reasons, no bare dismissals, correct option is not the longest, and the explanation adds the mechanism rather than restating the stem. Safe and age-appropriate."
+    },
+    {
+      "id": "SF-TRV-000179",
+      "verdict": "revise",
+      "reason": "Two options are true and the explanation admits it. Option 2 ('Your center of gravity drops, which makes you steadier') is a real consequence of widening the stance, and the explanation concedes 'Dropping your center of gravity helps too' - so the key rests entirely on the unearned ranking 'the base is the bigger effect'. Nobody partitioned those two contributions; that comparative is exactly the firmness failure this library has. Either rewrite option 2 so it is false, or reframe the question to ask for the largest single change."
+    },
+    {
+      "id": "SF-TRV-000180",
+      "verdict": "revise",
+      "reason": "Unearned comparative plus a second true option. 'Which matters more than the weight itself' ranks arm-swing loss against added load mass with no measurement behind it. Option 2 ('It changes where your weight sits over your feet') is also true - a carried load genuinely shifts the combined centre of mass - so a knowledgeable reader has two defensible answers. Also, the keyed answer is about carrying in general and does not engage the 'on uneven ground' half of the stem. Minor: a tightrope pole works mainly by raising rotational inertia, which is not quite the arm-correction mechanism the explanation implies."
+    },
+    {
+      "id": "SF-TRV-000181",
+      "verdict": "accept",
+      "reason": "Vitamin D from UV on skin is correct, and the explanation is carefully bounded ('the only vitamin your body can manufacture from daylight'), which avoids the false wider claim that it is the only vitamin the body can make at all. The aside about it being an odd fit for the word 'vitamin' teaches something beyond the answer. Easy but legitimately easy at min_age 9; no safety issue (no sun-exposure dose is recommended)."
+    },
+    {
+      "id": "SF-TRV-000182",
+      "verdict": "revise",
+      "reason": "Firmness in the explanation. 'The softness and the gradient both matter too - just less' is a ranking of three contributions that nobody measured, and option 2 (soft surface absorbs part of each push) is itself true. 'Dozens of small stabilizing muscles are involved rather than idle' also overstates: those stabilisers are active on pavement too, just less variably recruited. The core claim - variable terrain recruits stabilisers more - is sound and EMG-supported; drop the invented ranking and the 'idle' framing."
+    },
+    {
+      "id": "SF-TRV-000183",
+      "verdict": "accept",
+      "reason": "Correct and well-calibrated: muscle mechanical efficiency is roughly 20-25%, so 'most of the energy they use comes out as warmth' is accurate and appropriately hedged with 'most' rather than a made-up percentage. Distractors are real physiology used wrongly (skin vasoconstriction, set-point language), which is good test craft. Practical closing line about dressing for how you will feel later is useful and safe."
+    },
+    {
+      "id": "SF-TRV-000184",
+      "verdict": "accept",
+      "reason": "Factually right and genuinely corrective: atmospheric composition stays about 21% oxygen at altitude, and the effect is reduced partial pressure from lower air density. Option 3 ('thinner air is harder for the lungs to draw in') is a strong distractor because it is intuitively appealing and actually backwards. The explanation names the misconception it is fixing, which is the best kind of explanation in this set."
+    },
+    {
+      "id": "SF-TRV-000185",
+      "verdict": "revise",
+      "reason": "The keyed fact is true - overcast outdoors is roughly 1,000-10,000 lux against 200-500 lux for a lit room - but the closing line 'Ten minutes outside in the morning does more than an hour by a window' is an invented dose comparison. Light near a window commonly measures 500-2,000 lux, so an hour there can easily exceed the melanopic dose of ten minutes outdoors; the sentence is not merely unmeasured, it is probably wrong. Cut it or replace with the lux comparison the item can actually support."
+    },
+    {
+      "id": "SF-TRV-000187",
+      "verdict": "revise",
+      "reason": "Two options state the same correct physics. Option 0 (moving air strips the warm layer against the skin) and option 2 (air movement carries heat away faster than it can be replaced) are the same convective mechanism worded two ways, and option 2 is arguably the more standard statement - yet it is keyed wrong. Nobody can reliably choose between them, so the item is unanswerable as written. Rewrite option 2 into something false (e.g. a claim about air pressure) or merge the two."
+    },
+    {
+      "id": "SF-TRV-000188",
+      "verdict": "revise",
+      "reason": "Empirical research claim with confidence 'simplified' and no source. The evidence base here (Thompson Coon 2011 and successors) is small single-bout studies of healthy adults with high heterogeneity and poor methodological quality, and the 'more likely to do it again' outcome is the weakest part of it. The item hedges well ('tend to', 'a modest finding'), so this is close - but a psychology finding asserted to children needs a citation, and the open-quality caveat should be visible rather than implied. Add a source or relabel as contested."
+    },
+    {
+      "id": "SF-TRV-000189",
+      "verdict": "accept",
+      "reason": "Water conducts and convects heat away roughly 20-25 times faster than air, and the item says 'many times faster' rather than inventing a multiplier. The 68F room versus 68F lake contrast is concrete and correct, and the closing advice to enter cold water slowly is a genuine cold-shock safety point rather than a risk. Distractors are all plausible lay explanations."
+    },
+    {
+      "id": "SF-TRV-000190",
+      "verdict": "revise",
+      "reason": "Invented causal-epidemiological claim in the explanation: 'people who walk on trails tend to turn an ankle less on curbs'. No study supports that comparison. What is supported is narrower - balance and perturbation training reduces recurrent ankle sprain in people who have already sprained one. The keyed answer itself (practice at corrections flat ground rarely demands) is fine; the last clause states a measured population outcome that was never measured."
+    },
+    {
+      "id": "SF-TRV-000191",
+      "verdict": "accept",
+      "reason": "Shivering thermogenesis is correctly described as involuntary rapid contraction whose only product is heat. The distractors are real adjacent physiology used incorrectly - non-shivering thermogenesis via hormone-driven metabolism, and skin vasoconstriction - so all four are plausible to a reader who does not know. The link back to why moving on a cold day warms you ties the item to the app's subject without overreaching."
+    },
+    {
+      "id": "SF-TRV-000192",
+      "verdict": "revise",
+      "reason": "The ranking is stated far more firmly than the item can support and one distractor is also true. Lejeune/Willems/Heglund (J Exp Biol 1998) found walking on sand costs 1.6-2.5x more mechanical work, with reduced efficiency of muscle-tendon energy conversion as a named second mechanism - which is option 3, keyed wrong but genuinely a contributor. 'The lost push is the bulk of it' asserts a partition the item never cites, and 'On firm ground you get back nearly all of each push' overstates: walking's saving is pendular exchange, not near-total elastic return. Cite the finding or drop the ranking."
+    }
+  ]
+}

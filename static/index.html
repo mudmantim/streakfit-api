@@ -37,7 +37,17 @@
             <ul class="auth-value-props">
                 <li class="auth-value">
                     <span class="auth-value-icon" aria-hidden="true">🎯</span>
-                    <span class="auth-value-text"><b>Five tiny moves a day.</b> A mission you can actually finish — not a workout you'll dread.</span>
+                    <!-- "Five TINY moves" was measured against what the app
+                         actually prescribes and does not hold: the heaviest
+                         beginner day of a year is 3x20 arm circles each way,
+                         3x15 glute bridges, 3x15 crunches, 3x10 ankle circles
+                         each way and 3x20 jumping jacks — about 330 reps. The
+                         part that IS true, and is the actual promise, is that
+                         it is five moves, no equipment, and it ends. Whether
+                         the volume itself should be lower on a beginner's
+                         first days is a prescription question for the owner,
+                         not something to paper over in the copy. -->
+                    <span class="auth-value-text"><b>Five moves a day. No equipment.</b> A mission with an end to it — not a workout you'll dread.</span>
                 </li>
                 <li class="auth-value">
                     <span class="auth-value-icon" aria-hidden="true">🔥</span>
@@ -101,18 +111,50 @@
                             <option value="beginner">Beginner</option>
                             <option value="intermediate">Intermediate</option>
                             <option value="advanced">Advanced</option>
-                            <option value="custom" disabled>Custom</option>
                         </select>
                     </div>
+                    <!-- Pausing his roaming leaves everything else about him
+                         intact: he still reacts, still talks, still has a face.
+                         An accessible way to stop the movement without removing
+                         the character. -->
+                    <div class="settings-row" id="settings-row-roam">
+                        <label class="settings-label" for="rickie-roam-toggle">Rickie's roaming</label>
+                        <button id="rickie-roam-toggle" type="button" class="btn-secondary"
+                                aria-pressed="false"
+                                onclick="window.RickieRoam &amp;&amp; window.RickieRoam.setPaused(!window.RickieRoam.isPaused())">
+                            Ask Rickie to settle
+                        </button>
+                    </div>
+
+                    <!-- What Rickie calls you. Separate from the login on
+                         purpose: a username is a credential people fill with
+                         email addresses, and he says this one out loud. Blank
+                         is a real choice — he then uses no name at all. -->
+                    <div class="settings-row" id="settings-row-name">
+                        <label class="settings-label" for="display-name-input">Rickie calls you</label>
+                        <input id="display-name-input" class="display-name-input"
+                               type="text" maxlength="40" autocomplete="nickname"
+                               placeholder="Optional"
+                               aria-describedby="display-name-help"
+                               onchange="handleDisplayNameChange(this.value)">
+                    </div>
+                    <p class="settings-help" id="display-name-help">
+                        Not your login. Leave it blank and Rickie just won't use a name.
+                    </p>
+
                     <div class="settings-row" id="settings-row-rickie">
                         <label class="settings-label" for="rickie-mode-select">Rickie</label>
-                        <select id="rickie-mode-select" class="skill-select" title="How much of Rickie's personality you want"
+                        <select id="rickie-mode-select" class="skill-select" title="How much of Rickie's personality you want" aria-describedby="rickie-mode-help"
                                 onchange="handleRickieModeChange(this.value)">
-                            <option value="full">🦝 Full</option>
-                            <option value="quiet">🦝 Quiet</option>
-                            <option value="minimal">🦝 Minimal</option>
+                            <option value="full">🦝 Full — jokes and celebrations</option>
+                            <option value="quiet">🦝 Quiet — fewer interruptions</option>
+                            <option value="minimal">🦝 Minimal — just the facts</option>
                         </select>
                     </div>
+                    <p class="settings-help" id="rickie-mode-help">
+                        How chatty Rickie is. He never stops being available — this
+                        only changes how often he speaks up on his own.
+                    </p>
                     <div class="settings-row" id="settings-row-forget">
                         <span class="settings-label">Memory</span>
                         <button id="btn-forget-coach" class="btn-forget-coach"
@@ -124,10 +166,64 @@
                     <div class="settings-row">
                         <span class="settings-label">Theme</span>
                         <div class="theme-toggle" role="group" aria-label="Display mode">
-                            <button class="theme-btn" data-mode="classic" onclick="handleDisplayModeChange('classic')" title="Classic">📋</button>
-                            <button class="theme-btn" data-mode="bright"  onclick="handleDisplayModeChange('bright')"  title="Bright">✨</button>
-                            <button class="theme-btn" data-mode="game"    onclick="handleDisplayModeChange('game')"    title="Game">🎮</button>
+                            <button class="theme-btn" data-mode="classic" onclick="handleDisplayModeChange('classic')"
+                                    aria-label="Classic theme — plain and quiet">
+                                <span aria-hidden="true">📋</span><span class="theme-btn-text">Classic</span>
+                            </button>
+                            <button class="theme-btn" data-mode="bright"  onclick="handleDisplayModeChange('bright')"
+                                    aria-label="Bright theme — light and colorful">
+                                <span aria-hidden="true">✨</span><span class="theme-btn-text">Bright</span>
+                            </button>
+                            <button class="theme-btn" data-mode="game"    onclick="handleDisplayModeChange('game')"
+                                    aria-label="Game theme — the playful one">
+                                <span aria-hidden="true">🎮</span><span class="theme-btn-text">Game</span>
+                            </button>
                         </div>
+                    </div>
+                    <div class="settings-divider"></div>
+                    <!-- Your data. A product used by families has to let them see
+                         what is held and take it all back out again. -->
+                    <div class="settings-row" id="settings-row-yourdata">
+                        <span class="settings-label">Your data</span>
+                        <button id="btn-export-data" class="btn-forget-coach"
+                                onclick="handleExportData()"
+                                title="Download everything StreakFit holds about you">
+                            Download my data
+                        </button>
+                    </div>
+                    <!-- Moderation decisions about you, and the appeal route.
+                         Hidden entirely when there are none: most people will
+                         never have one and a permanent "Appeals" row in the
+                         settings menu of a movement app reads as an accusation.
+                         refreshModerationVisibility() un-hides it.
+
+                         Sits with "Your data" and "Account" on purpose: this is
+                         an account-level fact about you, not a preference. -->
+                    <div class="settings-row" id="settings-row-moderation" hidden>
+                        <span class="settings-label">Moderation</span>
+                        <button id="btn-moderation-decisions" type="button"
+                                class="btn-forget-coach"
+                                onclick="openModerationDecisions()"
+                                aria-expanded="false" aria-controls="moderation-panel"
+                                title="See decisions about your account and appeal them">
+                            Decisions &amp; appeals
+                        </button>
+                    </div>
+                    <!-- The panel the button fills. It lives here, next to its
+                         button, rather than being appended by JS: appendChild
+                         on #settings-menu put it BELOW the Log Out button, and
+                         aria-controls has to point at an element that exists
+                         before the first click. -->
+                    <div id="moderation-panel" class="moderation-panel"
+                         role="region" aria-label="Moderation decisions and appeals"
+                         hidden></div>
+                    <div class="settings-row" id="settings-row-delete">
+                        <span class="settings-label">Account</span>
+                        <button id="btn-delete-account" class="btn-delete-account"
+                                onclick="openDeleteAccount()"
+                                title="Permanently delete your account, your progress, and your photos">
+                            Delete my account
+                        </button>
                     </div>
                     <div class="settings-divider"></div>
                     <button id="btn-logout" class="btn-logout settings-logout" onclick="handleLogout()">Log Out</button>
@@ -135,24 +231,42 @@
             </div>
         </header>
 
-        <main class="container">
+        <!-- Three panes, toggled with CSS. Everything stays mounted: five
+             different render paths write into these regions in one pass and
+             several of them never run again, so unmounting a section is how you
+             get a Journey card that can't come back. display:none costs
+             nothing and breaks nothing. -->
+        <main class="container" data-pane="today">
 
+            <!-- This said "sign up anytime to save your streak", which was
+                 false twice over: guest progress lives in a Set in memory, so
+                 there is no streak, and signing up carries nothing across. It
+                 also offered no way to sign up. Both fixed: the sentence is now
+                 true, and the button exists. -->
             <p id="guest-mode-banner" class="guest-mode-banner" hidden>
-                Guest mode — sign up anytime to save your streak.
+                Guest mode — a look around. Nothing here is saved.
+                <button id="guest-signup-btn" type="button" class="guest-signup-btn"
+                        onclick="handleGuestSignup()">Start for real →</button>
             </p>
 
+            <!-- Today. Rickie and the streak live on the page itself rather
+                 than inside a bordered box in the mission card, which made him
+                 read as a system notice instead of a character. -->
+            <div class="today-strip pane-today">
+                <img src="/static/rickie.svg" alt="Rickie" class="today-rickie" id="today-rickie">
+                <div class="today-text">
+                    <p class="today-greeting" id="today-greeting">Rickie's getting today ready…</p>
+                    <div id="today-streak-slot"></div>
+                </div>
+            </div>
+
             <!-- Today's 5 ─────────────────────────────────────────── -->
-            <section class="card daily-card">
-                <p id="rickie-mission-intro" class="rickie-mission-intro">
-                    <img src="/static/rickie.svg" alt="Rickie" class="rickie-avatar-sm">
-                    <span id="rickie-intro-text">Hi, I'm Rickie. Complete today's mission and come see me afterward.</span>
-                </p>
+            <section class="card daily-card pane-today">
                 <div class="daily-header-row">
                     <div>
                         <h2 class="daily-title">Today's Mission</h2>
                         <div class="daily-mission-meta">
                             <span id="daily-mission-date" class="daily-mission-date"></span>
-                            <span id="daily-streak-badge" class="daily-streak-badge" hidden></span>
                         </div>
                     </div>
                     <span id="daily-count-badge" class="daily-count-badge">0/5</span>
@@ -174,6 +288,16 @@
                     <span class="daily-stat" id="stat-total-missions"></span>
                 </div>
 
+                <!-- How hard today should be. The app cannot know this — a
+                     completion records a date and an exercise key and nothing
+                     about how it went — so it asks instead of guessing. Every
+                     option pays exactly the same. -->
+                <div id="daily-effort" class="daily-effort" hidden>
+                    <p id="daily-effort-note" class="daily-effort-note" hidden></p>
+                    <div id="daily-effort-options" class="daily-effort-options"
+                         role="radiogroup" aria-label="How hard should today be?"></div>
+                </div>
+
                 <div id="daily-exercises-list">
                     <div class="state-loading">
                         <div class="spinner"></div>
@@ -188,14 +312,21 @@
             </section>
 
             <!-- Rickie's Journey ────────────────────────────────────── -->
-            <section id="journey-card" class="card journey-card" hidden>
+            <section id="journey-card" class="card journey-card pane-progress" hidden>
                 <div class="journey-header">
                     <img src="/static/rickie.svg" alt="Rickie" class="journey-avatar">
                     <div class="journey-header-text">
-                        <h2 class="journey-title">Rickie's Journey</h2>
+                        <h2 class="journey-title">Your Journey</h2>
                         <p class="journey-level-line">
                             <span id="journey-level" class="journey-level"></span>
                             <span id="journey-level-title" class="journey-level-title"></span>
+                        </p>
+                        <!-- A level with no explanation is a number that looks
+                             like a judgement. Say what it counts and, more
+                             importantly, what it does not. -->
+                        <p class="journey-level-note">
+                            Levels just count how much you've moved. They don't
+                            unlock anything and they never go down.
                         </p>
                     </div>
                 </div>
@@ -205,20 +336,62 @@
                 </div>
                 <p id="journey-xp-caption" class="journey-xp-caption"></p>
 
+                <!-- Three counters, no glossary anywhere. A reviewer met a
+                     streak, XP and acorns in the first two minutes and could
+                     not tell which of them mattered, which were spendable, or
+                     which could be taken away. Levels and acorns each had a
+                     note; XP had none at all, and nothing said how the three
+                     relate. They do relate simply, so say it simply — and say
+                     the reassuring part, which is that only one of them is
+                     ever spent and none of them goes down. -->
+                <dl class="journey-glossary">
+                    <div class="journey-glossary-row">
+                        <dt>🔥 Streak</dt>
+                        <dd>Days in a row you finished the five moves.</dd>
+                    </div>
+                    <div class="journey-glossary-row">
+                        <dt>⭐ XP</dt>
+                        <dd>Earned for everything you do here. XP adds up to levels.</dd>
+                    </div>
+                    <div class="journey-glossary-row">
+                        <dt>🌰 Acorns</dt>
+                        <dd>The only one you spend. Spending never costs you XP,
+                            levels, or anything you've already done.</dd>
+                    </div>
+                </dl>
+
                 <div class="journey-acorns-row">
                     <span class="journey-acorns-icon" aria-hidden="true">🌰</span>
                     <span id="journey-acorns-value" class="journey-acorns-value">0</span>
                     <span class="journey-acorns-label">Acorns</span>
                 </div>
+                <!-- This said "photo filters for team photos", which told a
+                     solo user their acorns were useless two lines above the
+                     button that spends them. The solo path is the common case,
+                     so it is the one the sentence names. -->
+                <p class="journey-acorns-note">
+                    Earned by moving. Spend them on looks for your pictures —
+                    tap “Make a picture” below. Spending never reduces the total
+                    you’ve earned.
+                </p>
 
                 <p id="journey-message" class="journey-message"></p>
 
-                <button id="journey-memory-book-btn" class="journey-memory-book-btn"
-                        onclick="openMemoryBook()">Memory Book →</button>
+                <div class="journey-actions">
+                    <button id="journey-memory-book-btn" class="journey-memory-book-btn"
+                            onclick="openMemoryBook()">Memory Book →</button>
+                    <!-- Filters are earned by moving, so they cannot live only
+                         inside a team photo composer — a solo user would earn
+                         the best rewards in the product and never see them. -->
+                    <button id="journey-make-picture-btn" class="journey-memory-book-btn"
+                            onclick="startSoloPicture()">📸 Make a picture →</button>
+                    <input id="solo-photo-input" type="file" accept="image/*"
+                           capture="environment" class="visually-hidden">
+                </div>
             </section>
 
             <!-- Teams ─────────────────────────────────────────────── -->
-            <section id="teams-section" class="teams-section">
+            <section id="teams-section" class="teams-section pane-team">
                 <div class="teams-header">
                     <h2 class="teams-title">Teams</h2>
                     <p class="teams-subtitle">Who you're building this with</p>
@@ -226,15 +399,13 @@
                 <div id="teams-list"></div>
             </section>
 
-            <!-- Install StreakFit ──────────────────────────────────── -->
-            <section id="install-card" class="card install-card" hidden>
-                <h3 class="install-card-title">Add StreakFit to your home screen</h3>
-                <button id="install-card-btn" class="btn-primary install-card-btn">Add to Home Screen</button>
-                <p id="install-card-instructions" class="install-card-instructions" hidden></p>
-            </section>
-
             <!-- Side Quests ─────────────────────────────────────────── -->
-            <section id="side-quests-section" class="side-quests-section">
+            <!-- Side Quests sits in Progress, not on Today. It is a second
+                 habit tracker with its own streak that awards no XP, acorns,
+                 levels or milestones — and it was broken for an unknown period
+                 without anyone noticing, which is the strongest evidence
+                 available that it is not what people come here for. -->
+            <section id="side-quests-section" class="side-quests-section pane-progress">
                 <div class="side-quests-header">
                     <h2 class="side-quests-title">Side Quests</h2>
                     <p class="side-quests-subtitle">Track your own daily habits</p>
@@ -250,7 +421,35 @@
                 </form>
             </section>
 
+            <!-- Utilities last. These used to sit between the mission and the
+                 user's progress, which is the most valuable position on the
+                 page and not where an install prompt belongs. -->
+            <section id="install-card" class="card install-card pane-progress" hidden>
+                <h3 class="install-card-title">Add StreakFit to your home screen</h3>
+                <button id="install-card-btn" class="btn-primary install-card-btn">Add to Home Screen</button>
+                <p id="install-card-instructions" class="install-card-instructions" hidden></p>
+            </section>
+
+            <!-- For someone with no team. A single quiet row at the foot of
+                 Progress instead of a permanent tab: a tab labelled Team is a
+                 standing nudge at a person who has chosen not to use it, and
+                 the solo experience is meant to be whole on its own. -->
+            <div id="solo-team-invite" class="solo-team-invite pane-progress" hidden>
+                <p class="solo-team-invite-text">Doing this with someone else? You can share a
+                    campfire with them.</p>
+                <button id="solo-team-invite-btn" class="btn-secondary">Add people</button>
+            </div>
+
         </main>
+
+        <!-- Pane switcher. Team only appears once there is a team. -->
+        <nav class="pane-nav" id="pane-nav" aria-label="Sections">
+            <button class="pane-nav-btn is-active" data-pane-target="today"
+                    aria-current="page">Today</button>
+            <button class="pane-nav-btn" data-pane-target="progress">Progress</button>
+            <button class="pane-nav-btn" id="pane-nav-team" data-pane-target="team"
+                    hidden>Team</button>
+        </nav>
 
         <!-- Rickie's Reaction (completion toast) ─────────────────── -->
         <div id="rickie-reaction" class="rickie-reaction" hidden aria-live="polite">
@@ -263,6 +462,7 @@
         </div>
     </div>
 
+    <script src="/static/rickie-roam.js"></script>
     <script src="/static/app.js"></script>
 </body>
 </html>

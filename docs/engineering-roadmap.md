@@ -1,6 +1,8 @@
 # StreakFit Engineering Roadmap
 
-A genuine engineering audit of the StreakFit backend, aimed at **reducing future engineering cost**. Every item is grounded in the code, the subsystem maps, or measurement — not speculation. Nothing here is implemented; this is the plan.
+A genuine engineering audit of the StreakFit backend, aimed at **reducing future engineering cost**. Every item is grounded in the code, the subsystem maps, or measurement — not speculation.
+
+**This was written as a plan and is now partly history.** Items are struck through as they land, with the commit, because a roadmap that still lists finished work is the same trap as documentation that contradicts the code — the thing it was written to prevent. Immediate tier: I1–I6 all done as of 2026-09-20.
 
 **Legend** — Effort: S (<½ day) · M (½–2 days) · L (>2 days). Risk: how likely a change is to break something. Priority: P0 (do next sprint) · P1 (this year) · P2 (when it matters).
 
@@ -10,11 +12,13 @@ Contents: [Phase 3 · Technical Debt](#phase-3--technical-debt-backlog) · [Phas
 
 ## Executive summary
 
-The backend is in **good health**: one well-tested file (155 pytest + an end-to-end suite), a defensible architecture (server-owned truth, fail-closed integrations, migrations-as-truth with a boot guard), and a clean recent hardening pass. The debt is mostly **operational reproducibility** and **scale-readiness**, not correctness. The three things worth doing first, because they're cheap and de-risk everything else:
+The backend is in **good health**: one well-tested file (638 pytest as of 2026-09-20, plus an end-to-end suite and a browser harness), a defensible architecture (server-owned truth, fail-closed integrations, migrations-as-truth with a boot guard), and a clean recent hardening pass. The debt is mostly **operational reproducibility** and **scale-readiness**, not correctness.
 
-1. **Make the deploy declarative** — the Start Command and Render config live only in the dashboard; a new owner can't rebuild prod from the repo.
-2. **Pin `anthropic` (and `alembic`)** — the only unpinned dependency is the one that talks to a paid, changing API.
-3. **Fix the stale `memory_pipeline.md`** and extract the coach model string to config — tiny, removes two "why doesn't this match the code?" traps.
+The three things named here as "worth doing first" are all done:
+
+1. ~~**Make the deploy declarative**~~ — `render.yaml` is in the repo.
+2. ~~**Pin `anthropic` (and `alembic`)**~~ — both pinned exactly in `requirements.txt`.
+3. ~~**Fix the stale `memory_pipeline.md`** and extract the coach model string to config~~ — the doc describes `_persist_coach_interaction`, and the model and reply budget are `COACH_MODEL` / `COACH_MAX_TOKENS`, overridable per environment.
 
 The largest *latent* risk is that several correctness guarantees (rate limiting, weather cache, deletion integrity) hold **only because there is a single gunicorn worker**. That's fine now and documented; it's the first thing to revisit before scaling — see [operations/production-readiness.md](operations/production-readiness.md).
 
@@ -26,12 +30,12 @@ The largest *latent* risk is that several correctness guarantees (rate limiting,
 
 | # | Item | Benefit / Impact | Effort | Risk | Dependencies |
 |---|---|---|---|---|---|
-| I1 | **Deploy config not in repo** — no `render.yaml`/`Procfile`/`wsgi.py`; Start Command only in comments + dashboard | High — a new owner can reconstruct and review the deploy; disaster-recovery becomes possible from git alone | S | Low | Confirm live Render settings first |
-| I2 | **Pin `anthropic`** (currently `>=0.40.0`) and add explicit `alembic` pin | Medium-High — build reproducibility; a silent SDK bump can't change coach behavior at deploy | S | Low | Verify current installed version |
-| I3 | **Stale `memory_pipeline.md`** — documents the pre-atomic persist path (`_record_coach_exchange`/`_update_coach_note`) instead of `_persist_coach_interaction` | Medium — removes a real "docs contradict code" trap in the trickiest subsystem | S | None | — |
-| I4 | **Coach model/params are inline literals** (`'claude-sonnet-5'`, `max_tokens=768`, thinking) at ~3880 | Medium — a model bump becomes a config edit, not a code hunt; enables per-env overrides | S | Low | — |
-| I5 | **No JSON handler for 413 / admin 403** — both return Flask default HTML, inconsistent with the API's `{"error":...}` | Low-Medium — consistent client error handling | S | Low | — |
-| I6 | **`_persist_coach_interaction` failure is swallowed silently** beyond a log line — no metric | Low-Medium — memory-loss is currently invisible unless someone greps logs | S | Observability (I: logging exists) |
+| ~~I1~~ | ~~**Deploy config not in repo**~~ — **DONE.** `render.yaml` is committed; the deploy can be reconstructed and reviewed from git | — | — | — |
+| ~~I2~~ | ~~**Pin `anthropic`**~~ — **DONE.** `anthropic==0.120.0` and `alembic==1.18.5`, both exact, with the reasoning in the file | — | — | — |
+| ~~I3~~ | ~~**Stale `memory_pipeline.md`**~~ — **DONE.** The doc describes the atomic path | — | — | — |
+| ~~I4~~ | ~~**Coach model/params are inline literals**~~ — **DONE 2026-09-20.** `COACH_MODEL` and `COACH_MAX_TOKENS` at module scope, overridable via `STREAKFIT_COACH_MODEL` / `STREAKFIT_COACH_MAX_TOKENS`. A model bump is now an environment change. The spend test pins the effective value rather than the literal | — | — | — |
+| ~~I5~~ | ~~**No JSON handler for 413 / admin 403**~~ — **DONE 2026-09-20.** 413 was already JSON; the admin 403 was still Flask's HTML. Fixed both ends: an `errorhandler(403)`, and a guard around `res.json()` in the browser client, because the client half is the durable one — any platform error page (a 502, a gateway timeout) broke it the same way, and an unguarded parse there is a button that silently does nothing | — | — | — |
+| ~~I6~~ | ~~**`_persist_coach_interaction` failure is swallowed silently**~~ — **DONE 2026-09-20.** Counted and reported by `/api/verification/self` as `coach.memory_writes`, which is UNKNOWN rather than PASS at zero, because "nothing has failed since boot" is not evidence the path works | — | — | — |
 
 ### Medium (worth fixing this year)
 

@@ -17,6 +17,7 @@ the models rely on Python-side defaults. That difference is expected and
 harmless. Structure — tables, columns (name/type/nullable), primary keys,
 foreign keys, unique constraints, and indexes — is what must match.
 """
+import json
 import os
 import sys
 import tempfile
@@ -93,3 +94,50 @@ def test_migration_chain_builds_from_empty_and_matches_models():
         "Schema built from the migration chain does not match the models "
         "(the migrations and the models have drifted apart):\n"
         + "\n".join(mismatches))
+
+
+def test_self_check_reports_schema_currency_only_when_it_really_knows():
+    """`db.migrations` must PASS on a migrated database and UNKNOWN otherwise.
+
+    Mudman Command's roll-up turns UNKNOWN into "investigate", so this check is
+    load-bearing for qualification. It is also easy to misread: a database built
+    with `create_all()` — which every other test here uses, and which I used
+    when I first probed this — carries no Alembic stamp, so UNKNOWN is the
+    CORRECT answer there, not a defect. Both halves are pinned so nobody
+    "fixes" the honest half.
+    """
+    migrated = _build_from_migrations()
+    probe = (
+        "import json, sys; sys.path.insert(0, %r);\n"
+        "from app import app, _migration_state\n"
+        "with app.app_context(): print(json.dumps(_migration_state()))\n" % str(REPO)
+    )
+    env = {**os.environ, 'DATABASE_URL': f'sqlite:///{migrated}',
+           'SECRET_KEY': 'test', 'JWT_SECRET_KEY': 'test'}
+    env.pop('STREAKFIT_ENFORCE_DB_HEAD', None)
+    out = subprocess.run([sys.executable, '-c', probe],
+                         cwd=REPO, env=env, capture_output=True, text=True)
+    assert out.returncode == 0, out.stderr[-2000:]
+    state = json.loads(out.stdout.strip().splitlines()[-1])
+    assert state['state'] == 'ok', (
+        "a database built by `flask db upgrade` reported its schema currency as "
+        f"{state['state']!r} — qualification would read that as 'investigate'")
+    assert state['latest'], "stamped revision not reported"
+    assert state['appliedCount'] and state['appliedCount'] > 0
+
+    # And the honest half: an unstamped database must NOT claim to be at head.
+    unstamped = tempfile.mktemp(suffix='.db')
+    env2 = {**env, 'DATABASE_URL': f'sqlite:///{unstamped}'}
+    probe2 = (
+        "import json, sys; sys.path.insert(0, %r);\n"
+        "from app import app, db, _migration_state\n"
+        "with app.app_context():\n"
+        "    db.create_all()\n"
+        "    print(json.dumps(_migration_state()))\n" % str(REPO)
+    )
+    out2 = subprocess.run([sys.executable, '-c', probe2],
+                          cwd=REPO, env=env2, capture_output=True, text=True)
+    assert out2.returncode == 0, out2.stderr[-2000:]
+    assert json.loads(out2.stdout.strip().splitlines()[-1])['state'] == 'unknown', (
+        "a create_all() database claimed its schema was at head; it has no "
+        "Alembic stamp and cannot know that")

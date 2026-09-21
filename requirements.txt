@@ -2,6 +2,11 @@ Flask==3.0.2
 Flask-SQLAlchemy==3.1.1
 Flask-JWT-Extended==4.6.0
 Flask-Limiter==3.5.0
+# Driver for a shared rate-limit backend. Without it, setting
+# RATELIMIT_STORAGE_URI=redis://... raises ConfigurationError at import and the
+# app does not start — so the documented production configuration was, until
+# this was added, impossible to actually apply.
+redis==5.0.8
 Flask-Migrate==4.0.5
 SQLAlchemy==2.0.27
 psycopg2-binary==2.9.9
@@ -23,3 +28,12 @@ alembic==1.18.5
 # pytest is a DEV/CI tool (see requirements-dev.txt) but is kept here because prod
 # already installs it; removing it would change the deployed image. Not required at runtime.
 pytest==9.1.1
+# cryptography: encrypts preserved photo evidence at rest (Fernet, AES-128-CBC
+# + HMAC-SHA256). Added for the moderation evidence store — it was NOT a
+# declared dependency before, and `pip show cryptography` reports no
+# Required-by, so production would not have had it incidentally.
+#
+# The KEY is not here and never will be: STREAKFIT_EVIDENCE_KEY is set in the
+# environment by an operator. With no key the application captures no photo
+# evidence at all rather than storing anything in the clear.
+cryptography==50.0.1

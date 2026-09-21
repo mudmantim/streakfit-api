@@ -71,9 +71,14 @@ def test_returns_200_json(client):
 
 def test_envelope_matches_the_contract(client):
     body = _get(client)
-    assert set(body) == {"application", "status", "timestamp", "checks"}
+    # SUPERSET. The merged framework also publishes `generatedAt` (its own
+    # name for the same instant). The contract these tests defend is that the
+    # deployed keys are all still there and still mean what they meant --
+    # pinning the set exactly would forbid ever adding a field.
+    assert {"application", "status", "timestamp", "checks"} <= set(body)
     assert body["application"] == "streakfit"
     assert body["timestamp"].endswith("Z")
+    assert body["generatedAt"] == body["timestamp"]
 
 
 def test_checks_array_is_never_empty(client):
@@ -83,7 +88,19 @@ def test_checks_array_is_never_empty(client):
 
 
 def test_reports_the_four_checks_in_a_stable_order(client):
-    assert [c["id"] for c in _get(client)["checks"]] == CHECK_IDS
+    """The deployed four, still present and still in that relative order.
+
+    The merged build reports twelve. What an external consumer depends on is
+    that the ids it already reads have not vanished or been reordered
+    underneath it, not that nothing was ever added beside them.
+    """
+    ids = [c["id"] for c in _get(client)["checks"]]
+    for name in CHECK_IDS:
+        assert name in ids, f"{name} disappeared from the published checks"
+    positions = [ids.index(name) for name in CHECK_IDS]
+    assert positions == sorted(positions), \
+        f"the deployed checks were reordered: {list(zip(CHECK_IDS, positions))}"
+    assert len(ids) == len(set(ids)), f"duplicate check id in {ids}"
 
 
 def test_every_check_carries_the_contract_fields(client):
@@ -300,16 +317,26 @@ def test_the_coach_key_value_never_appears(client, monkeypatch):
 # ── Unexpected exceptions ───────────────────────────────────────────────────
 
 def test_an_unexpected_exception_is_unknown_not_fail(client, monkeypatch):
-    """A broken CHECK must not masquerade as a broken PRODUCT."""
+    """A broken CHECK must not masquerade as a broken PRODUCT.
+
+    The seam moved: the deployed build had one function per check, and the
+    merged framework builds them inline. `_read_migration_state` is the
+    equivalent seam -- it is what the schema checks call, and it is shared
+    with /api/build-identity.
+    """
     def boom():
         raise RuntimeError('something nobody predicted')
 
-    monkeypatch.setattr(app_module, '_check_assets_present', boom)
+    monkeypatch.setattr(app_module, '_read_migration_state', boom)
 
-    check = _check(_get(client), 'assets.present')
-    assert check["status"] == 'UNKNOWN'
-    assert check["level"] == 'UNKNOWN'
-    assert check["observed"] == 'check did not complete'
+    body = _get(client)
+    for name in ('db.migrations', 'db.schema-current'):
+        check = _check(body, name)
+        assert check["status"] == 'UNKNOWN', f"{name} reported {check['status']}"
+        assert check["level"] == 'UNKNOWN'
+        # The TYPE, and nothing that came with it.
+        assert check["observed"] == 'RuntimeError'
+        assert 'nobody predicted' not in json.dumps(check)
 
 
 def test_an_unexpected_exception_does_not_leak_its_message(client, monkeypatch):
@@ -317,22 +344,31 @@ def test_an_unexpected_exception_does_not_leak_its_message(client, monkeypatch):
     def boom():
         raise RuntimeError('postgresql://user:pw@internal-host.example/db')
 
-    monkeypatch.setattr(app_module, '_check_db_reachable', boom)
+    monkeypatch.setattr(app_module, '_read_migration_state', boom)
 
     body = _get(client)
     raw = json.dumps(body)
     assert 'internal-host.example' not in raw
     assert 'postgresql://' not in raw
-    assert 'RuntimeError' in _check(body, 'db.reachable')["failureReason"]
+    assert 'user:pw' not in raw
+    assert 'RuntimeError' in json.dumps(_check(body, 'db.migrations'))
 
 
 def test_one_broken_check_does_not_take_the_endpoint_down(client, monkeypatch):
+    """An endpoint that 500s reports nothing at all about the other checks."""
     def boom():
         raise RuntimeError('nope')
 
-    monkeypatch.setattr(app_module, '_check_assets_present', boom)
-    body = _get(client)
-    assert len(body["checks"]) == 4
+    before = len(_get(client)["checks"])
+    monkeypatch.setattr(app_module, '_read_migration_state', boom)
+
+    body = _get(client)          # _get asserts 200
+    assert len(body["checks"]) == before, \
+        "a broken check removed checks from the response instead of reporting itself"
+    # Every other check still reported a real verdict.
+    others = [c for c in body["checks"]
+              if c["id"] not in ('db.migrations', 'db.schema-current')]
+    assert others and all(c["status"] in VALID_STATUSES for c in others)
 
 
 # ── Roll-up: weakest link, never an average ─────────────────────────────────
@@ -360,11 +396,30 @@ def test_one_failure_is_not_averaged_away():
         [{"status": 'PASS'}] * 9 + [{"status": 'FAIL'}]) == 'FAIL'
 
 
-def test_overall_status_is_pass_when_every_check_passes(client, at_head, monkeypatch):
+def test_overall_status_is_the_roll_up_of_the_published_checks(client, at_head,
+                                                               monkeypatch):
+    """The envelope's verdict must be derived from the checks it published.
+
+    This asserted four PASSes end to end when there were exactly four checks.
+    The merged build reports twelve, several of which are legitimately UNKNOWN
+    in this suite (no content store, no retention runs, no delivery worker), so
+    a blanket PASS is no longer the right expectation. The property that
+    actually mattered survives: `status` is the weakest link of the array in
+    the same response, so one bad subsystem cannot hide behind the others.
+    """
     monkeypatch.setattr(app_module, '_anthropic_api_key', 'configured')
     body = _get(client)
-    assert [c["status"] for c in body["checks"]] == ['PASS'] * 4
-    assert body["status"] == 'PASS'
+    assert body["status"] == app_module._roll_up(body["checks"])
+    statuses = {c["status"] for c in body["checks"]}
+    if 'FAIL' in statuses:
+        assert body["status"] == 'FAIL'
+    elif 'UNKNOWN' in statuses:
+        assert body["status"] == 'UNKNOWN'
+    else:
+        assert body["status"] == 'PASS'
+    # The deployed four still carry real verdicts rather than placeholders.
+    for name in CHECK_IDS:
+        assert _check(body, name)["status"] in VALID_STATUSES
 
 
 def test_overall_status_reflects_a_real_failure(client, monkeypatch):

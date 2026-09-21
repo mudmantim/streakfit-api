@@ -465,16 +465,21 @@ def dry_run(only=None):
 
 # ── Release probes: weather + memory + memory-aware repetition ───────────────
 
-def _note_block(goals=(), prefs=(), notes=()):
-    """Replicates app._load_coach_note_block's background format for eval."""
+def _note_block(likes=(), avoid=(), when=()):
+    """Replicates app._load_coach_note_block's background format for eval.
+
+    Values must be canonical tokens from app.COACH_NOTE_TAXONOMY — Coach Notes
+    store nothing else, so a probe using free text would be testing a prompt
+    the product can no longer produce.
+    """
     lines = ['What you quietly know about this user (background only — weave in '
              'naturally when it helps; never say "I remember," never list these back):']
-    if goals:
-        lines.append("- Goals: " + "; ".join(goals))
-    if prefs:
-        lines.append("- Preferences: " + "; ".join(prefs))
-    if notes:
-        lines.append("- Ongoing: " + "; ".join(notes))
+    if likes:
+        lines.append("- Movement they enjoy: " + ", ".join(likes))
+    if avoid:
+        lines.append("- Movement to steer away from: " + ", ".join(avoid))
+    if when:
+        lines.append("- How they like sessions: " + ", ".join(when))
     return "\n".join(lines)
 
 
@@ -508,17 +513,17 @@ WEATHER_PROBES = [
 MEMORY_PROBES = [
     {
         "id": "memory_preference_used", "tags": ["memory", "listen"],
-        "note_block": _note_block(prefs=["prefers short morning workouts"]),
+        "note_block": _note_block(when=["mornings", "short"]),
         "history": [], "message": "got any tips for actually sticking with this?",
         "looking_for": "Should quietly reflect the known preference (short morning "
                        "workouts) in the advice, WITHOUT saying \"I remember\" or listing it.",
     },
     {
-        "id": "memory_goal_used", "tags": ["memory", "warmth"],
-        "note_block": _note_block(goals=["training for a 5k"]),
+        "id": "memory_activity_used", "tags": ["memory", "warmth"],
+        "note_block": _note_block(likes=["running"]),
         "history": [], "message": "did my five today!",
-        "looking_for": "Celebrate, and can nod to the 5k goal naturally as connected — "
-                       "never recite it back or announce that he remembers it.",
+        "looking_for": "Celebrate, and may nod naturally to the fact that they like "
+                       "running — never recite it back or announce that he remembers it.",
     },
     {
         "id": "memory_cross_turn_reference", "tags": ["memory", "listen"],

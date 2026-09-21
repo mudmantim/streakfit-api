@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
 """Teams subsystem — create, join, and the member roster the team panel
 reads (Operation: No Dead Ends, R2.8)."""
+import json
 import os
+import re
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from verification._client import run_module_standalone
-from verification._fixtures import build_team_scenario
+from verification._fixtures import build_team_scenario, fetch_user_id
 
 
 def run(api, results, scenario):
@@ -21,34 +23,90 @@ def run(api, results, scenario):
         f"status={status} member_count={detail.get('member_count')}",
     )
     if ok:
-        members = detail["members"]
-        roster_names = {m.get("name") for m in members}
-        logins = {users["a"]["username"], users["b"]["username"]}
+        # The roster is keyed by user_id now, and only security.py resolved
+        # ids before — and it runs after this module. Resolved here so teams
+        # does not depend on another module having run first.
+        for role in ("a", "b"):
+            if users[role].get("id") is None:
+                fetch_user_id(api, results, users, role,
+                              check_name=f"teams.fetch_{role}_user_id")
 
-        # The roster still names everybody — by a per-team label, never by the
-        # login. `/api/login` takes `username`, so a roster that printed it
-        # handed every teammate half of somebody's credentials and confirmed
-        # the account was real.
+        # Identify members by user_id, not by login.
+        #
+        # The roster stopped returning other people's login identifiers — it
+        # sends `name`, a chosen display name or a stable "Member N". These
+        # smoke accounts are called qa_smoke_* and carry a run tag, which is
+        # exactly the machine-looking shape `_safe_display_name` refuses, so
+        # matching on the login here would never succeed again.
+        roster_ids = {m["user_id"] for m in detail["members"]}
         results.check(
-            "teams.roster_lists_both_by_label",
-            len(roster_names) == 2 and None not in roster_names,
-            f"roster={roster_names}",
+            "teams.roster_lists_both_members",
+            {users["a"]["id"], users["b"]["id"]} <= roster_ids,
+            f"roster={roster_ids}",
         )
+        # The guarantee itself, on a live server: no member-visible response
+        # may contain another account's login.
+        #
+        # The first version of this check was VACUOUS and an adversarial
+        # review said so. Smoke accounts are called `qa_smoke_*`, and a `qa_`
+        # prefix was already refused by the old name resolver, so "the login
+        # is absent" could never fail here no matter how broken the roster
+        # was. It passed against an implementation that published ordinary
+        # logins verbatim.
+        #
+        # So it asserts the POSITIVE shape as well: peers get a chosen display
+        # name or "Member N", and nothing else. These accounts never set a
+        # display name, so every label must be a Member ordinal — which fails
+        # immediately if anything falls back to a username, whatever that
+        # username happens to look like.
+        body = json.dumps(detail)
         results.check(
             "teams.roster_carries_no_login_identifier",
-            not (logins & roster_names)
-            and not any(str(v) in logins for m in members for v in m.values()),
-            f"roster={roster_names} keys={sorted(members[0])}",
+            all(users[r]["username"] not in body for r in ("a", "b")),
+            f"detail={body[:200]}",
+        )
+        names = [m.get("name") for m in detail["members"]]
+        results.check(
+            "teams.roster_labels_are_never_derived_from_a_login",
+            all(re.fullmatch(r"Member \d+", n or "") for n in names),
+            f"names={names} (these accounts set no display name, so every "
+            f"label must be a Member ordinal)",
         )
         results.check(
             "teams.creator_flag_correct",
-            sum(1 for m in members if m["is_creator"]) == 1,
-            f"members={members}",
+            any(m["user_id"] == users["a"]["id"] and m["is_creator"] for m in detail["members"]),
         )
         results.check(
             "teams.non_creator_flag_correct",
-            sum(1 for m in members if not m["is_creator"]) == 1,
-            f"members={members}",
+            any(m["user_id"] == users["b"]["id"] and not m["is_creator"] for m in detail["members"]),
+        )
+
+        # Witness fields: the roster's whole purpose is showing whether the
+        # people you share a campfire with moved today. Shipped without them
+        # for the life of the team feature.
+        member = next((m for m in detail["members"] if m["user_id"] == users["a"]["id"]), {})
+        results.check(
+            "teams.roster_carries_today_status",
+            "completed_today" in member and "completed_today_count" in member,
+            f"member keys={sorted(member)}",
+        )
+        results.check(
+            "teams.roster_carries_streak",
+            isinstance(member.get("current_streak"), int),
+            f"current_streak={member.get('current_streak')!r}",
+        )
+        # No leaderboard: the roster must not arrive pre-sorted by who is ahead.
+        results.check(
+            "teams.roster_not_ranked_by_streak",
+            [m["is_creator"] for m in detail["members"]][0] is True,
+            "creator should lead the roster, not the highest streak",
+        )
+
+        campfire = detail.get("campfire", {})
+        results.check(
+            "teams.campfire_reports_next_stage",
+            campfire.get("next_stage") == "Small Flame" and campfire.get("next_stage_at") == 100,
+            f"campfire={campfire}",
         )
 
     # Listed in A's teams list (not just the detail route).
@@ -56,6 +114,12 @@ def run(api, results, scenario):
     ok = results.check("teams.list_readable", status == 200, f"status={status}")
     if ok:
         results.check("teams.appears_in_creator_list", any(t["id"] == team_id for t in teams_list))
+        row = next((t for t in teams_list if t["id"] == team_id), {})
+        results.check(
+            "teams.list_carries_moved_today",
+            isinstance(row.get("moved_today"), int),
+            f"moved_today={row.get('moved_today')!r}",
+        )
 
     # Joining with a garbage code fails cleanly.
     status, _ = api.request(

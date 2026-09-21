@@ -1,0 +1,198 @@
+{
+  "verdicts": [
+    {
+      "id": "SF-TRV-000465",
+      "verdict": "accept",
+      "reason": "",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000466",
+      "verdict": "accept",
+      "reason": "",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000467",
+      "verdict": "accept",
+      "reason": "",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000468",
+      "verdict": "accept",
+      "reason": "",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000469",
+      "verdict": "accept",
+      "reason": "",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000470",
+      "verdict": "accept",
+      "reason": "",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000471",
+      "verdict": "accept",
+      "reason": "",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000472",
+      "verdict": "accept",
+      "reason": "",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000473",
+      "verdict": "revise",
+      "reason": "The answer is right but the explanation gives the wrong mechanism. It says sound wins because it reaches motor areas 'through a shorter chain than vision does'. The dominant cause is that hearing transduces mechanically in about a millisecond while the retina runs a multi-step biochemical cascade that costs tens of milliseconds; pathway length is secondary. Rewrite along the lines of 'the ear turns sound into a nerve signal almost instantly, while the eye has to run a slower chemical chain first'. Also consider reworking the options: 'light' appears twice and 'sound' once, so the odd-one-out is a structural tell.",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000474",
+      "verdict": "accept",
+      "reason": "",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000475",
+      "verdict": "accept",
+      "reason": "",
+      "sources_checked": [
+        {
+          "url": "https://www.brainfacts.org/thinking-sensing-and-behaving/taste/2018/do-different-parts-of-the-tongue-taste-different-things-010319",
+          "resolved": true,
+          "supports_claim": true,
+          "note": "Resolved and directly supports every part of the item, including the nuance the item is careful about. Page states 'All regions of the tongue that detect taste respond to all five taste qualities' and 'Taste buds are also scattered across the roof of the mouth and the back of the throat.' The item's correction of the taste-map myth is not overstated: it correctly says the map came from small real differences in sensitivity redrawn as separate zones, rather than claiming sensitivity is identical everywhere."
+        }
+      ]
+    },
+    {
+      "id": "SF-TRV-000476",
+      "verdict": "revise",
+      "reason": "Guessable to the point of being free. Two distractors ('a sense of magnetic north', 'a sense of nearby metal') are things no reader believes a human has, so the key is the only survivable option and a nine-year-old who knows nothing scores it. Replace them with senses people genuinely argue about or would not expect, e.g. a sense of how full your stomach is, a sense of how hard a muscle is pulling, a sense of your own heartbeat — all real, which forces the reader to think about what 'a sense' means instead of eliminating jokes. Separately, note that human magnetoreception is an active research question, so flatly listing it as not-a-sense is shakier than the item implies.",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000477",
+      "verdict": "accept",
+      "reason": "",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000478",
+      "verdict": "accept",
+      "reason": "",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000479",
+      "verdict": "revise",
+      "reason": "The key states a contested finding as settled fact. Contagious yawning in dogs has a mixed replication record: the original 2008 report was followed by failures to replicate and by disputes over whether familiarity with the person matters at all. The item's own explanation hedges the wrong thing — it hedges why yawns exist, which nobody needed hedged, while asserting 'dogs will yawn back at a person they know well' flat out. Either mark the item contested and say so in the text ('some studies find dogs catch yawns from people, others have not been able to repeat it'), or move the key to the age finding, which is much better supported: contagious yawning appears around four or five rather than being present at birth.",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000480",
+      "verdict": "revise",
+      "reason": "The key and explanation are sound, but distractor 4, 'Light still passes the eyelid', is literally true — eyelids transmit a small amount of light, which is why closed eyes look red in sunshine. A reader who knows that has two defensible answers and no way to choose. Replace it with something false, e.g. 'Your eyes scan ahead while shut'. Minor second point: the explanation says vision is dialled down 'just before the lid moves and picked back up after' — fine as written, but do not let an edit tighten this into a claim that you see nothing at all during a blink.",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000481",
+      "verdict": "accept",
+      "reason": "",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000482",
+      "verdict": "accept",
+      "reason": "",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000483",
+      "verdict": "accept",
+      "reason": "",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000484",
+      "verdict": "accept",
+      "reason": "",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000485",
+      "verdict": "accept",
+      "reason": "",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000486",
+      "verdict": "accept",
+      "reason": "",
+      "sources_checked": [
+        {
+          "url": "https://my.clevelandclinic.org/health/body/hyoid-bone",
+          "resolved": true,
+          "supports_claim": true,
+          "note": "Resolved and supports the claim as stated. Page: 'Your hyoid bone is unique because it's the only bone in your body that doesn't connect to another bone', 'It's shaped like a crescent or the letter U', 'ligaments, muscles and cartilage keep it in place', and it supports the tongue, the muscles in the floor of the mouth, the throat and the voice box. The item's 'anchors your tongue and the muscles you swallow with' is within what the source says."
+        }
+      ]
+    },
+    {
+      "id": "SF-TRV-000487",
+      "verdict": "accept",
+      "reason": "",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000488",
+      "verdict": "accept",
+      "reason": "",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000489",
+      "verdict": "accept",
+      "reason": "",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000490",
+      "verdict": "revise",
+      "reason": "The content is accurate and well hedged, but the question hands the reader the answer: 'sprinting' is obviously fast and the key is the only option containing the word 'fast'. A nine-year-old who knows nothing about fibre types matches the words and scores. Fix by removing the lexical link — ask instead what is different about the fibres you use for a short all-out effort compared with the ones you use on a long walk, or reword the key so the giveaway word is gone (e.g. 'They run out of fuel quickly').",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000491",
+      "verdict": "revise",
+      "reason": "Structural giveaway: three of the four options are teeth and the key is the only bone, so the odd one out is the answer without any knowledge — and 'broken bones heal' is already common knowledge for this age group. The teaching is entirely in the explanation, not in the question. Rework so the choice is genuinely between candidates, e.g. all four options tissues that differ in repair ability (a cracked bone, tooth enamel, the lens of the eye, a fingernail), or invert the question to ask which of four damaged things cannot rebuild itself.",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000492",
+      "verdict": "accept",
+      "reason": "",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000493",
+      "verdict": "revise",
+      "reason": "Two factual problems in the explanation. (1) There are normally two pairs of floating ribs, 11 and 12, not one. The item repeatedly says 'the bottom pair' and then names that single pair 'floating ribs', which teaches the wrong anatomy. It also blurs the false ribs: ribs 8 to 10 do not reach the breastbone directly either, they join the cartilage above, so 'most ribs curve around and join the breastbone through cartilage' is loose at best. (2) 'they are part of why your lower trunk twists more easily than your chest' looks backwards — the lumbar spine is the most rotation-restricted region of the spine (roughly 5 to 13 degrees total) while the thoracic spine rotates far more (roughly 35 degrees), the rib cage notwithstanding. Either drop that sentence or replace it with something defensible about the lower ribs being free to move with breathing. Fix the rib count first; the key itself ('they reach no breastbone') is true and can stay.",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000494",
+      "verdict": "accept",
+      "reason": "",
+      "sources_checked": []
+    }
+  ]
+}

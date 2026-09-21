@@ -1,7 +1,8 @@
-const CACHE = 'streakfit-v0749';
+const CACHE = 'streakfit-v0818';
 const STATIC = [
   '/static/style.css',
   '/static/app.js',
+  '/static/rickie-roam.js',
   '/static/icons/icon.svg',
   '/static/icons/icon-180.png',
   '/static/icons/icon-192.png',

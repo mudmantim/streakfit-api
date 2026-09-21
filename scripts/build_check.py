@@ -159,6 +159,71 @@ def check_js_syntax() -> None:
             fail(f"{js.name}: JavaScript syntax error — {proc.stderr.strip().splitlines()[:3]}")
 
 
+# ── 3b. The API client survives a response that is not JSON ─────────────────
+_API_GUARD_PROBE = r"""
+const src = require('fs').readFileSync(process.argv[1], 'utf8');
+const start = src.indexOf('async function api(path, method, body) {');
+if (start < 0) { console.error('api() not found'); process.exit(2); }
+const end = src.indexOf('\n}', src.indexOf('return { status: res.status, data: data };', start)) + 2;
+let resp;
+const api = new Function('localStorage','fetch','showView','setError',
+  src.slice(start, end) + '; return api;')(
+  { getItem: () => null, removeItem: () => {} }, async () => resp, () => {}, () => {});
+let bad = 0;
+const cases = [
+  [502, () => { throw new SyntaxError('Unexpected token <'); }],
+  [403, () => { throw new SyntaxError('Unexpected token <'); }],
+  [204, () => { throw new SyntaxError('Unexpected end of JSON input'); }],
+  [200, () => ({ ok: true })],
+];
+(async () => {
+  for (const [status, body] of cases) {
+    resp = { status, json: async () => body() };
+    try {
+      const out = await api('/api/probe');
+      if (!out || !out.data || typeof out.data !== 'object') {
+        console.error('status ' + status + ' returned no usable object'); bad++;
+      }
+    } catch (e) { console.error('status ' + status + ' rejected: ' + e.message); bad++; }
+  }
+  process.exit(bad ? 1 : 0);
+})();
+"""
+
+
+def check_api_client_guard() -> None:
+    """A response that is not JSON must not reject an uncaught promise.
+
+    `api()` wraps its try/catch around the fetch, not the parse, so an
+    unguarded `await res.json()` turns any HTML error body — a platform 502, a
+    gateway timeout, a proxy page — into an unhandled rejection. The caller
+    never resolves and the user gets a control that silently does nothing:
+    exactly the shape of the Side Quest regression.
+
+    Here rather than in the browser harness because it needs no server, and
+    because the bodies that trigger it come from infrastructure a local run
+    never produces.
+    """
+    global checks_run
+    node = shutil.which("node")
+    app_js = STATIC / "app.js"
+    if not node:
+        warn("node not found — skipped the api() non-JSON guard check")
+        return
+    if not app_js.exists():
+        fail("static/app.js is missing")
+        return
+    checks_run += 1
+    proc = subprocess.run([node, "-e", _API_GUARD_PROBE, str(app_js)],
+                          capture_output=True, text=True, timeout=60, check=False)
+    if proc.returncode == 2:
+        warn("api() could not be located in app.js — guard check skipped "
+             f"({proc.stderr.strip()})")
+    elif proc.returncode != 0:
+        fail("app.js: api() rejects on a non-JSON response — "
+             f"{proc.stderr.strip().splitlines()[:3]}")
+
+
 # ── 4. Shipped JSON parses ───────────────────────────────────────────────────
 def check_json_files() -> None:
     global checks_run
@@ -244,14 +309,123 @@ def check_exercise_illustrations() -> None:
         )
 
 
+# Routes that legitimately have no caller in static/app.js, with the reason.
+# Anything NOT listed here must be reachable from the app, or it is a feature
+# users cannot get to.
+UNCALLED_ROUTE_ALLOWLIST = {
+    "/api/admin/stats": "admin console (static/admin.html)",
+    "/api/admin/project-status": "admin console",
+    "/api/admin/system-health": "admin console",
+    "/api/admin/verify": "admin console",
+    "/api/admin/verify/status": "admin console",
+    "/api/admin/verify/history": "admin console",
+    # Operator-only by design, same as the rest of /api/admin/*. The people
+    # these serve are not in the app; a frontend caller would be decorative.
+    # Reachability is covered by tests/test_moderation.py, which drives the
+    # queue, the detail view and every action over HTTP.
+    "/api/admin/reports": "admin console — moderation queue",
+    "/api/admin/reports/<string:public_id>": "admin console — report detail and evidence",
+    "/api/admin/reports/<string:public_id>/action": "admin console — moderation actions",
+    "/api/admin/reports/<string:public_id>/photo-evidence": "admin console — encrypted evidence, operator only by design",
+    "/api/admin/reports/<string:public_id>/legal-hold": "admin console — legal hold",
+    "/api/admin/appeals": "admin console — appeal queue",
+    "/api/admin/appeals/<string:public_id>/decide": "admin console — appeal disposition",
+    "/api/challenges/<int:challenge_id>": "single-challenge detail; list view carries the same data",
+    "/api/teams/<int:team_id>/campfire": "campfire summary is embedded in GET /api/teams/<id>",
+    # Machine-facing by design. Mudman Command's verifier probes a running app
+    # over HTTP and has no session and no browser; a frontend caller would not
+    # make these more reachable, it would make them decorative. Covered by
+    # tests/test_qualification_endpoints.py and by an actual run of Command's
+    # verifier — see docs/qualification/mudman-command.md.
+    "/api/health": "liveness probe for Mudman Command and the platform, not the UI",
+    "/api/build-identity": "build identity for Mudman Command's verifier",
+    "/api/verification/self": "subsystem self-checks for Mudman Command's verifier",
+}
+
+
+def check_api_routes_are_reachable() -> None:
+    """Every API route must be reachable from the frontend, or explicitly excused.
+
+    This exists because of the R2 team layer: several endpoints shipped working,
+    tested, and completely unreachable through the UI, and only a much later
+    stability review noticed. A route with no caller is not a finished feature,
+    so the build gate now says so out loud instead of leaving it to be found by
+    someone reading the code a year later.
+    """
+    global checks_run
+    checks_run += 1
+
+    app_py = (ROOT / "app.py").read_text(encoding="utf-8")
+    routes = re.findall(r"@app\.route\(\s*['\"]([^'\"]+)['\"]", app_py)
+    api_routes = sorted({r for r in routes if r.startswith("/api/")})
+    if not api_routes:
+        fail("found no /api/ routes in app.py — this check would pass vacuously")
+        return
+
+    raw = "\n".join(
+        (STATIC / name).read_text(encoding="utf-8")
+        for name in ("app.js", "admin.html")
+        if (STATIC / name).exists()
+    )
+    # Comments must not count as callers. A comment that merely *mentions* a
+    # route (including one explaining that the route had no caller) would
+    # otherwise satisfy this check and hide the very problem it exists to find.
+    caller_lines = []
+    in_block = False
+    for line in raw.splitlines():
+        stripped = line.strip()
+        if in_block:
+            if "*/" in stripped:
+                in_block = False
+                stripped = stripped.split("*/", 1)[1]
+            else:
+                continue
+        if stripped.startswith("/*"):
+            in_block = "*/" not in stripped
+            if not in_block:
+                stripped = stripped.split("*/", 1)[1]
+            else:
+                continue
+        if stripped.startswith("//") or stripped.startswith("*"):
+            continue
+        caller_lines.append(stripped)
+    callers = "\n".join(caller_lines)
+
+    unreachable = []
+    for route in api_routes:
+        # '/api/teams/<int:team_id>/messages' -> require "/api/teams/" and then
+        # "/messages" on the same line. The gap has to tolerate the way app.js
+        # builds these: string concatenation, quotes and template literals, e.g.
+        #   api('/api/teams/' + teamId + '/messages')
+        literal = re.sub(r"<[^>]+>", "\x00", route)
+        parts = [re.escape(p) for p in literal.split("\x00") if p]
+        pattern = "[^\\n]{0,80}?".join(parts)
+        if not re.search(pattern, callers):
+            if route not in UNCALLED_ROUTE_ALLOWLIST:
+                unreachable.append(route)
+
+    if unreachable:
+        fail(
+            f"{len(unreachable)} API route(s) have no caller in the frontend — "
+            f"built but unreachable through the UI: {', '.join(unreachable)}. "
+            "Wire them up, or add them to UNCALLED_ROUTE_ALLOWLIST with a reason."
+        )
+
+    stale = [r for r in UNCALLED_ROUTE_ALLOWLIST if r not in api_routes]
+    if stale:
+        warn(f"allowlisted routes no longer exist in app.py: {', '.join(stale)}")
+
+
 def main() -> int:
     for check in (
         check_asset_references,
         check_service_worker,
         check_js_syntax,
+        check_api_client_guard,
         check_json_files,
         check_app_imports,
         check_exercise_illustrations,
+        check_api_routes_are_reachable,
     ):
         try:
             check()

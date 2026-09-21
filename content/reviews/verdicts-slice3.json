@@ -1,0 +1,148 @@
+{
+  "verdicts": [
+    {
+      "id": "SF-TRV-000359",
+      "verdict": "revise",
+      "reason": "The stem asks for an effect, but the keyed option states a mechanism ('measures you against a starting point that is not yours'), which is the only option not in effect-form and the only critical one among three positive ones - both tells. Worse, distractor index 2 ('helps most when the other person is close to your level') is broadly supported by social comparison research, so a knowledgeable reader is punished. Either rewrite the stem to ask what is wrong with comparison, or replace that distractor.",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000360",
+      "verdict": "revise",
+      "reason": "The explanation's first sentence is a verbatim restatement of the keyed option and never names or explains the mechanism (loss aversion / the value already banked). Also 'a well-documented quirk' is firmer than warranted: loss aversion's robustness and magnitude are actively disputed (Gal & Rucker 2018, 'The Loss of Loss Aversion'). Name the effect, say why losses weigh more, and soften to 'a well-known pattern' or label the item contested.",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000361",
+      "verdict": "revise",
+      "reason": "'Anchoring ... outperforms reminders' is a firm head-to-head comparative claim with confidence 'simplified' and no source. The peer-reviewed evidence does not support it that flatly - reminder and prompt interventions perform well in large behaviour-change trials, and the anchoring-beats-reminders figures in circulation come from popular blogs, not trials. Drop the comparison and just explain why an existing routine is a reliable cue, or cite a real trial.",
+      "sources_checked": ["https://www.calm.com/blog/habit-stacking", "https://zbiotics.com/blogs/journal/habit-stacking-science"]
+    },
+    {
+      "id": "SF-TRV-000362",
+      "verdict": "accept",
+      "reason": "True, well-pitched, anti-shame, and the explanation adds the real idea (the pattern, not the day).",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000363",
+      "verdict": "accept",
+      "reason": "Editorial framing is honestly labelled and the reference-point point is genuinely useful.",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000364",
+      "verdict": "accept",
+      "reason": "Deliberately modest claim, correctly labelled editorial, no medical overreach. One of the better items.",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000365",
+      "verdict": "accept",
+      "reason": "",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000366",
+      "verdict": "accept",
+      "reason": "Poor sleep raising perceived exertion at a fixed workload is solid, and the explanation adds the distinction between the work and the reading of it.",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000367",
+      "verdict": "accept",
+      "reason": "Neural adaptation dominating early balance gains is well supported, and 'almost entirely' is defensible for days-scale balance practice.",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000368",
+      "verdict": "revise",
+      "reason": "Safety: the rubric bars eyes-closed movement, and this item invites a child or a senior to test it by closing their eyes while balancing with no caveat at all. Add an explicit instruction that eyes-closed balance is only done seated or with a hand on something solid. Separately, the keyed option is the only one carrying its own mini-explanation ('; one input of three is gone'), which makes it pickable on form alone - move that clause into the explanation.",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000369",
+      "verdict": "accept",
+      "reason": "Good safety content, and the explanation gives the real reason (working at the edge of ability) rather than restating.",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000370",
+      "verdict": "revise",
+      "reason": "The citation is wrong. NBK556154 is 'Environmental Justice Concerns and the Proposed Atlantic Coast Pipeline Route in North Carolina' (RTI Press, 2018) - it has nothing to do with proprioception or physiology. This is the only item in the slice marked confidence 'established', and its single source does not support the claim. The claim itself is correct and the options are well built, so replace the source with a real one (e.g. StatPearls 'Physiology, Sensory System', NBK547656) and re-verify. Any other item in the library citing NBK556154 should be checked too.",
+      "sources_checked": ["https://www.ncbi.nlm.nih.gov/books/NBK556154/", "https://www.ncbi.nlm.nih.gov/books/NBK547656/"]
+    },
+    {
+      "id": "SF-TRV-000371",
+      "verdict": "accept",
+      "reason": "Energy cost of walking on sand is 2.1-2.7x pavement and grass sits between, driven by work done deforming the substrate - the stated mechanism is right. Grass is the weaker half of the premise but not misleading.",
+      "sources_checked": ["https://www.tandfonline.com/doi/abs/10.1080/00140130600558023", "https://link.springer.com/article/10.1007/BF00705078"]
+    },
+    {
+      "id": "SF-TRV-000372",
+      "verdict": "accept",
+      "reason": "Automatic postural responses do precede conscious awareness; explanation earns its place.",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000373",
+      "verdict": "revise",
+      "reason": "The keyed answer is near-tautological - 'turning is where control gets tested' is close to the definition of agility, so the item tests nothing. Option 0 ('straight-line movement does not build muscle') is a throwaway no reader would pick. Rework so the item teaches an actual mechanism (deceleration and re-acceleration load, changing the base of support under momentum) rather than restating the category.",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000374",
+      "verdict": "accept",
+      "reason": "Short frequent balance practice is consistent with standard fall-prevention programming, and the advice is safe.",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000375",
+      "verdict": "accept",
+      "reason": "",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000376",
+      "verdict": "revise",
+      "reason": "Both the premise and the mechanism are stated far more firmly than the evidence supports, and the item is labelled 'simplified' rather than contested. The review literature on monopedal balance and limb dominance does not reach consensus, and several studies in sedentary adults, adolescents and athletes found no significant difference between legs - which means distractor index 2 ('balance is unrelated to which side you favor') is at least as defensible as the keyed answer. Either relabel as contested and say in the text that the evidence is mixed, or cut the item.",
+      "sources_checked": ["https://pubmed.ncbi.nlm.nih.gov/33059226/", "https://pmc.ncbi.nlm.nih.gov/articles/PMC10868922/", "https://ijspt.scholasticahq.com/article/30996-limb-dominance-does-not-affect-y-balance-test-performance-in-non-athlete-adolescents"]
+    },
+    {
+      "id": "SF-TRV-000377",
+      "verdict": "accept",
+      "reason": "Attentional dissociation lowering perceived effort is sound, and the three distractors are all real misconceptions.",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000378",
+      "verdict": "accept",
+      "reason": "Circadian entrainment by morning light is solid, and distractor 2 ('sunlight is strongest then') is a good trap since it is false.",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000379",
+      "verdict": "accept",
+      "reason": "",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000380",
+      "verdict": "accept",
+      "reason": "Practical, safe, and the explanation gives the reason rather than the rule.",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000381",
+      "verdict": "revise",
+      "reason": "Close, but this is a respiratory symptom in an app read by nine-year-olds, and the item leads with 'it is usually dryness', which normalises a sign that can be exercise-induced asthma. The escalation line, 'persistent tightness is worth asking about', never says who to ask. Make it concrete - tell an adult, and see a doctor if it keeps happening - and put the caveat before the reassurance rather than last.",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000382",
+      "verdict": "accept",
+      "reason": "Correctly hedged to association rather than cause, and the text does say what is argued over, which is what 'contested' requires. Minor construction tell: the keyed option is the only tentatively worded one among three firm claims, so a test-savvy reader can pick it on tone.",
+      "sources_checked": []
+    }
+  ]
+}

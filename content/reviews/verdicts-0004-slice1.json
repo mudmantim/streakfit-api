@@ -1,0 +1,194 @@
+{
+  "verdicts": [
+    {
+      "id": "SF-TRV-000405",
+      "verdict": "revise",
+      "reason": "Option B ('The group splits into two walks') is the failure state named in the stem offered back as an answer, so it self-eliminates and the item is really a 1-in-3. Replace it with a plausible tactic (e.g. 'The fast walker carries the bag' or 'They walk a loop route with meeting points').",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000406",
+      "verdict": "revise",
+      "reason": "Guessable without knowledge: the key is the only concrete, specific option and the other three are interchangeable generic praise, so the odd-one-out rule gives it away. The explanation admits this ('Three of these could have been sent to anybody'). Rewrite so at least two distractors are also specific and observational (e.g. 'You looked tired Thursday and went anyway' framed as a worse choice, or a specific but evaluative comment).",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000407",
+      "verdict": "accept",
+      "reason": "",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000408",
+      "verdict": "accept",
+      "reason": "",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000409",
+      "verdict": "revise",
+      "reason": "The stem's premise is stated more firmly than the evidence supports. Spontaneous interpersonal gait synchronisation is real but far from the norm: Zivotofsky and Hausdorff report it in about 50% of treadmill trials and roughly 36% of over-ground walks, and a systematic review notes it 'emerges in only about half of trials' and is dissociable from simple proximity. 'Usually end up stepping at the same time' should become 'often' or 'sometimes', and the item should carry a source given it makes a quantified behavioural claim under `simplified`.",
+      "sources_checked": [
+        "https://www.archives-rrct.org/article/S2590-1095(20)30090-2/fulltext",
+        "https://arxiv.org/html/2503.08967"
+      ]
+    },
+    {
+      "id": "SF-TRV-000410",
+      "verdict": "accept",
+      "reason": "",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000411",
+      "verdict": "accept",
+      "reason": "",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000412",
+      "verdict": "revise",
+      "reason": "Solvable purely by elimination from the stem, with no knowledge required. 'Never gets a quiet half hour' rules out the long session and the earlier wake-up, and 'moving together' rules out taking turns alone, leaving only the key. Either drop the eliminating clause from the stem or make the distractors survive it (e.g. 'A longer session at the weekend only', 'Moving only while the toddler naps').",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000413",
+      "verdict": "revise",
+      "reason": "Every one of the four options assumes the struggling person keeps climbing; none offers checking in, slowing to a rest, or turning back. For an audience that includes seniors this quietly teaches push-through as the only option. Add an option that respects the other person's limit, and soften 'helps them most' — this is an editorial judgement, not a ranked finding.",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000414",
+      "verdict": "revise",
+      "reason": "All three distractors are factually false about the named activities and the explanation itself refutes them (catch needs a ball, dancing is not competitive, dancing is usually indoors). A reader who knows nothing about the teaching point eliminates all three from common sense and lands on the key. Rebuild with distractors that are true of tag, catch and dancing but also true of a family workout.",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000415",
+      "verdict": "accept",
+      "reason": "",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000416",
+      "verdict": "accept",
+      "reason": "",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000417",
+      "verdict": "revise",
+      "reason": "The key and the circadian phase-delay mechanism are sound, but the explanation's claim that 'teenagers still need roughly as much sleep as they did at eleven' conflicts with standard guidance, which sets 9-12 hours for ages 6-12 and 8-10 hours for ages 13-18. Teens do need somewhat less than an eleven-year-old; the point to make is that reduced sleep need is not what pushes bedtime later. Reword that sentence, or cite the guidance if the 'roughly the same' framing is kept.",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000418",
+      "verdict": "accept",
+      "reason": "",
+      "sources_checked": [
+        "https://www.niams.nih.gov/health-topics/kids/healthy-bones"
+      ]
+    },
+    {
+      "id": "SF-TRV-000419",
+      "verdict": "accept",
+      "reason": "",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000420",
+      "verdict": "reject",
+      "reason": "The stem's premise is the retired view. The AAP's 2011 policy statement on climatic heat stress revised the earlier position and states that youth do not have a thermoregulatory apparatus inferior to adults' during exercise in the heat when hydration is maintained; the higher surface-area-to-mass ratio is now described as aiding dry heat loss and sweat evaporation, not as a disadvantage. So the key ('More skin area for their size') is the discredited explanation for a comparison that current consensus does not support, and no option in the set is correct. Two distractors are also eliminable without knowledge ('no sweat glands yet', 'hearts beat more slowly'). Keep the shade-and-water message, but build it on something true — e.g. that children are less likely to notice or act on heat and thirst cues than the adult beside them — and mark it `contested` if the comparison is kept at all.",
+      "sources_checked": [
+        "https://pubmed.ncbi.nlm.nih.gov/21824876/",
+        "https://pmc.ncbi.nlm.nih.gov/articles/PMC6770410/"
+      ]
+    },
+    {
+      "id": "SF-TRV-000421",
+      "verdict": "accept",
+      "reason": "",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000422",
+      "verdict": "revise",
+      "reason": "Two problems. The explanation's claim that 'most of the strength and coordination for it is still there' and that only practice goes missing is firmer than the evidence and misleading for older readers: difficulty getting off the floor is substantially driven by loss of lower-body strength, power and balance, not disuse alone. Second, the stem's 'worth practicing' telegraphs the key, which is the only option containing 'skill', while the other three are weak. Soften the explanation to 'practice is part of it' and rebuild the distractors.",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000423",
+      "verdict": "accept",
+      "reason": "",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000424",
+      "verdict": "revise",
+      "reason": "'It keeps their hands warm' is a throwaway joke distractor, and 'It copies how adults walk' is false on its face to any reader who has watched an adult walk. That leaves the key as the only balance-related option in a question plainly about balance. The science is fine; replace the two dud options with plausible alternatives (e.g. 'It gives them something to grab with', 'It helps them see further ahead').",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000425",
+      "verdict": "accept",
+      "reason": "",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000426",
+      "verdict": "accept",
+      "reason": "",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000427",
+      "verdict": "revise",
+      "reason": "The question asks which part holds 'most' of the fiber, but the flesh is not among the options and actually holds roughly half: a medium apple has about 4.4 g of fiber with the skin and about 2.1 g peeled. 'Most' is firmer than the fact supports. Also guessable with no knowledge, since juice, seeds and core are all eliminable on sight. Reword the stem toward what peeling costs you (which is what the explanation already says correctly) and give the flesh a place in the options.",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000428",
+      "verdict": "accept",
+      "reason": "",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000429",
+      "verdict": "accept",
+      "reason": "",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000430",
+      "verdict": "accept",
+      "reason": "",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000431",
+      "verdict": "accept",
+      "reason": "",
+      "sources_checked": [
+        "https://www.niams.nih.gov/health-topics/calcium-and-vitamin-d-important-bone-health"
+      ]
+    },
+    {
+      "id": "SF-TRV-000432",
+      "verdict": "accept",
+      "reason": "",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000433",
+      "verdict": "accept",
+      "reason": "",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000434",
+      "verdict": "accept",
+      "reason": "",
+      "sources_checked": []
+    }
+  ]
+}

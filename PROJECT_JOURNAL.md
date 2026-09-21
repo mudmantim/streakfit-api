@@ -448,3 +448,363 @@ request — not from proactively hunting for improvements. Carried-forward items
 rate-limit storage resets each deploy), **no application-level cap on `/api/coach`** as defence in
 depth for a paid API, and **M9** above. One local docs-only commit is deliberately unpushed, to be
 bundled with the next functional change rather than triggering a deploy on its own.
+
+---
+
+# Session 5 (2026-09-18) — out of maintenance mode, into product completion
+
+Tim reopened the project with a different goal: not more hardening, but
+**"StreakFit must become a fully working, fun, polished app that Olivia can
+actually use and enjoy."** The production and security work was declared the
+foundation, not the job.
+
+## What the reconstruction found
+
+Day 1 of StreakFit is genuinely good. Register in ten seconds, five exercises
+with illustrations, and at 5/5 a streak banner, confetti, a level-up and the
+Insight/Brain Boost unlock. Nothing about the first session needed rescuing.
+
+**Day 2 was where it fell apart, and the reason is worth remembering.**
+`new_exercise` pays once ever and the mission bonuses only land on the fifth
+completion, so a returning user earned **0 XP on four of their five taps**.
+That is arguable as economy design. What was not arguable: `app.js` gated
+Rickie's reaction toast on `summary.xp > 0`, so the companion said **nothing at
+all** for four of every five taps. A character bible built around being
+"genuinely glad every time you show up" had produced an app that went quiet the
+moment the novelty bonus ran out.
+
+It survived because **every day-1 completion pays**. A first session looks
+perfect. Every test passed, every API response was correct, and the bug was
+only reachable by being a returning user — which nothing in the test suite, the
+verification suite, or any manual pass had ever been.
+
+The second finding was the same shape. `GET /api/teams/<id>` returned members
+as `{user_id, username, is_creator}` — no "did they move today", no streak.
+The founding witness-only model was missing from the **API**, not just the UI,
+so a parent could not open StreakFit and see whether their kid had moved. And
+`/api/teams/<id>/moments` sat fully implemented, humanised and tested with **no
+caller anywhere in the frontend** — the exact "shipped but unreachable through
+the UI" failure that `CLAUDE.md`'s verification standard was written after,
+still present in the codebase that documents it.
+
+## Sizing the repeat reward, rather than picking a number
+
+Tim authorised paying for repeat completions but explicitly not an arbitrary
+value. Simulating 365 days across 40 users with the real `get_daily_exercises()`
+showed discovery decaying from 5 new exercises on day 1 to ~0.4 by day 14 and
+none after day 30 — daily income collapsing 153 → 53 XP.
+
+Three constraints then bound the value, and they agree on **5**:
+
+1. Five repeat taps must be worth less than the 40 XP for *finishing*, or the
+   product stops being about finishing. `5 × repeat < 40` ⟹ repeat < 8.
+2. A discovery must stay an event: 20 XP is 4× a repeat at 5, only 2× at 10.
+3. Below 5 the bar barely moves — at 3 XP a tap is ~1% of a mid-game level.
+
+Two tests encode the *constraints*, not the number, so raising the value past
+the point where taps outweigh finishing fails CI. Full reasoning and the
+simulation table now live in `docs/reward-economy.md`. No acorns for repeats:
+acorns have no sink, and paying them for the most frequent action in the app
+would inflate a currency that may later get a use.
+
+## A tenth of the beginner library was unreachable
+
+Found while simulating that discovery curve, not by looking for it. Every
+beginner saw exactly **27 of their 30 exercises, forever**. `marching_in_place`,
+`step_touch` and `standing_bicycle` had never been selected — not rarely,
+*never* — across 40 users × 365 days.
+
+Beginner's only high-fun exercises all live in `conditioning`, and the fun floor
+requires one in every set, so the generator redrew until conditioning landed on
+one of those three. The other three were mathematically excluded. Three drawn
+illustrations were dead, and the category meant to be the fun one was the least
+varied — which is exactly the monotony a returning user feels.
+
+Fixed by detecting the monopoly case and waiving the floor on a deterministic
+one day in five. All 30 reachable now; 90% of beginner days still include
+something high-energy; intermediate and advanced never trigger the waiver.
+
+## Methodology notes worth keeping
+
+- **A stale service worker made me briefly believe a correct fix had failed.**
+  The first verification of the reaction fix showed Rickie still silent. The fix
+  was fine; the browser was serving the previous `app.js` from the SW cache. Any
+  browser check must clear the service worker first, and `uicheck.py` now does
+  it on every run. A cache is a perfectly good way to verify yesterday's code.
+- **A gate that has not been watched failing is not a gate.** Every new check
+  here was fault-injected. The route-reachability gate passed its first fault
+  injection for the *wrong reason* — it matched a code comment that merely
+  mentioned the route, which is to say it would have hidden precisely the
+  problem it exists to find. It now strips comments before matching.
+- **Two of my assumptions about this codebase were wrong and cheap to check:**
+  `award_progress` did not return `event_type` (it does now), and the team
+  creation response nests under `team`. Both would have been silent failures.
+
+## What now exists that did not
+
+`scripts/uicheck.py` (`make uicheck`) drives the real app in headless Chrome at
+390×844 and asserts on what a person sees — 18 checks. It exists because both
+headline bugs of this session were invisible to pytest *and* to the verification
+suite, which is not a gap either of those was ever going to close. Stdlib-only
+CDP client, no new dependency, local-only by design.
+
+`build_check.py` now fails if any `/api/` route has no caller in the frontend.
+
+## State at the end of the session
+
+199 pytest, 88 verification checks (was 81), 18 UI checks, ruff/mypy/build clean.
+Nothing deployed — `product-completion` is a local branch and production still
+serves the maintenance-mode build. Carried-forward infrastructure items (M1b,
+M9, the `/api/coach` spend cap) were deliberately left alone.
+
+Still open and deliberately not decided here: **acorns have no sink**, so the
+number climbs and buys nothing; Brain Boost holds 40 questions shown to every
+user on the same date, so a daily user repeats them every 40 days; and Side
+Quests award no XP at all, running a reward loop entirely parallel to the game's.
+Each is a product decision rather than a defect, and each is Tim's call.
+
+---
+
+# Session 5b (2026-09-18) — team photos, because the user asked for them
+
+Olivia named a missing feature: send pictures to her family team, with filters.
+That arrived mid-completion-push and was treated as a completion requirement
+rather than backlog, but folded in after the day-2 and witness work rather than
+displacing it.
+
+## The decision that shaped everything: where bytes live
+
+Render's web filesystem is wiped on every deploy, so writing photos to disk is
+not a trade-off, it is simply broken. Object storage would be a new paid
+service — an owner decision. So the bytes went into Postgres, which is not where
+images belong at scale and is the right call at this one, provided the growth is
+genuinely bounded.
+
+Rate limits alone would not have bounded it: sustained uploads at 40/hour reach
+gigabytes. The per-team quota is what actually caps storage, and it was added
+only after working that arithmetic out rather than assuming a rate limit was a
+storage control. Three limits now hold it: 2 MB per upload, 150 MB per team,
+30-day retention.
+
+Client-side composition falls out of the same constraint and pays for itself
+three times: the server never processes an image, the upload is one small
+finished JPEG instead of a full-resolution original, and a canvas round-trip
+drops EXIF on the way. The server strips EXIF again regardless — a client is a
+convenience, never a safety layer.
+
+## Filters as data
+
+The catalog carries its own render spec, so `app.py` is the only place a filter
+exists and the client implements five primitives rather than twelve filters.
+Adding one is a dict. A test fails if a filter uses a primitive the client does
+not implement, because the failure mode otherwise is a filter that renders as
+nothing at all and nobody notices.
+
+Acorns got their first sink here. `acorns_total` stays lifetime-earned, because
+the `acorns_100` milestone means "earned 100" and would quietly break if
+spending decremented it; `acorns_spent` is separate and the balance is derived.
+
+## What verify_all caught that pytest could not
+
+`create_team_moment` only stages a row and leaves committing to its caller. I
+called it after the commit, so every photo's history moment was staged and
+discarded. **The pytest passed** — tests share one session with the app, so the
+uncommitted row was visible to the very next query. Over HTTP, with separate
+requests, team history recorded nothing.
+
+The end-to-end suite failed on it immediately. The unit test now rolls back
+before asserting, so a staged-but-uncommitted row can no longer masquerade as a
+saved one, and it is fault-injected to prove it fails.
+
+That is the second time today a test passed while the product was broken. The
+first was Rickie's silence. Both had the same shape: the thing being verified
+was not the thing a user experiences.
+
+## Two real UI bugs, found only by driving it
+
+- **The composer previewed nothing.** `_buildPhotoComposer` opened by calling
+  `_closePhotoComposer()`, which nulls `_composerImage` — the image it was about
+  to draw. Every assertion about the API passed; the preview was a grey box.
+- **The creator's Delete never appeared.** The thread and the team info load
+  concurrently, and the thread finished first, so photo bubbles were built while
+  `_teamPanelIsCreator` was still false. Fixed by re-applying permissions when
+  the info lands rather than serialising the two requests.
+
+## A structural change the feature forced
+
+The team panel was one long scroll, which left the message thread a 160px window
+at the bottom of an 877px sheet. That was tolerable for text and absurd for
+photographs. Splitting it into Campfire / Photos & Chat tabs — the separation
+`TEAM_UI_BASELINE.md` described as two screens all along — gives the thread
+~464px. The feature did not create that problem, it just made it impossible to
+keep ignoring.
+
+## Where it stands
+
+242 pytest, verify_all 108/108, uicheck 30/30, all gates clean. Nothing
+deployed. Age verification and parental consent remain undesigned and this
+raises the stakes on them — flagged, not solved, because it is a legal and
+policy call.
+
+---
+
+# Session 6 (2026-09-18) — Impress Olivia, without losing the solo user
+
+Tim raised the bar: the next time Olivia opens StreakFit it should feel like a
+transformation, and the standard is "whoa, StreakFit can do THAT now?". Then he
+added the constraint that matters more — everything social is **additive**.
+StreakFit remains a movement app with a real information layer, and a person who
+never creates a team must get the full core benefit. The hierarchy is movement,
+then useful information, then encouragement, then progression, then social.
+
+## The constraint caught a real defect immediately
+
+Filters are earned by moving. The only place to *use* one was a team photo
+composer. So a solo user could earn the best rewards in the product and never
+see them — the exact thing the constraint forbids. The composer now has a solo
+mode reached from the Journey card: same filters, saves to the phone, nothing
+uploaded, no team required.
+
+## Judging the filters by looking at them
+
+Rendering all twelve side by side was worth more than reading the catalog.
+`golden_hour` was indistinguishable from no filter and cost 20 acorns.
+`goofy_specs` promised glasses and delivered Rickie in a corner. The "gold" in
+`first_mission_gold` was a sepia tint nobody could see. And Rickie appeared as
+the same asset in a corner across five of them.
+
+Three new primitives fixed most of it — `vignette`, `burst`, and a `stat` badge
+that prints the person's **real streak and level onto the picture**. That last
+one is the only filter primitive StreakFit can have and a camera app cannot,
+because a camera app does not know whether you moved today.
+
+## Content was the thinnest part of the product
+
+90 insights and 40 questions, indexed by day of the year: every user worldwide
+saw the same fact on the same date, and a daily user met the same question every
+40 days. Now 270 and 190, with selection shuffled per person so nobody repeats
+until the library is exhausted and two people in a house are almost never on the
+same fact — which is the point, because half the value of a fact is telling
+someone.
+
+The sharper find: in the original 40 questions the correct answer sat at index 1
+thirty times and index 0 ten times. **Indices 2 and 3 were never correct.**
+"Always pick the second one" scored 75%, and a child would have found that
+faster than an adult.
+
+## Challenges, and why they are presets
+
+The social ask was movement challenges. The design decision that matters is that
+they are a fixed preset list, never free text: a typed dare in a family app used
+by children is a safety hole no moderation closes. Eight equipment-free options
+inside the same movement model the exercise library already uses.
+
+There is no loser. No failure state, no countdown, and nothing anywhere names a
+person who did not do it — the card lists who did and stops. An untouched
+challenge simply closes. Rickie's challenge lines were checked for the same
+thing: none of them nudge the people who have not joined in.
+
+And it amplifies rather than replaces: 15 XP against 40 for finishing your own
+mission, with a test pinning that ordering, and a daily cap that stops paying
+without ever refusing a completion — refusing one would be telling someone they
+had moved too much.
+
+## Three bugs that only using it could find
+
+- **The biggest moment of a first day lasted 900ms.** Finishing a first mission
+  and unlocking a milestone happen in the same instant, and the milestone toast
+  replaced the completion one — so "+60 XP, Level 2 — Adventurer" flashed past.
+  Reactions are queued now.
+- **The challenge card wrapped its text one character per line.**
+  `.challenge-card` and `.challenge-title` were already taken by Side Quests,
+  which is backed by the `Challenge` model, so the new cards inherited a
+  horizontal flex row — and my rules were quietly overriding the Side Quests
+  card's own appearance.
+- **The daily challenge cap paid one fewer than it allowed**, because the count
+  query autoflushed the pending completion it was about to count.
+
+## Two of my own tests were wrong
+
+Substring matching flagged "within" for "thin", and "One imperfect day feels
+like total failure" got flagged as shaming — when it is the *correct answer* to
+why all-or-nothing plans collapse, and among the most on-brand content in the
+library. The tests were fixed, not the content. Worth remembering: a
+never-negative rule enforced bluntly will start deleting the good stuff.
+
+---
+
+# Session 7 (2026-09-18) — the design pass
+
+Tim's brief: stop adding mechanics, make what exists feel like one product
+designed by one person. Final pre-Olivia quality pass.
+
+## What was actually wrong
+
+The home screen was six white cards of identical weight — mission, permission
+ask, progress, teams, install, side quests. Nothing outranked anything. There
+was one heading size, one body size, uniform gaps, and a single shadow, so the
+page had no way to say "this matters more than that". It read as a settings
+list containing a fitness app.
+
+The foundation came first: a type scale, a 4px spacing rhythm, and three
+elevation levels. Everything after that was arrangement.
+
+## The streak was being said three times
+
+A badge inside the mission card, a helper line under the progress bar, and a
+stats row — for the same number, on the same screen, in small text. An
+eleven-day streak deserves better than that. It is now stated once, in a warm
+gradient at 2.1rem, beside Rickie, above everything else.
+
+## Rickie's expression language was invisible
+
+The most interesting bug of the session. R1.5.2 built a whole expression engine:
+Rickie goes happy on a completion, celebrating on a first perfect mission, and
+it applied correctly every time. Then `loadDailyExercises` ran 480ms later and
+reset him to `idle_dashboard` → neutral. **Every completion, for months.** The
+character had four faces and the dashboard was wiping them before anyone could
+see one.
+
+A celebration now holds his face for six seconds, and the resting expression is
+state-aware — finished today means a proud Rickie for the rest of it. Same four
+drawings, finally doing their job.
+
+He was also contradicting himself at the best moment of the day: the greeting
+was written for before the mission with a completion clause stapled on, which
+produced "The day's not over yet. That's today done."
+
+## Five identical buttons is a wall
+
+The mission was five rows of identical indigo "I did this". Only the next
+undone one keeps the solid button now, with a small gradient accent bar; the
+rest step back to an outline. Everything stays tappable in any order — this is
+guidance, not a restriction, and that distinction matters in a product whose
+first rule is never to punish anyone.
+
+## "Am I getting anywhere" needed evidence, not a claim
+
+A level number and an XP bar are assertions. Seven dots showing the last seven
+days are evidence, and the data was already there. Days that happened glow;
+days that did not are plain — never red, never crossed out, never counted. The
+caption says "6 days moved this week", or "This week is a fresh page" when
+there are none, because there is no version of this product that tells someone
+how many days they missed.
+
+## Something happened while I was away
+
+A dot and "New since you were here" — never a count, because a rising number is
+an anxiety mechanic. Read state lives in localStorage on the device rather than
+the server tracking who has looked at what, which a family app should not
+quietly start doing.
+
+It shipped permanently switched on, because the server sends naive UTC and the
+browser was reading it as local time. The same bug I had already fixed in
+`_momentWhen` and not applied here. There is now one `_parseServerTime` and
+both call it.
+
+## What the personas showed
+
+Four personas at 390×844: first day, solo with a streak, teen on a team, and
+someone back after a week away. The returning user is the one that matters
+most, and it holds up — Rise Again, "This week is a fresh page", their best
+streak and total missions still on display, and not one mention of the gap.

@@ -1,0 +1,158 @@
+{
+  "verdicts": [
+    {
+      "id": "SF-TRV-000335",
+      "verdict": "revise",
+      "reason": "Claim is fine but the item is guessable without knowing anything: all three distractors are absolutes ('always indicates', 'the only remedy', 'only affects people who exercise') and the key is the only hedged option, so a test-wise nine-year-old picks it by pattern. Rewrite at least two distractors as plausible non-absolute beliefs (e.g. 'Yes, and it usually means you slept badly'). Also consider naming the actual red line in the explanation — stiffness lasting more than about an hour most mornings is the thing worth asking about — rather than the vague 'severe or persistent'.",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000336",
+      "verdict": "reject",
+      "reason": "The keyed answer is wrong on the substance and the explanation understates a real danger to the exact audience. Falls are the leading cause of injury death in adults 65+; about half of fatal falls involve traumatic brain injury, and falls cause the large majority of hip fractures, which frequently end independent living. 'The fall itself is often survivable' is a minimising framing of that. Worse, distractor C ('Falls are much more common than in younger people') is simply true — roughly 1 in 4 adults 65+ falls each year — so the item has two defensible answers and keys the weaker one. If the post-fall fear cycle is the lesson worth teaching, ask about it directly ('After a fall, what often does damage even when nothing is broken?') and keep the physical injury risk in the explanation instead of waving it away.",
+      "sources_checked": [
+        "https://www.cdc.gov/falls/data-research/facts-stats/index.html",
+        "https://www.cdc.gov/falls/data-research/index.html"
+      ]
+    },
+    {
+      "id": "SF-TRV-000337",
+      "verdict": "accept",
+      "reason": "True at the level given, mechanism actually explained, distractors all plausible beliefs.",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000338",
+      "verdict": "revise",
+      "reason": "Two problems. (1) Options A ('how athletic they were as a teenager') and C ('whether they played sport at school') say essentially the same thing, so a reader eliminates both on the logic that they cannot both be wrong separately — that plus the weak 'height and build' leaves one option standing. Collapse them into one and add a genuinely competing predictor. (2) 'The best predictor' is a superlative empirical claim carried by a `simplified` label with no sources; recent activity is strongly associated with late-life function but calling it the best predictor outruns what is cited. Either soften to 'which of these matters most' or attach a source.",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000339",
+      "verdict": "accept",
+      "reason": "Correct, safe, and the explanation teaches the discriminating cue (sharp vs dull) rather than restating the option.",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000340",
+      "verdict": "revise",
+      "reason": "The rule as stated in the option — 'effort builds gradually; a warning is sudden' — misses and actively miscategorises overuse injury, which is the most common way a beginner gets hurt and which builds gradually by definition. A reader applying this rule would file a slowly worsening tendon or shin pain under 'ordinary effort'. The explanation's 'not a perfect rule' hedge does not cover that specific failure; name it (pain that grows session on session, or that is still there the next day, is also a warning). Option D ('there is no reliable way to tell them apart') is a bare dismissal distractor and should be replaced.",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000341",
+      "verdict": "accept",
+      "reason": "Accurate on the Valsalva effect, appropriately unalarming, and the explanation gives an actionable fix (breathe out on the effort). Distractors are all things people actually believe.",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000342",
+      "verdict": "revise",
+      "reason": "Guessable by shape: the key is the longest option and the only one with two clauses, and it is the only one that mentions a doctor. Separately, distractor B is not wrong enough to be a distractor — lying down is legitimate first aid for dizziness, so a reader who knows that is penalised for knowing it. Make B clearly worse (e.g. 'lie flat and then finish the session'), and even out option lengths.",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000343",
+      "verdict": "accept",
+      "reason": "Notably well-handled firmness: 'it reduces risk; it does not abolish it' is exactly the right register, and B is a useful wrong belief to knock down rather than a throwaway.",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000344",
+      "verdict": "revise",
+      "reason": "Right advice, wrong reason, and the wrong line drawn. Standard guidance splits on fever and systemic symptoms (fever, body aches, deep fatigue) rather than on 'anything chest-related' — that is the above-the-neck rule, and the reason behind it is cardiac strain and impaired heat regulation while febrile, with a small myocarditis risk, not 'mostly buys you a longer illness'. That last claim is stated as fact and is not well supported. Rewrite the explanation around fever as the stop signal, and keep the chest-symptom caution as an addition rather than the whole caveat.",
+      "sources_checked": [
+        "https://www.mayoclinic.org/healthy-lifestyle/fitness/expert-answers/exercise/faq-20058494",
+        "https://www.heart.org/en/news/2021/01/13/is-it-ok-to-exercise-when-youre-sick",
+        "https://www.myheart.org.sg/heart-news/exercise-with-a-cold-or-flu-and-the-impact-on-the-heart/"
+      ]
+    },
+    {
+      "id": "SF-TRV-000345",
+      "verdict": "accept",
+      "reason": "Concrete, useful, and the explanation earns its place with real examples rather than restating the option.",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000346",
+      "verdict": "accept",
+      "reason": "Matches current drink-to-thirst guidance for ordinary activity and correctly declines to treat more as safer. No meal/body framing issues.",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000347",
+      "verdict": "accept",
+      "reason": "Honestly labelled `editorial`, so no sourcing obligation, and it points toward a professional rather than giving a diagnosis.",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000348",
+      "verdict": "revise",
+      "reason": "The advice is good but the explanation invents a statistic: 'most restart injuries come from resuming at the old level' is an unsourced quantified claim under a `simplified` label. This is the firmness failure the rubric calls out. Say it as the pattern it is ('a common way people get hurt on a restart is picking up where they left off') or attach a source. The option text itself is fine.",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000349",
+      "verdict": "accept",
+      "reason": "Real mechanism, correctly explained, and it beats the folk answers without mocking them.",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000350",
+      "verdict": "accept",
+      "reason": "Talk test is a well-established crude intensity gauge and the explanation says so without overselling it.",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000351",
+      "verdict": "accept",
+      "reason": "Correct on painless crepitus, and it carries the pain/swelling caveat without turning it into a scare.",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000352",
+      "verdict": "accept",
+      "reason": "Explains the mechanism (momentum masking the pattern) rather than restating the option.",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000353",
+      "verdict": "revise",
+      "reason": "'Often within the first few minutes' is firmer than the evidence. The acute-exercise literature generally finds mood benefit from bouts of about ten minutes upward, measured during and after the bout, and affect during effort depends on intensity — above the ventilatory threshold it typically gets worse before it gets better. A child who feels nothing at minute two and concludes it is not working is the failure mode. Rephrase to something like 'often within a single short session, not weeks' and add a source, or downgrade the timing claim.",
+      "sources_checked": [
+        "https://journals.sagepub.com/doi/10.3233/BPL-160040",
+        "https://pmc.ncbi.nlm.nih.gov/articles/PMC9291128/"
+      ]
+    },
+    {
+      "id": "SF-TRV-000354",
+      "verdict": "revise",
+      "reason": "No single defensible right answer. Distractor B ('it gives you time to think without interruption') is at least as good an explanation as the key, and C is not far behind, so a reader who thinks about it carefully can land on B and be marked wrong. The key also asserts a cognitive mechanism ('loosening attention lets connections surface') that is a hypothesis, not a settled finding, under a `simplified` label with no sources — the walking/creativity effect is reasonably well evidenced but its mechanism is not. Either narrow the question so only one option fits, or relabel and source it.",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000355",
+      "verdict": "accept",
+      "reason": "Honestly labelled `editorial`; distractors are all real beliefs people hold.",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000356",
+      "verdict": "accept",
+      "reason": "Editorial and labelled as such; the explanation gives a concrete image (the two-minute version on a terrible day) rather than restating the option.",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000357",
+      "verdict": "accept",
+      "reason": "Consistent with distraction-versus-rumination findings, stated moderately, no diagnosis or medical advice, age-appropriate.",
+      "sources_checked": []
+    },
+    {
+      "id": "SF-TRV-000358",
+      "verdict": "accept",
+      "reason": "Kind, non-shaming, editorial and labelled as such.",
+      "sources_checked": []
+    }
+  ]
+}

@@ -1,0 +1,229 @@
+{
+  "verdicts": [
+    {
+      "id": "SF-TRV-000081",
+      "verdict": "revise",
+      "reason": "Two firmness problems in the explanation. 'which is the only reason it feels like nothing' is an unearned exclusive causal claim — automation is one reason, but walking is also genuinely metabolically cheap (inverted-pendulum energy exchange, elastic tendon return), which the item itself offers as distractor 0 and then dismisses. 'robots are still not very good at it' is dated as of 2026 and a child who has seen a humanoid robot video will know it. Also, distractor 2 ('legs run on reflexes that don't involve the brain') is partly true — spinal central pattern generators are real — so the discrimination between options rests on a hedge the reader can't see."
+    },
+    {
+      "id": "SF-TRV-000082",
+      "verdict": "revise",
+      "reason": "The answer key points at the weaker mechanism. 'They repair after being worked, and come back slightly sturdier' is the damage-and-repair (microtear) model, which current exercise physiology no longer treats as the driver of adaptation: mechanical tension is the primary stimulus and muscle damage is neither required nor reliably correlated with growth (low-load training to effort produces equivalent hypertrophy with minimal damage). Stated here as settled fact with confidence 'simplified'. Reword around tension/adaptation rather than repair-of-damage, or mark the mechanism as the open question it is."
+    },
+    {
+      "id": "SF-TRV-000083",
+      "verdict": "accept",
+      "reason": "Definition is correct, all four options are things people genuinely believe progressive overload means, the answer is not the longest or most specific, and the explanation adds the 'creeping, not maxing' point rather than restating the answer. No firmness or safety issues."
+    },
+    {
+      "id": "SF-TRV-000084",
+      "verdict": "accept",
+      "reason": "Passive-versus-active range is the standard working distinction and the explanation gives a concrete test (able to be put there versus able to get there yourself). Distractor 0 fairly represents the common loose usage. Slightly the longest option but not by a margin that gives the answer away."
+    },
+    {
+      "id": "SF-TRV-000085",
+      "verdict": "accept",
+      "reason": "Dynamic movement before activity, long holds after, is well supported and stated without overclaiming an injury-prevention benefit — which is the trap this topic usually falls into. Notably good handling of distractor 0: the explanation concedes that warming up with the activity itself is also legitimate instead of pretending it is wrong."
+    },
+    {
+      "id": "SF-TRV-000086",
+      "verdict": "revise",
+      "reason": "Overstated for the thing the question actually asks about. 'Muscles respond to tension and have no idea where it came from' and 'a push-up and a bench press are the same conversation' hold reasonably for hypertrophy, but the question asks about strength, and maximal strength is load- and specificity-dependent — meta-analyses consistently find heavy-load training superior for 1RM strength even where hypertrophy is equal. That makes distractor 0 ('only up to a point, after which weights become necessary') substantially defensible, so the item marks a defensible option wrong. Soften to 'you can build real, useful strength' and drop 'muscles can't tell'."
+    },
+    {
+      "id": "SF-TRV-000087",
+      "verdict": "revise",
+      "reason": "Test-craft: the correct option is the only hedged one ('reasonably well') among three single-factor absolutes ('hand size, which sets how much you can squeeze', 'forearms, and not much else', 'how much you use your hands'). A reader who knows nothing picks the moderate-sounding option. Content is also firmer than the evidence: 'grip tracks whole-body strength closely' overstates — correlations range from low to high by population and test, are only moderate for upper-body pressing, and reviews explicitly caution against grip as a stand-alone measure of total-body strength. Its stronger role is as a health/mortality marker, not a strength surrogate."
+    },
+    {
+      "id": "SF-TRV-000088",
+      "verdict": "accept",
+      "reason": "Stretch tolerance — the nervous system easing its guard rather than tissue lengthening — is the current mainstream account of acute range gains, and the item correctly rejects both the permanent-lengthening and the micro-tear stories. The 'which is why forcing a stretch works so badly' line is a safety-positive framing rather than an overclaim. Distractors are all things people actually believe."
+    },
+    {
+      "id": "SF-TRV-000090",
+      "verdict": "accept",
+      "reason": "Definition correct, the wall-sit example earns its place, and the practical note (useful when space or noise is a problem) teaches something. 'Working flat out' slightly overstates a plank's effort level but nothing turns on it, and no option is guessable from form."
+    },
+    {
+      "id": "SF-TRV-000091",
+      "verdict": "accept",
+      "reason": "Early strength gains preceding measurable hypertrophy is mainstream and the explanation hedges appropriately by including timing/coordination alongside recruitment. Distractors are plausible (the bone and the confidence options are both things people say) and the correct option is not distinguishable by form."
+    },
+    {
+      "id": "SF-TRV-000092",
+      "verdict": "accept",
+      "reason": "Joint-specificity of flexibility is correct and the hip-versus-shoulder example makes it concrete. 'Trainable at any age, just slowly' is appropriately hedged rather than promising a timeline. The correct option is the shortest, which is good craft here."
+    },
+    {
+      "id": "SF-TRV-000093",
+      "verdict": "revise",
+      "reason": "Two defensible answers. Posterior neck and upper-trapezius tightness is at least as standard a claim about desk sitters as hip flexors are, so distractor 0 is marked wrong without justification. The stated mechanism is also firmer than the evidence: 'muscles adapt to the length they spend most of their time at' comes from animal immobilisation work, and in humans the sitting/tightness link is an association with reduced hip extension in which perceived tightness is substantially a nervous-system guarding effect rather than demonstrated tissue shortening. 'It takes about ten seconds' is an invented dose."
+    },
+    {
+      "id": "SF-TRV-000094",
+      "verdict": "revise",
+      "reason": "This is the 'most repair happens during X' pattern. The proportion is not something anyone has measured; muscle protein synthesis is elevated for roughly 24-72 hours after training but remodelling also proceeds continuously, so the split implied by 'most' is invented. The question is also near-tautological (work happens during the session, so anything else is 'between'), and it leans on the same damage-and-repair model flagged in SF-TRV-000082. The message about rest days mattering is worth keeping — restate it as adaptation happening after the stimulus, without the proportion."
+    },
+    {
+      "id": "SF-TRV-000095",
+      "verdict": "revise",
+      "reason": "Guessable without knowing the fact. The correct option is the longest, the only three-item list, and the only one saying anything happens at all — the other three are variations on 'little happens' ('very little else', 'shutting down almost entirely', 'carries on as usual'). Anyone with a general cultural sense that sleep is restorative picks it blind. The content is accurate; rewrite the distractors so at least two assert something specific and positive."
+    },
+    {
+      "id": "SF-TRV-000096",
+      "verdict": "revise",
+      "reason": "Contested material labelled 'simplified'. The explanation's concrete claim — a move you fumbled 'can feel oddly easier the next morning without you having touched it again' — is the sleep-dependent overnight enhancement effect for motor skills, which has been under sustained challenge since Rickard et al. 2008 (gains attributed to averaging and reactive-inhibition artifacts), with later work finding stabilisation rather than enhancement and meta-analysis finding no compelling evidence of sleep-specific consolidation for motor sequences. Either drop the overnight-improvement illustration and keep the better-supported consolidation claim, or reclassify as contested and say the question is open."
+    },
+    {
+      "id": "SF-TRV-000097",
+      "verdict": "accept",
+      "reason": "Light as the primary zeitgeber, and the non-image-forming retinal cells behind it, are well established, and 'strongest signal' sits in a clock-setting context where morning light does carry the largest phase-shifting effect. Distractors are plausible, the correct option is not the longest, and there is no dose or duration invented."
+    },
+    {
+      "id": "SF-TRV-000098",
+      "verdict": "accept",
+      "reason": "Evening light delaying sleep onset is well supported and stated without a screen-time prescription or a lux figure. The correct option is the shortest, which is good craft, and the firelight aside teaches something beyond the answer."
+    },
+    {
+      "id": "SF-TRV-000099",
+      "verdict": "accept",
+      "reason": "Correct and appropriately hedged: 'almost always' rather than 'always', and it volunteers the complication (heart rate rises during REM) instead of hiding it. No device or target-number framing, which this topic invites."
+    },
+    {
+      "id": "SF-TRV-000100",
+      "verdict": "accept",
+      "reason": "Accurate, the question says 'famous for' rather than 'only stage with dreams' so the NREM-dreaming nuance is not misrepresented, and REM atonia is a genuinely interesting addition. Distractors are real sleep stages, not jokes."
+    },
+    {
+      "id": "SF-TRV-000101",
+      "verdict": "accept",
+      "reason": "Roughly 90 minutes is standard and the question says 'roughly'. The added point — deep sleep front-loaded, REM later, so losing the last two hours is not the same as losing the first two — is the part that teaches, and it is correct. Numeric distractors are spread sensibly."
+    },
+    {
+      "id": "SF-TRV-000102",
+      "verdict": "accept",
+      "reason": "Correct, and the teenage phase-delay note is both accurate and kind — framed as biology rather than character, which suits an app children use. No hour targets invented. Distractor 2 ('depends entirely on the individual') is a genuinely tempting wrong answer."
+    },
+    {
+      "id": "SF-TRV-000103",
+      "verdict": "accept",
+      "reason": "Regularity helping circadian anticipation is well supported, and 'often beats an extra half hour' is hedged rather than asserted as a rule. Nothing prescriptive about bedtimes, and the explanation gives a mechanism (the body prepares in advance only if it can predict) rather than restating the option."
+    },
+    {
+      "id": "SF-TRV-000104",
+      "verdict": "accept",
+      "reason": "Definition is correct and the two comparative asides are both defensible — active recovery being preferred over complete rest is framed as what people find rather than a physiological claim, and 'stretching does less than its reputation suggests' matches the evidence that stretching has negligible effect on soreness. Distractor 0 (a hard session to 'flush' the muscles) is a well-chosen piece of gym folklore."
+    },
+    {
+      "id": "SF-TRV-000105",
+      "verdict": "accept",
+      "reason": "Model item for this library. Slow-wave activity and consolidation during deep sleep are well supported, and the glymphatic question is correctly labelled contested, correctly dated (the 2013 finding directly contradicted by the May 2024 Nature Neuroscience tracer work, still disputed), and says so in the text rather than only in the metadata. Two of the three distractors assert something positive, so the answer is not guessable by form."
+    },
+    {
+      "id": "SF-TRV-000106",
+      "verdict": "accept",
+      "reason": "Sleep inertia from waking out of slow-wave sleep is correct, the name is given, and the ten-to-twenty-minute versus an-hour contrast matches standard nap guidance rather than being invented. Ending on 'It passes' is the right reassurance for a young reader."
+    },
+    {
+      "id": "SF-TRV-000107",
+      "verdict": "accept",
+      "reason": "Amygdala reactivity increasing and prefrontal regulation weakening after poor sleep is well supported, and 'small things genuinely do feel bigger — it isn't a failure of perspective' is a non-shaming framing. 'One bad night is enough' is at the edge (the strongest evidence comes from total deprivation) but the claim is about direction, not magnitude, and distractors are all plausible beliefs."
+    },
+    {
+      "id": "SF-TRV-000108",
+      "verdict": "revise",
+      "reason": "The headline range (half to two-thirds, varying by person) is right, but the aside is wrong in a checkable way: bone is conventionally cited at about 31% water (USGS, from Mitchell et al. 1945), not 'roughly a fifth'. Either correct the figure to about a third or drop the aside — an invented proportion attached to a true core is the exact defect pattern here."
+    },
+    {
+      "id": "SF-TRV-000109",
+      "verdict": "accept",
+      "reason": "Genuinely good item. The evaporation mechanism is correct, distractor 3 is a precise near-miss (cooling by the liquid itself) so the reader must actually know why sweat cools, and 'sweat that drips off does almost nothing' explains both the breeze and the humid day. Nothing about hydration targets or body composition."
+    },
+    {
+      "id": "SF-TRV-000110",
+      "verdict": "accept",
+      "reason": "Correct and age-appropriate, with a real reason attached (fat is denser but slower to access, protein is building material the body is reluctant to burn). No food is framed as good or bad and no eating advice is given, which matters for a nine-year-old audience."
+    },
+    {
+      "id": "SF-TRV-000111",
+      "verdict": "accept",
+      "reason": "Correct, the hair/nails/skin examples make it concrete, and the correct option is the shortest. Pairs cleanly with the carbohydrate item without contradicting it. No protein-target or supplement framing."
+    },
+    {
+      "id": "SF-TRV-000112",
+      "verdict": "accept",
+      "reason": "Correct (the skeleton holds roughly 99%) and 'overwhelming majority' avoids inventing a decimal. The structure-and-warehouse framing teaches the reason bone matters beyond being scaffolding, and the distractors are all plausible tissues."
+    },
+    {
+      "id": "SF-TRV-000114",
+      "verdict": "revise",
+      "reason": "Unearned 'main job' claim, and the chosen option is the vaguest of the four. Fibre's roles include bulking and transit but also colonic fermentation to short-chain fatty acids, viscosity effects on glycaemic response and cholesterol, and satiety — so declaring transit the main job is an invented ranking, and it is simply wrong for soluble fibre, where option 2 (absorbs water, contributes to fullness) is substantially correct and marked wrong. 'Gives everything else something to move along with' is also hard to parse at min_age 9."
+    },
+    {
+      "id": "SF-TRV-000115",
+      "verdict": "accept",
+      "reason": "Correct — sodium chloride is the main solute lost — and the everyday evidence (salty taste, white marks on a dried shirt) is verifiable by the reader. Crucially it closes with 'you replace it without thinking about it, from food', which heads off the electrolyte-supplement folklore this question usually attracts."
+    },
+    {
+      "id": "SF-TRV-000116",
+      "verdict": "accept",
+      "reason": "Correct, and the haem detail ('a little metal involved in every breath') is the kind of fact worth a reader's attention. Good distractor handling: the explanation says protein, fibre and starch are needed too but are not minerals, so the wrong options are not left looking like bad things."
+    },
+    {
+      "id": "SF-TRV-000117",
+      "verdict": "accept",
+      "reason": "Correct, and the explanation does real work by separating breakdown (stomach) from absorption (small intestine), which is the actual misconception the question targets. Surface area described qualitatively rather than with an invented tennis-court comparison."
+    },
+    {
+      "id": "SF-TRV-000118",
+      "verdict": "accept",
+      "reason": "Matches the physiology: borborygmi come from peristaltic and migrating-motor-complex contractions moving gas and fluid, and an empty gut is louder because there is less content to muffle it. 'Not really a hunger signal' is defensible on that basis and does not tell anyone to ignore hunger or delay eating. Distractor 3 (stomach contracting because it is empty) is a well-judged near-miss."
+    },
+    {
+      "id": "SF-TRV-000119",
+      "verdict": "accept",
+      "reason": "Directionally correct and, importantly, it avoids the two failure modes this topic has: it does not tell readers to drink before they are thirsty, and it explicitly refuses a fixed glasses-per-day number. 'Thirst plus a bit' is loose but errs safe, and 'there's no single right number' is the honest answer."
+    },
+    {
+      "id": "SF-TRV-000120",
+      "verdict": "accept",
+      "reason": "Correct — raised muscle temperature and blood flow, with warm muscle contracting more easily and tolerating stretch better — and it claims measurable temperature effects rather than injury prevention, which is the overclaim this question usually produces. The mind/body point is given its proper weight rather than dismissed."
+    },
+    {
+      "id": "SF-TRV-000121",
+      "verdict": "accept",
+      "reason": "Delayed-onset soreness peaking at roughly 24-48 hours is well established and 'a day or two' is the right level of precision. The 'session before last' heuristic assumes near-daily training and is loosely put, but nothing harmful follows from it and the core timing is right."
+    },
+    {
+      "id": "SF-TRV-000122",
+      "verdict": "accept",
+      "reason": "Framed as what people find rather than as a physiological cure, which is the correct strength of claim for the evidence on active recovery and soreness. The observation that the first minutes feel worse than the last is useful and true to experience, and 'nothing here needs to be earned back' avoids punishment framing."
+    },
+    {
+      "id": "SF-TRV-000123",
+      "verdict": "accept",
+      "reason": "Correct and valuable — soreness tracks novelty rather than training value — and it handles distractor 3 honestly by conceding beginners get more soreness and then explaining why that is precisely what makes it a bad progress measure. Safety-positive for an audience that might otherwise chase soreness."
+    },
+    {
+      "id": "SF-TRV-000124",
+      "verdict": "accept",
+      "reason": "Modest and defensible: it claims only gradual circulatory settling, which is the one cool-down benefit with real support, and explicitly demotes the stretching component to optional rather than claiming recovery or soreness benefits. Distractor 0 is the popular wrong answer, so the item is doing useful correction."
+    },
+    {
+      "id": "SF-TRV-000125",
+      "verdict": "accept",
+      "reason": "Movement-pattern rehearsal and coordination priming is a sound reason and complements rather than duplicates the temperature item. The closing line — the first proper rep is not the first time your body has seen the movement today — explains rather than restates, and no distractor is a joke or a bare dismissal."
+    },
+    {
+      "id": "SF-TRV-000126",
+      "verdict": "revise",
+      "reason": "Two overclaims wrapped around a true core. 'Nothing at all happens while you sit still' is a false absolute — synovial fluid is present and cartilage is nourished by diffusion regardless — and 'most of why stiffness eases a few minutes into a walk' is an invented proportion attributing a multi-causal sensation to one mechanism. Distractor 1 is also partly true: joint movement does increase synovial fluid production and hyaluronan secretion, so it is not cleanly wrong."
+    },
+    {
+      "id": "SF-TRV-000127",
+      "verdict": "accept",
+      "reason": "The safety and adherence message is right and worth stating plainly: pain is not the signal of adaptation, and conflating effort with pain is how people get hurt or quit. The year-long comparative is a generalisation, but it is supported by the dose-response and adherence evidence and errs in the protective direction. Distractor 3 ('strength needs pain, flexibility does not') is a good trap."
+    }
+  ]
+}

@@ -41,7 +41,7 @@ def test_survey_counts_dependents(app):
     db.session.add_all([
         CoachTurn(user_id=s.id, role="user", content="hi"),
         CoachTurn(user_id=s.id, role="assistant", content="yo"),
-        CoachNote(user_id=s.id, goals='["x"]', preferences='[]', notes='[]'),
+        CoachNote(user_id=s.id, activities='["yoga"]', avoid_movements='[]', session_prefs='[]'),
     ])
     db.session.commit()
     _safe, _blocked, counts = C.survey()

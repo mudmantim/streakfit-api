@@ -1,0 +1,229 @@
+{
+  "verdicts": [
+    {
+      "id": "SF-FCT-000137",
+      "verdict": "accept",
+      "reason": "Cold slowing sensory nerve conduction is a well-supported analgesia mechanism, and 'largely' is appropriately hedged."
+    },
+    {
+      "id": "SF-FCT-000138",
+      "verdict": "accept",
+      "reason": ""
+    },
+    {
+      "id": "SF-FCT-000139",
+      "verdict": "accept",
+      "reason": "Consistent with detraining literature; timescale claim is correct."
+    },
+    {
+      "id": "SF-FCT-000140",
+      "verdict": "accept",
+      "reason": "Standard talk test, stated at the right level of firmness."
+    },
+    {
+      "id": "SF-FCT-000141",
+      "verdict": "accept",
+      "reason": "The largest GH pulse does occur with the first slow-wave sleep episode; GH's role in tissue repair is standard physiology."
+    },
+    {
+      "id": "SF-FCT-000142",
+      "verdict": "accept",
+      "reason": "Synovial fluid thixotropy is the mainstream explanation; 'within a minute' is slightly tighter than sources say ('a few minutes') but not misleading."
+    },
+    {
+      "id": "SF-FCT-000143",
+      "verdict": "revise",
+      "reason": "The stated mechanism is wrong. Stopping abruptly does not make heart rate 'drop off a cliff' — heart rate falls gradually either way (that is what HR recovery measures). The real effect of an abrupt stop is blood pooling in the legs and a drop in blood pressure, which is what causes the light-headedness. Rewrite around blood pooling, or drop the 'cliff' framing; as written it teaches a mechanism that does not exist."
+    },
+    {
+      "id": "SF-FCT-000144",
+      "verdict": "accept",
+      "reason": "Low information density and overlaps SF-FCT-000139/149, but nothing false or unsafe."
+    },
+    {
+      "id": "SF-FCT-000145",
+      "verdict": "accept",
+      "reason": "Specificity of adaptation plus plateau; fair as a simplification."
+    },
+    {
+      "id": "SF-FCT-000146",
+      "verdict": "accept",
+      "reason": "Muscle protein synthesis stays elevated for 24-48h after exercise; no diet prescription attached."
+    },
+    {
+      "id": "SF-FCT-000147",
+      "verdict": "accept",
+      "reason": "Morning/post-stillness stiffness is a real and commonly reported pattern; heavy overlap with SF-FCT-000142 though."
+    },
+    {
+      "id": "SF-FCT-000148",
+      "verdict": "revise",
+      "reason": "This is the classic supercompensation curve stated as a mechanical certainty for every hard session ('the repair overshoots slightly, and you come back a little stronger than before'). Supercompensation is a contested training model, not an established per-session physiological event — different systems recover at different rates and single-session overshoot in performance has not been reliably demonstrated. Either soften to 'over weeks of hard efforts and recovery you end up stronger' or re-tag as contested and say so in the text."
+    },
+    {
+      "id": "SF-FCT-000149",
+      "verdict": "accept",
+      "reason": "Matches detraining evidence for a one-week layoff."
+    },
+    {
+      "id": "SF-FCT-000150",
+      "verdict": "accept",
+      "reason": "Caffeine is an adenosine receptor antagonist; the framing is accurate and useful."
+    },
+    {
+      "id": "SF-FCT-000151",
+      "verdict": "accept",
+      "reason": "REM atonia, correctly described."
+    },
+    {
+      "id": "SF-FCT-000152",
+      "verdict": "accept",
+      "reason": ""
+    },
+    {
+      "id": "SF-FCT-000153",
+      "verdict": "accept",
+      "reason": "Homeostatic sleep pressure; the tank analogy does not overreach."
+    },
+    {
+      "id": "SF-FCT-000154",
+      "verdict": "accept",
+      "reason": "Core temperature begins falling roughly two hours before habitual sleep onset."
+    },
+    {
+      "id": "SF-FCT-000155",
+      "verdict": "accept",
+      "reason": "Morning light is the dominant zeitgeber; correctly stated."
+    },
+    {
+      "id": "SF-FCT-000156",
+      "verdict": "accept",
+      "reason": "Chronotype is partly heritable and shifts with age; the non-judgemental framing is right for the audience."
+    },
+    {
+      "id": "SF-FCT-000157",
+      "verdict": "accept",
+      "reason": "Pubertal circadian phase delay is well documented."
+    },
+    {
+      "id": "SF-FCT-000158",
+      "verdict": "accept",
+      "reason": "Hedged to 'most' rather than the usual unsourced '95%' figure."
+    },
+    {
+      "id": "SF-FCT-000159",
+      "verdict": "accept",
+      "reason": ""
+    },
+    {
+      "id": "SF-FCT-000160",
+      "verdict": "revise",
+      "reason": "The mechanism is right but the word 'simply' makes a blanket reassurance out of it. Habitual loud snoring is the cardinal symptom of obstructive sleep apnea — roughly 2-3% of children and a far higher share of older adults — and this item, aimed at 9-year-olds and seniors, tells the reader snoring is nothing but a noise. Remove 'simply' and add a non-diagnostic clause (e.g. that loud, habitual snoring or pauses in breathing are worth mentioning to a doctor)."
+    },
+    {
+      "id": "SF-FCT-000161",
+      "verdict": "accept",
+      "reason": "Ordinary room-level light suppresses and delays melatonin in most people; 'can' keeps it appropriately hedged."
+    },
+    {
+      "id": "SF-FCT-000162",
+      "verdict": "accept",
+      "reason": "Social jetlag, correctly described."
+    },
+    {
+      "id": "SF-FCT-000163",
+      "verdict": "accept",
+      "reason": ""
+    },
+    {
+      "id": "SF-FCT-000164",
+      "verdict": "accept",
+      "reason": "Sleep inertia is worse on waking from slow-wave sleep; accurate."
+    },
+    {
+      "id": "SF-FCT-000165",
+      "verdict": "accept",
+      "reason": "Distal heat loss and sleep onset; the 'slightly cool room' guidance is not overstated."
+    },
+    {
+      "id": "SF-FCT-000166",
+      "verdict": "accept",
+      "reason": "Hedged with 'tends to', and the light-emitting-eReader vs paper comparison supports both named mechanisms. Note the sleep-onset effect is modest (~10 minutes), so the text must not be firmed up in editing."
+    },
+    {
+      "id": "SF-FCT-000167",
+      "verdict": "accept",
+      "reason": "REM is concentrated in the later cycles, so a short night cuts REM disproportionately."
+    },
+    {
+      "id": "SF-FCT-000168",
+      "verdict": "revise",
+      "reason": "Stated far more firmly than the evidence supports, and partly contradicted. Skin does not repair faster while you sleep: Hoyle et al. (Science Translational Medicine, 2017) found human burns sustained at night healed about 60% slower than daytime burns, because fibroblast mobilisation is circadian and peaks in the active phase. Overnight muscle protein synthesis is limited by amino acid availability rather than elevated by sleep per se, and bone resorption markers actually peak overnight. What is defensible is that poor or short sleep impairs repair — that is the claim to make, not a blanket 'skin, muscle and bone all repair faster while you're asleep'."
+    },
+    {
+      "id": "SF-FCT-000169",
+      "verdict": "accept",
+      "reason": "Brief arousals are normal and usually unremembered; reassuring without being medical advice."
+    },
+    {
+      "id": "SF-FCT-000170",
+      "verdict": "accept",
+      "reason": "Semicircular canals, correctly described for rotation; omitting the otoliths is a fair simplification."
+    },
+    {
+      "id": "SF-FCT-000171",
+      "verdict": "accept",
+      "reason": "Endolymph inertia and cupula deflection; accurate."
+    },
+    {
+      "id": "SF-FCT-000172",
+      "verdict": "accept",
+      "reason": "Vision, vestibular and somatosensory integration; the 'vote' framing teaches the idea well."
+    },
+    {
+      "id": "SF-FCT-000173",
+      "verdict": "accept",
+      "reason": "Sensory conflict is the standard explanation used by major health bodies."
+    },
+    {
+      "id": "SF-FCT-000174",
+      "verdict": "accept",
+      "reason": "Ankle and hip postural strategies are established in the postural-control literature."
+    },
+    {
+      "id": "SF-FCT-000175",
+      "verdict": "accept",
+      "reason": "Visual fixation measurably improves postural stability."
+    },
+    {
+      "id": "SF-FCT-000176",
+      "verdict": "accept",
+      "reason": "Correct physics: a long pole raises rotational inertia, slowing the rate of tip."
+    },
+    {
+      "id": "SF-FCT-000177",
+      "verdict": "accept",
+      "reason": "Spotting is correctly described; 'avoid' is slightly absolute (dancers also habituate vestibularly) but not misleading."
+    },
+    {
+      "id": "SF-FCT-000178",
+      "verdict": "accept",
+      "reason": "Proprioception, correctly named. The eyes-shut example is a seated finger-to-nose illustration, not an eyes-closed movement instruction, so it does not trip the safety rule."
+    },
+    {
+      "id": "SF-FCT-000179",
+      "verdict": "accept",
+      "reason": "Base-of-support size and stability; correct and no instruction to attempt anything risky."
+    },
+    {
+      "id": "SF-FCT-000180",
+      "verdict": "revise",
+      "reason": "Misattributes the cat righting reflex to a 'faster' inner ear. The vestibular system only triggers the reflex — humans have that part too and it is not the limiting factor. What lets a cat land on its feet is body mechanics: an unusually flexible spine and no functional collarbone, letting it counter-rotate front and back halves and reorient while conserving angular momentum. As written it teaches the wrong cause."
+    },
+    {
+      "id": "SF-FCT-000181",
+      "verdict": "accept",
+      "reason": "Whole-body centre of mass sits roughly at navel level (anterior to S2); 'roughly' carries the approximation honestly."
+    }
+  ]
+}

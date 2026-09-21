@@ -178,7 +178,7 @@ components:
       properties:
         id: {type: integer}
         username: {type: string}
-        skill_level: {type: string, enum: [beginner, intermediate, advanced, custom]}
+        skill_level: {type: string, enum: [beginner, intermediate, advanced]}
         display_mode: {type: string, enum: [classic, bright, game]}
         rickie_mode: {type: string, enum: [full, quiet, minimal]}
         current_streak: {type: integer}
@@ -526,7 +526,7 @@ paths:
               type: object
               minProperties: 1
               properties:
-                skill_level: {type: string, enum: [beginner, intermediate, advanced, custom]}
+                skill_level: {type: string, enum: [beginner, intermediate, advanced]}
                 display_mode: {type: string, enum: [classic, bright, game]}
                 rickie_mode: {type: string, enum: [full, quiet, minimal]}
             example: {"skill_level": "intermediate", "display_mode": "bright"}
@@ -564,7 +564,7 @@ paths:
               schema: {$ref: '#/components/schemas/Error'}
               examples:
                 none: {value: {"error": "Provide skill_level, display_mode, and/or rickie_mode"}}
-                bad_skill: {value: {"error": "Invalid skill_level. Must be one of: beginner, intermediate, advanced, custom"}}
+                bad_skill: {value: {"error": "Invalid skill_level. Must be one of: beginner, intermediate, advanced"}}
                 bad_display: {value: {"error": "Invalid display_mode. Must be one of: classic, bright, game"}}
                 bad_rickie: {value: {"error": "Invalid rickie_mode. Must be one of: full, quiet, minimal"}}
         '401': {$ref: '#/components/responses/UnauthorizedJWT'}
@@ -1000,6 +1000,84 @@ paths:
               example: {"error": "Not found"}
         '422': {$ref: '#/components/responses/UnprocessableJWT'}
 
+    patch:
+      tags: [Challenges]
+      summary: Rename a side quest
+      description: >
+        Changes the title only. The streak, best streak and check-in history are
+        untouched — the name is a label, and renaming must never cost somebody
+        their history. Scoped to the caller in the query, so another user's id
+        returns 404 rather than 403.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: challenge_id
+          in: path
+          required: true
+          schema: {type: integer}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title]
+              properties:
+                title: {type: string, maxLength: 100}
+            example: {"title": "Read ten pages"}
+      responses:
+        '200':
+          description: The renamed challenge.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Challenge'}
+        '400':
+          description: Empty or over-long title. The message is written for a person.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+              example: {"error": "Give it a name first."}
+        '401': {$ref: '#/components/responses/UnauthorizedJWT'}
+        '404':
+          description: No such challenge owned by this user.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '422': {$ref: '#/components/responses/UnprocessableJWT'}
+
+    delete:
+      tags: [Challenges]
+      summary: Remove a side quest
+      description: >
+        Deletes the row. Nothing about the daily mission lives on it, so the
+        mission streak, XP, levels and lifetime totals are unaffected — a
+        promise the UI makes out loud and `tests/test_side_quest_editing.py`
+        holds to. Scoped to the caller in the query.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: challenge_id
+          in: path
+          required: true
+          schema: {type: integer}
+      responses:
+        '200':
+          description: Removed.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message: {type: string}
+              example: {"message": "Side Quest removed"}
+        '401': {$ref: '#/components/responses/UnauthorizedJWT'}
+        '404':
+          description: No such challenge owned by this user.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '422': {$ref: '#/components/responses/UnprocessableJWT'}
+
   /api/challenges/{challenge_id}/checkin:
     post:
       tags: [Challenges]
@@ -1093,12 +1171,8 @@ paths:
               schema: {$ref: '#/components/schemas/Error'}
               example: {"error": "Team name is required"}
         '401': {$ref: '#/components/responses/UnauthorizedJWT'}
-        '403':
-          description: Free-plan team-count cap reached.
-          content:
-            application/json:
-              schema: {$ref: '#/components/schemas/Error'}
-              example: {"error": "You've reached the 10-team limit for your plan"}
+        # No 403 here: there is no team-count cap on any plan. Joining or
+        # creating a team is never a paid permission.
         '413': {$ref: '#/components/responses/PayloadTooLarge'}
         '422': {$ref: '#/components/responses/UnprocessableJWT'}
         '429': {$ref: '#/components/responses/TooManyRequests'}
@@ -1258,7 +1332,8 @@ paths:
               schema: {$ref: '#/components/schemas/Error'}
               examples:
                 bad_code: {value: {"error": "Invalid invite code"}}
-                count_cap: {value: {"error": "You've reached the 10-team limit for your plan"}}
+                # A team-count cap example lived here. There is no such cap on
+                # any plan; only the per-team MEMBER cap below applies.
                 member_cap: {value: {"error": "This team is at its 8-member limit"}}
         '404':
           description: No such team.
