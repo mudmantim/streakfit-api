@@ -1453,6 +1453,141 @@ def health():
     return jsonify({"status": "ok"}), 200
 
 
+# --- Build Identity (Production Verification Framework) ---
+#
+# Implements Build Identity Contract v1.0.0. The reference implementation is
+# PorchLight; the consumer is Mudman Command, which probes this path with no
+# credentials and treats a missing `application`, `environment` or
+# `schemaVersion` as a critical failure.
+#
+# Unauthenticated, exactly as the contract requires: a dashboard has to reach
+# this before it holds credentials, and an app whose *authentication* is broken
+# is precisely the app worth reporting on. That trade is only safe because the
+# exclusion list below is honoured, so treat it as load-bearing.
+#
+# NEVER in this payload: credentials, connection strings, database hostnames,
+# internal service or instance identifiers, file paths, user data, or any
+# configuration *value* (feature flags are booleans, never their settings).
+#
+# `_get_commit_sha()` is defined with the admin helpers below and shared with
+# them; it is not duplicated here.
+
+BUILD_IDENTITY_SCHEMA_VERSION = '1.0.0'
+VERIFICATION_FRAMEWORK_VERSION = '1.0.0'
+STREAKFIT_API_VERSION = '1'
+
+
+def _detect_environment():
+    """production | development, derived rather than configured.
+
+    Nothing in this repo names the environment today and this change must not
+    add an environment variable to do it. Two markers already exist: Render sets
+    RENDER on every service, and the production start command sets
+    STREAKFIT_ENFORCE_DB_HEAD=1 inline on gunicorn (docs/operations/environment.md).
+    Either one means production.
+
+    Both markers are read here and discarded -- neither reaches the payload.
+    """
+    if os.environ.get('RENDER') or os.environ.get('RENDER_SERVICE_ID'):
+        return 'production'
+    if os.environ.get('STREAKFIT_ENFORCE_DB_HEAD') == '1':
+        return 'production'
+    return 'development'
+
+
+def _read_migration_state():
+    """The contract's `migration` object, read-only, never raising.
+
+    Deliberately NOT folded into `_assert_db_at_head()`, which reads the same two
+    values. That one's obligation is to kill the process when it cannot confirm
+    the schema; this one's is to never fail the request, because the contract
+    requires an identity even from a build that cannot see its database -- "I am
+    this build and I cannot read my migration state" is far more useful than a
+    500. Same two reads, opposite duties on failure, so they stay apart.
+
+    `state` says whether the revision could be READ, not whether it is current.
+    That is the contract's meaning ("unknown when the database could not be
+    read"), and it is why `atHead` carries the comparison instead.
+    """
+    from alembic.config import Config
+    from alembic.script import ScriptDirectory
+    from alembic.runtime.migration import MigrationContext
+
+    try:
+        cfg = Config()
+        cfg.set_main_option(
+            'script_location',
+            os.path.join(os.path.dirname(os.path.abspath(__file__)), 'migrations'))
+        script = ScriptDirectory.from_config(cfg)
+        head = script.get_current_head()
+        # Read-only: a connection, one revision read, no transaction of our own.
+        with db.engine.connect() as conn:
+            current = MigrationContext.configure(conn).get_current_revision()
+    except Exception:
+        # Unreachable database, unreadable migration directory -- either way the
+        # state is unknown, which is a first-class answer here rather than an error.
+        return {"latest": None, "appliedCount": None, "state": "unknown", "atHead": None}
+
+    try:
+        # Walk the chain from the stamped revision back to base. An unstamped
+        # database has applied nothing, which is 0 rather than unknown.
+        applied = len(list(script.iterate_revisions(current, 'base'))) if current else 0
+    except Exception:
+        # A revision the chain does not contain -- real during a bad rollback.
+        # The revision itself is still known and still reported.
+        applied = None
+
+    return {
+        "latest": current,
+        "appliedCount": applied,
+        "state": "ok",
+        "atHead": current == head,
+    }
+
+
+@app.route('/api/build-identity', methods=['GET'])
+@limiter.limit("60 per minute")
+def build_identity():
+    """Who is running. See the contract notes above before adding a field."""
+    sha = _get_commit_sha()
+
+    return jsonify({
+        "schemaVersion": BUILD_IDENTITY_SCHEMA_VERSION,
+        "application": "streakfit",
+        # No versioning scheme exists anywhere in this repo (see CLAUDE.md), so the
+        # commit is the real identity -- the same answer /api/admin/project-status
+        # already gives. "unknown" over an invented version number.
+        "version": sha or "unknown",
+        "gitSha": sha,
+        "gitBranch": os.environ.get('RENDER_GIT_BRANCH'),
+        # No build-date signal exists without adding an environment variable, and
+        # process start time is not a build date. null over a plausible-looking guess.
+        "buildDate": None,
+        "environment": _detect_environment(),
+        # Required by the contract, deliberately null: RENDER_SERVICE_ID and
+        # RENDER_INSTANCE_ID are internal infrastructure identifiers and are
+        # excluded from this payload. The keys stay so the shape is still the
+        # contract's.
+        "deploymentId": None,
+        "instanceId": None,
+        "migration": _read_migration_state(),
+        # Not guessed. The managed Postgres provider is recorded inconsistently
+        # across this repo and Mudman Command, and an unverified provider name
+        # would be exactly the fabricated fact this framework exists to refuse.
+        "storageProvider": "unknown",
+        # Booleans only, never configuration values. `coach` is here because it is
+        # the one flag that explains a user-visible behaviour: /api/coach returns
+        # 503 when the key is absent.
+        "featureFlags": {
+            "coach": bool(os.environ.get('ANTHROPIC_API_KEY')),
+        },
+        "apiVersion": STREAKFIT_API_VERSION,
+        "verificationFrameworkVersion": VERIFICATION_FRAMEWORK_VERSION,
+        "healthTimestamp": datetime.utcnow().isoformat() + "Z",
+    }), 200
+
+
+
 # --- Admin ---
 
 @app.route('/admin')
