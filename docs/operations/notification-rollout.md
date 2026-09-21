@@ -110,8 +110,13 @@ Each stage is reversible, and no stage claims delivery works until stage 6
 proves it.
 
 ### Stage 0 — before anything
-- [ ] Back up the production database **and restore it somewhere disposable**
-      to prove the backup is real.
+- [ ] **Identify which Neon project is production** by matching the hostname
+      in `DATABASE_URL` to an endpoint ID — the account holds two projects
+      named `streakfit`, and region is not the tiebreak. See
+      [deploy-runbook.md](deploy-runbook.md) §3.1.
+- [ ] `pg_dump` the production database **and restore it somewhere
+      disposable** to prove the backup is real. Neon takes no automatic dump
+      export, and a point-in-time branch is not a backup — §3.2.
 - [ ] Decide Option A / B / C above.
 
 ### Stage 1 — deploy the code, with delivery switched off

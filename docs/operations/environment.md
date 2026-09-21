@@ -73,10 +73,11 @@ graph TB
 
 | Prerequisite | Why | Where |
 |---|---|---|
-| Managed PostgreSQL (Neon) | Primary datastore | `DATABASE_URL` |
+| Managed PostgreSQL (**Neon**, not Render) | Primary datastore. The account holds **two** projects named `streakfit`; match the hostname to the endpoint ID before any operation | `DATABASE_URL` |
 | Anthropic account + key | Rickie coach (billed per call) | `ANTHROPIC_API_KEY` |
 | Render web service (git-linked to `main`) | Hosting + auto-deploy | Render dashboard |
 | Python **3.12.7** | Pinned runtime; SQLAlchemy 2.0.27 doesn't import on 3.14 | `runtime.txt`, `.python-version` |
-| DB backup/PITR | Recovery | Render/Neon dashboard — **confirm cadence + test a restore** |
+| DB backup | Recovery | **`pg_dump`, run by hand.** Neon takes no automatic dump export — if nobody runs it there is no file. See [runbooks.md](../runbooks.md#restore-from-backup) |
+| DB point-in-time restore | Fast recovery, **not** a backup | Neon history window — **Free is 6 hours**; it lives inside the project and dies with it |
 
 Open-Meteo (weather) needs **no** account/key — it's called anonymously; the only operational note is the shared-egress-IP 429 risk documented in [../architecture/coach-subsystem.md](../architecture/coach-subsystem.md) and [ADR-0005](../adrs/0005-in-process-weather-cache.md).

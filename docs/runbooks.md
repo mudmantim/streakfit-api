@@ -62,7 +62,9 @@ Baseline facts:
 ## Database connection exhaustion
 - Symptom: `SELECT 1` health failures, `QueuePool limit`/timeout errors in logs.
 1. Check the pool config in `app.py` (`SQLALCHEMY_ENGINE_OPTIONS`) and the DB's
-   max-connections **[verify Render Postgres plan]**.
+   max-connections **[verify the Neon plan's connection limit]** — this is
+   Neon, not Render Postgres, and pooled connections have a different ceiling
+   from direct ones.
 2. Look for a leak — long-running/held sessions. The coach persist path is now one
    short transaction (WS1); admin verify runs in a background thread with its own
    `app_context`.
@@ -119,10 +121,101 @@ python scripts/cleanup_qa_smoke.py --execute  # delete the SAFE group only
   no model involvement. To clear bad notes for a user, use the Forget path above.
 
 ## Restore from backup
-- **[verify Render Postgres]** — restore is a Render Postgres feature, not in this repo.
-1. Take/confirm a fresh backup before any risky operation (Render Postgres → Backups).
-2. To restore: use the Render dashboard point-in-time restore / backup restore flow
-   **[Render dashboard]** — exact steps depend on the Postgres plan.
-3. After restore, confirm the schema is at the Alembic head (`flask db current`) or
-   the boot guard will block startup; run `flask db upgrade` if behind.
-4. Verify `/health` → 200 and a normal login.
+
+> **CORRECTED 2026-09-21. This section used to describe Render Postgres
+> backups. Render does not host this database.** A read-only pass over the
+> Render dashboard found exactly one managed Postgres instance in the account
+> — `porchlight-db`, Oregon — which is PorchLight's, and `streakfit-api`'s
+> environment page carries no linked-database section at all. Production
+> reaches **Neon**, an external provider, and Neon's recovery model is not
+> Render's. Following the old steps would have meant looking for a backup
+> that was never being taken.
+
+**There is no automatic dump export.** Neon does not produce backup files on a
+schedule. If nobody has run `pg_dump`, there is no file to restore from — only
+the history window, which is not the same thing (see below).
+
+### The two mechanisms, which are not interchangeable
+
+| | **Point-in-time branch** | **`pg_dump` file** |
+|---|---|---|
+| Lives | inside the same Neon project | wherever you put it |
+| Time limit | only within the **history window** | none |
+| Survives losing the project or the account | **no** | **yes** |
+| Speed | instant (copy-on-write) | minutes |
+| Use it as | a fast rehearsal target | **the actual recovery artifact** |
+
+A branch is a cheap clone that shares the project's fate. If what you are
+recovering *from* is damage to the project, the branch is gone with it.
+
+The **history window** is per plan and must be read, never assumed: **Free is
+6 hours** and cannot be raised; Launch is 1 day (up to 7); Scale is 1 day (up
+to 30). Neon console → project → **Settings → Postgres → History window**. On
+Free, a branch taken before an evening migration is worthless by morning.
+
+### Restoring
+
+0. **Identify the project first.** Match the hostname in Render's
+   `DATABASE_URL` to a Neon endpoint ID before touching anything — there is
+   more than one Neon project named `streakfit`. See
+   `docs/operations/deploy-runbook.md` §3.1.
+1. **Within the history window**, and for a fast recovery: restore the branch
+   to a timestamp in the Neon console. Neon keeps a backup branch of the
+   pre-restore state automatically, so the restore itself is reversible.
+2. **Outside the window**, or if the project itself is the problem: create a
+   fresh Neon branch or project and `pg_restore` the most recent dump into it,
+   then repoint `DATABASE_URL`.
+   ```
+   pg_restore --no-owner --no-acl -d "$TARGET_URL" streakfit-<stamp>.dump
+   ```
+   Use the **direct** (non-`-pooler`) hostname — see "Pooled versus direct".
+3. After any restore, confirm the schema is at the Alembic head
+   (`flask db current`) or the boot guard blocks startup; run `flask db
+   upgrade` if behind.
+4. Verify `/health` → 200, `/api/build-identity` reports the expected
+   `migration.atHead: true`, and a normal login works.
+
+**What a restore cannot undo:** everything written after the dump or after the
+restore point. There is no partial or table-level recovery here — a branch
+restore "overwrites all data and schema" on that branch.
+
+## Pooled versus direct connections
+
+Neon offers two hostnames for the same endpoint, differing only by a suffix:
+
+```
+direct  ep-<id>.<region>.aws.neon.tech
+pooled  ep-<id>-pooler.<region>.aws.neon.tech
+```
+
+The endpoint ID is identical in both. The pooled one routes through PgBouncer
+in transaction mode.
+
+**The application should use whichever Render already has. Migrations,
+`pg_dump` and `pg_restore` must use the DIRECT hostname.** Transaction-mode
+pooling breaks session-scoped behaviour that Alembic DDL and the dump tools
+rely on, and the failure is confusing rather than obvious.
+
+This matters for the deploy specifically: a Pre-Deploy `flask db upgrade`
+inherits the service's `DATABASE_URL`. **If that URL is pooled, confirm the
+upgrade runs against a direct connection before relying on it.**
+
+## Backup handling
+
+A dump of this database contains every user's data, including coach
+conversations. It is not an ops artifact; it is the most concentrated copy of
+personal data this project produces.
+
+- Keep the connection string out of shell history (leading space, or read it
+  from a file). Never paste a full `DATABASE_URL` into a chat, an issue or a
+  commit — the password sits between the first `:` and the **final** `@`.
+- Store dumps encrypted and off Neon. Do not leave them in the repository,
+  in `/tmp`, or in a cloud folder that syncs.
+- **Delete them on a schedule you actually keep.** StreakFit promises 30-day
+  deletion of conversations and evidence; a dump taken today still contains
+  what was deleted tomorrow, so an undeleted backup silently outlives the
+  promise. **This is an unresolved privacy decision, not a solved problem** —
+  see `docs/operations/deploy-runbook.md` §8.
+- `pg_dump`/`pg_restore` must be the same major version as the Neon server or
+  newer, or they refuse to run. Check `SHOW server_version;` against
+  `pg_dump --version` before you need it in a hurry.
