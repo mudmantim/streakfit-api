@@ -144,6 +144,37 @@ def test_a_notice_becomes_a_real_http_request_and_a_recorded_receipt(
         "the provider's id must be parsed off the real response and stored")
 
 
+def test_the_request_identifies_itself_and_is_not_bare_urllib(
+        client, resend_stub, monkeypatch):
+    """A defect that only a real call to the real endpoint could find.
+
+    Cloudflare fronts api.resend.com and refuses urllib's default
+    `Python-urllib/3.x` signature outright. Measured against the live endpoint
+    on 2026-09-21 with a valid key:
+
+        GET /domains, default UA  -> 403, Cloudflare 1010 browser_signature_banned
+        GET /domains, explicit UA -> 401 from Resend itself (it got through)
+
+    `_notify_http_post` set no User-Agent, so every alert would have been
+    stopped at the CDN and never reached the provider at all -- a child-safety
+    notice failing before anything in this codebase got a say. Every test
+    missed it because they talk to a local stub, and a stub has no CDN in
+    front of it. This one at least holds the header in place.
+    """
+    _queued_urgent_notice()
+    monkeypatch.setattr(appmod, '_notification_channel',
+                        lambda name=None: ResendChannel())
+
+    _deliver_pending_notices(source=SOURCE_THREAD)
+
+    ua = resend_stub.received[0]['headers'].get('user-agent', '')
+    assert ua, "no User-Agent was sent; Cloudflare refuses the request"
+    assert 'python-urllib' not in ua.lower(), (
+        f"the default urllib User-Agent ({ua!r}) is blocked by Cloudflare "
+        f"before Resend sees the request")
+    assert 'StreakFit' in ua, f"the client should say what it is; got {ua!r}"
+
+
 def test_the_idempotency_key_is_sent_as_a_header(client, resend_stub, monkeypatch):
     """It is the only thing standing between a crash mid-send and a duplicate
     child-safety alert, and it only works if it survives as a real header."""

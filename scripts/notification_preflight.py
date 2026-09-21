@@ -42,6 +42,11 @@ REQUIRED = {
 # strict RFC 5322 -- a real address this rejects would be a worse outcome than
 # a malformed one it lets through, because the app fails loudly on send and
 # silently on nothing.
+# Mirrors app._NOTIFY_USER_AGENT. Cloudflare fronts api.resend.com and refuses
+# urllib's default signature with a 1010 before Resend sees it, so a preflight
+# without this reports a CDN block as a provider failure.
+USER_AGENT = 'StreakFit/1.0 (+https://streakfit.pro)'
+
 ADDRESS = re.compile(r'^[^@\s<>]+@[^@\s<>]+\.[^@\s<>]+$')
 NAMED_ADDRESS = re.compile(r'^.+<\s*([^@\s<>]+@[^@\s<>]+\.[^@\s<>]+)\s*>$')
 
@@ -153,18 +158,55 @@ def main():
     print("  --live: asking Resend to list sending domains (no email sent)...")
     req = urllib.request.Request(
         'https://api.resend.com/domains',
-        headers={'Authorization': f'Bearer {key}', 'Accept': 'application/json'},
+        headers={'Authorization': f'Bearer {key}',
+                 'Accept': 'application/json',
+                 # Required, not decorative. Cloudflare fronts api.resend.com
+                 # and refuses urllib's default `Python-urllib/3.x` with a
+                 # 1010 before Resend ever sees the request. Same header the
+                 # app sends (app._NOTIFY_USER_AGENT).
+                 'User-Agent': USER_AGENT},
         method='GET')
+    raw = ''
     try:
         with urllib.request.urlopen(req, timeout=15) as resp:
-            body = json.loads(resp.read().decode('utf-8') or '{}')
+            raw = resp.read().decode('utf-8', 'replace')
+            body = json.loads(raw or '{}')
             status = resp.status
     except urllib.error.HTTPError as exc:
         status, body = exc.code, {}
+        try:
+            raw = exc.read().decode('utf-8', 'replace')
+        except Exception:
+            raw = ''
     except Exception as exc:
         # Type only: a socket error can carry a hostname.
         print(f"  FAIL  could not reach Resend ({type(exc).__name__})\n")
         return 1
+
+    if status == 403 and '1010' in raw:
+        print("  FAIL  blocked by Cloudflare before reaching Resend (error 1010).")
+        print("        The request never got to the provider. This is a client")
+        print("        signature problem, not a credential problem.\n")
+        return 1
+
+    # A SENDING-ONLY KEY IS THE RIGHT KEY, and it cannot read /domains.
+    #
+    # Resend keys are scoped. A key restricted to sending is the correct least
+    # privilege for this app -- it posts to /emails and needs nothing else --
+    # and it answers 401 here saying exactly that. Reporting "Resend rejected
+    # the API key" for a key that is valid, correctly scoped, and able to do
+    # the one thing the app asks of it would be a false alarm that pushes an
+    # operator toward a MORE privileged key. So it is read and named.
+    if status == 401 and 'restricted to only send' in raw.lower():
+        print("  PASS  Resend accepted the API key")
+        print("  ----  it is a SENDING-ONLY key, so the sending-domain check")
+        print("        below cannot run -- /domains needs broader access.")
+        print()
+        print("  Least privilege, and correct for this app: it only ever posts")
+        print("  to /emails. Nothing here is wrong. What it does mean is that")
+        print("  the sender can only be confirmed by sending -- see")
+        print("  scripts/notification_live_send.py.\n")
+        return 0
 
     if status == 401:
         print("  FAIL  Resend rejected the API key (401).\n")

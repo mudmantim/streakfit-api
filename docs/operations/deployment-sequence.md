@@ -80,8 +80,20 @@ exactly the property the first constraint needs.
       Resend *accepted* it — a person still has to confirm it arrived.
       **Gate: owner — authorizes one real email.**
 - [ ] **A4 · Preflight.** `python scripts/notification_preflight.py --live`
-      confirms the key is accepted and the sender is usable. Prints no values,
-      sends no mail.
+      confirms Resend accepts the key. Prints no values, sends no mail.
+
+      **Done 2026-09-21: PASS.** The key is valid and correctly scoped to
+      sending only, so the sending-domain check cannot run and the sender can
+      only be confirmed by sending — which is A3's job.
+
+      This step also found the defect that would have broken every alert:
+      Cloudflare fronts `api.resend.com` and refused urllib's default
+      signature with a 1010 before Resend saw the request. See
+      [notification-rollout.md](notification-rollout.md) §7.
+
+> Run A4 **before** A3. The preflight is free and catches configuration and
+> transport problems without spending a send; with a send-only key it is also
+> the only thing that can confirm the credential short of sending.
 
 **Do not proceed to Phase B until A1–A4 are done.** A deploy without them is
 the thing constraint 1 forbids.

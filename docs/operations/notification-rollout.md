@@ -282,6 +282,14 @@ behind a routine one.)*
 - **The free tier caps at 100 emails/day** (3,000/month). On a report-flood
   day that cap is itself a delivery failure, and the retry will keep pushing
   against a ceiling it cannot clear until the next day.
+- **A sending-only API key cannot be checked against `/domains`.** Resend
+  scopes keys, and a send-only key is the correct least privilege here — the
+  app posts to `/emails` and needs nothing else. It answers `401 "This API key
+  is restricted to only send emails"` to the preflight's domain lookup, which
+  the preflight now reads and reports as a PASS rather than a rejection.
+  Treating it as failure would have pushed an operator toward a *more*
+  privileged key. The consequence is real though: with such a key the sender
+  can only be confirmed **by sending**.
 - **The last untested link is the provider itself.** The whole chain — a
   filed report, notice generation, the claim, a real HTTP request carrying the
   Authorization and Idempotency-Key headers, the response parsed and the
@@ -301,3 +309,35 @@ behind a routine one.)*
   [rate-limit-backend-outage.md](rate-limit-backend-outage.md) — but the plan
   choice is still open, and Render's free Key Value tier loses all counters
   whenever its instance restarts.
+
+---
+
+## 7. Cloudflare sits in front of Resend, and it blocks bare urllib
+
+Found on 2026-09-21, the first time anything in this project made a real
+request to `api.resend.com` with a real key. It had been invisible through
+every test, because tests talk to a local stub and a stub has no CDN.
+
+```
+GET /domains   User-Agent: Python-urllib/3.12        -> 403  Cloudflare 1010
+                                                            browser_signature_banned
+GET /domains   User-Agent: StreakFit/1.0 (+https://…) -> 401  from Resend itself
+```
+
+The 401 is the *good* outcome: it means the request reached the provider,
+which then correctly said the key is send-only.
+
+`_notify_http_post` set no `User-Agent`, so urllib sent its default and
+**every alert would have been stopped at the CDN before reaching Resend** —
+a child-safety notice failing before any code in this repository got a say,
+and failing in a way that looks like a provider outage rather than a client
+bug. Fixed by identifying the client honestly (`app._NOTIFY_USER_AGENT`), and
+held in place by
+`tests/test_delivery_end_to_end.py::test_the_request_identifies_itself_and_is_not_bare_urllib`.
+
+**The general lesson, which is not about Resend.** Every layer between this
+app and a provider — CDN, WAF, rate limiter, TLS — is invisible to a test
+suite that stubs the network, and each one can refuse a request for reasons
+that have nothing to do with the request being wrong. That is the argument for
+doing one real call *before* the feature is publicly reachable, not after the
+first real incident fails to page anybody.

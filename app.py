@@ -9724,12 +9724,30 @@ class ConsoleChannel(NotificationChannel):
 # The one seam every HTTP-speaking channel goes through, so tests can fake a
 # provider without a network and without a real account. Nothing else in this
 # file talks to the outside world for delivery.
+# Identify this client honestly on outbound notification requests.
+#
+# NOT cosmetic, and not politeness. urllib's default is `Python-urllib/3.x`,
+# and Cloudflare sits in front of api.resend.com and refuses that signature
+# outright:
+#
+#   GET /domains  (default UA)  -> 403 Cloudflare 1010 browser_signature_banned
+#   GET /domains  (this UA)     -> 401 from Resend itself, i.e. it got through
+#
+# Measured against the real endpoint on 2026-09-21. Without this header every
+# alert would have been stopped at the CDN and never reached the provider --
+# a child-safety notice failing before anything we control got a say. It was
+# invisible to every test because those talk to a local stub, which has no
+# CDN in front of it.
+_NOTIFY_USER_AGENT = 'StreakFit/1.0 (+https://streakfit.pro)'
+
+
 def _notify_http_post(url, payload, headers, timeout=10):
     """POST JSON, return (status, decoded-body-or-None). Never raises for HTTP
     status -- the caller decides what a status means."""
     data = json.dumps(payload).encode('utf-8')
     req = urllib.request.Request(url, data=data, method='POST')
     req.add_header('Content-Type', 'application/json')
+    req.add_header('User-Agent', _NOTIFY_USER_AGENT)
     for k, v in (headers or {}).items():
         req.add_header(k, v)
     try:
