@@ -48,10 +48,20 @@ Categories: `harassment`, `threats`, `inappropriate_content`, `child_safety`,
 `spam`, `other`. Subjects: a **user**, or a specific **message**, **photo** or
 **challenge**.
 
-- **You can only report what you can already see.** The report route repeats
-  the same membership check the read routes use. Without it, "report this
-  message" becomes a way to ask the server to fetch content you were never
-  shown — a safety feature that is also the hole.
+- **You can only report what you can already see, and the server decides
+  that, not the client.** The content is resolved FIRST; its team and author
+  are derived from the row; the reporter is then authorized against that team,
+  its `joined_at` boundary, and the content's state. `team_id` is checked
+  against the truth rather than believed, and `reported_user_id` is ignored
+  outright for content reports.
+
+  The first version took all three from the request body and had three holes
+  because of it — cross-team disclosure, a cross-team automatic takedown, and
+  a bypass of the history boundary. All three are reproduced as attacks in
+  `tests/test_moderation_security.py`.
+- **Every refusal is one 404.** Missing, someone else's, before you joined,
+  deleted, expired, already withheld — all identical. A 403 that appears only
+  for content which exists is an oracle for other people's teams.
 - **Evidence is snapshotted at report time**, not read back later, so an edit
   or a delete cannot empty a report. The photo *caption* is copied, never the
   pixels; an operator opens the image through the existing photo route.
@@ -85,13 +95,22 @@ reach.
 
 | Action | Effect | Explicitly NOT affected |
 |---|---|---|
-| `restrict_content` | the message/photo disappears for everyone, including its author; photo **bytes** 404 on direct request | the author's account, streak, other posts |
+| `restrict_content` | the message, photo or challenge disappears for everyone including its author — card, caption and metadata, not just the attachment; photo **bytes** 404 on direct request; a restricted challenge cannot be completed | the author's account, streak, other posts |
 | `suspend_social` | cannot post chat, photos or challenges **anywhere** | daily mission, streak, XP, acorns, Brain Boost, Side Quests, *and they can still see their team* |
 | `remove_from_team` | one membership row deleted | every other team, and all progress |
 
 **Progress is never touched by any moderation path.** "Never punish who showed
 up" applies to somebody being moderated too — a suspended person keeps their
 streak and can still do today's mission.
+
+**Suspension covers every social write**: chat, photo upload, photo delete,
+challenge create, challenge complete, team create, team join, invite rotation.
+
+**It deliberately does NOT cover blocking or reporting.** Owner decision: being
+moderated must never remove somebody's ability to protect themselves. A
+suspended person can still block, still report, and still read `/api/blocks`.
+Anything else would mean a harassment suspension leaves the suspended person
+unable to report harassment against them.
 
 **Fail-closed** in two places: a restricted photo 404s on the byte route as
 well as vanishing from the thread (hiding it from a list while the image is
@@ -148,3 +167,22 @@ consistent with the coach-turn policy.
 
 **6. Rate limits.** Reporting is capped at 10/hour per user. That is a guess,
 not a measured figure.
+
+**7. Exceptional operator actions.** Moderation actions are pinned to the
+verified report: `target_user_id` and `team_id` may be supplied but must
+match, and a mismatch is a 400 rather than a silent substitution. There is
+**no `override: true`**, on purpose — a boolean that lets one route act on
+anything is indistinguishable in the audit trail from the route working
+normally.
+
+Acting outside a report is a genuine need: a tip-off arrives by email, or an
+operator sees something directly. That wants its own route with its own
+mandatory reason field, its own `actor` value, and its own entry in the audit
+trail — not a flag on this one. **Not built, and needs separate authorization.**
+
+**8. Evidence still excludes image bytes.** A reported photo preserves its
+caption and metadata; the pixels are not copied. If the photo is deleted
+before review, the reviewer has the caption and the context and no image. The
+design for fixing that — a separate blob table, operator-only, hard TTL,
+logged reads, purge on close — is written up in the audit and **not
+implemented pending owner approval**.

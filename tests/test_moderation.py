@@ -256,8 +256,13 @@ def test_reporting_cannot_be_used_to_reach_content_you_cannot_see(client, pair):
         'category': 'harassment', 'subject_type': 'message',
         'subject_ref': msg['message_id'], 'team_id': team['id']},
         headers=auth_headers(outsider))
-    assert r.status_code == 403
+    # 404, not 403. The security pass made every refusal identical -- missing,
+    # someone else's, pre-join, deleted, already withheld -- because a 403 that
+    # only appears for content that EXISTS confirms it exists.
+    assert r.status_code == 404
+    assert r.get_json() == {'error': 'not_found'}
     assert db.session.query(Report).count() == 0
+    assert db.session.query(ReportEvidence).count() == 0
     assert 'private to this team' not in r.get_data(as_text=True)
 
 

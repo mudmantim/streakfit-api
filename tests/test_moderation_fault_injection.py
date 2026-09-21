@@ -208,12 +208,15 @@ def test_without_the_admin_gate_ordinary_users_reach_the_queue(
 
 # --- Report-route boundary ---------------------------------------------------
 
-def test_without_the_membership_check_reporting_becomes_a_fetch_primitive(
+def test_without_the_content_resolver_reporting_becomes_a_fetch_primitive(
         client, pair, monkeypatch):
     """The report route must never be a way to reach content you cannot see.
 
-    With the membership guard removed, an outsider's report succeeds and the
-    server captures the private message into evidence on their say-so.
+    The guard is now `_resolve_reportable_content`, which finds the row,
+    derives its team, and authorizes the reporter against THAT team plus the
+    joined_at boundary. Replacing it with a version that resolves the content
+    and skips the authorization is exactly the vulnerability that shipped in
+    2b862a9, and the outsider's report succeeds again.
     """
     a, b, team = pair
     outsider = register_and_login(client, 'strangerpat')
@@ -222,23 +225,98 @@ def test_without_the_membership_check_reporting_becomes_a_fetch_primitive(
     payload = {'category': 'harassment', 'subject_type': 'message',
                'subject_ref': msg['message_id'], 'team_id': team['id']}
 
-    assert client.post('/api/reports', json=payload,
-                       headers=auth_headers(outsider)).status_code == 403
+    # Guard in place.
+    r = client.post('/api/reports', json=payload, headers=auth_headers(outsider))
+    assert r.status_code == 404
     assert db.session.query(Report).count() == 0
 
-    # Now show what the guard is actually preventing. `_capture_report_evidence`
-    # is the step immediately after it, and it does not check anything itself --
-    # it copies the content out on the caller's say-so. Reaching it is the whole
-    # prize, so calling it directly is the honest demonstration: with the
-    # membership check gone, this is what the outsider's report would return.
-    rep = Report(public_id='x' * 32, reporter_user_id=uid(client, outsider),
-                 category='harassment', subject_type='message',
-                 subject_ref=msg['message_id'], team_id=team['id'])
-    db.session.add(rep)
-    db.session.flush()
-    evidence, _author = appmod._capture_report_evidence(
-        rep, 'message', msg['message_id'], team['id'])
+    # Guard replaced by the unauthorized lookup the old code did.
+    def resolve_without_authorizing(_user_id, subject_type, subject_ref):
+        row = db.session.execute(
+            appmod.db.select(appmod.TeamMessage).where(
+                appmod.TeamMessage.public_id == subject_ref)).scalar_one_or_none()
+        if row is None:
+            return None
+        return {"team_id": row.team_id, "author_id": row.sender_user_id,
+                "content_text": row.body, "context": {}}
+
+    monkeypatch.setattr(appmod, '_resolve_reportable_content', resolve_without_authorizing)
+    r2 = client.post('/api/reports', json=payload, headers=auth_headers(outsider))
+    assert r2.status_code == 201, 'without authorization the outsider gets in'
+    ev = db.session.query(appmod.ReportEvidence).one()
+    assert ev.content_text == 'private to this team', (
+        'and the private text lands in an evidence record — which is what the '
+        'resolver exists to prevent')
+
+
+def test_without_the_team_match_a_cross_team_report_is_accepted(client, pair, monkeypatch):
+    """The claimed team_id must be checked against the content's real team."""
+    a, b, team = pair
+    other = register_and_login(client, 'otherperson')
+    other_team = client.post('/api/teams', json={'name': 'Other'},
+                             headers=auth_headers(other)).get_json()['team']
+    client.post(f'/api/teams/{other_team["id"]}/join',
+                json={'code': other_team['invite_code']}, headers=auth_headers(a))
+    say(client, b, team['id'], 'team one content')
+    msg = [m for m in thread(client, a, team['id'])][-1]
+
+    payload = {'category': 'child_safety', 'subject_type': 'message',
+               'subject_ref': msg['message_id'], 'team_id': other_team['id']}
+    assert client.post('/api/reports', json=payload,
+                       headers=auth_headers(a)).status_code == 404
+    assert db.session.query(appmod.ContentRestriction).count() == 0
+
+
+def test_without_the_derived_author_a_forged_report_names_the_wrong_person(
+        client, pair, monkeypatch):
+    """reported_user_id must come from the content, never from the body."""
+    a, b, team = pair
+    bystander = register_and_login(client, 'bystandera')
+    client.post(f'/api/teams/{team["id"]}/join', json={'code': team['invite_code']},
+                headers=auth_headers(bystander))
+    say(client, b, team['id'], 'authored by b')
+    msg = [m for m in thread(client, a, team['id'])][-1]
+    bystander_id = uid(client, bystander)
+
+    client.post('/api/reports', json={
+        'category': 'harassment', 'subject_type': 'message',
+        'subject_ref': msg['message_id'], 'team_id': team['id'],
+        'reported_user_id': bystander_id}, headers=auth_headers(a))
+    rep = db.session.query(Report).one()
+    assert rep.reported_user_id == uid(client, b)
+    assert rep.reported_user_id != bystander_id
+
+
+def test_without_the_target_check_an_operator_action_can_wander(
+        client, pair, monkeypatch, admin_env):
+    """Operator actions must be pinned to the report's subject."""
+    a, b, team = pair
+    client.post('/api/reports', json={
+        'category': 'threats', 'subject_type': 'user',
+        'reported_user_id': uid(client, b), 'team_id': team['id']},
+        headers=auth_headers(a))
+    rep = db.session.query(Report).one()
+
+    r = client.post(f'/api/admin/reports/{rep.public_id}/action',
+                    json={'action': 'suspend_social', 'target_user_id': uid(client, a)},
+                    headers=ADMIN)
+    assert r.status_code == 400 and r.get_json()['code'] == 'target_mismatch'
+    assert db.session.query(appmod.UserRestriction).count() == 0
+
+
+def test_without_the_challenge_filter_a_restricted_challenge_stays_visible(
+        client, pair, monkeypatch):
+    a, b, team = pair
+    preset = next(iter(appmod.CHALLENGE_PRESETS_BY_KEY))
+    ch = client.post(f'/api/teams/{team["id"]}/challenges', json={'preset_key': preset},
+                     headers=auth_headers(a))
+    cpid = (ch.get_json().get('challenge') or ch.get_json())['public_id']
+    db.session.add(appmod.ContentRestriction(subject_type='challenge',
+                                             subject_ref=cpid, reason='moderator'))
     db.session.commit()
-    assert evidence.content_text == 'private to this team', (
-        'the capture step is unguarded by design — the membership check in the '
-        'route is the only thing standing between an outsider and this text')
+
+    visible = lambda tok: any((m.get('challenge') or {}).get('public_id') == cpid
+                              for m in thread(client, tok, team['id']))
+    assert not visible(b)
+    monkeypatch.setattr(appmod, '_restricted_refs', lambda _t, _r: set())
+    assert visible(b)

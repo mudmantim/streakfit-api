@@ -5087,6 +5087,10 @@ def create_team():
     user_id = int(get_jwt_identity())
     user = db.session.get(User, user_id)
 
+    suspended = _require_social_privileges(user_id)
+    if suspended:
+        return suspended
+
     count_cap = _user_team_count_cap(user)
     if count_cap is not None:
         current_count = db.session.execute(
@@ -5359,6 +5363,10 @@ def join_team(team_id):
     user_id = int(get_jwt_identity())
     user = db.session.get(User, user_id)
 
+    suspended = _require_social_privileges(user_id)
+    if suspended:
+        return suspended
+
     team = db.session.get(Team, team_id)
     if not team:
         abort(404)
@@ -5467,6 +5475,10 @@ def rotate_team_invite(team_id):
         abort(404)
     if team.created_by_user_id != user_id:
         return jsonify({"error": "Forbidden"}), 403
+
+    suspended = _require_social_privileges(user_id)
+    if suspended:
+        return suspended
 
     invite = db.session.execute(
         db.select(TeamInviteCode).where(TeamInviteCode.team_id == team_id)
@@ -5867,12 +5879,42 @@ def get_team_messages(team_id):
     # from everyone. Applying both here rather than in the query keeps the
     # `joined_at` boundary above as the single history rule and makes the two
     # moderation rules legible side by side.
+    # A restriction on a PHOTO or a CHALLENGE has to remove the whole message
+    # that carries it, not just the attachment. The photo card's body IS the
+    # caption and the challenge announcement's body IS the challenge -- leaving
+    # the message and hiding only the attachment left the reported words on
+    # screen, which is not a takedown.
     blocked = _blocked_ids_for(user_id)
     if blocked:
         messages = [m for m in messages if m.sender_user_id not in blocked]
-    restricted = _restricted_refs('message', [m.public_id for m in messages])
-    if restricted:
-        messages = [m for m in messages if m.public_id not in restricted]
+
+    restricted_msgs = _restricted_refs('message', [m.public_id for m in messages])
+    photo_ids_present = [m.photo_id for m in messages if m.photo_id]
+    challenge_ids_present = [m.challenge_id for m in messages if m.challenge_id]
+    restricted_photo_rows = set()
+    restricted_challenge_rows = set()
+    if photo_ids_present:
+        pubs = db.session.execute(
+            db.select(TeamPhoto.id, TeamPhoto.public_id)
+            .where(TeamPhoto.id.in_(photo_ids_present))
+        ).all()
+        by_pub = {p: i for i, p in pubs}
+        hidden = _restricted_refs('photo', list(by_pub))
+        restricted_photo_rows = {by_pub[p] for p in hidden}
+    if challenge_ids_present:
+        pubs = db.session.execute(
+            db.select(TeamChallenge.id, TeamChallenge.public_id)
+            .where(TeamChallenge.id.in_(challenge_ids_present))
+        ).all()
+        by_pub = {p: i for i, p in pubs}
+        hidden = _restricted_refs('challenge', list(by_pub))
+        restricted_challenge_rows = {by_pub[p] for p in hidden}
+
+    if restricted_msgs or restricted_photo_rows or restricted_challenge_rows:
+        messages = [m for m in messages
+                    if m.public_id not in restricted_msgs
+                    and m.photo_id not in restricted_photo_rows
+                    and m.challenge_id not in restricted_challenge_rows]
 
     usernames = _peer_names_for_ids(
         m.sender_user_id for m in messages if m.sender_type == 'user'
@@ -6051,6 +6093,10 @@ def complete_team_challenge(team_id, public_id):
     if not membership:
         return jsonify({"error": "Forbidden"}), 403
 
+    suspended = _require_social_privileges(user_id)
+    if suspended:
+        return suspended
+
     challenge = db.session.execute(
         db.select(TeamChallenge).where(TeamChallenge.public_id == public_id)
     ).scalar_one_or_none()
@@ -6061,6 +6107,11 @@ def complete_team_challenge(team_id, public_id):
     # uuid" is not the reason a boundary holds.
     if (challenge is None or challenge.team_id != team_id
             or challenge.created_at < membership.joined_at):
+        return jsonify({"error": "not_found"}), 404
+    # A withheld challenge is not completable either. Hiding the card from the
+    # thread while the completion route still accepts its id would leave the
+    # takedown reachable by anyone who had already seen the challenge.
+    if _is_content_restricted('challenge', challenge.public_id):
         return jsonify({"error": "not_found"}), 404
 
     already = db.session.execute(
@@ -6366,6 +6417,10 @@ def delete_team_photo(team_id, public_id):
     if not membership:
         return jsonify({"error": "Forbidden"}), 403
 
+    suspended = _require_social_privileges(user_id)
+    if suspended:
+        return suspended
+
     photo = db.session.execute(
         db.select(TeamPhoto).where(TeamPhoto.public_id == public_id)
     ).scalar_one_or_none()
@@ -6534,54 +6589,127 @@ def _require_social_privileges(user_id):
     }), 403
 
 
-def _capture_report_evidence(report, subject_type, subject_ref, team_id):
-    """Snapshot the reported content so a later edit or delete cannot empty
-    the report. Returns (evidence_or_None, reported_user_id_or_None)."""
+def _resolve_reportable_content(user_id, subject_type, subject_ref):
+    """Find the content, establish where it lives, and decide whether this
+    person is allowed to see it. Returns a dict, or None.
+
+    This exists because the first version of the report route did none of it.
+    It took `team_id` from the client, checked the reporter belonged to THAT
+    team, and then looked the content up by `public_id` across the whole
+    database. Three separate holes came out of the same mistake:
+
+      * a member of team A could report team B's message by naming team A,
+        and the evidence snapshot copied B's private text into the report;
+      * a `child_safety` report did that AND hid the content, so an outsider
+        could take a message down in a team they had no standing in;
+      * a latecomer who could not see a pre-`joined_at` message in the thread
+        could still report it and capture its text.
+
+    So the order is inverted: resolve the content first, derive the team and
+    the author FROM THE ROW, then authorize the reporter against that. The
+    client no longer gets to assert any of it.
+
+    Every refusal is the same `None`. The caller turns that into one 404 for
+    "does not exist", "is not yours to see", "was deleted", and "has expired"
+    alike -- the photo byte route already works this way, and a route that
+    distinguishes them is an oracle for content in other people's teams.
+    """
+    if not subject_ref:
+        return None
+
+    row = None
+    team_id = author_id = None
     content_text = None
-    author_id = None
-    context = {"team_id": team_id, "subject_ref": subject_ref}
+    context = {"subject_ref": subject_ref}
 
     if subject_type == 'message':
         row = db.session.execute(
             db.select(TeamMessage).where(TeamMessage.public_id == subject_ref)
         ).scalar_one_or_none()
-        if row is not None:
-            content_text = row.body
-            author_id = row.sender_user_id
-            context.update({"created_at": row.created_at.isoformat(),
-                            "sender_type": row.sender_type})
+        if row is None:
+            return None
+        team_id, author_id = row.team_id, row.sender_user_id
+        content_text = row.body
+        created_at = row.created_at
+        context.update({"created_at": created_at.isoformat(),
+                        "sender_type": row.sender_type})
+
     elif subject_type == 'photo':
         row = db.session.execute(
             db.select(TeamPhoto).where(TeamPhoto.public_id == subject_ref)
         ).scalar_one_or_none()
-        if row is not None:
-            # The caption, never the pixels. Copying image bytes into a second
-            # table would double the exposure of the thing being complained
-            # about; the operator can open the photo through the admin route.
-            content_text = row.caption
-            author_id = row.sender_user_id
-            context.update({"created_at": row.created_at.isoformat(),
-                            "filter_key": row.filter_key,
-                            "deleted_at": row.deleted_at.isoformat() if row.deleted_at else None})
+        if row is None:
+            return None
+        team_id, author_id = row.team_id, row.sender_user_id
+        # The caption, never the pixels. Copying image bytes into a second
+        # table would double the exposure of the thing being complained about.
+        # See docs/moderation/policy.md -- image-byte evidence is a design the
+        # owner has not approved and is deliberately not built here.
+        content_text = row.caption
+        created_at = row.created_at
+        if row.deleted_at is not None:
+            return None
+        if row.expires_at and row.expires_at <= datetime.utcnow():
+            return None
+        context.update({"created_at": created_at.isoformat(),
+                        "filter_key": row.filter_key})
+
     elif subject_type == 'challenge':
         row = db.session.execute(
             db.select(TeamChallenge).where(TeamChallenge.public_id == subject_ref)
         ).scalar_one_or_none()
-        if row is not None:
-            content_text = getattr(row, 'title', None)
-            author_id = row.created_by_user_id
-            context.update({"created_at": row.created_at.isoformat(),
-                            "target_user_id": row.target_user_id})
+        if row is None:
+            return None
+        team_id, author_id = row.team_id, row.created_by_user_id
+        # `TeamChallenge` has no `title` column -- the wording lives in the
+        # preset table, keyed by `preset_key`. The first version read a
+        # `title` attribute that does not exist, so every challenge report
+        # reached a reviewer with content_text None and nothing to read.
+        preset = CHALLENGE_PRESETS_BY_KEY.get(row.preset_key) or {}
+        content_text = preset.get('title') or row.preset_key
+        created_at = row.created_at
+        context.update({"created_at": created_at.isoformat(),
+                        "preset_key": row.preset_key,
+                        "target_user_id": row.target_user_id})
+    else:
+        return None
 
+    # Authorize against the team the content is ACTUALLY in.
+    membership = db.session.execute(
+        db.select(TeamMembership).where(TeamMembership.team_id == team_id,
+                                        TeamMembership.user_id == user_id)
+    ).scalar_one_or_none()
+    if membership is None:
+        return None
+    # The same history boundary the read paths enforce. Reporting must not be
+    # a way to reach what the thread refuses to show you.
+    if created_at < membership.joined_at:
+        return None
+    # Already withheld by a moderator: there is nothing useful to report and
+    # confirming it exists would leak the takedown.
+    if _is_content_restricted(subject_type, subject_ref):
+        return None
+    # A blocked person's content is not visible to this reporter either.
+    if author_id is not None and author_id in _blocked_ids_for(user_id):
+        return None
+
+    context["team_id"] = team_id
+    return {"team_id": team_id, "author_id": author_id,
+            "content_text": content_text, "context": context}
+
+
+def _capture_report_evidence(report, subject_type, resolved):
+    """Snapshot already-authorized content. Takes the resolved dict rather
+    than an id, so there is no second lookup that could skip the checks."""
     evidence = ReportEvidence(
         report_id=report.id,
         content_type=subject_type,
-        content_text=content_text,
-        author_user_id=author_id,
-        context_json=json.dumps(context),
+        content_text=resolved["content_text"],
+        author_user_id=resolved["author_id"],
+        context_json=json.dumps(resolved["context"]),
     )
     db.session.add(evidence)
-    return evidence, author_id
+    return evidence
 
 
 def _int_or_none(value):
@@ -6666,13 +6794,19 @@ def delete_block(target_user_id):
 @jwt_required()
 @limiter.limit("10 per hour", key_func=user_or_ip_key)
 def create_report():
-    """Report a person or a specific piece of content.
+    """Report a person, or one message, photo or challenge.
 
-    You may only report something you can already see. The membership and
-    `joined_at` checks below are the same boundaries the read routes enforce,
-    repeated here on purpose: without them, "report this message" becomes a
-    way to ask the server to fetch content you were never shown, which is
-    exactly the shape of the bug where a safety feature becomes the hole.
+    CONTENT IS RESOLVED BEFORE ANYTHING IS WRITTEN. `_resolve_reportable_content`
+    finds the row, derives the team and the author from it, and authorizes this
+    reporter against that team, its history boundary, and the content's state.
+    The client supplies an id and nothing else that matters: `team_id` is
+    checked against the truth rather than believed, and `reported_user_id` is
+    ignored outright for content reports.
+
+    The previous version trusted all three and had three holes because of it --
+    cross-team disclosure, a cross-team automatic takedown, and a bypass of the
+    `joined_at` boundary. See tests/test_moderation_security.py, which
+    reproduces each one against the old behaviour.
     """
     user_id = int(get_jwt_identity())
     data = request.get_json(silent=True) or {}
@@ -6688,37 +6822,52 @@ def create_report():
                                  f"{', '.join(SUBJECT_TYPES)}."}), 400
 
     subject_ref = (data.get('subject_ref') or '').strip() or None
-    team_id = _int_or_none(data.get('team_id'))
+    claimed_team_id = _int_or_none(data.get('team_id'))
     note = (data.get('note') or '').strip()[:2000] or None
-    reported_user_id = _int_or_none(data.get('reported_user_id'))
-
-    membership = None
-    if team_id is not None:
-        membership = db.session.execute(
-            db.select(TeamMembership).where(TeamMembership.team_id == team_id,
-                                            TeamMembership.user_id == user_id)
-        ).scalar_one_or_none()
-        if membership is None:
-            return jsonify({"error": "Forbidden"}), 403
 
     if subject_type == 'user':
+        reported_user_id = _int_or_none(data.get('reported_user_id'))
         if reported_user_id is None:
             return jsonify({"error": "reported_user_id is required."}), 400
         if reported_user_id == user_id:
             return jsonify({"error": "You cannot report yourself."}), 400
-        # You may report someone you share a team with. Without this, the
-        # route reports on strangers by id and becomes an existence oracle.
-        if membership is None:
+        if claimed_team_id is None:
             return jsonify({"error": "team_id is required to report a person."}), 400
+        # Reporting a PERSON still goes through the team you share, because
+        # without it the route takes any user id and becomes an existence
+        # oracle. Both memberships are checked against the database.
+        mine = db.session.execute(
+            db.select(TeamMembership).where(TeamMembership.team_id == claimed_team_id,
+                                            TeamMembership.user_id == user_id)
+        ).scalar_one_or_none()
+        if mine is None:
+            return jsonify({"error": "Forbidden"}), 403
         shares_team = db.session.execute(
             db.select(db.func.count(TeamMembership.id)).where(
-                TeamMembership.team_id == team_id,
+                TeamMembership.team_id == claimed_team_id,
                 TeamMembership.user_id == reported_user_id)
         ).scalar()
         if not shares_team:
             return jsonify({"error": "Forbidden"}), 403
-    elif subject_ref is None:
-        return jsonify({"error": "subject_ref is required for content reports."}), 400
+        team_id = claimed_team_id
+        resolved = None
+    else:
+        if subject_ref is None:
+            return jsonify({"error": "subject_ref is required for content reports."}), 400
+        resolved = _resolve_reportable_content(user_id, subject_type, subject_ref)
+        if resolved is None:
+            # One answer for every refusal -- missing, someone else's, before
+            # you joined, deleted, expired, already withheld. Distinguishing
+            # them would confirm the existence of content in other people's
+            # teams.
+            return jsonify({"error": "not_found"}), 404
+        team_id = resolved["team_id"]
+        # A client-supplied team that disagrees with the content's real team is
+        # the exact shape of the cross-team attack. Refuse it the same way.
+        if claimed_team_id is not None and claimed_team_id != team_id:
+            return jsonify({"error": "not_found"}), 404
+        # Derived from the row, never from the request body.
+        reported_user_id = resolved["author_id"]
 
     report = Report(
         public_id=uuid.uuid4().hex,
@@ -6733,11 +6882,12 @@ def create_report():
     db.session.add(report)
     db.session.flush()   # need report.id for the evidence row
 
-    if subject_type != 'user':
-        _, author_id = _capture_report_evidence(report, subject_type, subject_ref, team_id)
-        if report.reported_user_id is None:
-            report.reported_user_id = author_id
+    if resolved is not None:
+        _capture_report_evidence(report, subject_type, resolved)
         if category in AUTO_RESTRICT_CATEGORIES:
+            # Reachable only after the authorization above, so an automatic
+            # takedown can no longer be triggered against a team the reporter
+            # has nothing to do with.
             db.session.add(ContentRestriction(
                 subject_type=subject_type, subject_ref=subject_ref,
                 reason='auto_' + category))
@@ -6745,6 +6895,7 @@ def create_report():
                 report_id=report.id, actor='system',
                 action='content_restricted', subject_type=subject_type,
                 subject_ref=subject_ref, team_id=team_id,
+                target_user_id=reported_user_id,
                 note='automatic, pending review: ' + category))
     else:
         db.session.add(ReportEvidence(
@@ -6868,7 +7019,37 @@ def admin_report_action(public_id):
         return jsonify({"error": "Unknown action.",
                         "actions": list(MODERATION_ACTIONS)}), 400
     note = (data.get('note') or '').strip()[:2000] or None
-    target_user_id = _int_or_none(data.get('target_user_id')) or report.reported_user_id
+
+    # The action's target comes from the REPORT, not from the request body.
+    #
+    # It used to take `target_user_id` and `team_id` from the caller and fall
+    # back to the report. Combined with the forged `reported_user_id` hole in
+    # the report route, that was a path to suspending an account that had
+    # nothing to do with anything -- reproduced, and the bystander got a 403.
+    # The report route is fixed, but an action that can name any user while
+    # the audit row records THIS report id would still write a false trail.
+    #
+    # A caller may still pass the values; they must match. Sending something
+    # else is refused rather than ignored, so a mistaken operator script fails
+    # loudly instead of silently moderating the wrong person.
+    target_user_id = report.reported_user_id
+    team_id = report.team_id
+    claimed_user = _int_or_none(data.get('target_user_id'))
+    if claimed_user is not None and claimed_user != target_user_id:
+        return jsonify({
+            "error": "target_user_id does not match this report's subject.",
+            "code": "target_mismatch",
+        }), 400
+    claimed_team = _int_or_none(data.get('team_id'))
+    if claimed_team is not None and claimed_team != team_id:
+        return jsonify({
+            "error": "team_id does not match this report's team.",
+            "code": "target_mismatch",
+        }), 400
+    # There is deliberately NO override flag. Acting outside a report is a
+    # real operational need (a tip-off that arrives by other means), and it
+    # wants its own audited route with its own reason field -- not a boolean
+    # on this one. See docs/moderation/policy.md, OPEN DECISION 7.
     now = datetime.utcnow()
 
     if action == 'dismiss':
@@ -6927,7 +7108,6 @@ def admin_report_action(public_id):
         report.reviewed_at = now
 
     elif action == 'remove_from_team':
-        team_id = _int_or_none(data.get('team_id')) or report.team_id
         if target_user_id is None or team_id is None:
             return jsonify({"error": "Both a user and a team are required."}), 400
         membership = db.session.execute(
@@ -6944,7 +7124,7 @@ def admin_report_action(public_id):
 
     db.session.add(ModerationAction(
         report_id=report.id, actor='operator', action=action,
-        target_user_id=target_user_id, team_id=report.team_id,
+        target_user_id=target_user_id, team_id=team_id,
         subject_type=report.subject_type, subject_ref=report.subject_ref,
         note=note))
     db.session.commit()
