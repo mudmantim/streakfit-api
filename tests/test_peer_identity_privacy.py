@@ -334,3 +334,57 @@ def test_team_history_never_names_an_ordinary_login(client):
                                  headers=auth_headers(a)).get_json())
     assert ORDINARY_LOGIN not in body, body[:300]
     assert ANOTHER_ORDINARY_LOGIN not in body, body[:300]
+
+
+# ── The four peer surfaces must agree about who somebody is ──────────────────
+
+def test_every_peer_surface_gives_a_member_the_same_label(client):
+    """The roster, the history and the chat must not each invent a label.
+
+    The roster numbers its members inline (it is sorting them anyway); the
+    other surfaces call `_team_peer_labels`. Two code paths producing the same
+    answer is a claim, so it is asserted here rather than assumed: a member who
+    reads "Member 2" on the roster and something else in the thread has been
+    told two different things about the same person.
+
+    Mixed on purpose -- one member chooses a display name and two do not, which
+    is the case where an ordinal and a chosen name have to coexist.
+    """
+    a = _t(client, 'timhill')            # creator, no display name
+    b = _t(client, 'oliviahill')         # joiner, chooses a name
+    c = _t(client, 'sarahjones')         # joiner, no display name
+    tid, code = _team(client, a)
+    _join_ok(client, tid, code, b)
+    _join_ok(client, tid, code, c)
+    client.patch('/api/me', json={'display_name': 'Olivia'},
+                 headers=auth_headers(b))
+
+    roster = client.get(f"/api/teams/{tid}", headers=auth_headers(a)).get_json()['members']
+    by_id = {m['user_id']: m['name'] for m in roster}
+
+    # Chat: every sender, echo and list alike.
+    for token in (a, b, c):
+        echo = client.post(f"/api/teams/{tid}/messages", json={'body': 'hi'},
+                           headers=auth_headers(token)).get_json()
+        assert echo['sender_username'] == by_id[echo['sender_user_id']], \
+            f"chat echo disagrees with the roster: {echo}"
+
+    listed = client.get(f"/api/teams/{tid}/messages",
+                        headers=auth_headers(a)).get_json()
+    for m in listed:
+        if m.get('sender_user_id'):
+            assert m['sender_username'] == by_id[m['sender_user_id']], \
+                f"chat list disagrees with the roster: {m}"
+
+    # History: same names, same people.
+    moments = client.get(f"/api/teams/{tid}/moments",
+                         headers=auth_headers(a)).get_json()
+    for m in moments:
+        if m.get('subject_username') and m.get('moment_type') != 'campfire_stage_reached':
+            assert m['subject_username'] in by_id.values(), \
+                f"history used a label no other surface knows: {m}"
+
+    # And the mix actually happened, or this test proved nothing.
+    assert 'Olivia' in by_id.values(), by_id
+    assert any(v.startswith('Member ') for v in by_id.values()), by_id
+    assert len(set(by_id.values())) == 3, by_id
