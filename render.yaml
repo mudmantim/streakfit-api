@@ -94,3 +94,73 @@ services:
         sync: false
       - key: JWT_SECRET_KEY
         sync: false
+
+  # ── Moderation evidence retention ─────────────────────────────────────────
+  #
+  # Decisions 4 and 6: photo bytes go 30 days from CAPTURE, text and caption
+  # evidence 30 days after the report CLOSES, and a legal hold is the only
+  # thing that suppresses either. The in-process thread runs this too, so a
+  # live service sweeps hourly; this cron is what covers a service that is
+  # down or mid-deploy.
+  #
+  # ⚠️ INERT, for the same reason as the cron above — Render does not read this
+  # file. Creating it in the dashboard is an OUTSTANDING DEPLOYMENT REQUIREMENT.
+  # Until it exists, evidence retention depends on the web service being up.
+  #
+  # 04:17 UTC, an hour after the coach sweep: both walk the same database and
+  # there is no reason to have them contend.
+  - type: cron
+    name: streakfit-moderation-evidence-sweep
+    runtime: python
+    region: oregon          # VERIFY against dashboard — must match the web service
+    plan: starter           # VERIFY against dashboard
+    branch: main
+    schedule: "17 4 * * *"
+    buildCommand: pip install -r requirements.txt
+    startCommand: flask moderation-prune
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: SECRET_KEY
+        sync: false
+      - key: JWT_SECRET_KEY
+        sync: false
+      # Required to purge PHOTO evidence: the sweep deletes ciphertext without
+      # reading it, but the app refuses to start its evidence paths without a
+      # key configured. Set from the same secret as the web service — a
+      # DIFFERENT key here would leave photos undecryptable and unpurgeable.
+      - key: STREAKFIT_EVIDENCE_KEY
+        sync: false
+
+  # ── Review-deadline notices ───────────────────────────────────────────────
+  #
+  # Decision 2: 24h for child_safety, 72h otherwise. This generates a durable
+  # notice the first time a report turns urgent or passes its deadline.
+  #
+  # ⚠️ INERT, and more importantly INCOMPLETE even once created: `--mark-
+  # delivered` records that a notice was carried by the CLI, but a cron's
+  # stdout is not a person. There is no email, push or pager in this app.
+  # A REAL DELIVERY CHANNEL IS AN OUTSTANDING REQUIREMENT — until one exists,
+  # the owner finds out by running `flask moderation-notify` and looking.
+  # Do not read a green cron here as "the owner was told".
+  #
+  # Hourly: a 24h clock is not well served by a daily check, which could burn
+  # a sixth of the window before anyone is told.
+  - type: cron
+    name: streakfit-moderation-notices
+    runtime: python
+    region: oregon          # VERIFY against dashboard — must match the web service
+    plan: starter           # VERIFY against dashboard
+    branch: main
+    schedule: "7 * * * *"
+    buildCommand: pip install -r requirements.txt
+    # No --mark-delivered: marking a notice delivered because a cron printed it
+    # to a log nobody reads is the lie this table was built to prevent.
+    startCommand: flask moderation-notify
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: SECRET_KEY
+        sync: false
+      - key: JWT_SECRET_KEY
+        sync: false

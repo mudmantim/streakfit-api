@@ -21,7 +21,8 @@ from conftest import register_and_login, auth_headers
 
 from app import db, Report, ReportEvidence, PhotoEvidence, EvidenceAccess, \
     ContentRestriction, UserRestriction, ModerationAction, Appeal, TeamPhoto, \
-    DailyCompletion, _sweep_moderation_evidence, _review_due_at
+    DailyCompletion, ModerationNotice, _sweep_moderation_evidence, \
+    _review_due_at, _generate_moderation_notices, _review_queue_counts
 
 ADMIN = {'X-Admin-Secret': 's3cret-value'}
 # A throwaway Fernet key generated for the test process only. Never a default,
@@ -744,3 +745,238 @@ def test_nothing_reveals_who_reported_whom(client, team, admin_env):
     for path in ('/api/moderation/decisions', '/api/appeals', '/api/blocks'):
         raw = client.get(path, headers=auth_headers(member)).get_data(as_text=True)
         assert 'ownerpat' not in raw
+
+
+# --- Decision 2, continued: noticing the obligation ---------------------------
+#
+# A deadline nobody is told about is a deadline nobody meets. These check the
+# GENERATION half -- that an obligation is recorded exactly once -- and are
+# careful not to claim the delivery half, which has no channel yet.
+
+def _notices(kind=None):
+    q = db.session.query(ModerationNotice)
+    if kind:
+        q = q.filter(ModerationNotice.kind == kind)
+    return q.all()
+
+
+def test_a_child_safety_report_is_noticed_the_moment_it_is_filed(client, team, admin_env):
+    """It does not wait to go overdue. A 24h clock spent waiting for the clock
+    to run out is most of the window the owner promised, gone."""
+    owner, member, t = team
+    report_message(client, owner, t['id'], 'urgent', category='child_safety',
+                   author_tok=member)
+    made = _generate_moderation_notices()
+    db.session.commit()
+
+    assert made['urgent_filed'] == 1
+    assert made['overdue'] == 0, 'it is not overdue yet, only urgent'
+    rep = db.session.query(Report).one()
+    assert [n.subject_ref for n in _notices('urgent_filed')] == [rep.public_id]
+
+
+def test_an_ordinary_report_is_not_noticed_until_it_is_overdue(client, team, admin_env):
+    owner, member, t = team
+    report_message(client, owner, t['id'], 'thing', author_tok=member)
+    made = _generate_moderation_notices()
+    db.session.commit()
+    assert made == {'urgent_filed': 0, 'overdue': 0, 'appeal_filed': 0}
+    assert _notices() == []
+
+    rep = db.session.query(Report).one()
+    rep.due_at = datetime.utcnow() - timedelta(minutes=1)
+    db.session.commit()
+
+    made = _generate_moderation_notices()
+    db.session.commit()
+    assert made['overdue'] == 1
+    assert [n.subject_ref for n in _notices('overdue')] == [rep.public_id]
+
+
+def test_generation_is_idempotent(client, team, admin_env):
+    """The sweep runs hourly. An overdue report must be noticed once, not once
+    an hour forever -- and the guarantee has to survive a restart, so it lives
+    in the unique constraint rather than in the generator's memory."""
+    owner, member, t = team
+    report_message(client, owner, t['id'], 'urgent', category='child_safety',
+                   author_tok=member)
+    rep = db.session.query(Report).one()
+    rep.due_at = datetime.utcnow() - timedelta(minutes=1)
+    db.session.commit()
+
+    first = _generate_moderation_notices()
+    db.session.commit()
+    assert first['urgent_filed'] == 1 and first['overdue'] == 1
+
+    for _ in range(5):
+        again = _generate_moderation_notices()
+        db.session.commit()
+        assert again == {'urgent_filed': 0, 'overdue': 0, 'appeal_filed': 0}
+
+    assert len(_notices()) == 2, 'one urgent + one overdue, however often it runs'
+
+
+def test_a_closed_report_stops_generating_notices(client, team, admin_env):
+    owner, member, t = team
+    report_message(client, owner, t['id'], 'thing', author_tok=member)
+    rep = db.session.query(Report).one()
+    rep.due_at = datetime.utcnow() - timedelta(minutes=1)
+    db.session.commit()
+
+    client.post(f'/api/admin/reports/{rep.public_id}/action',
+                json={'action': 'dismiss'}, headers=ADMIN)
+    made = _generate_moderation_notices()
+    db.session.commit()
+    assert made['overdue'] == 0
+    assert _notices() == []
+
+
+def test_an_appeal_is_noticed_and_carries_no_content(client, team, admin_env):
+    owner, member, t = team
+    report_message(client, owner, t['id'], 'thing', author_tok=member)
+    rep = db.session.query(Report).one()
+    client.post(f'/api/admin/reports/{rep.public_id}/action',
+                json={'action': 'suspend_social', 'note': 'reviewed'}, headers=ADMIN)
+    action = db.session.query(ModerationAction).filter_by(
+        action='suspend_social').one()
+
+    r = client.post('/api/appeals', json={'decision_id': action.id,
+                                          'reason': 'a private explanation'},
+                    headers=auth_headers(member))
+    assert r.status_code == 201
+
+    made = _generate_moderation_notices()
+    db.session.commit()
+    assert made['appeal_filed'] == 1
+
+    n = _notices('appeal_filed')[0]
+    assert n.subject_type == 'appeal'
+    # The notice is a pointer, never the person's words.
+    assert 'a private explanation' not in (n.subject_ref or '')
+    assert not hasattr(n, 'reason')
+
+
+def test_a_notice_is_not_delivered_just_because_it_exists(client, team, admin_env):
+    """The distinction the whole table exists to keep. Generating a notice is
+    not telling anybody, and an undelivered row must read as 'nobody knows'."""
+    owner, member, t = team
+    report_message(client, owner, t['id'], 'urgent', category='child_safety',
+                   author_tok=member)
+    _generate_moderation_notices()
+    db.session.commit()
+
+    n = _notices('urgent_filed')[0]
+    assert n.delivered_at is None
+    assert n.channel is None
+    assert _review_queue_counts()['undelivered_notices'] == 1
+
+
+def test_the_notify_command_reports_without_marking_delivered(client, team, admin_env):
+    owner, member, t = team
+    report_message(client, owner, t['id'], 'urgent', category='child_safety',
+                   author_tok=member)
+
+    runner = client.application.test_cli_runner()
+    out = runner.invoke(args=['moderation-notify']).output
+    assert 'generated 1 urgent' in out
+    assert 'not marked delivered' in out
+    assert db.session.query(ModerationNotice).one().delivered_at is None
+
+    out = runner.invoke(args=['moderation-notify', '--mark-delivered']).output
+    assert 'marked 1 delivered via cli' in out
+    n = db.session.query(ModerationNotice).one()
+    assert n.delivered_at is not None and n.channel == 'cli'
+    assert _review_queue_counts()['undelivered_notices'] == 0
+
+
+# --- Decisions 4 and 6: the sweep actually runs --------------------------------
+#
+# `_sweep_moderation_evidence` being correct is worth nothing if nothing calls
+# it. Before this the only caller was `flask moderation-prune`, which meant the
+# 30-day promise held exactly as often as somebody remembered to type it.
+
+class _StopLoop(Exception):
+    """Ends the sweeper after one pass instead of sleeping for an hour."""
+
+
+def test_the_retention_thread_sweeps_moderation_evidence(client, team, admin_env,
+                                                         evidence_key, monkeypatch):
+    """The scheduling mechanism, driven for one real iteration."""
+    import app as app_module
+
+    owner, member, t = team
+    report_message(client, owner, t['id'], 'thing', author_tok=member)
+    rep = db.session.query(Report).one()
+    client.post(f'/api/admin/reports/{rep.public_id}/action',
+                json={'action': 'dismiss'}, headers=ADMIN)
+    db.session.refresh(rep)
+    # Closed long enough ago that its evidence has aged out.
+    rep.reviewed_at = datetime.utcnow() - timedelta(days=31)
+    db.session.commit()
+    assert rep.evidence_purged_at is None
+
+    calls = []
+
+    def fake_sleep(seconds):
+        calls.append(seconds)
+        if len(calls) > 1:
+            raise _StopLoop()
+
+    monkeypatch.setattr(app_module.time, 'sleep', fake_sleep)
+    with pytest.raises(_StopLoop):
+        app_module._retention_sweeper_loop()
+
+    db.session.refresh(rep)
+    assert rep.evidence_purged_at is not None, \
+        'the scheduled sweep did not purge aged-out evidence'
+
+
+def test_the_retention_thread_also_generates_notices(client, team, admin_env,
+                                                     monkeypatch):
+    import app as app_module
+
+    owner, member, t = team
+    report_message(client, owner, t['id'], 'urgent', category='child_safety',
+                   author_tok=member)
+    calls = []
+
+    def fake_sleep(seconds):
+        calls.append(seconds)
+        if len(calls) > 1:
+            raise _StopLoop()
+
+    monkeypatch.setattr(app_module.time, 'sleep', fake_sleep)
+    with pytest.raises(_StopLoop):
+        app_module._retention_sweeper_loop()
+
+    assert [n.kind for n in _notices()] == ['urgent_filed']
+
+
+def test_one_failing_sweep_does_not_cancel_the_other(client, team, admin_env,
+                                                     monkeypatch):
+    """Separate try blocks, and this is why. The coach sweep failing must not
+    be the reason an overdue child_safety report goes unnoticed."""
+    import app as app_module
+
+    owner, member, t = team
+    report_message(client, owner, t['id'], 'urgent', category='child_safety',
+                   author_tok=member)
+
+    def boom(*a, **kw):
+        raise RuntimeError('coach sweep exploded')
+
+    monkeypatch.setattr(app_module, '_sweep_expired_coach_turns', boom)
+
+    calls = []
+
+    def fake_sleep(seconds):
+        calls.append(seconds)
+        if len(calls) > 1:
+            raise _StopLoop()
+
+    monkeypatch.setattr(app_module.time, 'sleep', fake_sleep)
+    with pytest.raises(_StopLoop):
+        app_module._retention_sweeper_loop()
+
+    assert [n.kind for n in _notices()] == ['urgent_filed'], \
+        'notice generation was taken down by an unrelated failure'

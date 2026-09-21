@@ -11,6 +11,9 @@ import threading
 from functools import wraps
 import time
 import uuid
+# click ships with Flask and backs its CLI; imported directly so a command
+# can declare options (flask moderation-notify --mark-delivered).
+import click
 import urllib.parse
 import urllib.request
 from datetime import datetime, date, timedelta
@@ -2185,6 +2188,50 @@ class Appeal(db.Model):
         # One appeal per action per person. A second look is a reviewer
         # decision, not something a user can force by resubmitting.
         db.UniqueConstraint('user_id', 'action_id', name='uq_appeal_user_action'),
+    )
+
+
+class ModerationNotice(db.Model):
+    """A review obligation that has been NOTICED, exactly once.
+
+    The owner reviews reports, and this app has no notification channel -- no
+    email, no push, no pager. Building one was not in scope and would have been
+    the wrong thing to reach for first: the part that has to be durable is the
+    RECORD that an obligation came due, not the transport that carries it.
+
+    So generation and delivery are split. `_generate_moderation_notices` writes
+    a row the first time a report turns urgent or goes past its deadline, and
+    the unique constraint makes that idempotent -- run it every minute for a
+    week and a given report is still noticed once. `delivered_at` stays NULL
+    until something actually carries it somewhere, which today is an operator
+    running `flask moderation-notify`.
+
+    The consequence worth stating plainly: a notice sitting here with a NULL
+    `delivered_at` means nobody has been told. Generation is not delivery, and
+    this table does not pretend otherwise. Wiring a real channel is an
+    outstanding deployment requirement -- see docs/operations/moderation.md.
+
+    Carries no content: a subject reference and a kind. What the report SAYS
+    stays in the report, behind the operator boundary.
+    """
+    __tablename__ = 'moderation_notice'
+    id = db.Column(db.Integer, primary_key=True)
+    # Same (subject_type, subject_ref) idiom Report already uses: a public_id
+    # string rather than two nullable foreign keys for report-or-appeal.
+    subject_type = db.Column(db.String(16), nullable=False)   # report | appeal
+    subject_ref = db.Column(db.String(32), nullable=False, index=True)
+    kind = db.Column(db.String(24), nullable=False)  # urgent_filed|overdue|appeal_filed
+    created_at = db.Column(db.DateTime, nullable=False,
+                           default=datetime.utcnow, index=True)
+    delivered_at = db.Column(db.DateTime, nullable=True, index=True)
+    channel = db.Column(db.String(24), nullable=True)   # how it was delivered
+
+    __table_args__ = (
+        # Idempotency lives in the database, not in the generator's bookkeeping.
+        # A generator that tracked "already sent" in memory would start over
+        # every deploy and notify the same overdue report forever.
+        db.UniqueConstraint('subject_type', 'subject_ref', 'kind',
+                            name='uq_moderation_notice_subject_kind'),
     )
 
 
@@ -7209,8 +7256,17 @@ def _review_queue_counts():
     open_appeals = db.session.execute(
         db.select(db.func.count(Appeal.id)).where(Appeal.status == 'open')
     ).scalar() or 0
+    # Notices nobody has acted on. Surfaced beside the queue because a
+    # backlog of undelivered notices is the signal that the notification
+    # path is not reaching anyone -- the queue looking calm is exactly what
+    # it looks like when nobody is being told.
+    undelivered = db.session.execute(
+        db.select(db.func.count(ModerationNotice.id)).where(
+            ModerationNotice.delivered_at.is_(None))
+    ).scalar() or 0
     return {"pending": pending, "urgent_pending": urgent,
-            "overdue": overdue, "open_appeals": open_appeals}
+            "overdue": overdue, "open_appeals": open_appeals,
+            "undelivered_notices": undelivered}
 
 
 @app.route('/api/admin/reports/<string:public_id>', methods=['GET'])
@@ -8599,6 +8655,98 @@ def moderation_prune_command():
           f"{result['held_by_legal_hold']} skipped under legal hold")
 
 
+def _generate_moderation_notices(now=None):
+    """Notice every review obligation that has come due, exactly once.
+
+    Three things are worth noticing, and they are the three the owner's
+    decisions created:
+
+      * a child_safety report arriving at all -- it is on a 24h clock from the
+        moment it is filed, so waiting for it to go overdue wastes most of the
+        window the owner promised;
+      * any pending report passing its due_at;
+      * an appeal being filed, which is a person waiting on an answer with no
+        deadline of its own.
+
+    Idempotent by unique constraint, not by bookkeeping: each row is INSERTed
+    and a duplicate is swallowed. Safe to call on every sweep, on every deploy,
+    and twice concurrently.
+
+    Returns counts of notices CREATED, which is not the same as delivered and
+    is not reported as though it were.
+    """
+    now = now or datetime.utcnow()
+    created = {"urgent_filed": 0, "overdue": 0, "appeal_filed": 0}
+
+    def notice(subject_type, subject_ref, kind):
+        """One INSERT in its own SAVEPOINT. A duplicate is the normal case --
+        it means this obligation was already noticed -- so it must not poison
+        the surrounding transaction and take the other notices down with it."""
+        try:
+            with db.session.begin_nested():
+                db.session.add(ModerationNotice(
+                    subject_type=subject_type, subject_ref=subject_ref,
+                    kind=kind, created_at=now))
+            created[kind] += 1
+        except IntegrityError:
+            pass    # already noticed; that is the point of the constraint
+
+    pending = db.session.execute(
+        db.select(Report).where(Report.status == 'pending')).scalars().all()
+    for r in pending:
+        if r.category in AUTO_RESTRICT_CATEGORIES:
+            notice('report', r.public_id, 'urgent_filed')
+        if r.due_at and r.due_at <= now:
+            notice('report', r.public_id, 'overdue')
+
+    for a in db.session.execute(
+        db.select(Appeal).where(Appeal.status == 'open')).scalars().all():
+        notice('appeal', a.public_id, 'appeal_filed')
+
+    return created
+
+
+def _undelivered_notices():
+    return db.session.execute(
+        db.select(ModerationNotice).where(ModerationNotice.delivered_at.is_(None))
+        .order_by(ModerationNotice.created_at.asc())
+    ).scalars().all()
+
+
+@app.cli.command("moderation-notify")
+@click.option('--mark-delivered', is_flag=True, default=False,
+              help='Mark the printed notices delivered. Off by default so the '
+                   'command is safe to run just to look.')
+def moderation_notify_command(mark_delivered):
+    """Generate review notices and print the ones nobody has acted on.
+
+    This is generation plus a console channel. It is NOT a notification system:
+    nothing reaches anybody who is not already looking at this terminal. Until
+    a real channel is configured, an unread notice is only as visible as the
+    person who remembers to run this.
+    """
+    created = _generate_moderation_notices()
+    db.session.commit()
+
+    rows = _undelivered_notices()
+    print(f"generated {created['urgent_filed']} urgent, {created['overdue']} overdue, "
+          f"{created['appeal_filed']} appeal notices; "
+          f"{len(rows)} undelivered in total")
+    for n in rows:
+        print(f"  [{n.kind:13}] {n.subject_type}:{n.subject_ref[:12]}  "
+              f"noticed {n.created_at.isoformat()}")
+
+    if mark_delivered:
+        now = datetime.utcnow()
+        for n in rows:
+            n.delivered_at = now
+            n.channel = 'cli'
+        db.session.commit()
+        print(f"marked {len(rows)} delivered via cli")
+    elif rows:
+        print("  (not marked delivered -- re-run with --mark-delivered once acted on)")
+
+
 @app.cli.command("moderation-queue")
 def moderation_queue_command():
     """Print the review queue. The owner's way to discover new and overdue
@@ -9294,6 +9442,42 @@ def _retention_sweeper_loop():
             # a database error can carry one back in its message.
             db.session.rollback()
             app.logger.warning('retention sweep failed: %s', type(exc).__name__)
+
+        # Moderation evidence is swept in the SAME thread but its OWN try, so
+        # that a failure in one retention promise cannot cancel the other. The
+        # coach sweep and the evidence sweep answer to different commitments
+        # and neither is allowed to be the reason the other stopped running.
+        try:
+            with app.app_context():
+                result = _sweep_moderation_evidence()
+                db.session.commit()
+                if result['text_evidence_purged'] or result['photo_evidence_purged']:
+                    app.logger.info(
+                        'event=moderation_evidence_sweep text=%d photos=%d held=%d',
+                        result['text_evidence_purged'],
+                        result['photo_evidence_purged'],
+                        result['held_by_legal_hold'])
+        except Exception as exc:
+            db.session.rollback()
+            app.logger.warning('moderation evidence sweep failed: %s',
+                               type(exc).__name__)
+
+        # Noticing an overdue report is independent of purging expired
+        # evidence, and a third try for the same reason as the second: the
+        # owner finding out a child_safety report is sitting unreviewed must
+        # not depend on the retention sweep having succeeded.
+        try:
+            with app.app_context():
+                made = _generate_moderation_notices()
+                db.session.commit()
+                if any(made.values()):
+                    app.logger.info(
+                        'event=moderation_notices urgent=%d overdue=%d appeals=%d',
+                        made['urgent_filed'], made['overdue'], made['appeal_filed'])
+        except Exception as exc:
+            db.session.rollback()
+            app.logger.warning('moderation notice generation failed: %s',
+                               type(exc).__name__)
 
 
 def _start_retention_sweeper():

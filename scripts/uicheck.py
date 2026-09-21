@@ -1677,6 +1677,133 @@ def check_rickie_roams(b: Browser, base: str, app) -> None:
     check(len(set(poses)) >= 2, f"a celebration is not always the same one ({sorted(set(poses))})")
 
 
+def check_appeals_are_reachable(b: Browser, base: str, app) -> None:
+    """A decision you can see, and an appeal you can actually file.
+
+    This check exists because the feature shipped unreachable. The endpoints,
+    the model, the migration and the tests were all correct, and the settings
+    row that opened them was lost in a failed `git stash pop` -- leaving
+    openModerationDecisions() as a function nothing called. Every pytest test
+    still passed, because pytest talks to the API and never opens the menu.
+
+    So this drives it the way the one person who needs it would: somebody with
+    a decision against their account, going looking for what happened and
+    whether they can say anything about it.
+    """
+    print("\nDecisions and appeals")
+    from app import ModerationAction, User, db as _db
+
+    username, token = make_user(app, "appeal")
+    with app.app_context():
+        user = _db.session.execute(
+            _db.select(User).where(User.username == username)).scalar_one()
+        # A decision with no report attached: report_id is nullable precisely
+        # because an operator action is not always the end of a report.
+        _db.session.add(ModerationAction(
+            actor='operator', action='suspend_social',
+            target_user_id=user.id, note='uicheck fixture'))
+        _db.session.commit()
+
+    b.goto(base + "/", wait=1.0)
+    b.js(f"localStorage.setItem('streakfit_token', {json.dumps(token)})")
+    b.goto(base + "/", wait=2.5)
+
+    b.js("(()=>{const m=document.getElementById('settings-menu');"
+         " if(m) m.hidden=false; return 1;})()")
+    time.sleep(0.8)
+
+    # 1. The row is THERE. This is the assertion the whole check exists for.
+    if not check(bool(b.js("(()=>{const r=document.getElementById("
+                           "'settings-row-moderation'); return !!(r && !r.hidden);})()")),
+                 "somebody with a decision can find it in settings"):
+        return
+
+    # 2. The panel starts closed and the button says so.
+    check(b.js("document.getElementById('btn-moderation-decisions')"
+               ".getAttribute('aria-expanded')") == "false",
+          "the control reports itself closed before it is pressed")
+
+    # 3. Pressing it shows the decision in words, not a code.
+    b.js("document.getElementById('btn-moderation-decisions').click()")
+    time.sleep(1.4)
+    text = (b.js("(()=>{const p=document.getElementById('moderation-panel');"
+                 " return p && !p.hidden ? p.innerText : '';})()") or "").strip()
+    check("Posting to teams is paused" in text,
+          "it says what happened in plain language", text[:120])
+    check("suspend_social" not in text,
+          "and not the internal action name", text[:120])
+    check(b.js("document.getElementById('btn-moderation-decisions')"
+               ".getAttribute('aria-expanded')") == "true",
+          "the control now reports itself open")
+
+    # 4. aria-controls has to point at something real, or it is noise.
+    controls = b.js("document.getElementById('btn-moderation-decisions')"
+                    ".getAttribute('aria-controls')")
+    check(bool(b.js(f"!!document.getElementById({json.dumps(controls)})")),
+          "aria-controls points at an element that exists", str(controls))
+
+    # 5. The appeal box is labelled. A bare textarea is unusable by anyone
+    #    who cannot see where it sits on the page.
+    labelled = b.js("(()=>{const t=document.querySelector("
+                    "'.moderation-appeal-input'); if(!t) return '';"
+                    " const l=document.querySelector(`label[for='${t.id}']`);"
+                    " return l ? l.textContent.trim() : '';})()")
+    check(bool(labelled), "the appeal box has a real label", str(labelled))
+
+    # 6. Filing one works, and the answer promises a person -- not a verdict.
+    b.js("(()=>{const t=document.querySelector('.moderation-appeal-input');"
+         " t.value='I would like this looked at again.'; return 1;})()")
+    b.js("document.querySelector('.moderation-appeal-btn').click()")
+    time.sleep(1.8)
+    after = (b.js("document.getElementById('moderation-panel').innerText") or "").strip()
+    check("Someone will look at this" in after,
+          "filing one is acknowledged without promising an outcome", after[:160])
+
+    # 7. It survives a reload as submitted, rather than offering the form again.
+    b.goto(base + "/", wait=2.5)
+    b.js("(()=>{const m=document.getElementById('settings-menu');"
+         " if(m) m.hidden=false; return 1;})()")
+    time.sleep(0.5)
+    b.js("document.getElementById('btn-moderation-decisions').click()")
+    time.sleep(1.4)
+    again = (b.js("document.getElementById('moderation-panel').innerText") or "").strip()
+    check("Appeal submitted" in again or "Someone will look at this" in again,
+          "and it is still submitted after a reload", again[:160])
+    check(not b.js("!!document.querySelector('.moderation-appeal-btn')"),
+          "the form is not offered a second time for the same decision")
+
+    # 8. A second press closes it again.
+    b.js("document.getElementById('btn-moderation-decisions').click()")
+    time.sleep(0.6)
+    check(bool(b.js("document.getElementById('moderation-panel').hidden")),
+          "pressing it again closes the panel")
+
+
+def check_appeals_stay_hidden_for_everybody_else(b: Browser, base: str, app) -> None:
+    """The other half, and the one that protects the other 99.9%.
+
+    A standing "Appeals" row in the settings menu of a family movement app
+    tells everyone who opens it that being moderated is a thing that happens
+    here. It has to be absent, not merely empty, for anyone with a clean
+    account.
+    """
+    print("\nNo accusation for people with nothing against them")
+    _username, token = make_user(app, "clean")
+    b.goto(base + "/", wait=1.0)
+    b.js(f"localStorage.setItem('streakfit_token', {json.dumps(token)})")
+    b.goto(base + "/", wait=2.5)
+    b.js("(()=>{const m=document.getElementById('settings-menu');"
+         " if(m) m.hidden=false; return 1;})()")
+    time.sleep(1.2)
+
+    check(bool(b.js("(()=>{const r=document.getElementById('settings-row-moderation');"
+                    " return !!(r && r.hidden);})()")),
+          "a clean account never sees the row")
+    menu = (b.js("document.getElementById('settings-menu').innerText") or "")
+    check("appeal" not in menu.lower(),
+          "and the word 'appeal' appears nowhere in their settings", menu[:160])
+
+
 def check_accessibility_basics(b: Browser, base: str, app) -> None:
     """The things a screen reader and a keyboard need, on the real page.
 
@@ -1880,6 +2007,8 @@ def main() -> int:
         check_acorns_are_spendable_without_a_team(browser, base, flask_app)
         check_display_name_can_be_set_changed_and_cleared(browser, base, flask_app)
         check_rickie_roams(browser, base, flask_app)
+        check_appeals_are_reachable(browser, base, flask_app)
+        check_appeals_stay_hidden_for_everybody_else(browser, base, flask_app)
         check_accessibility_basics(browser, base, flask_app)
         check_page_is_clean(browser, base, flask_app)
     except Exception as exc:  # a crash must never read as a pass
