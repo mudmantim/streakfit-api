@@ -2752,6 +2752,12 @@ def _roll_up(checks):
 
 
 @app.route('/api/verification/self', methods=['GET'])
+# RESTORED. The deployed build rate-limits this and the merge dropped it: the
+# decorator sat just above the conflict boundary, so taking the other side's
+# function body silently took its (absent) throttle too. It is unauthenticated
+# and it does real work -- a database round trip, a manifest parse and six icon
+# stats per call -- which is exactly the shape worth limiting.
+@limiter.limit("60 per minute")
 def verification_self():
     """The checks only this application can run on itself.
 
@@ -6349,10 +6355,24 @@ def _team_peer_labels(team_id):
 
 
 def _usernames_for_ids(user_ids):
-    """Batch-resolve {user_id: username} in a single query — the fix for the
-    db.session.get(User, id)-in-a-loop N+1 in the team serializers.
+    """Batch-resolve {user_id: username} in a single query.
 
-    NEVER for anything a peer sees; use `_peer_names_for_ids` there."""
+    NEVER for anything a peer sees; use `_peer_names_for_ids` for a name and
+    `_team_peer_labels` for a name-or-ordinal within a team.
+
+    CURRENTLY UNCALLED, and that is not an oversight. It was written as the
+    N+1 fix for the team serializers, and those serializers no longer resolve
+    logins at all -- every peer-facing surface moved to the two helpers above.
+    Kept because resolving a batch of logins is a legitimate need for the
+    paths that have one (your own account, your own export, the server-side
+    deletion report), and rewriting it later from memory is how the careless
+    version gets reintroduced.
+
+    It is a loaded gun with the safety on. If you are about to call it, the
+    question to answer first is whether the response you are building is seen
+    by anybody other than the account it describes. Three separate leaks in
+    this codebase were a helper that resolved a name being used one surface
+    further out than its author intended."""
     ids = {i for i in user_ids if i}
     if not ids:
         return {}
@@ -6723,12 +6743,22 @@ def create_team_challenge(team_id):
     # It also did not need to name anybody. The row carries `sender_user_id`
     # and the client renders the sender's name from that, so naming them in
     # the body said it twice — once safely and once not.
-    sender = db.session.get(User, user_id)
-    who = _safe_display_name(sender) if sender else None
+    # NOBODY IS NAMED IN THE STORED TEXT.
+    #
+    # This called `_safe_display_name(sender)`, which falls back to the LOGIN
+    # whenever the login does not look machine-generated -- so an ordinary one
+    # like "timhill" was written verbatim into a durable chat row, which is
+    # precisely what the comment below says was fixed. Serializing peer names
+    # safely does not help: by the time anybody reads it, the login is already
+    # part of the stored text, and chat rows do not expire.
+    #
+    # The row does not need a name at all. It carries `sender_user_id`, and the
+    # sentence is DERIVED at read time from the peer-safe label map (see
+    # `_serialize_team_message`), so naming them here said it twice -- once
+    # safely and once not.
     message = TeamMessage(
         team_id=team_id, sender_type='user', sender_user_id=user_id,
-        body=(f"{who} started a challenge: {preset['title']}" if who
-              else f"Started a challenge: {preset['title']}"),
+        body=f"Started a challenge: {preset['title']}",
         challenge_id=challenge.id, created_at=now,
     )
     db.session.add(message)
@@ -6737,7 +6767,12 @@ def create_team_challenge(team_id):
     db.session.commit()
 
     usernames = _team_peer_labels(team_id)
-    payload = _serialize_team_message(message, usernames)
+    # Pass the challenge through, so the echo DERIVES its sentence the same way
+    # the list does. Without it the echo fell through to the stored body, which
+    # is the one path the read-time derivation does not cover -- and it was
+    # returning the raw row to the client that had just written it.
+    payload = _serialize_team_message(
+        message, usernames, None, ({challenge.id: challenge}, {}), user_id)
     payload['challenge'] = _serialize_challenge(challenge, {}, usernames, user_id)
     return jsonify(payload), 201
 

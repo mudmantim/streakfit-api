@@ -56,6 +56,11 @@ def _join_ok(client, tid, code, token):
     assert r.status_code == 200, r.get_json()
 
 
+def _uid(client, token):
+    """The caller's own numeric id, from their own /api/me (never a peer's)."""
+    return client.get("/api/me", headers=auth_headers(token)).get_json()["id"]
+
+
 def _everything_a_member_can_read(client, tid, token):
     """Every member-visible surface, as one big blob of text to search."""
     blobs = {}
@@ -388,3 +393,131 @@ def test_every_peer_surface_gives_a_member_the_same_label(client):
     assert 'Olivia' in by_id.values(), by_id
     assert any(v.startswith('Member ') for v in by_id.values()), by_id
     assert len(set(by_id.values())) == 3, by_id
+
+
+# ── Every peer-visible response, writes included ─────────────────────────────
+#
+# The sweep above reads six GET surfaces. The leak found during the
+# integration merge was in a POST ECHO -- the body returned by the request
+# that creates a thing, which no GET-only sweep ever looks at, and which was
+# still resolving names through a helper that falls back to the login.
+#
+# So this one exercises the writes too, and the block list, which is
+# peer-visible in its own right.
+
+def test_no_peer_visible_response_of_any_kind_carries_a_login(client):
+    """Reads AND writes, for three ordinary person-shaped logins.
+
+    Nobody here sets a display name: that is the case the fallback exists for,
+    and the case where a resolver that "only leaks machine-looking handles"
+    still hands over every real one.
+    """
+    a = _t(client, 'timhill')
+    b = _t(client, 'oliviahill')
+    c = _t(client, 'sarahjones')
+    logins = ('timhill', 'oliviahill', 'sarahjones')
+
+    tid, code = _team(client, a)
+    _join_ok(client, tid, code, b)
+    _join_ok(client, tid, code, c)
+
+    bodies = {}
+
+    def record(label, resp):
+        if resp is not None and resp.status_code < 400:
+            try:
+                bodies[label] = json.dumps(resp.get_json())
+            except Exception:
+                bodies[label] = resp.get_data(as_text=True)
+
+    # WRITES -- each response body is peer-derived and was never swept before.
+    record("POST message", client.post(
+        f"/api/teams/{tid}/messages", json={"body": "hello"}, headers=auth_headers(b)))
+    record("POST challenge", client.post(
+        f"/api/teams/{tid}/challenges",
+        json={"preset_key": "squats_20", "target_user_id": _uid(client, c)},
+        headers=auth_headers(a)))
+    record("POST join echo", client.post(
+        f"/api/teams/{tid}/join", json={"code": code}, headers=auth_headers(a)))
+    record("PUT block", client.put(f"/api/blocks/{_uid(client, c)}", headers=auth_headers(b)))
+    record("GET blocks", client.get("/api/blocks", headers=auth_headers(b)))
+    record("DELETE block", client.delete(f"/api/blocks/{_uid(client, c)}", headers=auth_headers(b)))
+
+    # READS, from every member's point of view -- a leak may be viewer-specific.
+    for who, token in (("a", a), ("b", b), ("c", c)):
+        for label, path in (
+            ("team", f"/api/teams/{tid}"),
+            ("teams_list", "/api/teams"),
+            ("moments", f"/api/teams/{tid}/moments"),
+            ("messages", f"/api/teams/{tid}/messages"),
+            ("campfire", f"/api/teams/{tid}/campfire"),
+            ("challenges", f"/api/teams/{tid}/challenges"),
+            ("lookup", f"/api/teams/lookup/{code}"),
+        ):
+            record(f"{label}({who})", client.get(path, headers=auth_headers(token)))
+
+    # The writes MUST be in there. The first version of this test sent
+    # {"preset": ...} where the API wants {"preset_key": ...}, so the challenge
+    # POST 400'd and its echo was never swept -- a test that looked exhaustive
+    # and quietly checked one surface fewer than it claimed. A 4xx now fails
+    # here instead of disappearing into `record`.
+    for required in ("POST message", "POST challenge", "GET blocks"):
+        assert required in bodies, (
+            f"{required} did not return a body, so it was never checked "
+            f"(got: {sorted(bodies)})")
+    assert len(bodies) >= 10, f"too few surfaces exercised: {sorted(bodies)}"
+
+    for login in logins:
+        leaked = [label for label, body in bodies.items() if login in body]
+        assert not leaked, (
+            f"{login!r} leaked into: {', '.join(sorted(leaked))}\n"
+            + "\n".join(f"   {k}: {bodies[k][:200]}" for k in sorted(leaked)))
+
+
+def test_a_challenge_announcement_never_stores_a_login(client, app):
+    """The durable row, not just the response.
+
+    `create_team_challenge` wrote the announcement body with
+    `_safe_display_name(sender)`, which returns the LOGIN whenever the login
+    does not look machine-generated. So "timhill started a challenge: 20
+    squats" went into `team_message.body` -- a row that never expires, in a
+    thread every member reads. A comment directly above it said the login had
+    been removed, because the author believed that helper was peer-safe. It is
+    not, and it was the third place in this codebase to make that assumption.
+
+    The read path already derived the sentence safely for challenge rows, so
+    the leak was invisible on GET and surfaced only in the POST echo, which
+    returned the stored text verbatim. Both halves are asserted here: what is
+    written down, and what comes back.
+    """
+    from app import db, TeamMessage
+
+    a = _t(client, 'timhill')
+    b = _t(client, 'oliviahill')
+    tid, code = _team(client, a)
+    _join_ok(client, tid, code, b)
+
+    echo = client.post(
+        f"/api/teams/{tid}/challenges",
+        json={"preset_key": "squats_20", "target_user_id": _uid(client, b)},
+        headers=auth_headers(a))
+    assert echo.status_code == 201, echo.get_json()
+
+    # 1. THE DURABLE ROW. Nothing serialized later can undo a login stored here.
+    with app.app_context():
+        bodies = [m.body for m in db.session.execute(
+            db.select(TeamMessage).where(TeamMessage.team_id == tid)
+        ).scalars().all()]
+    assert bodies, "no announcement row was written"
+    for body in bodies:
+        assert 'timhill' not in body, f"a login is stored in team_message.body: {body!r}"
+        assert 'oliviahill' not in body, f"a login is stored in team_message.body: {body!r}"
+
+    # 2. THE ECHO, which must say what the list will say and not the raw row.
+    listed = client.get(f"/api/teams/{tid}/messages",
+                        headers=auth_headers(a)).get_json()
+    announcement = next(m for m in listed if m.get('challenge'))
+    assert echo.get_json()['body'] == announcement['body'], (
+        "the POST echo and the list disagree about the same message: "
+        f"{echo.get_json()['body']!r} vs {announcement['body']!r}")
+    assert 'timhill' not in json.dumps(echo.get_json())
