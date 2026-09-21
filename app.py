@@ -2348,6 +2348,11 @@ RETENTION_STALE_AFTER_HOURS = 48
 
 # A delivery worker runs hourly, so two silent cycles plus slack.
 DELIVERY_STALE_AFTER_HOURS = 3
+# How long after a worker starts its first pass may still be outstanding
+# before "not yet" becomes "not happening". Generous relative to the settle
+# delay, because a first pass on a busy boot can take a few seconds, and mean
+# relative to the hourly interval, because this must never mask a dead worker.
+_WORKER_FIRST_PASS_GRACE_S = 120
 
 
 class RetentionRun(db.Model):
@@ -3036,24 +3041,59 @@ def verification_self():
             limitations="Configuration only. Says nothing about whether "
                         "anything has ever run or succeeded."))
 
-        # 2. OBSERVED EXECUTION. Knowable only from a record that a pass ran.
+        # 2. OBSERVED EXECUTION -- and A STARTING WORKER IS NOT A STOPPED ONE.
+        #
+        # From the notification_run table alone those two are the same
+        # observation: no recent pass. They call for opposite responses. One
+        # resolves itself within a minute; the other means nobody is being
+        # told anything and never will be until somebody intervenes.
+        #
+        # `_WORKER_STARTED_AT` is this process's own answer to "is a worker
+        # alive here", so a deploy reports UNKNOWN for its first minute
+        # instead of crying FAIL, and a worker that has genuinely stopped
+        # still reports FAIL immediately.
         run = _last_notification_run(unattended_only=True)
-        if run is None:
-            wstate, wobs = "FAIL", "no unattended delivery pass has ever run"
+        now = datetime.utcnow()
+        starting = (_WORKER_STARTED_AT is not None and
+                    (now - _WORKER_STARTED_AT).total_seconds()
+                    < _RETENTION_FIRST_PASS_SETTLE_S + _WORKER_FIRST_PASS_GRACE_S)
+        started_ago = (f"{(now - _WORKER_STARTED_AT).total_seconds():.0f}s"
+                       if _WORKER_STARTED_AT else "never")
+        if run is None and starting:
+            wstate, wlevel = "UNKNOWN", "UNKNOWN"
+            wobs = (f"a worker started {started_ago} ago in this process and "
+                    f"its first pass has not completed yet")
+            wreason = ("Delivery has not been observed yet. This resolves on "
+                       "its own within a minute of a restart.")
+        elif run is None:
+            wstate, wlevel = "FAIL", "OBSERVED"
+            wobs = (f"no unattended delivery pass has ever run "
+                    f"(worker in this process started: {started_ago})")
+            wreason = ("Nothing is delivering alerts on its own; a report "
+                       "would wait for somebody to run a command by hand.")
         else:
-            age_h = (datetime.utcnow() - run.ran_at).total_seconds() / 3600
-            wstate = "PASS" if worker_fresh else "FAIL"
+            age_h = (now - run.ran_at).total_seconds() / 3600
+            wstate = "PASS" if worker_fresh else ("UNKNOWN" if starting else "FAIL")
+            wlevel = "VERIFIED" if wstate == "PASS" else (
+                "UNKNOWN" if wstate == "UNKNOWN" else "OBSERVED")
             wobs = (f"last unattended pass {age_h:.1f}h ago via {run.source}, "
                     f"{run.delivered} delivered, {run.failed} failed")
+            if wstate == "UNKNOWN":
+                wobs += (f"; a worker started {started_ago} ago in this "
+                         f"process and has not reported yet")
+            wreason = None if wstate == "PASS" else (
+                "Nothing is delivering alerts on its own; a report would wait "
+                "for somebody to run a command by hand.")
         checks.append(_self_check(
             "moderation.delivery_worker", "An unattended delivery worker is running",
             "Something delivers notices without anybody typing a command.",
-            "Read the most recent notification_run whose source is unattended.",
-            wstate, "VERIFIED" if wstate == "PASS" else "OBSERVED", wobs,
-            failure_reason=None if wstate == "PASS" else
-            "Nothing is delivering alerts on its own; a report would wait for "
-            "somebody to run a command by hand.",
-            limitations="A manual run never satisfies this, by design."))
+            "Read the most recent UNATTENDED notification_run, and this "
+            "process's own worker start time, so a worker that has not "
+            "reported yet is not mistaken for one that has stopped.",
+            wstate, wlevel, wobs, failure_reason=wreason,
+            limitations="A manual run never satisfies this, by design. The "
+                        "start time is this PROCESS's -- it says a worker is "
+                        "alive here, not that one is alive everywhere."))
 
         # 3. OUTSTANDING WORK -- and it refuses to claim health it cannot see.
         stuck = _undelivered_urgent_notices()
@@ -9171,11 +9211,16 @@ def _delivery_capability(now=None):
     # reach anybody.
     channel = _notification_channel()
     configured = channel is not None and channel.certifies_delivery
+    config_problem = _channel_configuration_problem()
     run = _last_notification_run(unattended_only=True)
     worker_fresh = bool(
         run is not None
         and (now - run.ran_at) <= timedelta(hours=DELIVERY_STALE_AFTER_HOURS))
-    if channel is not None and not configured:
+    if config_problem:
+        # A channel was CHOSEN and could not be built. Distinct from "nothing
+        # chosen", and far more likely to be mistaken for working.
+        why = config_problem
+    elif channel is not None and not configured:
         why = (f"the configured channel ({channel.name}) cannot certify "
                f"delivery, so nothing can be marked delivered through it")
     elif not configured and not worker_fresh:
@@ -9407,6 +9452,19 @@ class NotificationError(Exception):
     """A delivery attempt did not succeed. Never carries provider text."""
 
 
+class NotificationConfigError(Exception):
+    """A channel is named but cannot be built from the environment.
+
+    Separate from NotificationError on purpose. A send that failed is a fact
+    about the world; a channel that could not be constructed is a fact about
+    this deployment, and the two want different answers from monitoring:
+    'delivery is broken' versus 'delivery was never set up'.
+
+    Its message names VARIABLES, never values. It is surfaced through
+    /api/verification/self, which is served without a credential.
+    """
+
+
 class NotificationChannel:
     """Somewhere a notice can be sent. Providers are adapters over this.
 
@@ -9450,7 +9508,112 @@ class ConsoleChannel(NotificationChannel):
         raise NotificationError('console is not a delivery channel')
 
 
-_NOTIFICATION_CHANNELS = {'console': ConsoleChannel}
+# The one seam every HTTP-speaking channel goes through, so tests can fake a
+# provider without a network and without a real account. Nothing else in this
+# file talks to the outside world for delivery.
+def _notify_http_post(url, payload, headers, timeout=10):
+    """POST JSON, return (status, decoded-body-or-None). Never raises for HTTP
+    status -- the caller decides what a status means."""
+    data = json.dumps(payload).encode('utf-8')
+    req = urllib.request.Request(url, data=data, method='POST')
+    req.add_header('Content-Type', 'application/json')
+    for k, v in (headers or {}).items():
+        req.add_header(k, v)
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            raw = resp.read()
+            try:
+                return resp.status, json.loads(raw or b'{}')
+            except ValueError:
+                return resp.status, None
+    except urllib.error.HTTPError as exc:
+        # Read the body but DO NOT propagate its text: a provider error can
+        # echo the request back, and the request contains a report id.
+        try:
+            exc.read()
+        except Exception:
+            pass
+        return exc.code, None
+
+
+class ResendChannel(NotificationChannel):
+    """Email through Resend. The first real delivery channel this app has had.
+
+    Configuration, all three required, and the channel refuses to exist
+    without them:
+
+      RESEND_API_KEY          the provider credential
+      STREAKFIT_NOTIFY_FROM   a verified sender on a domain Resend accepts
+      STREAKFIT_NOTIFY_TO     the ONE address alerts go to
+
+    THE RECIPIENT IS CONFIGURATION, NEVER DATA. `send()` takes a subject and a
+    body and nothing else -- there is no parameter through which a notice, a
+    report, or anything a user typed could influence who receives mail. A bug
+    in notice generation can therefore send the wrong SENTENCE, but it cannot
+    send it to the wrong PERSON, and that is the difference worth designing
+    for in a subsystem that handles child-safety reports.
+
+    Idempotency: Resend accepts an `Idempotency-Key` header and deduplicates
+    for 24 hours. `provider_key` is minted and committed before the send, so a
+    crash between sending and recording retries with the same key and Resend
+    collapses it. After 24 hours that window has closed on Resend's side and a
+    retry would deliver a second copy -- documented rather than papered over,
+    and a duplicate child-safety alert is the right failure to prefer.
+    """
+    name = 'resend'
+    endpoint = 'https://api.resend.com/emails'
+    timeout_s = 10
+
+    def __init__(self):
+        self.api_key = (os.environ.get('RESEND_API_KEY') or '').strip()
+        self.sender = (os.environ.get('STREAKFIT_NOTIFY_FROM') or '').strip()
+        self.recipient = (os.environ.get('STREAKFIT_NOTIFY_TO') or '').strip()
+        missing = [n for n, v in (('RESEND_API_KEY', self.api_key),
+                                  ('STREAKFIT_NOTIFY_FROM', self.sender),
+                                  ('STREAKFIT_NOTIFY_TO', self.recipient))
+                   if not v]
+        if missing:
+            # NAMES only. This string reaches an endpoint served without a
+            # credential.
+            raise NotificationConfigError(
+                "channel 'resend' is selected but " + ", ".join(missing) +
+                (" is not set" if len(missing) == 1 else " are not set"))
+
+    def send(self, subject, body, idempotency_key=None):
+        headers = {'Authorization': f'Bearer {self.api_key}'}
+        if idempotency_key:
+            headers['Idempotency-Key'] = str(idempotency_key)[:256]
+        payload = {
+            'from': self.sender,
+            # A LIST OF ONE, built here from configuration. Not from the
+            # notice, not from a user row, not from a request.
+            'to': [self.recipient],
+            'subject': subject,
+            # Plain text only. No HTML, so nothing can embed a tracking pixel
+            # or a remote image that would tell a third party when a
+            # child-safety alert was opened.
+            'text': body,
+        }
+        try:
+            status, data = _notify_http_post(
+                self.endpoint, payload, headers, timeout=self.timeout_s)
+        except Exception as exc:
+            # Type only. A socket error can carry a hostname; a provider error
+            # can carry the request back.
+            raise NotificationError(
+                f'resend request failed: {type(exc).__name__}')
+
+        if status is None or not (200 <= status < 300):
+            raise NotificationError(f'resend returned HTTP {status}')
+        receipt = (data or {}).get('id')
+        if not receipt:
+            # Accepted-looking with no id is not a delivery we can record, and
+            # `delivered_at` is only ever set beside a receipt.
+            raise NotificationError('resend returned no message id')
+        return receipt
+
+
+_NOTIFICATION_CHANNELS = {'console': ConsoleChannel, 'resend': ResendChannel}
 
 
 def _notification_channel(name=None):
@@ -9462,7 +9625,38 @@ def _notification_channel(name=None):
     """
     name = name or os.environ.get('STREAKFIT_NOTIFY_CHANNEL', '').strip()
     factory = _NOTIFICATION_CHANNELS.get(name)
-    return factory() if factory else None
+    if factory is None:
+        return None
+    try:
+        return factory()
+    except NotificationConfigError:
+        # Named but unbuildable -- half-configured is NOT configured, and it
+        # must not read as capability. `_channel_configuration_problem()`
+        # carries the reason to monitoring; here the honest answer is None.
+        return None
+
+
+def _channel_configuration_problem(name=None):
+    """Why the named channel could not be built, or None if it could.
+
+    Half-configured delivery is the state most likely to be believed: the
+    variable is set, somebody remembers setting it, and nothing says the key
+    beside it is missing. This turns that silence into a sentence naming the
+    variable -- never its value, because it is read by an endpoint served
+    without a credential.
+    """
+    name = name or os.environ.get('STREAKFIT_NOTIFY_CHANNEL', '').strip()
+    if not name:
+        return None            # nothing selected at all; a different fact
+    factory = _NOTIFICATION_CHANNELS.get(name)
+    if factory is None:
+        return (f"STREAKFIT_NOTIFY_CHANNEL names {name!r}, which is not a "
+                f"channel this build knows")
+    try:
+        factory()
+        return None
+    except NotificationConfigError as exc:
+        return str(exc)
 
 
 # Exponential, then FLAT FOREVER. The schedule is bounded; the number of
@@ -9494,6 +9688,15 @@ _NOTIFY_SCAN_LIMIT = 500
 # Who this process is, for a claim. Not a secret and not an identifier of any
 # person -- a pid and a random suffix, so two workers on one host differ.
 _WORKER_ID = f"{os.getpid()}-{uuid.uuid4().hex[:8]}"
+
+# When THIS process started its sweeper, or None if it is not running one.
+#
+# The difference between a worker that has not reported yet and a worker that
+# has stopped reporting is invisible from the notification_run table alone --
+# both look like "no recent pass". This is the other half of that question,
+# and it is per-process on purpose: it answers "is a worker alive HERE", which
+# is exactly what a web request can honestly speak to.
+_WORKER_STARTED_AT = None
 
 
 def _notice_backoff_minutes(notice):
@@ -9766,12 +9969,20 @@ def _undelivered_notices():
               help='Mark the printed notices delivered. Off by default so the '
                    'command is safe to run just to look.')
 def moderation_notify_command(scheduled, mark_delivered):
-    """Generate review notices and print the ones nobody has acted on.
+    """Generate review notices and attempt delivery of whatever is due.
 
-    This is generation plus a console channel. It is NOT a notification system:
-    nothing reaches anybody who is not already looking at this terminal. Until
-    a real channel is configured, an unread notice is only as visible as the
-    person who remembers to run this.
+    This is the command a scheduler runs. With `--scheduled` it records its
+    pass as source='cron', which is what lets `moderation.delivery_worker`
+    report PASS -- a hand-typed run records 'manual' and deliberately never
+    satisfies that check.
+
+    It is safe to run beside the in-process worker. Delivery takes a durable
+    lease committed before the send, so two runners over the same queue
+    produce one send and the loser skips.
+
+    With no channel configured it generates notices, delivers nothing, and
+    says so. That is the true state of the system rather than a failure of
+    this command.
     """
     created = _generate_moderation_notices()
     db.session.commit()
@@ -10496,11 +10707,33 @@ if os.environ.get('STREAKFIT_ENFORCE_DB_HEAD') == '1':
 # `flask db upgrade`, pytest and every local script import this module, and none
 # of them should silently start a thread that deletes rows.
 _RETENTION_THREAD_INTERVAL_S = int(os.environ.get('STREAKFIT_RETENTION_INTERVAL_S', '3600'))
+# Seconds between the worker starting and its first pass. Long enough not to
+# contend with gunicorn's boot, short enough that a report filed just after a
+# deploy is attempted in under a minute rather than in an hour.
+_RETENTION_FIRST_PASS_SETTLE_S = int(
+    os.environ.get('STREAKFIT_RETENTION_SETTLE_S', '20'))
 
 
 def _retention_sweeper_loop():
+    # SETTLE, THEN WORK, THEN SLEEP -- in that order, deliberately.
+    #
+    # This loop used to sleep a full interval FIRST, so every deploy, restart
+    # and crash-loop bought an hour in which nothing swept and nothing was
+    # delivered, and monitoring could not tell that hour apart from a worker
+    # that had died. A notice filed one minute after a deploy waited an hour
+    # for its first attempt, on a 24-hour clock.
+    #
+    # The short settle is not a sleep-first in disguise: it exists so the
+    # first pass does not contend with gunicorn's own start-up, and it is
+    # seconds rather than an hour. `_WORKER_STARTED_AT` is stamped before it,
+    # so monitoring can say "started 20 seconds ago, first pass pending"
+    # instead of "no pass has ever run".
+    # Never longer than the interval itself. A settle that outlasts a cycle is
+    # incoherent -- and an operator who sets a short interval (tests, a local
+    # run) is asking for fast cycles, not for a fixed 20-second wait in front
+    # of them.
+    time.sleep(min(_RETENTION_FIRST_PASS_SETTLE_S, _RETENTION_THREAD_INTERVAL_S))
     while True:
-        time.sleep(_RETENTION_THREAD_INTERVAL_S)
         try:
             with app.app_context():
                 deleted = _sweep_expired_coach_turns(force=True, source='thread')
@@ -10585,8 +10818,15 @@ def _retention_sweeper_loop():
             app.logger.warning('moderation delivery failed: %s',
                                type(exc).__name__)
 
+        # Sleep LAST. See the note at the top of this loop.
+        time.sleep(_RETENTION_THREAD_INTERVAL_S)
+
 
 def _start_retention_sweeper():
+    global _WORKER_STARTED_AT
+    # Stamped BEFORE the thread runs, so a request served in the first seconds
+    # of a new process can still distinguish "just started" from "never ran".
+    _WORKER_STARTED_AT = datetime.utcnow()
     thread = threading.Thread(target=_retention_sweeper_loop,
                               name='streakfit-retention', daemon=True)
     thread.start()

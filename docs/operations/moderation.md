@@ -185,27 +185,41 @@ rather than silent.
 queue, because a calm-looking queue and a growing undelivered count is exactly
 what "nobody is being notified" looks like from the outside.
 
-**What still does not exist is an adapter for any real provider** — that is the
-owner decision below, and it is the one thing none of the above substitutes for.
-`console` prints and deliberately raises rather than returning a receipt, and
-it declares `certifies_delivery = False`, so setting
-`STREAKFIT_NOTIFY_CHANNEL=console` **fails** `moderation.delivery_configured`
-rather than reading as capability. A channel that can never deliver is not
-configuration; counting it as such was the R2 false green one layer in.
+**A provider adapter now exists: `ResendChannel`.** It is email over Resend,
+built on the same `NotificationChannel` interface, with no new dependency —
+`urllib.request` was already imported. Three variables are required together
+and the channel refuses to build without all three:
 
-To wire one up once a provider is chosen:
+| Variable | What |
+|---|---|
+| `RESEND_API_KEY` | the credential — header only, never a payload field, never in an error |
+| `STREAKFIT_NOTIFY_FROM` | a verified sender |
+| `STREAKFIT_NOTIFY_TO` | the **one** address alerts reach |
 
-1. Write a `NotificationChannel` subclass whose `send(subject, body,
-   idempotency_key=...)` returns the provider's message id and raises on
-   anything else. Pass the key through to the provider if it supports one.
-2. Register it in `_NOTIFICATION_CHANNELS`.
-3. Set `STREAKFIT_NOTIFY_CHANNEL` to its name and `STREAKFIT_PUBLIC_URL` to the
-   site root, plus whatever credential the provider needs.
+Half-configured is not configured: with any one missing,
+`_notification_channel()` returns `None` and `moderation.delivery_configured`
+FAILS **naming the missing variable**. That string is served without a
+credential, so it names variables and never values.
 
-Until step 3, every notice stays undelivered, `moderation.delivery_configured`
-fails, and `moderation.notices_delivered` fails once an urgent notice is more
-than an hour old — which is the true state of the system, reported rather than
-hidden.
+**The recipient is configuration and can never become data.** `send()` takes a
+subject, a body and an idempotency key — there is no recipient parameter. A
+bug in notice generation can therefore send the wrong *sentence*; it cannot
+send it to the wrong *person*. That distinction is worth the design in a
+subsystem that handles child-safety reports.
+
+The message is **plain text only** — no HTML, so nothing can embed a tracking
+pixel or a remote image that would tell a third party when a child-safety
+alert was opened.
+
+`console` remains, and remains not a delivery channel: it declares
+`certifies_delivery = False`, so selecting it FAILS the configured check
+rather than reading as capability.
+
+**Nothing has been connected.** No account, no key, no message. Every test
+runs against a fake provider through a single stubbed HTTP seam
+(`_notify_http_post`) — see `tests/test_resend_channel.py`. The rollout, and
+the end-to-end test that must pass before anyone says alerts work, are in
+`docs/operations/notification-rollout.md`.
 
 ### 3.4 Staffing — still a decision, not a bug
 
@@ -256,6 +270,14 @@ that suppresses deletion, and it requires a written reason.
   that a failure record never carries the exception's text. Verified by
   mutation: removing the `kind` filter or ignoring a failed outcome both make
   these tests fail.
+- `tests/test_resend_channel.py` — the Resend adapter against a fake provider:
+  the recipient comes from configuration and no argument can change it, a
+  non-2xx and a 200-without-an-id are both refused as delivery, the key never
+  reaches a payload or an error, the idempotency key is stable across a
+  retry, and a half-configured channel names the variable it is missing.
+- `tests/test_unattended_operation.py` — that a worker which has not reported
+  YET is not read as one that has STOPPED, and that an in-process worker and
+  a cron delivering the same queue send exactly once.
 - `tests/test_notification_delivery.py` — 43 tests, one per defect the
   operational-readiness audit reproduced: that an empty queue with no provider
   is not a `PASS`; that a manual pass never satisfies the worker check; that a
