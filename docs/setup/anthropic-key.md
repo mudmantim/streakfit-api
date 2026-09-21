@@ -33,8 +33,15 @@ git check-ignore -v .env          # prints the .gitignore rule that covers it
 Then, in a terminal — **not in a chat window**:
 
 ```bash
-# The leading space keeps it out of your shell history on most systems.
- printf 'ANTHROPIC_API_KEY=%s\n' 'sk-ant-...' >> .env
+# A leading space does NOT reliably keep this out of your shell history: it
+# only works when HISTCONTROL includes `ignorespace` or `ignoreboth`, and the
+# common default (including on this machine) is `ignoredups`, which does not.
+# Check first:  echo "$HISTCONTROL"
+#
+# The safe version prompts instead, so the key is never on a command line at
+# all -- arguments are also visible in `ps`, where history settings do not
+# help. `read -s` leaves no echo and no history entry.
+read -rs -p 'Anthropic API key: ' K && printf 'ANTHROPIC_API_KEY=%s\n' "$K" >> .env && unset K
 chmod 600 .env                     # only you can read it
 ```
 

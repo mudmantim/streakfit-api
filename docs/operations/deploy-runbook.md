@@ -213,8 +213,11 @@ superuser, and none is needed.
 The file contains every user's data, including coach conversations. It is the
 most concentrated copy of personal data this project produces.
 
-- Keep the connection string out of shell history — a leading space, or read
-  it from a file.
+- Keep the connection string out of shell history. **A leading space does not
+  do this here** — `HISTCONTROL=ignoredups` on this machine, and only
+  `ignorespace`/`ignoreboth` suppress space-prefixed commands. Read it from a
+  file, or let the tool prompt. Better still, keep it off the command line
+  entirely: arguments are readable in `ps` regardless of history settings.
 - Store it encrypted and off Neon. Not in the repository, not in `/tmp`, not
   in a syncing cloud folder.
 - **Delete it on a schedule you actually keep.** StreakFit promises 30-day
