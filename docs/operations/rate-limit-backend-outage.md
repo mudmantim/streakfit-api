@@ -153,6 +153,17 @@ anything can raise. Confirmed to fail without the fix (6 of 7) and pass with
 it. The two ping-versus-write tests were confirmed the same way, by reverting
 the probe to a bare ping and watching both fail.
 
+## Sequencing consequence
+
+The deployed build reads `RATELIMIT_STORAGE_URI` and has **none** of the
+protections in this document — no degrade hook, no `sensitive_when_degraded`,
+no in-memory fallback. Provisioning Key Value and pointing the *current*
+production app at it would therefore introduce exactly the outage described
+above, with no recovery path, on a plan that "might restart at any time".
+
+**Shared storage must be provisioned after this code is live, never before.**
+See [deployment-sequence.md](deployment-sequence.md).
+
 ## Open
 
 - `limits` (the library Flask-Limiter delegates storage to, and therefore the

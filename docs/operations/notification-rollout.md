@@ -106,6 +106,23 @@ back on. Most control, most steps, easiest to leave in the wrong state.
 
 ## 4. Rollout stages
 
+> **⚠️ SUPERSEDED FOR THIS RELEASE — see
+> [deployment-sequence.md](deployment-sequence.md).**
+>
+> The order below deploys first and configures afterwards. Two things found
+> while preparing the release make that wrong here:
+>
+> 1. `/api/reports` does not exist in the deployed build, so the reporting UI
+>    becomes public *at the instant of deploy* — the safeguards have to be in
+>    place before it, not after.
+> 2. The deployed build reads `RATELIMIT_STORAGE_URI` but has none of this
+>    branch's outage protections, so pointing it at a new Key Value instance
+>    would 500 every throttled route on any blip. Shared storage must come
+>    **after** the deploy.
+>
+> The stage *content* below is still accurate and is what the new sequence
+> references; only the order changed.
+
 Each stage is reversible, and no stage claims delivery works until stage 6
 proves it.
 
@@ -163,7 +180,11 @@ Retention checks turn PASS on their own once a sweep is recorded.
       This catches the half-configured state, a wrong secret pasted into
       `RESEND_API_KEY`, and a recipient list where one address is required —
       all before an undelivered child-safety alert is the thing that tells
-      you. It cannot tell you mail actually arrives; only stage 4 does that.
+      you. It cannot tell you mail actually arrives.
+
+      `scripts/notification_live_send.py` is the one that can: it sends a
+      single real alert, locally, through the real channel, after printing it
+      and asking for a typed confirmation.
 
 ### Stage 4 — the real end-to-end test, still without DNS
 Resend's `onboarding@resend.dev` sends only to the **account owner's own
@@ -261,6 +282,13 @@ behind a routine one.)*
 - **The free tier caps at 100 emails/day** (3,000/month). On a report-flood
   day that cap is itself a delivery failure, and the retry will keep pushing
   against a ceiling it cannot clear until the next day.
+- **The last untested link is the provider itself.** The whole chain — a
+  filed report, notice generation, the claim, a real HTTP request carrying the
+  Authorization and Idempotency-Key headers, the response parsed and the
+  receipt stored — is now exercised over a real socket by
+  `tests/test_delivery_end_to_end.py`. What that does **not** prove is TLS to
+  `api.resend.com`, or that an email lands in a human's inbox. Only one real
+  send does that.
 - **Nothing alerts on the alerter.** If Resend is down, the thing that would
   tell you is the thing that is down. That wants a second, independent
   channel or an external dead-man's-switch, and neither exists.
