@@ -1998,8 +1998,25 @@ class Report(db.Model):
     reviewed_at = db.Column(db.DateTime, nullable=True)
     disposition = db.Column(db.String(24), nullable=True)
 
+    # The owner's review target, fixed at filing time: 24h for child_safety,
+    # 72h for everything else (REVIEW_WINDOW_HOURS).
+    #
+    # Stored rather than computed on read, and never recalculated. A report
+    # that is escalated, reopened or re-categorised keeps the deadline it was
+    # born with -- a due time that moves when somebody touches the row is a
+    # due time that can be reset by touching the row.
+    due_at = db.Column(db.DateTime, nullable=True, index=True)
+    escalated_at = db.Column(db.DateTime, nullable=True)
+    # Set when evidence for a CLOSED report has been purged, so the audit row
+    # can still say a report existed and was handled after its content is gone.
+    evidence_purged_at = db.Column(db.DateTime, nullable=True)
+    # An explicit, operator-set hold. Nothing else may suppress deletion.
+    legal_hold = db.Column(db.Boolean, nullable=False, default=False)
+    legal_hold_reason = db.Column(db.String(200), nullable=True)
+
     __table_args__ = (
         db.Index('ix_report_status_created', 'status', 'created_at'),
+        db.Index('ix_report_status_due', 'status', 'due_at'),
     )
 
 
@@ -2022,6 +2039,7 @@ class ReportEvidence(db.Model):
     content_text = db.Column(db.Text, nullable=True)
     author_user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True)
     context_json = db.Column(db.Text, nullable=True)   # surrounding metadata, JSON string
+    purged_at = db.Column(db.DateTime, nullable=True)  # content cleared by retention
 
 
 class ModerationAction(db.Model):
@@ -2050,9 +2068,16 @@ class ContentRestriction(db.Model):
     Separate from the content's own `deleted_at` so that a moderator hiding
     something and an author deleting their own photo stay distinguishable, and
     so lifting a restriction can never resurrect something the author deleted.
+
+    EACH RESTRICTION BELONGS TO ONE REPORT. Two people can report the same
+    message, and each report gets its own row. Closing one lifts only the row
+    it created, so a dismissal on report A cannot silently un-hide content that
+    report B is still holding. `_is_content_restricted` asks whether ANY
+    unlifted row exists, so the content stays hidden while one remains.
     """
     __tablename__ = 'content_restriction'
     id = db.Column(db.Integer, primary_key=True)
+    report_id = db.Column(db.Integer, db.ForeignKey('report.id'), nullable=True, index=True)
     subject_type = db.Column(db.String(16), nullable=False)
     subject_ref = db.Column(db.String(64), nullable=False)
     reason = db.Column(db.String(32), nullable=False)
@@ -2081,6 +2106,86 @@ class UserRestriction(db.Model):
     created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
     expires_at = db.Column(db.DateTime, nullable=True)   # NULL = until lifted
     lifted_at = db.Column(db.DateTime, nullable=True)
+
+
+class PhotoEvidence(db.Model):
+    """Encrypted bytes of a reported photo, kept apart from the photo itself.
+
+    The team photo table is the thing being complained about: it is served to
+    members, soft-deleted by authors, and expired by the retention sweep. An
+    evidence archive that lived there would be reachable by every route that
+    already reads photos. This is a separate table, never joined to any
+    member-facing query, and readable through exactly one operator route that
+    writes an audit row on every access.
+
+    `ciphertext` is Fernet (AES-128-CBC + HMAC-SHA256, authenticated). The key
+    comes from STREAKFIT_EVIDENCE_KEY and is never written to the database, to
+    a log, or to this repository. With no key configured, nothing is captured
+    at all -- see `_evidence_cipher`.
+
+    30 days maximum, from CAPTURE rather than from report closure, because the
+    owner's decision caps photo retention outright rather than relative to a
+    workflow that might stall.
+    """
+    __tablename__ = 'photo_evidence'
+    id = db.Column(db.Integer, primary_key=True)
+    report_id = db.Column(db.Integer, db.ForeignKey('report.id'), nullable=False, index=True)
+    photo_public_id = db.Column(db.String(32), nullable=False, index=True)
+    ciphertext = db.Column(db.LargeBinary, nullable=True)
+    content_type = db.Column(db.String(32), nullable=False, default='image/jpeg')
+    byte_size = db.Column(db.Integer, nullable=False, default=0)
+    key_id = db.Column(db.String(32), nullable=True)   # which key encrypted it
+    captured_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    expires_at = db.Column(db.DateTime, nullable=False, index=True)
+    purged_at = db.Column(db.DateTime, nullable=True)
+    # Why there are no bytes, when there are none: the original was already
+    # gone, or no key was configured. Recorded so a reviewer is told the
+    # difference instead of seeing an empty record.
+    unavailable_reason = db.Column(db.String(40), nullable=True)
+
+
+class EvidenceAccess(db.Model):
+    """One row per operator look at preserved evidence. Written BEFORE the
+    bytes are returned, so a read that happened without a record is not a
+    reachable state."""
+    __tablename__ = 'evidence_access'
+    id = db.Column(db.Integer, primary_key=True)
+    report_id = db.Column(db.Integer, db.ForeignKey('report.id'), nullable=False, index=True)
+    evidence_kind = db.Column(db.String(16), nullable=False)   # photo | text
+    actor = db.Column(db.String(40), nullable=False, default='operator')
+    accessed_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, index=True)
+    outcome = db.Column(db.String(24), nullable=False)         # served | purged | unavailable
+
+
+class Appeal(db.Model):
+    """Someone asking for a moderation decision to be looked at again.
+
+    Private by construction: readable by the person who filed it and by an
+    operator, and by nobody else. It never carries the reporter's identity or
+    the evidence -- an appeal route that answered "here is what they said about
+    you" would turn the appeals process into the disclosure channel the
+    reporting design spent its effort closing.
+    """
+    __tablename__ = 'appeal'
+    id = db.Column(db.Integer, primary_key=True)
+    public_id = db.Column(db.String(32), nullable=False, unique=True, index=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False, index=True)
+    # What is being appealed. A moderation action, so the trail stays intact:
+    # the action row is never edited or deleted by an appeal.
+    action_id = db.Column(db.Integer, db.ForeignKey('moderation_action.id'),
+                          nullable=False, index=True)
+    reason = db.Column(db.Text, nullable=True)
+    status = db.Column(db.String(16), nullable=False, default='open', index=True)
+    outcome = db.Column(db.String(24), nullable=True)     # upheld | overturned
+    outcome_note = db.Column(db.Text, nullable=True)      # shown to the appellant
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    decided_at = db.Column(db.DateTime, nullable=True)
+
+    __table_args__ = (
+        # One appeal per action per person. A second look is a reviewer
+        # decision, not something a user can force by resubmitting.
+        db.UniqueConstraint('user_id', 'action_id', name='uq_appeal_user_action'),
+    )
 
 
 class VerificationRun(db.Model):
@@ -6491,6 +6596,91 @@ AUTO_RESTRICT_CATEGORIES = ('child_safety',)
 SUBJECT_TYPES = ('user', 'message', 'photo', 'challenge')
 
 
+REVIEW_WINDOW_HOURS = {'child_safety': 24}
+REVIEW_WINDOW_DEFAULT_HOURS = 72
+
+# The owner's retention decisions, in one place so a reader can check them
+# against docs/moderation/policy.md without reading the sweep.
+EVIDENCE_RETENTION_DAYS_AFTER_CLOSURE = 30   # ordinary text/caption evidence
+PHOTO_EVIDENCE_MAX_AGE_DAYS = 30             # photo bytes, from capture, absolute
+
+
+def _review_due_at(category, created_at):
+    """When this report is due. Computed once, at filing, and never again."""
+    hours = REVIEW_WINDOW_HOURS.get(category, REVIEW_WINDOW_DEFAULT_HOURS)
+    return created_at + timedelta(hours=hours)
+
+
+def _evidence_cipher():
+    """The Fernet cipher for photo evidence, or None.
+
+    The key is STREAKFIT_EVIDENCE_KEY -- a urlsafe-base64 32-byte Fernet key,
+    generated once by an operator and set in the environment. It is never
+    generated by the application, never defaulted, and never stored anywhere
+    the database or this repository can reach.
+
+    With no key, this returns None and NOTHING IS CAPTURED. That is the
+    deliberate direction to fail: a milestone that silently stored reported
+    images in the clear because a variable was missing would be worse than one
+    that stores nothing and says so. The reviewer is told `no_evidence_key`
+    rather than shown an empty record.
+    """
+    raw = os.environ.get('STREAKFIT_EVIDENCE_KEY', '').strip()
+    if not raw:
+        return None, None
+    try:
+        from cryptography.fernet import Fernet
+    except ImportError:
+        app.logger.error('STREAKFIT_EVIDENCE_KEY is set but `cryptography` is '
+                         'not installed — photo evidence will not be captured')
+        return None, None
+    try:
+        cipher = Fernet(raw.encode('utf-8'))
+    except Exception:
+        app.logger.error('STREAKFIT_EVIDENCE_KEY is not a valid Fernet key — '
+                         'photo evidence will not be captured')
+        return None, None
+    # A short, non-secret fingerprint so a stored row can say WHICH key sealed
+    # it. Truncated HMAC of the key under a fixed label: enough to tell two
+    # keys apart across a rotation, not enough to be useful to anybody.
+    key_id = hmac.new(b'streakfit-evidence-key-id', raw.encode('utf-8'),
+                      hashlib.sha256).hexdigest()[:16]
+    return cipher, key_id
+
+
+def _capture_photo_evidence(report, photo_public_id):
+    """Seal a copy of the reported image, or record why there is none.
+
+    Always writes a row. "No bytes" and "never tried" look identical to a
+    reviewer otherwise, and the difference matters when the question is
+    whether something was destroyed before anyone looked at it.
+    """
+    now = datetime.utcnow()
+    row = PhotoEvidence(
+        report_id=report.id,
+        photo_public_id=photo_public_id,
+        expires_at=now + timedelta(days=PHOTO_EVIDENCE_MAX_AGE_DAYS),
+    )
+    photo = db.session.execute(
+        db.select(TeamPhoto).where(TeamPhoto.public_id == photo_public_id)
+    ).scalar_one_or_none()
+
+    cipher, key_id = _evidence_cipher()
+    if cipher is None:
+        row.unavailable_reason = 'no_evidence_key'
+    elif photo is None or photo.image_data is None:
+        # Already deleted by its author, or expired by the photo sweep. The
+        # report still stands on its caption and context.
+        row.unavailable_reason = 'original_already_gone'
+    else:
+        row.ciphertext = cipher.encrypt(photo.image_data)
+        row.content_type = photo.content_type or 'image/jpeg'
+        row.byte_size = len(photo.image_data)
+        row.key_id = key_id
+    db.session.add(row)
+    return row
+
+
 def _blocked_ids_for(user_id):
     """Every user id this person cannot see and cannot be seen by.
 
@@ -6685,10 +6875,14 @@ def _resolve_reportable_content(user_id, subject_type, subject_ref):
     # a way to reach what the thread refuses to show you.
     if created_at < membership.joined_at:
         return None
-    # Already withheld by a moderator: there is nothing useful to report and
-    # confirming it exists would leak the takedown.
-    if _is_content_restricted(subject_type, subject_ref):
-        return None
+    # Deliberately NOT refused when the content is already restricted.
+    #
+    # The first version returned None here, reasoning that confirming a
+    # takedown exists is a disclosure. It leaks nothing -- the reporter gets a
+    # 201 either way -- and it broke the case that matters: two people alarmed
+    # by the same message, where the second is turned away because the first
+    # got there first. Each report keeps its own restriction row, so both
+    # holds have to be lifted before the content comes back.
     # A blocked person's content is not visible to this reporter either.
     if author_id is not None and author_id in _blocked_ids_for(user_id):
         return None
@@ -6816,6 +7010,29 @@ def create_report():
         return jsonify({"error": "Choose a reason for the report.",
                         "categories": list(REPORT_CATEGORIES)}), 400
 
+    # A reporting restriction NEVER reaches an urgent safety report.
+    #
+    # Owner decision: blocking and urgent child-safety reporting stay
+    # available to everybody, always. Somebody whose reporting was restricted
+    # for abuse may still be the person who sees something that matters, and a
+    # system that silences them is worse than one that reads a few more bad
+    # reports. Restricting reporting is already reviewer-established rather
+    # than inferred, which is what keeps the remaining categories defensible.
+    if category not in AUTO_RESTRICT_CATEGORIES:
+        restricted = db.session.execute(
+            db.select(UserRestriction).where(
+                UserRestriction.user_id == user_id,
+                UserRestriction.kind == 'reporting_restricted',
+                UserRestriction.lifted_at.is_(None))
+        ).scalars().first()
+        if restricted is not None:
+            return jsonify({
+                "error": "Reporting is paused on your account while a reviewer "
+                         "looks at it. Urgent child-safety reports and blocking "
+                         "still work.",
+                "code": "reporting_restricted",
+            }), 403
+
     subject_type = (data.get('subject_type') or '').strip()
     if subject_type not in SUBJECT_TYPES:
         return jsonify({"error": "subject_type must be one of "
@@ -6869,6 +7086,7 @@ def create_report():
         # Derived from the row, never from the request body.
         reported_user_id = resolved["author_id"]
 
+    now = datetime.utcnow()
     report = Report(
         public_id=uuid.uuid4().hex,
         reporter_user_id=user_id,
@@ -6878,17 +7096,27 @@ def create_report():
         subject_type=subject_type,
         subject_ref=subject_ref,
         note=note,
+        created_at=now,
+        due_at=_review_due_at(category, now),
     )
     db.session.add(report)
-    db.session.flush()   # need report.id for the evidence row
+    db.session.flush()   # need report.id for the evidence rows
 
     if resolved is not None:
         _capture_report_evidence(report, subject_type, resolved)
+        if subject_type == 'photo':
+            # Sealed copy of the image, so a delete before review does not
+            # empty the report. Fails closed with no key -- see
+            # `_capture_photo_evidence`.
+            _capture_photo_evidence(report, subject_ref)
         if category in AUTO_RESTRICT_CATEGORIES:
             # Reachable only after the authorization above, so an automatic
             # takedown can no longer be triggered against a team the reporter
-            # has nothing to do with.
+            # has nothing to do with. The restriction belongs to THIS report,
+            # so closing a different report about the same content cannot
+            # lift it.
             db.session.add(ContentRestriction(
+                report_id=report.id,
                 subject_type=subject_type, subject_ref=subject_ref,
                 reason='auto_' + category))
             db.session.add(ModerationAction(
@@ -6921,13 +7149,33 @@ def admin_list_reports():
     gate as every other admin route -- there is no second way in."""
     _require_admin_secret()
     status = request.args.get('status', 'pending')
-    q = db.select(Report).order_by(Report.created_at.asc())
-    if status != 'all':
+    # Urgent first, then oldest deadline. A queue sorted only by arrival buries
+    # a 24-hour child-safety report under three days of spam.
+    q = db.select(Report).order_by(Report.due_at.asc().nullslast(),
+                                   Report.created_at.asc())
+    if status == 'overdue':
+        q = q.where(Report.status == 'pending',
+                    Report.due_at.isnot(None),
+                    Report.due_at <= datetime.utcnow())
+    elif status != 'all':
         q = q.where(Report.status == status)
     rows = db.session.execute(q.limit(200)).scalars().all()
-    return jsonify([{
+    return jsonify({
+        "generated_at": datetime.utcnow().isoformat(),
+        "counts": _review_queue_counts(),
+        "reports": [_serialize_report_row(r) for r in rows],
+    }), 200
+
+
+def _serialize_report_row(r):
+    """Queue shape. No reporter_user_id: a queue is glanced at, and a reporter
+    id on every row is the easiest thing to leak by accident."""
+    now = datetime.utcnow()
+    overdue = bool(r.status == 'pending' and r.due_at and r.due_at <= now)
+    return {
         "report_id": r.public_id,
         "category": r.category,
+        "urgent": r.category in AUTO_RESTRICT_CATEGORIES,
         "subject_type": r.subject_type,
         "subject_ref": r.subject_ref,
         "team_id": r.team_id,
@@ -6935,9 +7183,34 @@ def admin_list_reports():
         "status": r.status,
         "disposition": r.disposition,
         "created_at": r.created_at.isoformat(),
-        # No reporter_user_id in the list view: a queue is glanced at, and a
-        # reporter id on every row is the easiest thing to leak by accident.
-    } for r in rows]), 200
+        "due_at": r.due_at.isoformat() if r.due_at else None,
+        "overdue": overdue,
+        "escalated": bool(r.escalated_at),
+        "legal_hold": bool(r.legal_hold),
+        "evidence_purged": bool(r.evidence_purged_at),
+    }
+
+
+def _review_queue_counts():
+    now = datetime.utcnow()
+    pending = db.session.execute(
+        db.select(db.func.count(Report.id)).where(Report.status == 'pending')
+    ).scalar() or 0
+    urgent = db.session.execute(
+        db.select(db.func.count(Report.id)).where(
+            Report.status == 'pending',
+            Report.category.in_(AUTO_RESTRICT_CATEGORIES))
+    ).scalar() or 0
+    overdue = db.session.execute(
+        db.select(db.func.count(Report.id)).where(
+            Report.status == 'pending', Report.due_at.isnot(None),
+            Report.due_at <= now)
+    ).scalar() or 0
+    open_appeals = db.session.execute(
+        db.select(db.func.count(Appeal.id)).where(Appeal.status == 'open')
+    ).scalar() or 0
+    return {"pending": pending, "urgent_pending": urgent,
+            "overdue": overdue, "open_appeals": open_appeals}
 
 
 @app.route('/api/admin/reports/<string:public_id>', methods=['GET'])
@@ -6987,8 +7260,99 @@ def admin_report_detail(public_id):
     }), 200
 
 
+@app.route('/api/admin/reports/<string:public_id>/photo-evidence', methods=['GET'])
+def admin_photo_evidence(public_id):
+    """Decrypt and serve one preserved image, to an operator, once, with a row
+    written for it.
+
+    The audit record is written and COMMITTED BEFORE the bytes are produced.
+    Writing it afterwards would mean a crash between decryption and response
+    leaves an access that happened and a log that says it did not.
+    """
+    _require_admin_secret()
+    report = db.session.execute(
+        db.select(Report).where(Report.public_id == public_id)
+    ).scalar_one_or_none()
+    if report is None:
+        abort(404)
+    row = db.session.execute(
+        db.select(PhotoEvidence).where(PhotoEvidence.report_id == report.id)
+    ).scalars().first()
+
+    def audit(outcome):
+        db.session.add(EvidenceAccess(report_id=report.id, evidence_kind='photo',
+                                      actor='operator', outcome=outcome))
+        db.session.commit()
+
+    if row is None:
+        audit('unavailable')
+        return jsonify({"error": "no_photo_evidence"}), 404
+    if row.purged_at is not None or row.ciphertext is None:
+        audit('purged' if row.purged_at else 'unavailable')
+        return jsonify({"error": "evidence_unavailable",
+                        "reason": row.unavailable_reason or 'purged'}), 404
+    if row.expires_at <= datetime.utcnow():
+        # Past its retention window but not yet swept. Refuse rather than
+        # serve: the sweep's timing must not decide whether a promise holds.
+        audit('purged')
+        return jsonify({"error": "evidence_unavailable", "reason": "expired"}), 404
+
+    cipher, _key_id = _evidence_cipher()
+    if cipher is None:
+        audit('unavailable')
+        return jsonify({"error": "evidence_unavailable",
+                        "reason": "no_evidence_key"}), 503
+    try:
+        plaintext = cipher.decrypt(row.ciphertext)
+    except Exception:
+        # Wrong key, or a tampered row. Both are the same refusal.
+        audit('unavailable')
+        return jsonify({"error": "evidence_unavailable",
+                        "reason": "undecryptable"}), 503
+
+    audit('served')
+    resp = app.make_response(plaintext)
+    resp.headers['Content-Type'] = row.content_type or 'image/jpeg'
+    resp.headers['Cache-Control'] = 'no-store'
+    resp.headers['Content-Disposition'] = 'inline'
+    return resp
+
+
+@app.route('/api/admin/reports/<string:public_id>/legal-hold', methods=['POST'])
+def admin_legal_hold(public_id):
+    """Set or release an explicit legal hold.
+
+    Retention is otherwise automatic. The only thing that may suppress it is
+    this flag, set deliberately with a reason -- not a quiet `if` inside the
+    sweep, which is how "we kept everything forever" happens by accident.
+    """
+    _require_admin_secret()
+    report = db.session.execute(
+        db.select(Report).where(Report.public_id == public_id)
+    ).scalar_one_or_none()
+    if report is None:
+        abort(404)
+    data = request.get_json(silent=True) or {}
+    hold = bool(data.get('hold'))
+    reason = (data.get('reason') or '').strip()[:200]
+    if hold and not reason:
+        return jsonify({"error": "A legal hold requires a reason."}), 400
+    report.legal_hold = hold
+    report.legal_hold_reason = reason or None
+    db.session.add(ModerationAction(
+        report_id=report.id, actor='operator',
+        action='legal_hold_set' if hold else 'legal_hold_released',
+        target_user_id=report.reported_user_id, team_id=report.team_id,
+        note=reason or None))
+    db.session.commit()
+    return jsonify({"report_id": report.public_id, "legal_hold": report.legal_hold}), 200
+
+
 MODERATION_ACTIONS = (
     'dismiss',
+    'escalate',
+    'restrict_reporting',
+    'lift_reporting_restriction',
     'restrict_content',
     'unrestrict_content',
     'suspend_social',
@@ -7060,8 +7424,17 @@ def admin_report_action(public_id):
     elif action == 'restrict_content':
         if not report.subject_ref:
             return jsonify({"error": "This report names no content."}), 400
-        if not _is_content_restricted(report.subject_type, report.subject_ref):
+        # One restriction per report. If this report already has a live one
+        # (the automatic child_safety hold), it stays; a second row would just
+        # have to be lifted twice.
+        mine = db.session.execute(
+            db.select(ContentRestriction).where(
+                ContentRestriction.report_id == report.id,
+                ContentRestriction.lifted_at.is_(None))
+        ).scalars().first()
+        if mine is None:
             db.session.add(ContentRestriction(
+                report_id=report.id,
                 subject_type=report.subject_type, subject_ref=report.subject_ref,
                 reason='moderator'))
         report.status = 'closed'
@@ -7069,16 +7442,25 @@ def admin_report_action(public_id):
         report.reviewed_at = now
 
     elif action == 'unrestrict_content':
+        # ONLY the rows this report created.
+        #
+        # Two people can report the same message. Lifting by (subject_type,
+        # subject_ref) -- which is what this did first -- meant dismissing one
+        # report un-hid content another report was still holding, including an
+        # unreviewed child_safety hold. The content stays hidden while any
+        # unlifted row remains, because `_is_content_restricted` asks whether
+        # ANY exists.
         rows = db.session.execute(
             db.select(ContentRestriction).where(
-                ContentRestriction.subject_type == report.subject_type,
-                ContentRestriction.subject_ref == report.subject_ref,
+                ContentRestriction.report_id == report.id,
                 ContentRestriction.lifted_at.is_(None))
         ).scalars().all()
         for r in rows:
             r.lifted_at = now
+        still_held = _is_content_restricted(report.subject_type, report.subject_ref)
         report.status = 'closed'
-        report.disposition = 'content_allowed'
+        report.disposition = ('content_allowed' if not still_held
+                              else 'content_allowed_other_holds_remain')
         report.reviewed_at = now
 
     elif action == 'suspend_social':
@@ -7122,6 +7504,55 @@ def admin_report_action(public_id):
         report.disposition = 'removed_from_team'
         report.reviewed_at = now
 
+    elif action == 'escalate':
+        # Flags a report for attention WITHOUT touching its deadline. The due
+        # time is what the owner promised; escalation is a note about urgency,
+        # not a new clock.
+        report.escalated_at = now
+
+    elif action == 'restrict_reporting':
+        # Deliberate reporting abuse, established by a reviewer who wrote down
+        # why -- never inferred from a count of dismissals.
+        #
+        # A report that could not be substantiated is not a knowingly false
+        # one, and nothing in this system counts dismissals and acts on the
+        # total. This branch requires a human to have looked and to leave a
+        # note, which is the record an appeal is later judged against.
+        if target_user_id is None:
+            return jsonify({"error": "No user named."}), 400
+        if not note:
+            return jsonify({
+                "error": "Restricting reporting requires a written reason.",
+                "code": "reason_required",
+            }), 400
+        existing = db.session.execute(
+            db.select(UserRestriction).where(
+                UserRestriction.user_id == target_user_id,
+                UserRestriction.kind == 'reporting_restricted',
+                UserRestriction.lifted_at.is_(None))
+        ).scalars().first()
+        if existing is None:
+            db.session.add(UserRestriction(
+                user_id=target_user_id, kind='reporting_restricted',
+                reason='reviewed_abuse'))
+        report.status = 'closed'
+        report.disposition = 'reporting_restricted'
+        report.reviewed_at = now
+
+    elif action == 'lift_reporting_restriction':
+        if target_user_id is None:
+            return jsonify({"error": "No user named."}), 400
+        for r in db.session.execute(
+            db.select(UserRestriction).where(
+                UserRestriction.user_id == target_user_id,
+                UserRestriction.kind == 'reporting_restricted',
+                UserRestriction.lifted_at.is_(None))
+        ).scalars().all():
+            r.lifted_at = now
+        report.status = 'closed'
+        report.disposition = 'reporting_restriction_lifted'
+        report.reviewed_at = now
+
     db.session.add(ModerationAction(
         report_id=report.id, actor='operator', action=action,
         target_user_id=target_user_id, team_id=team_id,
@@ -7135,6 +7566,189 @@ def admin_report_action(public_id):
         "disposition": report.disposition,
         "action": action,
     }), 200
+
+
+# --- Moderation: appeals ------------------------------------------------------
+
+@app.route('/api/appeals', methods=['GET'])
+@jwt_required()
+def list_my_appeals():
+    """Your own appeals, and the decisions on them. Nobody else's."""
+    user_id = int(get_jwt_identity())
+    rows = db.session.execute(
+        db.select(Appeal).where(Appeal.user_id == user_id)
+        .order_by(Appeal.created_at.desc())
+    ).scalars().all()
+    return jsonify([_serialize_appeal(a) for a in rows]), 200
+
+
+def _serialize_appeal(a):
+    """What the appellant is allowed to see.
+
+    Not in here: the reporter, the evidence, the report, or the reporter's
+    words. An appeal that answered "here is what they said about you" would be
+    the disclosure channel everything else was built to close.
+    """
+    return {
+        "appeal_id": a.public_id,
+        # The decision this appeal is against. Needed because a person can hold
+        # two decisions of the SAME action name -- keying by the name alone
+        # made an appeal on one of them look like an appeal on both, which hid
+        # the form for a decision that was still appealable. It discloses
+        # nothing: it is their own appeal against their own action.
+        "decision_id": a.action_id,
+        "action": db.session.get(ModerationAction, a.action_id).action,
+        "reason": a.reason,
+        "status": a.status,
+        "outcome": a.outcome,
+        "outcome_note": a.outcome_note,
+        "created_at": a.created_at.isoformat(),
+        "decided_at": a.decided_at.isoformat() if a.decided_at else None,
+    }
+
+
+@app.route('/api/moderation/decisions', methods=['GET'])
+@jwt_required()
+def list_my_moderation_decisions():
+    """What has been done to you, so you know what there is to appeal.
+
+    Only actions whose target is you, and only the fact of them -- never the
+    report, the reporter, the note a reviewer wrote for other reviewers, or
+    which piece of content was involved.
+    """
+    user_id = int(get_jwt_identity())
+    rows = db.session.execute(
+        db.select(ModerationAction).where(
+            ModerationAction.target_user_id == user_id,
+            ModerationAction.action.in_(APPEALABLE_ACTIONS))
+        .order_by(ModerationAction.created_at.desc()).limit(50)
+    ).scalars().all()
+    appealed = {a.action_id for a in db.session.execute(
+        db.select(Appeal).where(Appeal.user_id == user_id)).scalars().all()}
+    return jsonify([{
+        "decision_id": r.id,
+        "action": r.action,
+        "decided_at": r.created_at.isoformat(),
+        "appealable": r.id not in appealed,
+    } for r in rows]), 200
+
+
+# The ACTION names, as written into ModerationAction.action -- not the
+# UserRestriction.kind they produce. Those differ ('restrict_reporting'
+# creates a 'reporting_restricted' restriction) and using the wrong one
+# silently made reporting restrictions unappealable.
+APPEALABLE_ACTIONS = ('suspend_social', 'remove_from_team', 'restrict_content',
+                      'restrict_reporting')
+
+
+@app.route('/api/appeals', methods=['POST'])
+@jwt_required()
+@limiter.limit("5 per hour", key_func=user_or_ip_key)
+def create_appeal():
+    """Appeal a moderation decision that was applied to you."""
+    user_id = int(get_jwt_identity())
+    data = request.get_json(silent=True) or {}
+    decision_id = _int_or_none(data.get('decision_id'))
+    reason = (data.get('reason') or '').strip()[:2000] or None
+    if decision_id is None:
+        return jsonify({"error": "decision_id is required."}), 400
+
+    action = db.session.get(ModerationAction, decision_id)
+    # Somebody else's decision is indistinguishable from one that does not
+    # exist. A 403 here would confirm that a given id belongs to a real
+    # moderation action against a real person.
+    if (action is None or action.target_user_id != user_id
+            or action.action not in APPEALABLE_ACTIONS):
+        return jsonify({"error": "not_found"}), 404
+
+    appeal = Appeal(public_id=uuid.uuid4().hex, user_id=user_id,
+                    action_id=action.id, reason=reason)
+    db.session.add(appeal)
+    try:
+        db.session.commit()
+    except IntegrityError:
+        db.session.rollback()
+        return jsonify({"error": "already_appealed"}), 409
+
+    # Filing an appeal changes nothing about the decision. Restoring content
+    # or privileges on request would make the appeal the bypass.
+    return jsonify({
+        "appeal_id": appeal.public_id,
+        "status": appeal.status,
+        "message": "Thanks — someone will look at this.",
+    }), 201
+
+
+@app.route('/api/admin/appeals', methods=['GET'])
+def admin_list_appeals():
+    _require_admin_secret()
+    status = request.args.get('status', 'open')
+    q = db.select(Appeal).order_by(Appeal.created_at.asc())
+    if status != 'all':
+        q = q.where(Appeal.status == status)
+    rows = db.session.execute(q.limit(200)).scalars().all()
+    return jsonify([{
+        "appeal_id": a.public_id,
+        "user_id": a.user_id,
+        "decision_id": a.action_id,
+        "action": db.session.get(ModerationAction, a.action_id).action,
+        "reason": a.reason,
+        "status": a.status,
+        "outcome": a.outcome,
+        "created_at": a.created_at.isoformat(),
+    } for a in rows]), 200
+
+
+@app.route('/api/admin/appeals/<string:public_id>/decide', methods=['POST'])
+def admin_decide_appeal(public_id):
+    """Uphold or overturn. Overturning reverses the original action; it never
+    deletes it, so the trail still shows what was done and that it was undone."""
+    _require_admin_secret()
+    appeal = db.session.execute(
+        db.select(Appeal).where(Appeal.public_id == public_id)
+    ).scalar_one_or_none()
+    if appeal is None:
+        abort(404)
+    data = request.get_json(silent=True) or {}
+    outcome = (data.get('outcome') or '').strip()
+    if outcome not in ('upheld', 'overturned'):
+        return jsonify({"error": "outcome must be 'upheld' or 'overturned'."}), 400
+    note = (data.get('note') or '').strip()[:2000] or None
+    now = datetime.utcnow()
+    action = db.session.get(ModerationAction, appeal.action_id)
+
+    if outcome == 'overturned':
+        if action.action in ('suspend_social', 'restrict_reporting'):
+            kind = ('social_suspended' if action.action == 'suspend_social'
+                    else 'reporting_restricted')
+            for r in db.session.execute(
+                db.select(UserRestriction).where(
+                    UserRestriction.user_id == appeal.user_id,
+                    UserRestriction.kind == kind,
+                    UserRestriction.lifted_at.is_(None))
+            ).scalars().all():
+                r.lifted_at = now
+        elif action.action == 'restrict_content' and action.report_id:
+            for r in db.session.execute(
+                db.select(ContentRestriction).where(
+                    ContentRestriction.report_id == action.report_id,
+                    ContentRestriction.lifted_at.is_(None))
+            ).scalars().all():
+                r.lifted_at = now
+        # remove_from_team is deliberately NOT auto-reversed: putting somebody
+        # back into a family's team is a decision about the other members too,
+        # and belongs to a person, not to this branch.
+
+    appeal.status = 'closed'
+    appeal.outcome = outcome
+    appeal.outcome_note = note
+    appeal.decided_at = now
+    db.session.add(ModerationAction(
+        report_id=action.report_id, actor='operator',
+        action='appeal_' + outcome, target_user_id=appeal.user_id,
+        team_id=action.team_id, note=note))
+    db.session.commit()
+    return jsonify({"appeal_id": appeal.public_id, "outcome": outcome}), 200
 
 
 # --- Coach v1 ---
@@ -7898,6 +8512,111 @@ def _sweep_expired_coach_turns(force=False, source='request'):
     # Recorded even when it deleted nothing — see RetentionRun.
     db.session.add(RetentionRun(ran_at=now, deleted=deleted, source=source))
     return deleted
+
+
+def _sweep_moderation_evidence(now=None):
+    """Delete evidence that has aged out. Returns a dict of what went.
+
+    Two separate clocks, because the owner's decisions are different rules:
+
+      * TEXT and CAPTION evidence goes 30 days after the report CLOSES, so a
+        report still being worked on keeps what it needs.
+      * PHOTO bytes go 30 days after CAPTURE, full stop. An absolute cap does
+        not stretch because a workflow stalled.
+
+    A legal hold is the ONLY thing that suppresses either, and it is an
+    explicit flag with a written reason -- never an implicit skip.
+
+    What survives is the report's minimal audit record: that a report existed,
+    its category, when it was filed and closed, and what was decided. The
+    sensitive part is what leaves. `evidence_purged_at` marks the difference so
+    an empty evidence list reads as "deleted on schedule" rather than "never
+    captured".
+    """
+    now = now or datetime.utcnow()
+    text_cutoff = now - timedelta(days=EVIDENCE_RETENTION_DAYS_AFTER_CLOSURE)
+    purged_text = purged_photos = held = 0
+
+    closed = db.session.execute(
+        db.select(Report).where(Report.status == 'closed',
+                                Report.reviewed_at.isnot(None),
+                                Report.reviewed_at <= text_cutoff,
+                                Report.evidence_purged_at.is_(None))
+    ).scalars().all()
+    for report in closed:
+        if report.legal_hold:
+            held += 1
+            continue
+        for ev in db.session.execute(
+            db.select(ReportEvidence).where(ReportEvidence.report_id == report.id,
+                                            ReportEvidence.purged_at.is_(None))
+        ).scalars().all():
+            ev.content_text = None
+            ev.context_json = None
+            ev.purged_at = now
+            purged_text += 1
+        report.note = None          # the reporter's own words are content too
+        report.evidence_purged_at = now
+        db.session.add(ModerationAction(
+            report_id=report.id, actor='system', action='evidence_purged',
+            note='retention: 30 days after closure'))
+
+    photo_rows = db.session.execute(
+        db.select(PhotoEvidence).where(PhotoEvidence.purged_at.is_(None),
+                                       PhotoEvidence.expires_at <= now)
+    ).scalars().all()
+    for row in photo_rows:
+        report = db.session.get(Report, row.report_id)
+        if report is not None and report.legal_hold:
+            held += 1
+            continue
+        row.ciphertext = None
+        row.byte_size = 0
+        row.purged_at = now
+        row.unavailable_reason = 'retention_expired'
+        purged_photos += 1
+        db.session.add(ModerationAction(
+            report_id=row.report_id, actor='system', action='photo_evidence_purged',
+            note='retention: 30 days from capture'))
+
+    return {"text_evidence_purged": purged_text,
+            "photo_evidence_purged": purged_photos,
+            "held_by_legal_hold": held}
+
+
+@app.cli.command("moderation-prune")
+def moderation_prune_command():
+    """Delete aged-out report evidence. For a scheduled run.
+
+    NOT wired to any scheduler. The in-process retention thread covers coach
+    turns only, and this command is deliberately manual until the owner
+    approves a production schedule -- see docs/moderation/operations.md.
+    """
+    result = _sweep_moderation_evidence()
+    db.session.commit()
+    print(f"purged {result['text_evidence_purged']} text evidence rows, "
+          f"{result['photo_evidence_purged']} photo evidence rows; "
+          f"{result['held_by_legal_hold']} skipped under legal hold")
+
+
+@app.cli.command("moderation-queue")
+def moderation_queue_command():
+    """Print the review queue. The owner's way to discover new and overdue
+    reports without a browser interface or a notification channel."""
+    counts = _review_queue_counts()
+    now = datetime.utcnow()
+    print(f"pending {counts['pending']} | urgent {counts['urgent_pending']} | "
+          f"overdue {counts['overdue']} | open appeals {counts['open_appeals']}")
+    rows = db.session.execute(
+        db.select(Report).where(Report.status == 'pending')
+        .order_by(Report.due_at.asc().nullslast())
+    ).scalars().all()
+    for r in rows:
+        late = (r.due_at and r.due_at <= now)
+        mark = 'OVERDUE' if late else 'due'
+        due = r.due_at.isoformat() if r.due_at else 'n/a'
+        print(f"  [{r.category:22}] {r.public_id[:12]}  {mark} {due}"
+              f"{'  ESCALATED' if r.escalated_at else ''}")
 
 
 @app.cli.command("coach-prune")

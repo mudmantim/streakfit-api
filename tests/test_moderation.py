@@ -388,9 +388,13 @@ def test_admin_queue_is_readable_with_the_secret(client, pair, admin_env):
         headers=auth_headers(a))
     q = client.get('/api/admin/reports', headers=ADMIN)
     assert q.status_code == 200
-    assert len(q.get_json()) == 1
+    body = q.get_json()
+    # The queue is now an object: counts for the owner's daily glance, then
+    # the rows. See the operations milestone.
+    assert len(body['reports']) == 1
+    assert body['counts']['pending'] == 1
     # The queue view withholds the reporter even from the operator listing.
-    assert 'reporter_user_id' not in q.get_json()[0]
+    assert 'reporter_user_id' not in body['reports'][0]
 
 
 # --- Moderation actions and enforcement --------------------------------------

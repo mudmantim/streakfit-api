@@ -1380,6 +1380,149 @@ function _rosterStatusText(m) {
 }
 
 
+// --- Moderation decisions and appeals ---------------------------------------
+//
+// Only surfaced to somebody who actually has a decision against them. A
+// permanent "Appeals" entry in a movement app's settings reads as an
+// accusation to the overwhelming majority of people who will never see one.
+
+async function refreshModerationVisibility() {
+    var row = document.getElementById('settings-row-moderation');
+    if (!row) return;
+    var res = await api('/api/moderation/decisions');
+    var has = res && res.status === 200 && Array.isArray(res.data) && res.data.length > 0;
+    row.hidden = !has;
+}
+
+
+async function openModerationDecisions() {
+    // The panel is in the markup, beside its button. It used to be created
+    // here and appended to #settings-menu, which placed it after the Log Out
+    // button at the bottom of the menu -- nowhere near the control that
+    // opened it, and unreachable in reading order for anyone using the
+    // keyboard to get there.
+    var host = document.getElementById('moderation-panel');
+    if (!host) return;
+
+    var btn = document.getElementById('btn-moderation-decisions');
+
+    // A second press closes it. A control with aria-expanded has to be able
+    // to go back to false, or the state it reports becomes a lie.
+    if (!host.hidden) {
+        host.hidden = true;
+        if (btn) btn.setAttribute('aria-expanded', 'false');
+        return;
+    }
+    host.hidden = false;
+    if (btn) btn.setAttribute('aria-expanded', 'true');
+    host.innerHTML = '';
+
+    var heading = document.createElement('h3');
+    heading.className = 'moderation-panel-heading';
+    heading.textContent = 'Decisions about your account';
+    host.appendChild(heading);
+
+    var decisions = await api('/api/moderation/decisions');
+    var appeals = await api('/api/appeals');
+    // Keyed by the decision, not the action name: two decisions can share a
+    // name, and appealing one of them must not make the other look appealed.
+    var byDecision = {};
+    if (appeals && appeals.status === 200) {
+        (appeals.data || []).forEach(function (a) { byDecision[a.decision_id] = a; });
+    }
+
+    var rows = (decisions && decisions.status === 200) ? (decisions.data || []) : [];
+    if (!rows.length) {
+        var none = document.createElement('p');
+        none.className = 'moderation-empty';
+        none.textContent = 'Nothing here. No decisions have been made about your account.';
+        host.appendChild(none);
+        return;
+    }
+
+    rows.forEach(function (d) {
+        var card = document.createElement('div');
+        card.className = 'moderation-decision';
+
+        var what = document.createElement('p');
+        what.className = 'moderation-decision-what';
+        what.textContent = MODERATION_DECISION_LABELS[d.action] || d.action;
+        card.appendChild(what);
+
+        var when = document.createElement('p');
+        when.className = 'moderation-decision-when';
+        when.textContent = new Date(d.decided_at).toLocaleDateString();
+        card.appendChild(when);
+
+        var existing = byDecision[d.decision_id];
+        if (existing) {
+            var state = document.createElement('p');
+            state.className = 'moderation-decision-state';
+            state.textContent = existing.status === 'closed'
+                ? ('Appeal ' + existing.outcome + (existing.outcome_note
+                    ? ' \u2014 ' + existing.outcome_note : ''))
+                : 'Appeal submitted. Someone will look at this.';
+            card.appendChild(state);
+        } else if (d.appealable) {
+            card.appendChild(_buildAppealForm(d, card));
+        }
+        host.appendChild(card);
+    });
+}
+
+
+var MODERATION_DECISION_LABELS = {
+    'suspend_social': 'Posting to teams is paused',
+    'remove_from_team': 'Removed from a team',
+    'restrict_content': 'Something you posted was hidden',
+    'restrict_reporting': 'Reporting is paused on your account'
+};
+
+
+function _buildAppealForm(decision, card) {
+    var form = document.createElement('div');
+    form.className = 'moderation-appeal-form';
+
+    var labelId = 'appeal-reason-' + decision.decision_id;
+    var label = document.createElement('label');
+    label.className = 'moderation-appeal-label';
+    label.setAttribute('for', labelId);
+    label.textContent = 'Why should this be looked at again?';
+    form.appendChild(label);
+
+    var input = document.createElement('textarea');
+    input.id = labelId;
+    input.className = 'moderation-appeal-input';
+    input.rows = 3;
+    input.maxLength = 2000;
+    form.appendChild(input);
+
+    var send = document.createElement('button');
+    send.type = 'button';
+    send.className = 'moderation-appeal-btn';
+    send.textContent = 'Appeal this';
+    send.addEventListener('click', async function () {
+        send.disabled = true;
+        var res = await api('/api/appeals', 'POST', {
+            decision_id: decision.decision_id,
+            reason: input.value.trim() || null
+        });
+        var out = document.createElement('p');
+        out.className = 'moderation-decision-state';
+        out.setAttribute('role', 'status');
+        // Says nothing about who reported anything or what happens next.
+        out.textContent = (res && res.status === 201)
+            ? 'Appeal submitted. Someone will look at this.'
+            : (res && res.status === 409)
+                ? 'You have already appealed this one.'
+                : 'That did not send. Try again in a moment.';
+        form.replaceWith(out);
+    });
+    form.appendChild(send);
+    return form;
+}
+
+
 async function _loadBlocks() {
     var res = await api('/api/blocks');
     if (res && res.status === 200 && Array.isArray(res.data)) {
@@ -4237,6 +4380,7 @@ async function loadUserPreferences() {
     var result = await api('/api/me');
     if (!result || result.status !== 200) return;
     currentUser = result.data;
+    refreshModerationVisibility();
     applyTheme(result.data.display_mode);
     var sel = document.getElementById('skill-level-select');
     if (sel && result.data.skill_level) sel.value = result.data.skill_level;

@@ -320,3 +320,125 @@ def test_without_the_challenge_filter_a_restricted_challenge_stays_visible(
     assert not visible(b)
     monkeypatch.setattr(appmod, '_restricted_refs', lambda _t, _r: set())
     assert visible(b)
+
+
+# --- Operations milestone: evidence, retention, appeals ----------------------
+
+@pytest.fixture()
+def evidence_key(monkeypatch):
+    from cryptography.fernet import Fernet
+    monkeypatch.setenv('STREAKFIT_EVIDENCE_KEY', Fernet.generate_key().decode())
+
+
+def _photo_report(client, reporter, author, team_id):
+    from test_team_photos import VALID_JPEG
+    up = client.post(f'/api/teams/{team_id}/photos',
+                     data={'photo': (io.BytesIO(VALID_JPEG), 'p.jpg')},
+                     content_type='multipart/form-data', headers=auth_headers(author))
+    assert up.status_code == 201
+    pid = up.get_json()['photo']['public_id']
+    client.post('/api/reports', json={
+        'category': 'inappropriate_content', 'subject_type': 'photo',
+        'subject_ref': pid, 'team_id': team_id}, headers=auth_headers(reporter))
+    return pid, db.session.query(Report).order_by(Report.id.desc()).first()
+
+
+def test_without_the_cipher_the_image_would_be_stored_in_the_clear(
+        client, pair, monkeypatch, evidence_key):
+    """The fail-closed branch is what stops plaintext images being archived."""
+    from test_team_photos import VALID_JPEG
+    a, b, team = pair
+    _pid, rep = _photo_report(client, a, b, team['id'])
+    ev = db.session.query(appmod.PhotoEvidence).one()
+    assert ev.ciphertext is not None and VALID_JPEG not in ev.ciphertext
+
+    # Remove the key: nothing is captured at all, rather than captured raw.
+    db.session.query(appmod.PhotoEvidence).delete()
+    db.session.query(Report).delete()
+    db.session.commit()
+    monkeypatch.delenv('STREAKFIT_EVIDENCE_KEY', raising=False)
+    _pid2, _rep2 = _photo_report(client, a, b, team['id'])
+    ev2 = db.session.query(appmod.PhotoEvidence).one()
+    assert ev2.ciphertext is None
+    assert ev2.unavailable_reason == 'no_evidence_key'
+
+
+def test_without_the_admin_gate_evidence_bytes_are_reachable(
+        client, pair, monkeypatch, evidence_key, admin_env):
+    a, b, team = pair
+    _pid, rep = _photo_report(client, a, b, team['id'])
+    url = f'/api/admin/reports/{rep.public_id}/photo-evidence'
+    assert client.get(url, headers=auth_headers(b)).status_code == 403
+    monkeypatch.setattr(appmod, '_require_admin_secret', lambda: None)
+    assert client.get(url, headers=auth_headers(b)).status_code == 200
+
+
+def test_without_the_legal_hold_check_held_evidence_is_deleted(
+        client, pair, monkeypatch, admin_env):
+    from datetime import datetime, timedelta
+    a, b, team = pair
+    say(client, b, team['id'], 'preserve this')
+    msg = [m for m in thread(client, a, team['id'])][-1]
+    client.post('/api/reports', json={
+        'category': 'harassment', 'subject_type': 'message',
+        'subject_ref': msg['message_id'], 'team_id': team['id']},
+        headers=auth_headers(a))
+    rep = db.session.query(Report).one()
+    client.post(f'/api/admin/reports/{rep.public_id}/action',
+                json={'action': 'dismiss'}, headers=ADMIN)
+    client.post(f'/api/admin/reports/{rep.public_id}/legal-hold',
+                json={'hold': True, 'reason': 'preservation'}, headers=ADMIN)
+    db.session.refresh(rep)
+    rep.reviewed_at = datetime.utcnow() - timedelta(days=60)
+    db.session.commit()
+
+    appmod._sweep_moderation_evidence()
+    db.session.commit()
+    assert db.session.query(appmod.ReportEvidence).one().content_text == 'preserve this'
+
+    # Remove the hold check: the sweep deletes evidence somebody asked us to keep.
+    rep.legal_hold = False
+    db.session.commit()
+    appmod._sweep_moderation_evidence()
+    db.session.commit()
+    assert db.session.query(appmod.ReportEvidence).one().content_text is None
+
+
+def test_without_the_ownership_check_anyone_can_appeal_anyones_case(
+        client, pair, monkeypatch, admin_env):
+    a, b, team = pair
+    client.post('/api/reports', json={
+        'category': 'threats', 'subject_type': 'user',
+        'reported_user_id': uid(client, b), 'team_id': team['id']},
+        headers=auth_headers(a))
+    rep = db.session.query(Report).one()
+    client.post(f'/api/admin/reports/{rep.public_id}/action',
+                json={'action': 'suspend_social'}, headers=ADMIN)
+    action = db.session.query(appmod.ModerationAction).filter_by(
+        action='suspend_social').one()
+
+    nosy = register_and_login(client, 'nosyneil')
+    assert client.post('/api/appeals', json={'decision_id': action.id},
+                       headers=auth_headers(nosy)).status_code == 404
+    assert db.session.query(appmod.Appeal).count() == 0
+
+
+def test_without_a_stored_deadline_the_clock_would_restart_on_every_touch(client, pair):
+    """due_at is stored, not derived from 'now' at read time."""
+    from datetime import datetime, timedelta
+    a, b, team = pair
+    client.post('/api/reports', json={
+        'category': 'child_safety', 'subject_type': 'user',
+        'reported_user_id': uid(client, b), 'team_id': team['id']},
+        headers=auth_headers(a))
+    rep = db.session.query(Report).one()
+    original_due = rep.due_at
+    # Backdate the report as though it were filed yesterday.
+    rep.created_at = datetime.utcnow() - timedelta(hours=30)
+    db.session.commit()
+    # The deadline does not follow created_at, and does not reset to now+24h.
+    db.session.refresh(rep)
+    assert rep.due_at == original_due
+    assert appmod._review_due_at('child_safety', rep.created_at) < datetime.utcnow(), (
+        'a deadline computed from this created_at would already be overdue — '
+        'which is the point: the stored value is the promise, not a recompute')

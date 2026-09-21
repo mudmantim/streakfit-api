@@ -191,6 +191,32 @@
                             Download my data
                         </button>
                     </div>
+                    <!-- Moderation decisions about you, and the appeal route.
+                         Hidden entirely when there are none: most people will
+                         never have one and a permanent "Appeals" row in the
+                         settings menu of a movement app reads as an accusation.
+                         refreshModerationVisibility() un-hides it.
+
+                         Sits with "Your data" and "Account" on purpose: this is
+                         an account-level fact about you, not a preference. -->
+                    <div class="settings-row" id="settings-row-moderation" hidden>
+                        <span class="settings-label">Moderation</span>
+                        <button id="btn-moderation-decisions" type="button"
+                                class="btn-forget-coach"
+                                onclick="openModerationDecisions()"
+                                aria-expanded="false" aria-controls="moderation-panel"
+                                title="See decisions about your account and appeal them">
+                            Decisions &amp; appeals
+                        </button>
+                    </div>
+                    <!-- The panel the button fills. It lives here, next to its
+                         button, rather than being appended by JS: appendChild
+                         on #settings-menu put it BELOW the Log Out button, and
+                         aria-controls has to point at an element that exists
+                         before the first click. -->
+                    <div id="moderation-panel" class="moderation-panel"
+                         role="region" aria-label="Moderation decisions and appeals"
+                         hidden></div>
                     <div class="settings-row" id="settings-row-delete">
                         <span class="settings-label">Account</span>
                         <button id="btn-delete-account" class="btn-delete-account"

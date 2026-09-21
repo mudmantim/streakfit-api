@@ -13,6 +13,7 @@ in the disposable smoke team. It never touches an existing user or team.
 """
 import json
 import os
+import re
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -144,6 +145,89 @@ def run(api, results, scenario):
                             token=a_tok, body={"action": "dismiss"})
     results.check("moderation.admin_action_blocked_for_ordinary_user",
                   status == 403, f"status={status}")
+
+    # The operations milestone added four more operator routes. Evidence and
+    # appeal disposition are the two most sensitive surfaces in the product --
+    # one decrypts a preserved photo, the other overturns a decision -- so the
+    # boundary is checked on each of them by name rather than assumed to be
+    # inherited from the routes above.
+    ops_routes = (
+        ("photo_evidence", "GET", "/api/admin/reports/" + "0" * 32 + "/photo-evidence"),
+        ("legal_hold", "POST", "/api/admin/reports/" + "0" * 32 + "/legal-hold"),
+        ("appeal_queue", "GET", "/api/admin/appeals"),
+        ("appeal_decide", "POST", "/api/admin/appeals/" + "0" * 32 + "/decide"),
+    )
+    for name, method, path in ops_routes:
+        status, _ = api.request(method, path, body={} if method == "POST" else None)
+        results.check(f"moderation.admin_{name}_blocked_without_secret",
+                      status == 403, f"status={status}")
+        status, _ = api.request(method, path, token=a_tok,
+                                body={} if method == "POST" else None)
+        results.check(f"moderation.admin_{name}_blocked_for_ordinary_user",
+                      status == 403, f"status={status}")
+
+    # --- decisions and appeals, from the ordinary side -----------------------
+    #
+    # These smoke accounts have no moderation history, which is the point: the
+    # routes have to answer an empty, honest 200 for the overwhelming majority
+    # of people rather than 404 or leak somebody else's decisions into the list.
+    status, decisions = api.request("GET", "/api/moderation/decisions", token=a_tok)
+    results.check("moderation.decisions_readable",
+                  status == 200 and isinstance(decisions, list), f"status={status}")
+    results.check("moderation.clean_account_has_no_decisions",
+                  decisions == [], f"decisions={json.dumps(decisions)[:200]}")
+
+    status, appeals = api.request("GET", "/api/appeals", token=a_tok)
+    results.check("moderation.appeals_readable",
+                  status == 200 and isinstance(appeals, list), f"status={status}")
+    results.check("moderation.clean_account_has_no_appeals",
+                  appeals == [], f"appeals={json.dumps(appeals)[:200]}")
+
+    status, _ = api.request("GET", "/api/moderation/decisions")
+    results.check("moderation.decisions_require_a_login", status == 401, f"status={status}")
+    status, _ = api.request("GET", "/api/appeals")
+    results.check("moderation.appeals_require_a_login", status == 401, f"status={status}")
+
+    # A decision id you do not own is answered exactly like one that does not
+    # exist. A 403 here would confirm that a given id is a real decision
+    # against a real person -- the enumeration oracle the block route avoids.
+    status, _ = api.request("POST", "/api/appeals", token=a_tok,
+                            body={"decision_id": 1})
+    results.check("moderation.appeal_on_a_foreign_decision_is_not_an_oracle",
+                  status == 404, f"status={status} (must be 404, never 403)")
+    status, _ = api.request("POST", "/api/appeals", token=a_tok,
+                            body={"decision_id": 987654321})
+    results.check("moderation.appeal_on_a_missing_decision_is_404",
+                  status == 404, f"status={status}")
+    status, _ = api.request("POST", "/api/appeals", token=a_tok, body={})
+    results.check("moderation.appeal_without_a_decision_refused",
+                  status == 400, f"status={status}")
+
+    # --- the appeals UI is reachable ----------------------------------------
+    #
+    # This exists because of R2: a whole team layer shipped working and
+    # unreachable. The appeal form was built the same way -- a settings row
+    # that nothing rendered and a handler nothing called. The markup has to be
+    # served, and it has to start hidden, because a permanent "appeals" entry
+    # in a movement app reads as an accusation.
+    status, page = api.request("GET", "/", text=True)
+    html = page if isinstance(page, str) else ""
+    results.check("moderation.appeals_row_is_served",
+                  'id="settings-row-moderation"' in html,
+                  "settings-row-moderation not found in the served page")
+    row = re.search(r'<div[^>]*id="settings-row-moderation"[^>]*>', html)
+    results.check("moderation.appeals_row_starts_hidden",
+                  bool(row) and "hidden" in row.group(0),
+                  f"row={row.group(0) if row else 'absent'}")
+    results.check("moderation.appeals_row_has_a_handler",
+                  "openModerationDecisions()" in html,
+                  "the row renders but nothing opens the panel")
+    # The panel has to exist in the markup before the first click: the button
+    # advertises it with aria-controls, and a control pointing at an id that
+    # is not in the document is a broken promise to a screen reader.
+    results.check("moderation.appeals_panel_container_is_served",
+                  'id="moderation-panel"' in html,
+                  "aria-controls points at an element that does not exist")
 
     return scenario
 

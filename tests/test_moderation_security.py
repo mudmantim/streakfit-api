@@ -274,8 +274,16 @@ def test_a_deleted_photo_cannot_be_reported(client, two_teams):
     assert db.session.query(ReportEvidence).count() == 0
 
 
-def test_already_restricted_content_cannot_be_reported_again(client, two_teams):
-    """Confirming a takedown exists is itself a disclosure."""
+def test_already_restricted_content_can_still_be_reported_by_someone_else(client, two_teams):
+    """Reversed deliberately in the operations milestone.
+
+    The security pass refused this, reasoning that confirming a takedown
+    exists is a disclosure. It is not -- the reporter gets a 201 either way --
+    and refusing broke the case that matters: two people alarmed by the same
+    message, where the second is turned away because the first got there
+    first. Each report now owns its own restriction row, so both holds must be
+    lifted before the content returns.
+    """
     mallory, owner, victim, team_a, team_b = two_teams
     say(client, victim, team_b['id'], 'already withheld')
     msg = find(client, mallory, team_b['id'], 'already withheld')
@@ -286,7 +294,14 @@ def test_already_restricted_content_cannot_be_reported_again(client, two_teams):
         'category': 'spam', 'subject_type': 'message',
         'subject_ref': msg['message_id'], 'team_id': team_b['id']},
         headers=auth_headers(mallory))
-    assert r.status_code == 404
+    assert r.status_code == 201
+    # The authorization that matters is unchanged: an outsider still cannot.
+    outsider = register_and_login(client, 'outsidermo')
+    team_c = mkteam(client, outsider, 'Team C')
+    assert client.post('/api/reports', json={
+        'category': 'spam', 'subject_type': 'message',
+        'subject_ref': msg['message_id'], 'team_id': team_c['id']},
+        headers=auth_headers(outsider)).status_code == 404
 
 
 def test_a_blocked_persons_content_cannot_be_reported(client, two_teams):
@@ -568,7 +583,7 @@ def test_reporter_identity_is_still_withheld(client, two_teams, admin_env):
         'subject_ref': msg['message_id'], 'team_id': team_b['id']},
         headers=auth_headers(mallory))
     q = client.get('/api/admin/reports', headers=ADMIN).get_json()
-    assert 'reporter_user_id' not in q[0]
+    assert 'reporter_user_id' not in q['reports'][0]
     for path in (f'/api/teams/{team_b["id"]}', f'/api/teams/{team_b["id"]}/messages'):
         raw = client.get(path, headers=auth_headers(victim)).get_data(as_text=True)
         assert 'mallorykay' not in raw

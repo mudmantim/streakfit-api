@@ -4336,3 +4336,50 @@ body.theme-classic .theme-btn.active { background: rgba(79,70,229,.2); }
     font-size: .8rem;
     color: var(--gray-600, #555);
 }
+
+/* --- Moderation decisions and appeals ------------------------------------- */
+.moderation-panel {
+    margin-top: .75rem;
+    padding: .75rem;
+    border: 1px solid var(--gray-200);
+    border-radius: 10px;
+    background: var(--white, #fff);
+}
+.moderation-panel-heading {
+    margin: 0 0 .5rem;
+    font-size: .85rem;
+    font-weight: 700;
+}
+.moderation-empty { margin: 0; font-size: .8rem; color: var(--gray-500); }
+.moderation-decision {
+    padding: .5rem 0;
+    border-top: 1px solid var(--gray-100, #eee);
+}
+.moderation-decision:first-of-type { border-top: 0; }
+.moderation-decision-what { margin: 0; font-size: .85rem; font-weight: 600; }
+.moderation-decision-when { margin: .1rem 0 .35rem; font-size: .75rem; color: var(--gray-500); }
+.moderation-decision-state { margin: .25rem 0 0; font-size: .8rem; color: var(--gray-600, #555); }
+.moderation-appeal-form { display: flex; flex-direction: column; gap: .35rem; }
+.moderation-appeal-label { font-size: .75rem; color: var(--gray-600, #555); }
+.moderation-appeal-input {
+    width: 100%;
+    box-sizing: border-box;
+    font: inherit;
+    font-size: .85rem;
+    padding: .4rem;
+    border: 1px solid var(--gray-200);
+    border-radius: 6px;
+    resize: vertical;
+}
+.moderation-appeal-btn {
+    align-self: flex-start;
+    min-height: 44px;
+    padding: .35rem .8rem;
+    font-size: .8rem;
+    font-weight: 600;
+    border: 1px solid var(--gray-200);
+    border-radius: 6px;
+    background: none;
+    cursor: pointer;
+}
+.moderation-appeal-btn:hover { background: var(--gray-100); }

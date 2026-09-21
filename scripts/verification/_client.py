@@ -19,9 +19,17 @@ class ApiClient:
     def __init__(self, base_url):
         self.base_url = base_url.rstrip("/")
 
-    def request(self, method, path, token=None, body=None, raw_body=None, content_type=None):
+    def request(self, method, path, token=None, body=None, raw_body=None,
+                content_type=None, text=False):
         """`raw_body` + `content_type` send bytes as-is (multipart photo upload).
-        Without them the call is JSON, exactly as every existing module uses it."""
+        Without them the call is JSON, exactly as every existing module uses it.
+
+        `text=True` returns the decoded response body as a string instead of
+        parsed JSON. Needed to check a SERVED PAGE rather than an API payload
+        -- the moderation module reads index.html to prove the appeals row is
+        actually in the markup. The non-JSON fallback below truncates at 200
+        characters, which is fine for a photo's magic bytes and useless for
+        finding an element in a page."""
         url = self.base_url + path
         headers = {"Content-Type": content_type or "application/json"}
         if token:
@@ -41,6 +49,8 @@ class ApiClient:
         except urllib.error.URLError as e:
             raise RuntimeError(f"network error calling {method} {path}: {e}") from e
 
+        if text:
+            return status, raw.decode("utf-8", errors="replace")
         if not raw:
             return status, {}
         try:
@@ -66,10 +76,15 @@ class WsgiClient:
         self._test_client = flask_app.test_client()
         self.base_url = "wsgi://in-process"
 
-    def request(self, method, path, token=None, body=None, raw_body=None, content_type=None):
+    def request(self, method, path, token=None, body=None, raw_body=None,
+                content_type=None, text=False):
         headers = {}
         if token:
             headers["Authorization"] = "Bearer " + token
+        if text:
+            response = self._test_client.open(path, method=method, json=body,
+                                              headers=headers)
+            return response.status_code, response.get_data(as_text=True)
         if raw_body is not None:
             response = self._test_client.open(
                 path, method=method, data=raw_body, headers=headers,

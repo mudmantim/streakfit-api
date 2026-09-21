@@ -326,6 +326,10 @@ UNCALLED_ROUTE_ALLOWLIST = {
     "/api/admin/reports": "admin console — moderation queue",
     "/api/admin/reports/<string:public_id>": "admin console — report detail and evidence",
     "/api/admin/reports/<string:public_id>/action": "admin console — moderation actions",
+    "/api/admin/reports/<string:public_id>/photo-evidence": "admin console — encrypted evidence, operator only by design",
+    "/api/admin/reports/<string:public_id>/legal-hold": "admin console — legal hold",
+    "/api/admin/appeals": "admin console — appeal queue",
+    "/api/admin/appeals/<string:public_id>/decide": "admin console — appeal disposition",
     "/api/challenges/<int:challenge_id>": "single-challenge detail; list view carries the same data",
     "/api/teams/<int:team_id>/campfire": "campfire summary is embedded in GET /api/teams/<id>",
     # Machine-facing by design. Mudman Command's verifier probes a running app
