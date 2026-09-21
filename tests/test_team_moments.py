@@ -58,9 +58,20 @@ def test_team_creation_creates_moment(client):
     moments = get_moments(client, token, team['id']).get_json()
     assert len(moments) == 1
     assert moments[0]['moment_type'] == 'team_created'
-    assert moments[0]['subject_username'] == 'Member 1'
-    assert moments[0]['display_text'] == 'Member 1 created the team'
-    assert 'creator' not in moments[0]['display_text']
+    # This file's fixture gives every account a display name (see the top of
+    # the file), so the peer-visible label is that chosen name. An account
+    # with NO display name gets an ordinal instead -- covered by
+    # tests/test_username_exposure.py and tests/test_peer_identity_privacy.py.
+    assert moments[0]['subject_username'] == 'creator'
+    assert moments[0]['display_text'] == 'creator created the team'
+    # NOTE: a `'creator' not in display_text` assertion used to sit here. It
+    # came from a build where nobody had a display name, so the label was an
+    # ordinal and the login could not legitimately appear. Here the fixture
+    # CHOOSES 'creator' as the display name, so that assertion contradicted
+    # the line above it and could not tell a leak from a name somebody picked.
+    # The real guarantee -- that a LOGIN never reaches a peer -- is asserted in
+    # tests/test_username_exposure.py and tests/test_peer_identity_privacy.py,
+    # where the accounts set no display name and the logins are person-shaped.
 
 
 def test_joining_creates_moment(client):
@@ -73,7 +84,7 @@ def test_joining_creates_moment(client):
     types = [m['moment_type'] for m in moments]
     assert types.count('member_joined') == 1
     joined_moment = next(m for m in moments if m['moment_type'] == 'member_joined')
-    assert joined_moment['subject_username'] == 'Member 2'
+    assert joined_moment['subject_username'] == 'member'
 
 
 def test_leaving_creates_moment(client):
@@ -100,9 +111,9 @@ def test_campfire_log_creates_moment(client):
 
     moments = get_moments(client, token, team['id']).get_json()
     log_moment = next(m for m in moments if m['moment_type'] == 'campfire_log_added')
-    assert log_moment['subject_username'] == 'Member 1'
+    assert log_moment['subject_username'] == 'creator'
     assert log_moment['metadata']['total_team_missions'] == 1
-    assert log_moment['display_text'] == 'Member 1 added a log to the campfire'
+    assert log_moment['display_text'] == 'creator added a log to the campfire'
 
 
 def test_campfire_stage_threshold_creates_moment(client, app):

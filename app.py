@@ -6325,18 +6325,27 @@ def _team_peer_labels(team_id):
     Creator first, then join order, matching the roster exactly so "Member 2"
     means the same person in the roster, the history and the chat.
     """
-    team = db.session.get(Team, team_id)
-    creator_id = team.created_by_user_id if team else None
-    memberships = db.session.execute(
-        db.select(TeamMembership).where(TeamMembership.team_id == team_id)
-    ).scalars().all()
-    names = _peer_names_for_ids(m.user_id for m in memberships)
-    # A membership whose user row is gone is absent from `names` and must not
-    # consume an ordinal, or the numbering would shift for everybody else.
-    ordered = sorted((m for m in memberships if m.user_id in names),
-                     key=lambda m: (m.user_id != creator_id, m.user_id))
-    return {m.user_id: (names.get(m.user_id) or f"Member {i}")
-            for i, m in enumerate(ordered, 1)}
+    # ONE query. The obvious shape -- load the team, load the memberships,
+    # then resolve the names -- is three, and this runs on the chat list where
+    # test_get_team_messages_is_flat_not_n_plus_1 holds the whole endpoint to a
+    # fixed budget. Joining User drops the orphaned memberships for free (an
+    # inner join has nothing to match), which is the same liveness filter
+    # `_peer_names_for_ids` gives, and joining Team carries the creator id
+    # along rather than paying a second round trip for one column.
+    rows = db.session.execute(
+        db.select(TeamMembership.user_id, User.display_name,
+                  Team.created_by_user_id)
+        .join(User, User.id == TeamMembership.user_id)
+        .join(Team, Team.id == TeamMembership.team_id)
+        .where(TeamMembership.team_id == team_id)
+    ).all()
+    creator_id = rows[0][2] if rows else None
+    # `display_name` ONLY -- never `_safe_display_name`, which falls back to
+    # the login. See _peer_names_for_ids for why that fallback is wrong here.
+    named = [(uid, (display or "").strip() or None) for uid, display, _ in rows]
+    named.sort(key=lambda r: (r[0] != creator_id, r[0]))
+    return {uid: (name or f"Member {i}")
+            for i, (uid, name) in enumerate(named, 1)}
 
 
 def _usernames_for_ids(user_ids):

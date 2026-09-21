@@ -53,7 +53,11 @@ def test_member_can_post_and_read_message(client):
     assert resp.status_code == 201
     posted = resp.get_json()
     assert posted['sender_type'] == 'user'
-    assert posted['sender_username'] == 'Member 1'
+    # This file's fixture gives every account a display name (see the top of
+    # the file), so the peer-visible label is that chosen name. An account
+    # with NO display name gets an ordinal instead -- covered by
+    # tests/test_username_exposure.py and tests/test_peer_identity_privacy.py.
+    assert posted['sender_username'] == 'creator'
     assert posted['sender_user_id'] is not None
     assert posted['body'] == 'Great job today!'
 
@@ -74,7 +78,7 @@ def test_member_sees_other_members_message(client):
     messages = get_messages(client, member_token, team['id']).get_json()
     assert len(messages) == 2
     assert messages[0]['sender_type'] == 'rickie'
-    assert messages[1]['sender_username'] == 'Member 1'
+    assert messages[1]['sender_username'] == 'creator'
 
 
 def test_messages_ordered_chronologically(client):
