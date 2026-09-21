@@ -38,6 +38,31 @@ Baseline facts:
 3. `/health` runs a `SELECT 1` — a failure there points at the database (see below).
 4. If a bad deploy: **Rollback** (below).
 
+## Rate-limit backend outage (once shared storage is provisioned)
+- **The app stays up.** Flask-Limiter falls back to per-worker in-memory
+  counters, so throttled routes keep answering instead of returning 500.
+  Measured; see [operations/rate-limit-backend-outage.md](operations/rate-limit-backend-outage.md).
+1. `/api/verification/self` → `ratelimit.shared_storage` **FAIL**, observed
+   `DEGRADED — backend configured but could not record a count`. That is
+   the outage,
+   reported; the endpoint itself keeps working during it.
+2. Within ~15s the per-route degraded policies engage: invite-code lookup
+   refuses with **503**, login drops to a tighter **per-process** cap.
+3. **Recovery is automatic** — no redeploy. The check returns to PASS on its
+   own once the backend answers.
+4. Only escalate if it stays degraded: while degraded the limits are
+   per-worker, so the effective allowance is multiplied by the worker count.
+
+## Notification channel not delivering
+1. `python scripts/notification_preflight.py` **[in a shell with the app's
+   environment]** — names which variable is missing or malformed, and never
+   prints a value. Add `--live` to confirm Resend accepts the key and the
+   sending domain is verified. It sends no email.
+2. Half-configured reads as not configured by design: the app refuses to build
+   the channel and reports every notice undelivered rather than pretending.
+3. `/api/verification/self` → `moderation.delivery_configured` carries the
+   reason, by variable name.
+
 ## Anthropic (Rickie) outage
 - Blast radius is contained: `/api/coach` returns `503 coach_unavailable`; the rest
   of the app is unaffected (Rickie fails closed, never fabricates).
@@ -206,9 +231,16 @@ A dump of this database contains every user's data, including coach
 conversations. It is not an ops artifact; it is the most concentrated copy of
 personal data this project produces.
 
-- Keep the connection string out of shell history (leading space, or read it
-  from a file). Never paste a full `DATABASE_URL` into a chat, an issue or a
-  commit — the password sits between the first `:` and the **final** `@`.
+- Keep the connection string out of shell history. **A leading space does NOT
+  do this here** — verified on this machine, `HISTCONTROL=ignoredups`, and
+  only `ignorespace` or `ignoreboth` suppress space-prefixed commands. Read it
+  from a file, or let the tool prompt for it. Never paste a full
+  `DATABASE_URL` into a chat, an issue or a commit — the password sits between
+  the first `:` and the **final** `@`.
+- Better still, do not put it on a command line at all: arguments are visible
+  in `ps` to every process on the box, where history settings are irrelevant.
+  `~/backups/streakfit/streakfit-backup.sh` passes connection details as
+  libpq **environment variables by name** for exactly this reason.
 - Store dumps encrypted and off Neon. Do not leave them in the repository,
   in `/tmp`, or in a cloud folder that syncs.
 - **Delete them on a schedule you actually keep.** StreakFit promises 30-day

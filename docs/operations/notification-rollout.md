@@ -144,6 +144,26 @@ Retention checks turn PASS on their own once a sweep is recorded.
 ### Stage 3 — Resend account, no DNS yet
 - [ ] Create the Resend account; generate an API key. **Tim generates it; it
       is never shared into a transcript.**
+- [ ] Set the three variables in Render: `RESEND_API_KEY`,
+      `STREAKFIT_NOTIFY_FROM`, `STREAKFIT_NOTIFY_TO`. Leave
+      `STREAKFIT_NOTIFY_CHANNEL` unset for now — half-configured is not
+      configured, and the app will keep reporting delivery off until all of
+      it is in place.
+- [ ] Run the preflight, which reads the variables and **prints none of their
+      values**:
+
+      python scripts/notification_preflight.py          # offline; shape only
+      python scripts/notification_preflight.py --live   # + asks Resend if the
+                                                        #   key is accepted
+
+      `--live` makes one read-only call to Resend's `/domains` endpoint. It
+      sends no email and costs nothing. Exit 0 ready, 1 a problem, 2 nothing
+      configured.
+
+      This catches the half-configured state, a wrong secret pasted into
+      `RESEND_API_KEY`, and a recipient list where one address is required —
+      all before an undelivered child-safety alert is the thing that tells
+      you. It cannot tell you mail actually arrives; only stage 4 does that.
 
 ### Stage 4 — the real end-to-end test, still without DNS
 Resend's `onboarding@resend.dev` sends only to the **account owner's own
@@ -153,11 +173,52 @@ delivery test needs no DNS at all:
 - [ ] Set `STREAKFIT_NOTIFY_CHANNEL=resend`, `RESEND_API_KEY=…`,
       `STREAKFIT_NOTIFY_FROM=onboarding@resend.dev`,
       `STREAKFIT_NOTIFY_TO=<Tim's address>`, `STREAKFIT_PUBLIC_URL=https://streakfit.pro`.
+- [ ] Re-run `python scripts/notification_preflight.py --live`. With
+      `onboarding@resend.dev` it passes and reminds you of that sender's one
+      restriction: it delivers **only to the account owner's own address**.
 - [ ] File a throwaway `child_safety` report against a test account.
 - [ ] **Confirm the email arrives.**
 
 Only now may anyone say alerts work. Before this, every claim is about
 machinery, not about delivery.
+
+### Stage 4b — photo evidence key (independent of email)
+
+`STREAKFIT_EVIDENCE_KEY` is unset today, so reported images are not captured
+at all and a reviewer is shown `no_evidence_key`. That is fail-closed by
+design and is safe to leave as it is. Turning it on has one rule.
+
+**The key is not recoverable from anywhere.** It is not in the database, not
+in the repository, and not derivable from the ciphertext. Lose it and every
+sealed image is permanently unreadable — including the evidence behind an open
+child-safety report. So it is proven recoverable *before* it is activated,
+never after.
+
+`~/backups/streakfit/streakfit-evidence-key.sh` does this. It never prints the
+key; it displays only the non-secret fingerprint the app records in
+`photo_evidence.key_id`.
+
+- [ ] `streakfit-evidence-key.sh new` — generates a Fernet key, seals it with
+      a gpg passphrase (AES-256), records the fingerprint. The plaintext key
+      never touches disk and is never an argument, so it reaches neither
+      `ps` nor shell history. Refuses to overwrite an existing sealed key.
+- [ ] **Store the passphrase somewhere independent of this machine** — a
+      password manager. The sealed file and its passphrase must not share a
+      single point of failure.
+- [ ] `streakfit-evidence-key.sh verify` — **in a new shell**, typing the
+      passphrase from memory rather than from scrollback. This is the gate.
+      It decrypts the file, checks gpg's integrity check, confirms the result
+      is a usable Fernet key that round-trips a test message, and matches the
+      recorded fingerprint. All four, or it refuses.
+- [ ] Only once that passes: `streakfit-evidence-key.sh reveal`, and paste the
+      value into Render as `STREAKFIT_EVIDENCE_KEY`. Clear the scrollback.
+- [ ] Confirm `/api/verification/self` reports `moderation.evidence_key` PASS
+      with that fingerprint.
+
+**Rotation, if it ever happens:** keep the old sealed file. The app records
+which key sealed each row, and the self-check reports rows sealed under a key
+that is no longer current. Retiring the old key makes everything sealed under
+it unreadable forever.
 
 ### Stage 5 — the independent cron
 - [ ] Create `streakfit-moderation-notify` from the spec in `render.yaml`
@@ -188,6 +249,11 @@ machinery, not about delivery.
 
 ## 6. What this still does not buy
 
+*(Resolved since this list was written: `report_filed` and
+`deadline_approaching` both exist now — all six alert kinds fire, and
+`_NOTICE_PRIORITY` orders them in tiers so an urgent notice is never queued
+behind a routine one.)*
+
 - **Resend's idempotency window is 24 hours; urgent retries are unbounded.** A
   notice failing for longer than a day and then retrying reuses a key Resend
   has forgotten, so the crash-window protection expires exactly when a long
@@ -198,6 +264,12 @@ machinery, not about delivery.
 - **Nothing alerts on the alerter.** If Resend is down, the thing that would
   tell you is the thing that is down. That wants a second, independent
   channel or an external dead-man's-switch, and neither exists.
-- **Two of six alert kinds do not exist**: an ordinary report being filed, and
-  a deadline approaching (only *overdue* fires). Both need new code.
 - **`STREAKFIT_EVIDENCE_KEY` is unset**, so photo evidence is not captured.
+  The custody tooling now exists (stage 4b) but the key has not been generated
+  or activated, and until it is, a reviewer sees `no_evidence_key`.
+- **Shared rate-limit storage is not provisioned**, so limits are still
+  per-worker and reset on deploy. The outage behaviour has been measured and
+  fixed ahead of provisioning — see
+  [rate-limit-backend-outage.md](rate-limit-backend-outage.md) — but the plan
+  choice is still open, and Render's free Key Value tier loses all counters
+  whenever its instance restarts.
