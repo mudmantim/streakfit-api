@@ -69,7 +69,18 @@ exactly the property the first constraint needs.
       `STREAKFIT_NOTIFY_TO=<owner address>`, `STREAKFIT_NOTIFY_CHANNEL=resend`,
       `STREAKFIT_PUBLIC_URL=https://streakfit.pro`. *Inert until deploy.*
       **Gate: owner — account authorization.**
-- [ ] **A3 · Prove delivery reaches the provider.**
+
+      **2026-09-21 — PARTLY DONE, and the halves matter.** The Resend account
+      exists and its key is proven working (A3/A4). The values live locally in
+      `~/.streakfit-notify.env`, mode 600, outside the repo.
+
+      **They are NOT yet set in Render.** That is a production configuration
+      change and is still pending authorization. Until it happens the deployed
+      app has no channel, so a deploy would bring reporting up with delivery
+      unconfigured — which is exactly what this sequence exists to prevent.
+      The key being send-only means it is safe to carry, not that it is
+      installed.
+- [x] **A3 · Prove delivery reaches the provider.** ✅ PASS
       `python scripts/notification_live_send.py` — one real send, from the new
       code, to the configured address, **locally**. It needs no deploy and
       never touches the production database, so the last untested link is
@@ -84,13 +95,18 @@ exactly the property the first constraint needs.
       → the account owner's address; provider receipt
       `01a0c63b-a783-772c-bb3f-5fd8ab6d8330`.
 
-      **This step is not complete.** Acceptance is Resend agreeing to attempt
-      delivery; it is not an email in an inbox, and the two come apart for
-      spam filtering, a wrong recipient, or a silent provider drop. The
-      receipt is the last thing this codebase can observe, so the remaining
-      half is the owner confirming arrival. Until that happens, delivery is
-      *configured and accepted*, not *proven*, and A3 stays unticked.
-- [ ] **A4 · Preflight.** `python scripts/notification_preflight.py --live`
+      **2026-09-21 — ARRIVAL CONFIRMED. A3 PASSES.** The owner opened the
+      message in Gmail and verified the subject, the synthetic report id and
+      the `/admin` link. Notification delivery is now *proven*, not merely
+      accepted.
+
+      The two were recorded separately on purpose. A provider receipt is only
+      Resend agreeing to attempt delivery, and acceptance and arrival come
+      apart routinely — spam filtering, a sandbox sender that will not deliver
+      to the address, a silent drop. The receipt is the last event this
+      codebase can observe; a person in a mailbox is what closed the gap.
+      Nothing here should ever claim delivery on a receipt alone.
+- [x] **A4 · Preflight.** ✅ PASS `python scripts/notification_preflight.py --live`
       confirms Resend accepts the key. Prints no values, sends no mail.
 
       **Done 2026-09-21: PASS.** The key is valid and correctly scoped to
