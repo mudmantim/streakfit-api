@@ -80,12 +80,22 @@ secret needs to be pasted anywhere.**
 
 | Route | Purpose |
 |---|---|
-| `GET /api/admin/reports` | the queue (`?status=pending\|closed\|all`) |
+| `GET /api/admin/reports` | the queue (`?status=pending\|overdue\|closed\|all`), urgent first |
 | `GET /api/admin/reports/<id>` | detail, preserved evidence, action history |
 | `POST /api/admin/reports/<id>/action` | take an action |
+| `GET /api/admin/reports/<id>/photo-evidence` | decrypt and serve one preserved image, audited |
+| `POST /api/admin/reports/<id>/legal-hold` | suspend retention deletion, written reason required |
+| `GET /api/admin/appeals` | open appeals |
+| `POST /api/admin/appeals/<id>/decide` | uphold or overturn |
 
-Actions: `dismiss`, `restrict_content`, `unrestrict_content`,
-`suspend_social`, `lift_suspension`, `remove_from_team`.
+Actions, as `MODERATION_ACTIONS` defines them: `dismiss`, `escalate`,
+`restrict_reporting`, `lift_reporting_restriction`, `restrict_content`,
+`unrestrict_content`, `suspend_social`, `lift_suspension`,
+`remove_from_team`.
+
+The queue carries `counts.undelivered_notices` alongside the work itself,
+because a calm queue and a growing undelivered count is what "nobody is being
+notified" looks like from the outside.
 
 **Every action writes a `ModerationAction` row in the same transaction.** An
 action that happened without an audit record is not a state this code can
@@ -129,7 +139,62 @@ structure, not a safety system.
 
 ---
 
-## Open decisions — for the owner, not for me to settle
+## Decisions the owner has made, and what was built for each
+
+Seven decisions were taken after the first version of this document. They are
+listed here as settled, with the code and the test that carries each one.
+`tests/test_moderation_operations.py` maps them the same way in its header.
+
+**1. The reviewer is the owner.** No reviewer account, no role, no second
+credential — the operator routes behind `X-Admin-Secret` are the whole of it.
+This settles the *mechanism* of old decision 3. It does not settle the
+staffing; see "Still open" below.
+
+**2. Review deadlines: 24 hours for `child_safety`, 72 for everything else.**
+Computed once at filing (`_review_due_at`) and never recomputed, so a deadline
+cannot be pushed back by re-saving a report. The queue sorts urgent first —
+sorting by arrival buries a 24-hour report under three days of spam.
+
+**3. Restricted content stays hidden until a decision is made.** This answers
+the question old decision 2 left open: an auto-restriction does **not** expire
+if unreviewed. Only a moderation action lifts it. An unreviewed report means
+the content stays hidden, which is the failure direction that protects a child
+rather than the one that protects throughput.
+
+**4. Reported photos are preserved as encrypted evidence, 30 days from
+capture.** This replaces old decision 8. Bytes are sealed with Fernet under
+`STREAKFIT_EVIDENCE_KEY`, which the application never generates and never
+defaults — with no key, **nothing is captured** and the reviewer is told
+`no_evidence_key` rather than shown an empty record. Every access, successful
+or not, writes an `EvidenceAccess` row, committed *before* the bytes are
+produced. The 30 days run from capture and do not stretch because a workflow
+stalled.
+
+**5. Appeals are private.** This replaces old decision 4 ("none"). A person
+with a decision against them can see it in plain language and contest it once.
+An appeal reveals nothing about the reporter or the evidence, filing one
+restores nothing by itself, and an upheld appeal changes nothing while an
+overturned one reverses. The route into it is hidden entirely for anyone with
+no decisions — a standing "Appeals" row in a movement app reads as an
+accusation.
+
+**6. Evidence retention: 30 days after closure for text and captions.** This
+replaces old decision 5 ("indefinite"). Two clocks, because they are two
+different rules: text and caption evidence goes 30 days after the report
+*closes*, photo bytes 30 days from *capture*. A legal hold, with a written
+reason, is the only thing that suppresses either. What survives is the minimal
+audit record — that a report existed, its category, its dates, its outcome.
+
+**7. Repeated false reports need a human.** Dismissals alone never restrict
+anyone; no counter acts by itself. Restricting somebody's ability to report is
+an operator action requiring a written reason, it is reversible, and it is
+appealable. It never blocks `child_safety` reporting or blocking — the two
+things a person uses to protect themselves stay available to somebody who has
+been wrong before.
+
+---
+
+## Still open — for the owner, not for me to settle
 
 **1. Shared-team blocking.** Implemented as mutual invisibility. The
 alternatives, both deliberately not chosen:
@@ -145,30 +210,29 @@ Current behaviour is the least destructive and the least disclosing. It is
 also the weakest: the blocked person remains in the same team and can still
 read the thread.
 
-**2. Auto-restrict on `child_safety` reports.** Implemented: a `child_safety`
-report hides the content immediately, before any human review. **This is
-abusable** — anybody can hide one message by filing one report. The cost was
-accepted because the alternative leaves flagged material in front of a child
-for as long as review takes. Narrow on purpose: one piece of content, never
-the person, reversible in one click, and recorded as a `system` action.
-*Should this widen to `threats`? Should it expire automatically if unreviewed?*
+**2. Auto-restrict on `child_safety` reports is still abusable.** Anybody can
+hide one message by filing one report. The cost was accepted because the
+alternative leaves flagged material in front of a child for as long as review
+takes. Narrow on purpose: one piece of content, never the person, reversible
+in one click, recorded as a `system` action. Decision 3 settled that it does
+not expire. *Should it widen to `threats`?* — still open.
 
-**3. Who reads the queue.** There is no reviewer. The routes exist and the
-audit trail works, but nobody is assigned, there is no SLA, and nothing
-notifies anyone that a report arrived. **This is the largest remaining gap in
-the milestone** and it is a staffing decision.
+**3. Nobody is notified, and nobody is assigned.** Decisions 1 and 2 gave this
+a mechanism and a clock: deadlines are computed, overdue reports are tracked,
+and `ModerationNotice` durably records that an obligation came due. **What does
+not exist is delivery.** There is no email, no push and no pager in this
+application; `flask moderation-notify` prints to a terminal, and a notice with
+a NULL `delivered_at` means nobody has been told.
 
-**4. Appeals.** None. A suspended person is told their posting is paused and
-given no route to contest it. Deliberately left unbuilt rather than guessed.
+Measuring an obligation is not discharging it. **This remains the largest gap
+in the milestone**, it is still a staffing decision, and the delivery channel
+is an outstanding deployment requirement — see
+`docs/operations/moderation.md`.
 
-**5. Retention.** Reports and evidence are kept indefinitely. Evidence
-contains private content by design, so this needs a retention window
-consistent with the coach-turn policy.
-
-**6. Rate limits.** Reporting is capped at 10/hour per user. That is a guess,
+**4. Rate limits.** Reporting is capped at 10/hour per user. That is a guess,
 not a measured figure.
 
-**7. Exceptional operator actions.** Moderation actions are pinned to the
+**5. Exceptional operator actions.** Moderation actions are pinned to the
 verified report: `target_user_id` and `team_id` may be supplied but must
 match, and a mismatch is a 400 rather than a silent substitution. There is
 **no `override: true`**, on purpose — a boolean that lets one route act on
@@ -179,10 +243,3 @@ Acting outside a report is a genuine need: a tip-off arrives by email, or an
 operator sees something directly. That wants its own route with its own
 mandatory reason field, its own `actor` value, and its own entry in the audit
 trail — not a flag on this one. **Not built, and needs separate authorization.**
-
-**8. Evidence still excludes image bytes.** A reported photo preserves its
-caption and metadata; the pixels are not copied. If the photo is deleted
-before review, the reviewer has the caption and the context and no image. The
-design for fixing that — a separate blob table, operator-only, hard TTL,
-logged reads, purge on close — is written up in the audit and **not
-implemented pending owner approval**.

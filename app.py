@@ -8644,9 +8644,15 @@ def _sweep_moderation_evidence(now=None):
 def moderation_prune_command():
     """Delete aged-out report evidence. For a scheduled run.
 
-    NOT wired to any scheduler. The in-process retention thread covers coach
-    turns only, and this command is deliberately manual until the owner
-    approves a production schedule -- see docs/moderation/operations.md.
+    The in-process retention thread now runs this same sweep hourly, so a live
+    service prunes without anyone typing anything. This command exists for the
+    case that thread does not cover: a service that is down, mid-deploy, or
+    scaled to zero when a retention deadline passes.
+
+    The render.yaml cron that would run it is INERT -- Render does not read
+    that file, and creating the job in the dashboard is an outstanding
+    deployment requirement. Until it exists, evidence retention depends on the
+    web service being up.
     """
     result = _sweep_moderation_evidence()
     db.session.commit()
