@@ -228,6 +228,37 @@ limiter = Limiter(
     # the one outcome this control exists to prevent. The availability problem
     # it solved is real — measured, every login returned 500 with the backend
     # refused — but it is solved below, per route, instead of globally.
+    #
+    # `in_memory_fallback_enabled` is how the availability half is solved
+    # WITHOUT swallowing. The difference is the whole point: `swallow_errors`
+    # drops the limit and lets the request through unlimited; this keeps
+    # limiting, in this worker's memory, until the shared backend answers
+    # again. Degraded, not off.
+    #
+    # It is here rather than relying on _degrade_limiter_when_shared_storage_is_down
+    # alone because that hook cannot cover the case that actually occurs.
+    # Measured on the deployed stack (Python 3.12.7, Flask-Limiter 3.5.0,
+    # limits 5.8.0) by stopping the backend under a running app:
+    #
+    #     t+0.8s   backend killed   /api/health 500  /api/login 500
+    #     t+12.8s                   /api/health 500  /api/login 500
+    #     t+16.1s                   /api/health 200  /api/login 401
+    #
+    # Fifteen seconds of 500s on every throttled route — the full
+    # _SHARED_RL_PROBE_TTL, because the hook kept serving the "healthy" it had
+    # cached moments before the backend died, so it left `limiter.enabled`
+    # True and the limit raised. Two things made that worse than the duration
+    # suggests: /api/health is what Render polls for liveness, so a backend
+    # blip becomes a failing health check on the web service; and
+    # /api/verification/self — the endpoint whose job is to report "shared
+    # storage unreachable" — was taken out by the exact condition it exists to
+    # report.
+    #
+    # The hook is still worth having: it stands the limiter down for whole
+    # stretches of an outage rather than paying a failed connection per
+    # request. This just means a storage failure is never a 500 in the first
+    # place, including inside the TTL window the hook cannot see into.
+    in_memory_fallback_enabled=True,
 )
 
 
@@ -497,16 +528,48 @@ def can(user, capability, record=False):
     return allowed, reason
 
 
+# One key, re-used, with a short expiry. It is a probe, not a counter.
+_RATELIMIT_PROBE_KEY = 'streakfit:ratelimit-selfcheck'
+_RATELIMIT_PROBE_EXPIRY_S = 60
+
+
 def _ratelimit_backend_check():
-    """Ask the limiter's storage whether it is actually there.
+    """Ask the limiter's storage whether it can actually COUNT.
 
     A seam, and it exists for a reason worth keeping: `limiter.storage` is a
     read-only property, so the unreachable branch of the self-check could not
     be tested at all through the real object. A check whose failure path has
     never been executed is a check nobody should trust, so the call goes
     through one overridable function.
+
+    IT DELIBERATELY WRITES. `storage.check()` alone is a PING, and a backend
+    that answers a ping is not the same as a backend that can hold a rate
+    limit. Measured against Valkey 8 with `maxmemory` exceeded and
+    `noeviction` -- which is the shape of a memory-capped plan under load:
+
+        PING          -> PONG
+        SET anything  -> OOM command not allowed when used memory > 'maxmemory'
+        /api/verification/self -> ratelimit.shared_storage PASS
+
+    The app stayed up (the in-memory fallback absorbed it) and monitoring said
+    shared rate limiting was fine, while the backend could not record a single
+    count and every limit had quietly become per-worker. Green for a control
+    that was not running is the failure this whole check exists to prevent, so
+    it now does the thing it is claiming works: increments a key and reads the
+    result back.
+
+    What it still cannot see: a backend configured to EVICT rather than refuse
+    (`allkeys-lru`) accepts the write and may drop the key moments later. The
+    probe succeeds and the counters still erode. That is a property of the
+    plan, not something an endpoint can measure from inside -- it belongs in
+    the provisioning decision, and docs/operations/rate-limit-backend-outage.md
+    says so.
     """
-    return limiter.storage.check()
+    storage = limiter.storage
+    if not storage.check():          # cheap negative first: down is down
+        return False
+    # Any exception propagates; the caller reports it as DEGRADED by type.
+    return bool(storage.incr(_RATELIMIT_PROBE_KEY, _RATELIMIT_PROBE_EXPIRY_S))
 
 
 def user_or_ip_key():
@@ -3341,14 +3404,23 @@ def verification_self():
     else:
         started_rl = datetime.utcnow()
         try:
-            # Exercise it. A configured URI is not a reachable backend.
+            # Exercise it. A configured URI is not a working backend, and
+            # this check has now been wrong about that twice.
             #
-            # `limits` returns False rather than raising when the backend is
-            # down, and the first version of this only caught exceptions — so
-            # it reported PASS, "shared backend reachable (redis)", against a
-            # refused port. A check that goes green for an absent dependency is
-            # worse than no check, and it was only found by running the failure
-            # path rather than the happy one.
+            # First: `limits` returns False rather than raising when the
+            # backend is down, and the first version of this only caught
+            # exceptions — so it reported PASS, "shared backend reachable
+            # (redis)", against a refused port.
+            #
+            # Then: the probe was a PING, so a backend that was up but full
+            # (`maxmemory` exceeded, `noeviction`) answered it happily while
+            # refusing every write. PASS again, with not one count being
+            # recorded anywhere. `_ratelimit_backend_check` now increments a
+            # key instead of pinging.
+            #
+            # Both times the green came from checking something adjacent to
+            # the thing that mattered, and both times it was found by running
+            # the failure path rather than the happy one.
             if not _ratelimit_backend_check():
                 raise ConnectionError("backend reported itself unavailable")
             checks.append(_self_check(
@@ -3356,9 +3428,11 @@ def verification_self():
                 "Rate limiting is the control in front of the invite-code "
                 "lookup, so its counters must be shared between workers and "
                 "outlive a deploy.",
-                "Ask the configured limiter backend whether it is reachable.",
+                "Increment a probe key on the configured limiter backend "
+                "and read the result, so a backend that answers a ping but "
+                "cannot record a count is not mistaken for a working one.",
                 "PASS", "VERIFIED",
-                f"shared backend reachable ({storage_uri.split(':')[0]})",
+                f"shared backend counting ({storage_uri.split(':')[0]})",
                 duration_ms=int((datetime.utcnow() - started_rl).total_seconds() * 1000),
                 critical=True))
         except Exception as exc:
@@ -3367,9 +3441,11 @@ def verification_self():
                 "Rate limiting is the control in front of the invite-code "
                 "lookup, so its counters must be shared between workers and "
                 "outlive a deploy.",
-                "Ask the configured limiter backend whether it is reachable.",
+                "Increment a probe key on the configured limiter backend "
+                "and read the result, so a backend that answers a ping but "
+                "cannot record a count is not mistaken for a working one.",
                 "FAIL", "VERIFIED",
-                f"DEGRADED — backend configured but not reachable "
+                f"DEGRADED — backend configured but could not record a count "
                 f"({type(exc).__name__}); invite lookup is refusing and login "
                 f"is on a per-process cap",
                 # FAIL, not UNKNOWN. This was UNKNOWN until the behaviour was
@@ -3381,8 +3457,11 @@ def verification_self():
                 # CheckStatus is PASS/FAIL/UNKNOWN and inventing a fourth
                 # would roll up as unknown-shaped noise. The degradation is
                 # named in the text instead, where a reader looks.
-                failure_reason="Shared rate-limit storage is configured but did "
-                               "not answer. The application is still serving: "
+                failure_reason="Shared rate-limit storage is configured but could "
+                               "not record a count — it is unreachable, or "
+                               "reachable and refusing writes (a full "
+                               "memory-capped plan does exactly this). The "
+                               "application is still serving: "
                                "invite-code lookup refuses with 503 and login "
                                "falls back to a tighter PER-PROCESS cap, which "
                                "is multiplied by the worker count and does not "
@@ -9725,8 +9804,13 @@ class ResendChannel(NotificationChannel):
         except Exception as exc:
             # Type only. A socket error can carry a hostname; a provider error
             # can carry the request back.
+            #
+            # `from None` for the same reason, not to satisfy a linter: an
+            # implicitly chained cause re-attaches the original exception --
+            # hostname, request body and all -- to any traceback this is
+            # logged with, which would undo the redaction one line above.
             raise NotificationError(
-                f'resend request failed: {type(exc).__name__}')
+                f'resend request failed: {type(exc).__name__}') from None
 
         if status is None or not (200 <= status < 300):
             raise NotificationError(f'resend returned HTTP {status}')

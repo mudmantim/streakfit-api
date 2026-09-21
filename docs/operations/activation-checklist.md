@@ -55,6 +55,13 @@ the ones whose streaks depend on showing up.
 2. Same region as the StreakFit web service.
 3. Eviction policy: **`noeviction`**. An LRU policy can silently drop rate-limit
    counters, which reopens the window it exists to close.
+
+   Now measured, and it settles the trade-off rather than leaving it to
+   judgement. With `noeviction`, a full instance refuses writes and the
+   self-check reports FAIL — loud, and you find out. With `allkeys-lru` the
+   writes succeed and the counters simply erode, which **nothing can detect
+   from inside the app**. Prefer the failure you can see. See
+   [rate-limit-backend-outage.md](rate-limit-backend-outage.md).
 4. Copy the **internal** connection URL.
 5. StreakFit web service → Environment → add:
 
@@ -69,8 +76,13 @@ the ones whose streaks depend on showing up.
      | jq '.checks[] | select(.id=="ratelimit.shared_storage")'
    ```
 
-   Expect `"status": "PASS"` and `"shared backend reachable (redis)"`. If it
+   Expect `"status": "PASS"` and `"shared backend counting (redis)"`. If it
    still says `memory://`, the variable did not reach the process.
+
+   "Counting", not "reachable", is deliberate: the check increments a probe
+   key rather than sending a ping, because a memory-capped plan that is full
+   answers a ping and refuses every write. Measured — that state used to
+   report PASS while no limit could be recorded at all.
 
 ### Cost — check this, do not take it from me
 
@@ -86,7 +98,14 @@ this is not a sizing problem.
 
 A free, non-persistent tier would still be a large improvement over
 `memory://`, because it is shared across workers even if it does not survive
-a restart of the store itself.
+a restart of the store itself. Sharing is the half that matters for security:
+`memory://` multiplies every limit by the worker count, and losing counters on
+a restart is something `memory://` already does on every deploy.
+
+The restart behaviour is also now safe to rely on rather than something to
+hope about: an instance going away degrades instead of erroring, and recovers
+on its own without a redeploy. Both measured against a real Valkey 8 — see
+[rate-limit-backend-outage.md](rate-limit-backend-outage.md).
 
 ---
 
@@ -171,6 +190,6 @@ already passes, so these two are what stand between StreakFit and a clean run.
 
 **Do not mark retention "operational" until the self-check has reported PASS
 from production**, and do not mark rate limiting done until it reports
-`shared backend reachable`. A configuration that was applied is not the same
+`shared backend counting`. A configuration that was applied is not the same
 claim as a control that is working, and both of those endpoints exist
 precisely so the difference is checkable.

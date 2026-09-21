@@ -122,12 +122,14 @@ def test_production_with_working_shared_storage_passes(client, monkeypatch):
     check = rl_check(client)
     assert check["status"] == "PASS"
     assert check["critical"] is True, "a passing production check is still critical"
-    assert "reachable" in check["observed"]
+    assert "counting" in check["observed"]
 
 
 def test_production_with_unreachable_shared_storage_fails_as_degraded(client, monkeypatch):
-    """Configured is not reachable. With swallow_errors the limiter is OFF,
-    so this is FAIL rather than UNKNOWN."""
+    """Configured is not working. The probe writes rather than pings, so this
+    covers both an unreachable backend and a reachable one that refuses the
+    write -- a full memory-capped plan does the latter. Either way the shared
+    counters are not being kept, so it is FAIL rather than UNKNOWN."""
     monkeypatch.setenv("RENDER", "true")
     monkeypatch.setenv("RATELIMIT_STORAGE_URI", "redis://localhost:6379")
     monkeypatch.setattr(appmod, "_ratelimit_backend_check", lambda: False)

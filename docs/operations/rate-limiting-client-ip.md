@@ -1,7 +1,7 @@
 # Rate limiting: the client IP problem
 
 **Status:** **implemented** — `ProxyFix(x_for=2)` in `app.py`, regression-gated by
-`scripts/post_deploy_check.py`. Storage (`memory://`) deliberately unchanged; see roadmap **M1b**.
+`scripts/post_deploy_check.py`. Storage (`memory://`) deliberately unchanged; see roadmap **M1b** and, for what happens once shared storage exists and then fails, [rate-limit-backend-outage.md](rate-limit-backend-outage.md).
 **Date:** 2026-07-26. **Measured against:** production, commit `8da9053`.
 
 ## Summary

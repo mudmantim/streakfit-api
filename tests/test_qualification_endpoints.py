@@ -191,7 +191,7 @@ def test_a_configured_backend_is_exercised_not_believed(client, monkeypatch):
     monkeypatch.setattr(appmod, "_ratelimit_backend_check", unreachable)
     c = _check(client, "ratelimit.shared_storage")
     assert c["status"] == "FAIL", c
-    assert "not reachable" in c["observed"]
+    assert "could not record a count" in c["observed"]
 
     monkeypatch.setattr(appmod, "_ratelimit_backend_check", lambda: True)
     c = _check(client, "ratelimit.shared_storage")
@@ -204,7 +204,7 @@ def test_a_backend_that_reports_itself_down_is_a_failure_not_a_pass(client, monk
 
     `limits` returns False rather than raising when a Redis backend is
     unreachable. The check only caught exceptions, so it reported
-    PASS — "shared backend reachable (redis)" — against a refused port.
+    PASS — "shared backend counting (redis)" — against a refused port.
     A check that goes green for an absent dependency is worse than no check,
     and it was only found by running the failure path rather than the happy
     one.
