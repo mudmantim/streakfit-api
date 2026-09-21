@@ -3306,7 +3306,23 @@ def verification_self():
     # module's whole rule: where a shared backend IS configured, the check
     # exercises it and reports UNKNOWN if it cannot.
     storage_uri = os.environ.get("RATELIMIT_STORAGE_URI", "memory://")
-    in_production = os.environ.get('STREAKFIT_ENV', 'development') == 'production'
+    # ONE authority for "is this production", shared with /api/build-identity.
+    #
+    # This used to read STREAKFIT_ENV, which the live service does not set --
+    # so production satisfied `in_production == False` and this check reported
+    # `memory://` as "development; acceptable here", NOT critical. The same
+    # process, in the same request, called itself production in build-identity
+    # and development here. A security check that a missing variable can
+    # silence is not a check, and this one stands in front of an invite-code
+    # lookup with a measured 321 probes/second enumeration oracle.
+    #
+    # `_detect_environment()` derives it from markers production actually has
+    # (RENDER, RENDER_SERVICE_ID, or the inline STREAKFIT_ENFORCE_DB_HEAD=1 on
+    # the start command) and cannot be defeated by forgetting to set one more
+    # variable. STREAKFIT_ENV is still honoured when explicitly set, so a
+    # non-Render deployment can declare itself.
+    in_production = (_detect_environment() == 'production'
+                     or os.environ.get('STREAKFIT_ENV') == 'production')
     if storage_uri.startswith("memory:"):
         checks.append(_self_check(
             "ratelimit.shared_storage", "Rate limits survive a restart",

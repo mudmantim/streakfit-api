@@ -250,10 +250,59 @@ most concentrated copy of personal data this project produces.
 
 ---
 
+## 4b. What a FAILED migration actually leaves behind
+
+**Measured, not assumed.** The concern is real in general: if Alembic applied
+each revision in its own transaction, a failure at revision 7 of 12 would
+leave production at an intermediate schema no rollback procedure here
+describes.
+
+`migrations/env.py` calls `context.configure(connection=…)` with no
+`transaction_per_migration`, so Alembic's default applies: **the entire run is
+one transaction.** PostgreSQL has transactional DDL, so that is real rather
+than nominal.
+
+Verified experimentally on PostgreSQL 17 with a three-revision chain whose
+middle revision raises: **nothing survived** — not the first revision's table,
+not even the `alembic_version` row. All-or-nothing.
+
+All 12 pending migrations were scanned for the things that would break this —
+`CREATE INDEX CONCURRENTLY`, explicit `COMMIT`, `autocommit`, isolation-level
+changes, a second engine or session — and **none is present**. Four of them
+change data as well as schema; that rolls back with everything else.
+
+So: **a failed pre-deploy migration leaves production byte-for-byte
+unchanged**, and the old version keeps serving. There is nothing to undo, and
+the correct response is to read the error, fix it locally, and try again —
+*not* to restore a backup.
+
+**The conditions this depends on.** If any later migration introduces
+`CONCURRENTLY`, an explicit commit, or a non-transactional operation, or if
+`transaction_per_migration` is ever set, this guarantee is void and partial
+application becomes possible again. Re-check before any future release.
+
+### ⚠️ One migration deletes production data on SUCCESS
+
+`t4u5v6w7x8y9` (Coach Notes → allow-list) runs:
+
+```sql
+DELETE FROM coach_note;
+```
+
+and then drops the `goals`, `preferences` and `notes` columns. Every stored
+coach note is discarded and re-derived from future conversation under the new
+rules. **This is intentional** — old free-text notes cannot be carried into a
+closed vocabulary — but it is permanent on success, not on failure.
+
+Before deploying, note how many rows `coach_note` holds in production, so the
+loss is a number somebody decided to accept rather than a surprise. The
+encrypted backup preserves them; nothing in the application will.
+
 ## 5. Rollback, and what it cannot undo
 
 | Situation | Action | Works? |
 |---|---|---|
+| **Pre-deploy migration failed** | **Nothing.** The whole run rolled back (§4b); the old version never stopped serving | **Yes** — fix and retry |
 | Bad code, schema fine | Redeploy `fa92abd` | **Yes.** The new migrations only add; `fa92abd` ignores what it does not know about |
 | Migration failed partway | Restore §3.3's dump | Yes, losing everything written since |
 | Migration succeeded, data wrong | Restore §3.3's dump | Yes, same loss |
