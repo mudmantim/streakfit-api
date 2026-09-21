@@ -775,13 +775,24 @@ def test_a_child_safety_report_is_noticed_the_moment_it_is_filed(client, team, a
     assert [n.subject_ref for n in _notices('urgent_filed')] == [rep.public_id]
 
 
-def test_an_ordinary_report_is_not_noticed_until_it_is_overdue(client, team, admin_env):
+def test_an_ordinary_report_is_noticed_when_filed_and_again_when_overdue(
+        client, team, admin_env):
+    """REWRITTEN, because the behaviour it pinned was the defect.
+
+    This test used to assert that an ordinary report produced NO notice until
+    it went overdue -- so the first thing anybody heard about a 72-hour
+    promise was that it had already been broken. `report_filed` exists to
+    close that, and the two facts are separate: one report, noticed on
+    arrival and noticed again when its deadline passes.
+    """
     owner, member, t = team
     report_message(client, owner, t['id'], 'thing', author_tok=member)
     made = _generate_moderation_notices()
     db.session.commit()
-    assert made == {'urgent_filed': 0, 'overdue': 0, 'appeal_filed': 0}
-    assert _notices() == []
+    assert made['report_filed'] == 1
+    assert made['urgent_filed'] == 0, 'an ordinary report is not urgent'
+    assert made['overdue'] == 0, 'it is not late yet'
+    assert [n.kind for n in _notices()] == ['report_filed']
 
     rep = db.session.query(Report).one()
     rep.due_at = datetime.utcnow() - timedelta(minutes=1)
@@ -790,6 +801,7 @@ def test_an_ordinary_report_is_not_noticed_until_it_is_overdue(client, team, adm
     made = _generate_moderation_notices()
     db.session.commit()
     assert made['overdue'] == 1
+    assert made['report_filed'] == 0, 'filing is noticed once, not again'
     assert [n.subject_ref for n in _notices('overdue')] == [rep.public_id]
 
 
@@ -811,7 +823,9 @@ def test_generation_is_idempotent(client, team, admin_env):
     for _ in range(5):
         again = _generate_moderation_notices()
         db.session.commit()
-        assert again == {'urgent_filed': 0, 'overdue': 0, 'appeal_filed': 0}
+        assert again == {'urgent_filed': 0, 'report_filed': 0,
+                         'deadline_approaching': 0, 'overdue': 0,
+                         'appeal_filed': 0}
 
     assert len(_notices()) == 2, 'one urgent + one overdue, however often it runs'
 

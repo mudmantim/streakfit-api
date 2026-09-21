@@ -152,6 +152,13 @@ services:
         sync: false
       - key: JWT_SECRET_KEY
         sync: false
+      # Refuse to run against a schema this build does not expect. Safe HERE
+      # in a way it is not on the web service's start command: this job never
+      # runs `flask db upgrade`, so the guard cannot fire against its own
+      # migration. A cron that exits 1 during a deploy window is CORRECT -- it
+      # declined to sweep or deliver against a half-migrated database.
+      - key: STREAKFIT_ENFORCE_DB_HEAD
+        value: "1"
       # The delivery channel needs the same four as the web service, or this
       # job runs, finds a queue, and can send none of it.
       - key: STREAKFIT_NOTIFY_CHANNEL
@@ -196,6 +203,13 @@ services:
         sync: false
       - key: JWT_SECRET_KEY
         sync: false
+      # Refuse to run against a schema this build does not expect. Safe HERE
+      # in a way it is not on the web service's start command: this job never
+      # runs `flask db upgrade`, so the guard cannot fire against its own
+      # migration. A cron that exits 1 during a deploy window is CORRECT -- it
+      # declined to sweep or deliver against a half-migrated database.
+      - key: STREAKFIT_ENFORCE_DB_HEAD
+        value: "1"
       # Required to purge PHOTO evidence. The sweep deletes ciphertext without
       # reading it, but a DIFFERENT key here than the web service would leave
       # photos undecryptable; the same key must be used in both places.

@@ -3018,6 +3018,70 @@ def verification_self():
             "UNKNOWN", "UNKNOWN", f"{type(exc).__name__}",
             failure_reason="The moderation retention record could not be read."))
 
+    # EVIDENCE SEALED WITH A KEY THIS BUILD NO LONGER HAS.
+    #
+    # `photo_evidence.key_id` has been written at capture since the table
+    # existed and read by nothing. So a rotated or mistyped
+    # STREAKFIT_EVIDENCE_KEY was invisible: every stored image became
+    # permanently unopenable, and the first person to find out would be a
+    # reviewer clicking an image during a child-safety review, which is the
+    # worst possible moment to discover it.
+    #
+    # The comparison is on the key FINGERPRINT, not on decryption -- cheap,
+    # and it needs no plaintext. It answers "could these be opened", never
+    # "what is in them".
+    try:
+        cipher, current_key_id = _evidence_cipher()
+        if cipher is None:
+            ev_status, ev_level = "UNKNOWN", "UNKNOWN"
+            ev_observed = ("no evidence key is configured, so no photo "
+                           "evidence is being captured and existing rows "
+                           "cannot be assessed")
+            ev_reason = ("Reported images are not preserved at all. A report "
+                         "filed now keeps no picture.")
+        else:
+            stale = db.session.execute(
+                db.select(db.func.count(PhotoEvidence.id)).where(
+                    PhotoEvidence.purged_at.is_(None),
+                    PhotoEvidence.ciphertext.isnot(None),
+                    PhotoEvidence.key_id.isnot(None),
+                    PhotoEvidence.key_id != current_key_id)).scalar() or 0
+            total = db.session.execute(
+                db.select(db.func.count(PhotoEvidence.id)).where(
+                    PhotoEvidence.purged_at.is_(None),
+                    PhotoEvidence.ciphertext.isnot(None))).scalar() or 0
+            if stale:
+                ev_status, ev_level = "FAIL", "VERIFIED"
+                ev_observed = (f"{stale} of {total} sealed images were "
+                               f"encrypted with a different key")
+                ev_reason = ("Those images cannot be decrypted by this build. "
+                             "Restore the key that sealed them, or accept that "
+                             "the evidence is gone.")
+            else:
+                ev_status, ev_level = "PASS", "VERIFIED"
+                ev_observed = (f"{total} sealed image(s), all under the "
+                               f"current key")
+                ev_reason = None
+        checks.append(_self_check(
+            "moderation.evidence_key", "Sealed evidence is readable",
+            "Preserved report images can still be decrypted by this build.",
+            "Compare each unpurged photo_evidence row's key fingerprint with "
+            "the fingerprint of the configured key. No decryption, no "
+            "plaintext.",
+            ev_status, ev_level, ev_observed, failure_reason=ev_reason,
+            limitations="A matching fingerprint means the right KEY, not that "
+                        "the bytes are intact. It says nothing about database "
+                        "backups, which retention cannot reach.",
+            critical=False))
+    except Exception as exc:
+        checks.append(_self_check(
+            "moderation.evidence_key", "Sealed evidence is readable",
+            "Preserved report images can still be decrypted by this build.",
+            "Compare stored key fingerprints with the configured key.",
+            "UNKNOWN", "UNKNOWN", f"{type(exc).__name__}",
+            failure_reason="The evidence records could not be read.",
+            critical=False))
+
     # Generation is not delivery, and delivery is three separate facts.
     # Collapsing them reproduced as PASS on an empty database with no provider
     # configured and no worker running: "no urgent notice is waiting" read as
@@ -7238,6 +7302,14 @@ SUBJECT_TYPES = ('user', 'message', 'photo', 'challenge')
 REVIEW_WINDOW_HOURS = {'child_safety': 24}
 REVIEW_WINDOW_DEFAULT_HOURS = 72
 
+# How long BEFORE a deadline to say so. A quarter of the window in each case,
+# which is the point where "there is still time to act" stops being true on
+# its own: six hours left of a child-safety day, eighteen of an ordinary
+# three. Expressed as hours rather than a fraction so an operator reading
+# this file does not have to do arithmetic to know when they will be told.
+REVIEW_APPROACHING_HOURS = {'child_safety': 6}
+REVIEW_APPROACHING_DEFAULT_HOURS = 18
+
 # The owner's retention decisions, in one place so a reader can check them
 # against docs/moderation/policy.md without reading the sweep.
 EVIDENCE_RETENTION_DAYS_AFTER_CLOSURE = 30   # ordinary text/caption evidence
@@ -7248,6 +7320,20 @@ def _review_due_at(category, created_at):
     """When this report is due. Computed once, at filing, and never again."""
     hours = REVIEW_WINDOW_HOURS.get(category, REVIEW_WINDOW_DEFAULT_HOURS)
     return created_at + timedelta(hours=hours)
+
+
+def _review_approaching_at(category, due_at):
+    """When to say a deadline is coming, derived from the deadline itself.
+
+    Derived rather than stored: `due_at` is fixed at filing and never moves,
+    so this moves only if the POLICY moves, which is the one case where a
+    changed answer is the right answer.
+    """
+    if not due_at:
+        return None
+    hours = REVIEW_APPROACHING_HOURS.get(
+        category, REVIEW_APPROACHING_DEFAULT_HOURS)
+    return due_at - timedelta(hours=hours)
 
 
 def _evidence_cipher():
@@ -9393,15 +9479,24 @@ def moderation_prune_command(scheduled):
 def _generate_moderation_notices(now=None):
     """Notice every review obligation that has come due, exactly once.
 
-    Three things are worth noticing, and they are the three the owner's
-    decisions created:
+    Five things are worth noticing, and each is a different obligation rather
+    than a louder version of the last:
 
       * a child_safety report arriving at all -- it is on a 24h clock from the
         moment it is filed, so waiting for it to go overdue wastes most of the
         window the owner promised;
+      * ANY OTHER report arriving. Previously an ordinary report was silent
+        until it went OVERDUE, which meant the first thing anybody heard about
+        a 72-hour obligation was that it had already been missed;
+      * a pending report APPROACHING its deadline, while there is still time
+        to act on it -- the whole point of a deadline being known in advance;
       * any pending report passing its due_at;
       * an appeal being filed, which is a person waiting on an answer with no
         deadline of its own.
+
+    A report can legitimately produce several of these over its life: filed,
+    then approaching, then overdue. They are separate facts and each is said
+    once.
 
     Idempotent by unique constraint, not by bookkeeping: each row is INSERTed
     and a duplicate is swallowed. Safe to call on every sweep, on every deploy,
@@ -9411,7 +9506,8 @@ def _generate_moderation_notices(now=None):
     is not reported as though it were.
     """
     now = now or datetime.utcnow()
-    created = {"urgent_filed": 0, "overdue": 0, "appeal_filed": 0}
+    created = {"urgent_filed": 0, "report_filed": 0, "deadline_approaching": 0,
+               "overdue": 0, "appeal_filed": 0}
 
     def notice(subject_type, subject_ref, kind):
         """One INSERT in its own SAVEPOINT. A duplicate is the normal case --
@@ -9429,10 +9525,23 @@ def _generate_moderation_notices(now=None):
     pending = db.session.execute(
         db.select(Report).where(Report.status == 'pending')).scalars().all()
     for r in pending:
+        # FILED. A child-safety report gets the urgent kind; everything else
+        # gets its own, so no report is silent until it is already late.
         if r.category in AUTO_RESTRICT_CATEGORIES:
             notice('report', r.public_id, 'urgent_filed')
-        if r.due_at and r.due_at <= now:
-            notice('report', r.public_id, 'overdue')
+        else:
+            notice('report', r.public_id, 'report_filed')
+
+        # DEADLINE. Overdue and approaching are mutually exclusive AT THIS
+        # MOMENT -- a report cannot be both -- but over its life it will pass
+        # through approaching and then, if nobody acts, overdue. The `elif` is
+        # about now, not about history.
+        if r.due_at:
+            approaching_at = _review_approaching_at(r.category, r.due_at)
+            if r.due_at <= now:
+                notice('report', r.public_id, 'overdue')
+            elif approaching_at and approaching_at <= now:
+                notice('report', r.public_id, 'deadline_approaching')
 
     for a in db.session.execute(
         db.select(Appeal).where(Appeal.status == 'open')).scalars().all():
@@ -9726,6 +9835,28 @@ def _notice_is_due(notice, now):
             >= timedelta(minutes=_notice_backoff_minutes(notice)))
 
 
+# What outranks what, when more is waiting than one batch can carry.
+#
+# Tiers rather than urgent-or-not, because adding `report_filed` made the flat
+# version unsafe: ordinary notices are created AT FILING, so they are always
+# the OLDEST rows in the tail, and "oldest first within the tier" would have
+# put every newly filed report ahead of a deadline that was already broken.
+# A busy day of ordinary reports could then starve the overdue notices behind
+# them -- the same starvation the urgent tier was introduced to stop, one
+# level down.
+#
+#   0  urgent_filed          a child-safety report, on a 24h clock
+#   1  overdue               a deadline already missed
+#   2  deadline_approaching  a deadline about to be missed
+#   3  everything else       real obligations with no clock of their own
+_NOTICE_PRIORITY = {
+    'urgent_filed': 0,
+    'overdue': 1,
+    'deadline_approaching': 2,
+}
+_NOTICE_PRIORITY_DEFAULT = 3
+
+
 def _notices_for_delivery(now, limit):
     """The next batch, urgent first, ELIGIBILITY APPLIED BEFORE THE LIMIT.
 
@@ -9734,14 +9865,15 @@ def _notices_for_delivery(now, limit):
     being attempted at all, because fifty older notices sitting in backoff
     filled the batch window ahead of it.
 
-    So: order urgent ahead of ordinary, oldest first within each, scan a
-    bounded window, drop what is not due, and only then take the batch.
+    So: order by tier, oldest first within each tier, scan a bounded window,
+    drop what is not due, and only then take the batch.
     """
     rows = db.session.execute(
         db.select(ModerationNotice)
         .where(ModerationNotice.delivered_at.is_(None))
         .order_by(
-            db.case((ModerationNotice.kind == 'urgent_filed', 0), else_=1),
+            db.case(_NOTICE_PRIORITY, value=ModerationNotice.kind,
+                    else_=_NOTICE_PRIORITY_DEFAULT),
             ModerationNotice.created_at.asc())
         .limit(_NOTIFY_SCAN_LIMIT)
     ).scalars().all()
@@ -9783,6 +9915,8 @@ def _claim_notice(notice_id, now):
 # and interpolates nothing but the subject's own public id.
 _NOTICE_SUBJECTS = {
     'urgent_filed': 'StreakFit: child-safety report, due in 24h',
+    'report_filed': 'StreakFit: a report is waiting for review',
+    'deadline_approaching': 'StreakFit: a report review deadline is approaching',
     'overdue': 'StreakFit: report is past its review deadline',
     'appeal_filed': 'StreakFit: somebody has appealed a decision',
 }
@@ -10001,7 +10135,10 @@ def moderation_notify_command(scheduled, mark_delivered):
               "— nothing below has been sent to anybody")
 
     rows = _undelivered_notices()
-    print(f"generated {created['urgent_filed']} urgent, {created['overdue']} overdue, "
+    print(f"generated {created['urgent_filed']} urgent, "
+          f"{created['report_filed']} filed, "
+          f"{created['deadline_approaching']} approaching, "
+          f"{created['overdue']} overdue, "
           f"{created['appeal_filed']} appeal notices; "
           f"{len(rows)} undelivered in total")
     for n in rows:
@@ -10788,8 +10925,11 @@ def _retention_sweeper_loop():
                 db.session.commit()
                 if any(made.values()):
                     app.logger.info(
-                        'event=moderation_notices urgent=%d overdue=%d appeals=%d',
-                        made['urgent_filed'], made['overdue'], made['appeal_filed'])
+                        'event=moderation_notices urgent=%d filed=%d '
+                        'approaching=%d overdue=%d appeals=%d',
+                        made['urgent_filed'], made['report_filed'],
+                        made['deadline_approaching'], made['overdue'],
+                        made['appeal_filed'])
         except Exception as exc:
             db.session.rollback()
             app.logger.warning('moderation notice generation failed: %s',
