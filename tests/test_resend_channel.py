@@ -21,7 +21,7 @@ import app as appmod
 from app import (ResendChannel, NotificationError, NotificationConfigError,
                  _notification_channel, _channel_configuration_problem,
                  _delivery_capability, ModerationNotice, db,
-                 _deliver_pending_notices, _notice_message, SOURCE_THREAD)
+                 _deliver_pending_notices, SOURCE_THREAD)
 from datetime import datetime
 
 

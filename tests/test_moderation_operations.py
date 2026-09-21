@@ -11,8 +11,6 @@ The owner's seven decisions, checked against what the code does:
   7 false reports need a human  -> test_reporting_restriction_*
 """
 import io
-import json
-import os
 from datetime import datetime, timedelta
 
 import pytest
@@ -20,9 +18,8 @@ import pytest
 from conftest import register_and_login, auth_headers
 
 from app import db, Report, ReportEvidence, PhotoEvidence, EvidenceAccess, \
-    ContentRestriction, UserRestriction, ModerationAction, Appeal, TeamPhoto, \
-    DailyCompletion, ModerationNotice, _sweep_moderation_evidence, \
-    _review_due_at, _generate_moderation_notices, _review_queue_counts
+    ContentRestriction, UserRestriction, ModerationAction, Appeal, DailyCompletion, ModerationNotice, _sweep_moderation_evidence, \
+    _generate_moderation_notices, _review_queue_counts
 
 ADMIN = {'X-Admin-Secret': 's3cret-value'}
 # A throwaway Fernet key generated for the test process only. Never a default,
@@ -494,7 +491,7 @@ def _suspend(client, owner, member, t):
 
 def test_a_person_can_see_and_appeal_a_decision_about_them(client, team, admin_env):
     owner, member, t = team
-    action = _suspend(client, owner, member, t)
+    _suspend(client, owner, member, t)
 
     decisions = client.get('/api/moderation/decisions',
                            headers=auth_headers(member)).get_json()
@@ -636,7 +633,15 @@ def test_blocking_and_urgent_reporting_survive_an_appeal(client, team, admin_env
                       headers=auth_headers(member)).status_code == 204
     say(client, owner, t['id'], 'something alarming')
     msg = [m for m in thread(client, owner, t['id'])][-1]
+
     # Blocked, so that specific message is not reportable — but the person is.
+    # Both halves are asserted. The comment used to claim the first half while
+    # only the second was checked, which is a claim nothing was holding up.
+    assert client.post('/api/reports', json={
+        'category': 'child_safety', 'subject_type': 'message',
+        'subject_ref': msg['message_id'], 'team_id': t['id']},
+        headers=auth_headers(member)).status_code == 404
+
     r = client.post('/api/reports', json={
         'category': 'child_safety', 'subject_type': 'user',
         'reported_user_id': uid(client, owner), 'team_id': t['id']},

@@ -14,11 +14,9 @@ child-safety review.
 import uuid
 from datetime import datetime, timedelta
 
-import pytest
 
 import app as appmod
-from app import (db, Report, PhotoEvidence, EvidenceAccess,
-                 _evidence_cipher, _sweep_moderation_evidence,
+from app import (db, Report, PhotoEvidence, _evidence_cipher, _sweep_moderation_evidence,
                  PHOTO_EVIDENCE_MAX_AGE_DAYS)
 
 

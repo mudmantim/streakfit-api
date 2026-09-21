@@ -13,7 +13,6 @@ safe: ordinary notices are created AT FILING, so they are the oldest rows in
 the tail, and a busy day of them would have queued ahead of a deadline that
 was already broken. The tiers are tested here for that reason.
 """
-import json
 from datetime import datetime, timedelta
 
 import pytest
@@ -215,10 +214,9 @@ def test_an_approaching_deadline_outranks_an_ordinary_filing(client):
 
 
 def test_the_full_priority_order_holds(client):
-    made = {k: _notice(k, minutes_ago=i)
-            for i, k in enumerate(['appeal_filed', 'report_filed',
-                                   'deadline_approaching', 'overdue',
-                                   'urgent_filed'])}
+    for i, k in enumerate(['appeal_filed', 'report_filed',
+                           'deadline_approaching', 'overdue', 'urgent_filed']):
+        _notice(k, minutes_ago=i)
     batch = _notices_for_delivery(datetime.utcnow(), 50)
     assert [n.kind for n in batch][:4] == [
         'urgent_filed', 'overdue', 'deadline_approaching']  + ['report_filed']

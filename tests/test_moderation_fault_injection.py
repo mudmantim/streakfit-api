@@ -315,8 +315,9 @@ def test_without_the_challenge_filter_a_restricted_challenge_stays_visible(
                                              subject_ref=cpid, reason='moderator'))
     db.session.commit()
 
-    visible = lambda tok: any((m.get('challenge') or {}).get('public_id') == cpid
-                              for m in thread(client, tok, team['id']))
+    def visible(tok):
+        return any((m.get('challenge') or {}).get('public_id') == cpid
+                   for m in thread(client, tok, team['id']))
     assert not visible(b)
     monkeypatch.setattr(appmod, '_restricted_refs', lambda _t, _r: set())
     assert visible(b)

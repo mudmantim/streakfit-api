@@ -437,6 +437,19 @@ def test_retention_sweeper_thread_runs_with_no_requests_at_all(app, monkeypatch)
 
     monkeypatch.setattr(appmod, "_RETENTION_THREAD_INTERVAL_S", 0.2)
     appmod._coach_sweep_last = None
+
+    # _start_retention_sweeper() stamps the module-level _WORKER_STARTED_AT,
+    # which monkeypatch cannot undo because the function assigns it directly.
+    # Left set, it leaks into every later test in the process: the
+    # `moderation.delivery_worker` check reports UNKNOWN ("a worker started
+    # Ns ago") instead of FAIL for the next
+    # _RETENTION_FIRST_PASS_SETTLE_S + _WORKER_FIRST_PASS_GRACE_S seconds --
+    # about two minutes. That made
+    # test_notification_delivery.py::test_R2_* pass or fail depending on how
+    # FAST the whole suite ran: at 538s the gap exceeded the window, at 274s
+    # it did not. Restored here so the leak cannot reach them.
+    monkeypatch.setattr(appmod, "_WORKER_STARTED_AT", appmod._WORKER_STARTED_AT)
+
     thread = appmod._start_retention_sweeper()
     assert thread.daemon, "a non-daemon sweeper would hold the process open on exit"
 

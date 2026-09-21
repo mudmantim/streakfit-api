@@ -11,14 +11,13 @@ that leaks every ordinary name, which is the mistake the peer-identity work
 already made once.
 """
 import io
-import json
 
 import pytest
 
 from conftest import register_and_login, auth_headers
 
 from app import db, UserBlock, Report, ReportEvidence, ModerationAction, \
-    ContentRestriction, UserRestriction, TeamMessage, DailyCompletion
+    ContentRestriction, TeamMessage, DailyCompletion
 
 ADMIN = {'X-Admin-Secret': 's3cret-value'}
 

@@ -14,10 +14,9 @@ from datetime import datetime, timedelta
 
 import pytest
 
-from conftest import register_and_login, auth_headers
 
 import app as appmod
-from app import (db, RetentionRun, ModerationNotice, Report, PhotoEvidence,
+from app import (db, RetentionRun, Report, PhotoEvidence,
                  RETENTION_COACH, RETENTION_MODERATION,
                  RETENTION_STALE_AFTER_HOURS,
                  _last_retention_run, _record_retention_run,

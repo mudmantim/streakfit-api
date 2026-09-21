@@ -19,8 +19,7 @@ from datetime import datetime, timedelta
 import pytest
 
 import app as appmod
-from app import (db, ModerationNotice, NotificationRun, NotificationChannel,
-                 NotificationError, _deliver_pending_notices,
+from app import (db, ModerationNotice, NotificationRun, _deliver_pending_notices,
                  _persistently_failing_notices, _NOTIFY_PERSISTENT_AFTER,
                  DELIVERY_STALE_AFTER_HOURS, SOURCE_THREAD)
 import uuid

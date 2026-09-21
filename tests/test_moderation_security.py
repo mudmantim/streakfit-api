@@ -11,15 +11,13 @@ the whole database with no authorization. Content is now resolved first and
 the team and author are derived from the row.
 """
 import io
-import json
 
 import pytest
 
 from conftest import register_and_login, auth_headers
 
 from app import db, Report, ReportEvidence, ContentRestriction, \
-    UserRestriction, ModerationAction, TeamMessage, TeamPhoto, TeamChallenge, \
-    CHALLENGE_PRESETS_BY_KEY, DailyCompletion
+    UserRestriction, ModerationAction, TeamMessage, CHALLENGE_PRESETS_BY_KEY, DailyCompletion
 
 ADMIN = {'X-Admin-Secret': 's3cret-value'}
 

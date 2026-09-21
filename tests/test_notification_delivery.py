@@ -10,15 +10,13 @@ from datetime import datetime, timedelta
 
 import pytest
 
-from conftest import register_and_login, auth_headers
 
 import app as appmod
 from app import (db, ModerationNotice, NotificationRun, Report, User,
                  NotificationError, NotificationChannel, ConsoleChannel,
-                 SOURCE_THREAD, SOURCE_CRON, SOURCE_MANUAL,
+                 SOURCE_THREAD, SOURCE_MANUAL,
                  _deliver_pending_notices, _notice_message, _notice_is_due,
-                 _notification_channel, _undelivered_urgent_notices,
-                 _generate_moderation_notices, _notices_for_delivery,
+                 _notification_channel, _generate_moderation_notices, _notices_for_delivery,
                  _claim_notice, _delivery_capability, _persistently_failing_notices,
                  _NOTIFY_LEASE, _NOTIFY_PERSISTENT_AFTER,
                  _NOTIFY_URGENT_MAX_INTERVAL_M)
@@ -162,6 +160,11 @@ def test_R2_a_configured_channel_with_no_worker_still_fails(client, monkeypatch)
     """The state that reads healthiest and is not: a provider set up
     perfectly, and nothing ever calling it."""
     monkeypatch.setattr(appmod, '_notification_channel', lambda name=None: Works())
+    # "No worker" is this test's PRECONDITION, so it is stated rather than
+    # inherited. _WORKER_STARTED_AT is a process-wide global, and any earlier
+    # test that really starts a sweeper leaves it set -- which turns the
+    # assertion below from FAIL into UNKNOWN for the next two minutes.
+    monkeypatch.setattr(appmod, '_WORKER_STARTED_AT', None)
 
     assert state(client, 'moderation.delivery_configured') == 'PASS'
     assert state(client, 'moderation.delivery_worker') == 'FAIL'
@@ -177,7 +180,8 @@ def test_R2_a_worker_with_no_channel_fails_configuration(client, monkeypatch):
     assert state(client, 'moderation.notices_delivered') == 'UNKNOWN'
 
 
-def test_R2_a_manual_pass_never_satisfies_the_worker_check(client):
+def test_R2_a_manual_pass_never_satisfies_the_worker_check(client, monkeypatch):
+    monkeypatch.setattr(appmod, '_WORKER_STARTED_AT', None)   # see above
     _deliver_pending_notices(Works(), source=SOURCE_MANUAL)
     assert state(client, 'moderation.delivery_worker') == 'FAIL'
 
