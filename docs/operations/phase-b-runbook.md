@@ -140,40 +140,63 @@ git push origin main            # Auto-Deploy is Off — this deploys nothing
 
 Then in Render, trigger a manual deploy of `4b95bd1`.
 
-### ⚠️ RESEARCHED 2026-09-22 — resume triggers a build, and the commit is undocumented
+### MEASURED 2026-09-22 — resume restores the existing build; it does NOT rebuild
 
-**Established:** resuming a suspended Render service **automatically triggers
-a new build and deploy.** Render's own feature-request tracker carries
-*"Don't trigger a new build when an application is resumed"*, whose text is
-this exact scenario — *"Sometimes there's a need to suspend and then resume a
-service (for example, when performing maintenance actions like migrations).
-This is inconvenient when Render triggers a new build when the service is
-resumed."* Marked **"planned"** by Render in May 2023 and still planned, so
-the behaviour stands.
+Tested on a disposable Free-plan service (`render-resume-probe`) armed so that
+branch HEAD and the deployed commit genuinely differed:
 
-**NOT established, after searching the scaling, deploys, FAQ and API docs:**
-
-- **which commit** that automatic build uses — branch HEAD, or the
-  last-deployed commit;
-- whether a **manual deploy can be triggered on a suspended service** at all.
-
-Render's deploy documentation describes "Deploy latest commit" (branch HEAD)
-and "Deploy a specific commit", and says nothing about suspended services.
-
-**Why this does not make the procedure unsafe — only uncertain in duration.**
-Both outcomes are fail-closed:
-
-| Resume builds… | Result |
+| Time (EDT) | Event |
 |---|---|
-| the new commit | correct: new code, migrated schema, serving |
-| `fa92abd` | boot guard sees DB at `47f7dc9962e3` ≠ its head `q1r2s3t4u5v6`, calls `SystemExit(1)`, **service does not serve**. Trigger "Deploy latest commit" to recover |
+| 07:05 | COMMIT-B deployed via Auto-Deploy |
+| — | Auto-Deploy Off; COMMIT-C pushed to `main`, **not** deployed |
+| 07:32 | Suspended |
+| 07:34 | Resumed — **no new deployment event** |
+| after | Endpoint served **COMMIT-B**, while `main` was COMMIT-C |
 
-In neither branch does old code serve against the new schema. The cost of the
-bad branch is one failed deploy cycle and a crash-looping service that looks
-alarming, not a data or correctness risk.
+**Resume brought back the previously deployed commit and ignored the newer
+branch HEAD.** This contradicts Render's own feature request *"Don't trigger a
+new build when an application is resumed"* (marked planned, May 2023) — either
+the behaviour changed since, or it differs by plan.
 
-**Push the intended commit to `main` BEFORE suspending**, so that if resume
-does build branch HEAD, it builds the right thing.
+**Scope:** one Free-plan service, one occasion. It does **not** establish what
+the paid Starter instance does. Treat it as the likely behaviour, never as a
+guarantee.
+
+### What this means here, and why it changes nothing about safety
+
+Expect resume to bring back **`fa92abd`** — the currently deployed commit —
+rather than the new one. Against a migrated database its boot guard sees
+`47f7dc9962e3` ≠ its own head `q1r2s3t4u5v6`, calls `SystemExit(1)`, and the
+service **crash-loops without serving**. That looks alarming and is in fact
+the guard doing its job. It happens inside a planned outage in which nothing
+was serving anyway.
+
+**Both possible paid behaviours are safe. Neither can serve old code against
+the new schema:**
+
+| Paid resume behaviour | What happens | Safe? |
+|---|---|---|
+| Restores existing build (**observed on Free**) | `fa92abd` returns, boot guard exits, service does not serve. Trigger "Deploy latest commit" to recover. | **yes** |
+| Rebuilds from branch HEAD | builds the intended commit; Pre-Deploy `flask db upgrade` is a no-op; serves correctly | **yes** |
+
+The difference is one extra deploy cycle, not correctness.
+
+**Resume does not run the Pre-Deploy Command** — no deployment event is
+created — so there is no risk of an unexpected second migration either way.
+
+### Consequence for the procedure
+
+**After Stage 4's migration, go straight to deploying the new commit. Do not
+treat Resume as the step that brings the service back.**
+
+One unknown remains: **whether a manual deploy can be triggered while a
+service is suspended.** Untested, and cheap to test on the same probe.
+
+- **If it can:** suspend → migrate → deploy new commit → service returns on the
+  new build, and `fa92abd` never starts at all. Cleanest.
+- **If it cannot:** suspend → migrate → resume (old build crash-loops, service
+  still down) → immediately trigger "Deploy latest commit". Correct, with a
+  few alarming minutes in between.
 
 Order within the deploy, which is already configured and correct:
 
@@ -226,7 +249,7 @@ Only a person looking in a mailbox closes this, exactly as at A3.
 | 2 snapshot | Do not proceed. | **Fully** |
 | 3 suspend | If `/health` still 200, the window is open — do not migrate. | **Fully** |
 | 4 migrate | `flask db downgrade q1r2s3t4u5v6`, then Resume. Old build boots (DB back at its head) and serves as before. | **Fully — no user data exists yet** |
-| 5 deploy | Old build cannot serve against the migrated schema. Either fix forward, or downgrade as above then Resume. | **Fully** |
+| 5 deploy | Old build cannot serve against the migrated schema — expected, and it is the guard working. Fix forward with "Deploy latest commit". If abandoning: `flask db downgrade q1r2s3t4u5v6` first, THEN Resume, so `fa92abd` boots against its own head. | **Fully** |
 | 6 verify fails | See below — this is the boundary. | **Depends** |
 
 ### The boundary
@@ -318,6 +341,9 @@ later, the cron backstops and the `coach_note` contract migration.
 - [ ] Start Command carries `STREAKFIT_RETENTION_SWEEPER=1` **inline**
 - [ ] Auto-Deploy **Off**
 - [ ] A quiet hour chosen, and you accept ~8–15 minutes of planned downtime
+- [ ] You expect the old build to crash-loop between resume and the new
+      deploy, and will not mistake it for a failure — measured probe behaviour
+      says resume restores `fa92abd`, whose boot guard then stops it
 - [ ] You accept that after Stage 6's real report, rollback discards data
 
 **STOP immediately if:** `coach_note rows > 0`; `/health` still answers 200
@@ -327,8 +353,12 @@ after suspending; the migration reports anything other than 12 upgrades to
 
 ## Remaining risks
 
-1. **Suspend semantics undocumented** — mitigated by the boot guard, which
-   makes an old instance unable to return against the migrated schema.
+1. **Resume behaviour measured on Free, assumed for paid.** A Free-plan probe
+   showed resume restores the existing build without rebuilding. The paid
+   Starter instance is untested and may differ. Both possibilities are safe;
+   they differ only in whether one extra deploy cycle is needed.
+7. **Deploy-while-suspended is untested** — determines whether `fa92abd`
+   briefly crash-loops or never starts at all. Cheap to settle on the probe.
 2. **Resume-vs-deploy ordering unverified** — may briefly show the old build
    crash-looping; that is the guard working. Confirm live at Stage 5.
 3. **Migration duration on real data is an estimate**, not a measurement. The
