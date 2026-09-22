@@ -365,11 +365,37 @@ degrade hook, no `sensitive_when_degraded`, no in-memory fallback. Pointing
 the *old* build at Key Value would 500 every throttled route on any blip. That
 is the whole reason Phase C comes after Phase B.
 
-- [ ] C1 — New → Key Value, **free plan**, same region, **`noeviction`**.
-      Confirm at creation that `noeviction` is offered and the workspace's one
-      free instance is unused. If either is not true, **stop** — do not
-      upgrade to a paid plan to work around it.
+- [x] **C1 — DONE 2026-09-22, before Phase B.** `streakfit-ratelimit`:
+      Free ($0), Ohio (matching `streakfit-api`), **`noeviction`**,
+      persistence off, **Valkey 8.1.0**, external traffic blocked by inbound
+      rules, Internal Authentication **off**.
+
+      Two things this settled that were previously documentation-only:
+      **`noeviction` IS selectable on the Free plan**, and the engine is
+      Valkey 8 — the same major version every outage measurement in
+      [rate-limit-backend-outage.md](rate-limit-backend-outage.md) was taken
+      against.
+
+      Creating it early is safe and deliberate: the deployed build reacts to
+      `RATELIMIT_STORAGE_URI`, never to the instance existing. It shrinks the
+      window in which production runs per-worker limits to a single redeploy.
+
 - [ ] C2 — set `RATELIMIT_STORAGE_URI` to the **internal** URL, redeploy.
+
+      **URL form, verified against Valkey 8 rather than assumed:**
+
+      | Internal Authentication | URL | Result |
+      |---|---|---|
+      | **off** (current) | `redis://<internal-host>:6379` | ✅ `shared backend counting (redis)` |
+      | on | `redis://:<password>@<host>:6379` | ✅ works |
+      | on | `redis://default:<password>@<host>:6379` | ✅ works |
+      | on, but URL has no credentials | `redis://<host>:6379` | ❌ FAIL — reported as DEGRADED, correctly |
+
+      With auth off the URL carries no secret, so C2 is a plain configuration
+      value. If Internal Authentication is ever switched on, the URL becomes a
+      credential and must be handled like one — and switching it on *without*
+      updating the URL fails closed rather than silently unprotected, which is
+      the right direction.
 - [ ] C3 — confirm `ratelimit.shared_storage` reads **`shared backend counting (redis)`**.
 
 `redis==5.0.8` is already pinned, so no code change is needed.
