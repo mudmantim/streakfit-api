@@ -237,12 +237,19 @@ the moment the new code boots, which is exactly when reporting appears.
 
 ### Phase B — the deploy
 
+> **Recovery points confirmed available, 2026-09-21:**
+> the encrypted backup (`…20260922T004424Z.rewrapped.dump.gpg`, 42,550 bytes,
+> mode 600, re-wrapped under a private passphrase after the disclosure
+> incident) and the Neon snapshot on branch `production`, created
+> 2026-09-21 18:07:41 UTC, 32.9 MB, **expiry never** — owner-verified in the
+> Neon console. `premigration.sh` adds a third, fresher one at B1.
+
 - [ ] **B1 · `streakfit-premigration.sh`, immediately before B2.** Fresh
       encrypted backup + proof it parses + the count of what the destructive
       migration discards, in one run from one moment. Its verdict is valid for
       30 minutes; past that, run it again. A backup taken hours earlier is not
       a backup of what the migration is about to change.
-- [ ] **B1a · CHANGE THE START COMMAND — without this nothing delivers.**
+- [x] **B1a · START COMMAND — ✅ DONE 2026-09-22, owner-verified.**
 
       Current live command:
 
@@ -257,6 +264,16 @@ the moment the new code boots, which is exactly when reporting appears.
       `STREAKFIT_RETENTION_SWEEPER=1`. Deploy without it and reporting goes
       live while **no alert is ever delivered** — notices accumulate against a
       24-hour review clock and nobody is told.
+
+      **Live configuration, confirmed in the dashboard:**
+
+          Pre-Deploy : flask db upgrade
+          Start      : STREAKFIT_ENFORCE_DB_HEAD=1 STREAKFIT_RETENTION_SWEEPER=1 gunicorn app:app
+
+      The migration moved into Render's separate Pre-Deploy Command, which is
+      better than the previous combined form: it runs once per deploy instead
+      of on every process start, and a failure aborts the deploy before the new
+      version serves traffic.
 
       **INLINE ON GUNICORN, never as a global environment variable.** The flag
       is read at module import, and `flask db upgrade` imports the app — so as
@@ -287,6 +304,36 @@ because storage is still `memory://`. That is Phase C, not a regression.
 - [ ] **C3 ·** `STREAKFIT_RETENTION_SWEEPER=1` **inline on the start command**
       (as a global it fires during `flask db upgrade` and deadlocks the
       deploy). Then the hourly notify cron.
+
+## The transitional window, and what breaks in it
+
+Between `flask db upgrade` finishing and the new instance taking traffic, the
+**old build serves against the new schema.** This is inherent to migrating
+before switching and is not caused by the Pre-Deploy arrangement — the
+previous combined command had the same window.
+
+It is not harmless here, because one of the twelve migrations is destructive
+in a way the old code notices. `t4u5v6w7x8y9` drops `goals`, `preferences` and
+`notes` from `coach_note` and adds `activities`, `avoid_movements` and
+`session_prefs`. The deployed build reads the three dropped columns.
+
+So for the length of that window, three user-facing actions would fail on the
+old build:
+
+| Route | What a user is doing |
+|---|---|
+| `POST /api/coach` | asking Rickie something |
+| `DELETE /api/coach/memory` | pressing "Forget" |
+| `POST /api/teams/<id>/messages` | posting in a team thread |
+
+It self-heals the moment the new instance serves, and with two users the odds
+of anyone touching those seconds are small — but "small" is a reason to deploy
+at a quiet moment, not a reason to leave it unsaid. **Deploy when nobody is
+mid-conversation with Rickie.**
+
+`DELETE FROM coach_note` in that same migration is not a concern: the audit
+counted **0 rows**, and `premigration.sh` re-counts immediately beforehand so
+the assumption is re-checked rather than inherited.
 
 ## Rollback — tested, and it is a TWO-PART operation
 

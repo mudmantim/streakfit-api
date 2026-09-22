@@ -22,35 +22,44 @@ services:
     runtime: python
     region: ohio            # VERIFIED in the dashboard 2026-09-21
     plan: starter           # VERIFIED in the dashboard 2026-09-21 (paid; does NOT spin down)
-    branch: main            # VERIFIED: auto-deploy On Commit
+    branch: main            # VERIFIED 2026-09-22: Auto-Deploy is OFF (deploys are triggered by hand)
     # Python version comes from runtime.txt (python-3.12.7) — the single source of truth.
     # Not duplicated here to avoid drift.
     buildCommand: pip install -r requirements.txt
-    # ⚠️ THE LIVE START COMMAND IS NOT THIS. Verified in the dashboard 2026-09-21:
+    # RECONCILED 2026-09-22 against the live dashboard, owner-verified. The
+    # service now uses Render's SEPARATE Pre-Deploy Command rather than
+    # chaining the migration onto the start command:
     #
-    #     flask db upgrade && STREAKFIT_ENFORCE_DB_HEAD=1 gunicorn app:app
+    #     Pre-Deploy : flask db upgrade
+    #     Start      : STREAKFIT_ENFORCE_DB_HEAD=1 STREAKFIT_RETENTION_SWEEPER=1 gunicorn app:app
     #
-    # It does NOT set STREAKFIT_RETENTION_SWEEPER. Nothing sweeps and nothing
-    # delivers on its own in production today. (It also does not matter yet:
-    # the LIVE BUILD contains no sweeper at all — that arrives with this
-    # branch.) Adding the flag is a deploy-time decision, not a code change.
+    # This is BETTER than the previous combined form and is the arrangement to
+    # keep. Both flags are inline on the start command only, which is what
+    # makes it safe:
     #
-    # STREAKFIT_ENFORCE_DB_HEAD=1 is inline on gunicorn ONLY — as a global env
-    # var the boot guard would fire during `flask db upgrade` and deadlock the
-    # deploy. STREAKFIT_RETENTION_SWEEPER=1 must be inline for the same reason.
+    #   * Both are read at MODULE IMPORT, and `flask db upgrade` imports the
+    #     app. As global environment variables the boot guard would fire during
+    #     the migration and deadlock the deploy, and the retention sweeper
+    #     would start deleting rows against a schema in the middle of changing.
+    #     Scoping them to the start command makes both impossible.
+    #   * The Pre-Deploy command therefore runs with neither set, which is
+    #     exactly right for a migration step.
     #
-    # RECOMMENDED CHANGE, requiring Tim's approval (see
-    # docs/operations/notification-rollout.md §3): move `flask db upgrade` out
-    # of the start command and into Render's Pre-Deploy Command, which is
-    # currently empty. In the start command it re-runs on every process start
-    # — restarts, scaling, crash recovery — where it is a no-op at best. As a
-    # pre-deploy step it runs ONCE per deploy and a failure aborts the deploy
-    # before the new version serves traffic, which is what "migrations are an
-    # explicit deploy step" in CLAUDE.md actually asks for.
+    # STREAKFIT_RETENTION_SWEEPER=1 is not optional for this release.
+    # `_deliver_pending_notices` has two call sites — the CLI and the thread
+    # that flag starts. Without it the reporting UI goes live and no alert is
+    # ever delivered.
     #
-    #   Pre-Deploy Command: flask db upgrade
-    #   Start Command:      STREAKFIT_ENFORCE_DB_HEAD=1 STREAKFIT_RETENTION_SWEEPER=1 gunicorn app:app
-    startCommand: flask db upgrade && STREAKFIT_ENFORCE_DB_HEAD=1 STREAKFIT_RETENTION_SWEEPER=1 gunicorn app:app
+    # DONE 2026-09-22 — this was a recommendation and is now the live
+    # configuration, owner-verified in the dashboard. `flask db upgrade` moved
+    # out of the start command into Render's Pre-Deploy Command. In the start
+    # command it re-ran on every process start — restarts, scaling, crash
+    # recovery — where it was a no-op at best. As a pre-deploy step it runs
+    # ONCE per deploy and a failure aborts the deploy before the new version
+    # serves traffic, which is what "migrations are an explicit deploy step"
+    # in CLAUDE.md actually asks for.
+    preDeployCommand: flask db upgrade
+    startCommand: STREAKFIT_ENFORCE_DB_HEAD=1 STREAKFIT_RETENTION_SWEEPER=1 gunicorn app:app
     healthCheckPath: /health
     envVars:
       # Secrets — set in the dashboard, never committed. `sync: false` = Render won't
