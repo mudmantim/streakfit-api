@@ -91,9 +91,38 @@ def test_an_action_requires_an_audit_note():
 
 def test_an_action_is_confirmed_before_it_is_sent():
     """Several dispositions apply real sanctions to a real account, and a
-    mis-click in a select is easy at speed."""
+    mis-click in a select is easy at speed.
+
+    The confirmation is IN THE PAGE, not window.confirm(). A native dialog
+    blocks the renderer, so it cannot be driven in a headless browser — the one
+    safeguard between a mis-click and a real sanction would have been the one
+    thing never tested. It also cannot be styled and reads badly on a phone.
+    """
     js = _inline_js()
-    assert 'window.confirm(' in js, "a disposition is applied without confirmation"
+    assert 'window.confirm(' not in js.replace('// Not window.confirm()', ''), (
+        "a blocking native dialog is back; it cannot be browser-tested")
+    assert 'armedAction' in js, "there is no two-step confirmation"
+    assert 'cancelModerationAction' in js, "a confirmation cannot be cancelled"
+
+
+def test_cancelling_does_not_submit_anything():
+    js = _inline_js()
+    m = re.search(r'function cancelModerationAction\(\)\s*\{(.*?)\n  \}', js, re.S)
+    assert m, 'cancelModerationAction not found'
+    body = m.group(1)
+    assert 'fetch(' not in body, "cancelling issues a request"
+    assert 'armedAction = null' in body, "cancelling leaves the action armed"
+
+
+def test_a_pending_confirmation_cannot_outlive_its_report():
+    """Re-rendering the panel must disarm, or a confirmation shown for one
+    report could be applied to whatever is displayed next."""
+    js = _inline_js()
+    m = re.search(r'function renderModerationReport\(', js)
+    assert m, 'renderModerationReport not found'
+    after = js[m.start():m.start() + 300]
+    assert 'armedAction = null' in after, (
+        "re-rendering does not clear a pending confirmation")
 
 
 def test_the_result_is_verified_by_re_reading_the_report():

@@ -1915,6 +1915,138 @@ def check_page_is_clean(b: Browser, base: str, app) -> None:
           f"too small: {small_list}")
 
 
+def check_moderation_operator_can_close_a_report(b: Browser, base: str, app) -> None:
+    """The workflow that did not exist until 2026-09-22.
+
+    The moderation API was complete, and /admin called six endpoints — none of
+    them the reports API. A child-safety alert said "Open <url>/admin to review
+    it" and led to a page where nothing could be done. Every API test passed.
+
+    So this drives the real page: load the queue, open a report, arm a
+    disposition, cancel it, arm it again, confirm, and read back the status the
+    page then displays. A synthetic report created locally, never production.
+    """
+    import uuid as _uuid
+
+    secret = os.environ.get("ADMIN_SECRET") or "uicheck-local-secret"
+    os.environ["ADMIN_SECRET"] = secret
+
+    # A local synthetic report, written straight to the local database.
+    with app.app_context():
+        from app import db, Report, User
+        reporter = User.query.filter(User.username.like("uicheck_mod_%")).first()
+        if reporter is None:
+            _u, _t = make_user(app, "mod_reporter")
+            reporter = User.query.filter_by(username=_u).first()
+        pid = _uuid.uuid4().hex
+        r = Report(public_id=pid, reporter_user_id=reporter.id,
+                   reported_user_id=reporter.id, category="child_safety",
+                   subject_type="user", status="pending",
+                   created_at=dt.datetime.utcnow(),
+                   due_at=dt.datetime.utcnow() + dt.timedelta(hours=24))
+        db.session.add(r)
+        db.session.commit()
+
+    b.goto(f"{base}/admin", wait=2.0)
+
+    # 11. Unauthorized: the queue must hold nothing before a secret is entered.
+    pre = b.js("document.getElementById('moderation-queue').textContent")
+    check(pid[:12] not in str(pre),
+          "unauthenticated /admin does not disclose report ids",
+          f"queue text was: {str(pre)[:120]}")
+
+    # 2. Authenticate through the existing mechanism. The value is typed into
+    # the page, never placed in a URL where it would reach a log.
+    b.js("document.getElementById('secret-input').value = "
+         + json.dumps(secret) + "; loadAll();")
+    time.sleep(2.5)
+
+    # 1 & 3. The queue is visible and lists the report.
+    qtext = str(b.js("document.getElementById('moderation-queue').textContent"))
+    check("Moderation" in str(b.js("document.body.textContent")),
+          "the moderation section is present on /admin")
+    check(pid[:12] in qtext, "the pending report appears in the queue",
+          f"queue text: {qtext[:200]}")
+    check("OVERDUE" in qtext or "due in" in qtext,
+          "the queue shows a deadline")
+
+    # 3. Open it.
+    b.js("openModerationReport(" + json.dumps(pid) + ")")
+    time.sleep(1.5)
+    detail = str(b.js("document.getElementById('moderation-detail').textContent"))
+
+    # 4. Details, urgency, evidence and history render.
+    check("child_safety" in detail, "the report's category is shown")
+    check("pending" in detail, "the report's status is shown")
+    check("No actions taken yet" in detail or "dismiss" in detail,
+          "the action history is shown")
+    check("evidence" in detail.lower(), "evidence state is shown")
+
+    # 5. Choose a disposition and write a note.
+    b.js("document.getElementById('mod-action-select').value = 'dismiss';"
+         "document.getElementById('mod-action-note').value = "
+         "'uicheck synthetic — local only';")
+
+    # 6. Arm, then CANCEL. Nothing must be submitted.
+    b.js("submitModerationAction(" + json.dumps(pid) + ")")
+    time.sleep(0.4)
+    armed = str(b.js("document.getElementById('mod-feedback').textContent"))
+    check("Confirm" in armed, "arming shows a confirmation step", armed[:120])
+    b.js("cancelModerationAction()")
+    time.sleep(0.4)
+    with app.app_context():
+        from app import Report as R2
+        still = R2.query.filter_by(public_id=pid).first()
+        check(still.status == "pending",
+              "cancelling the confirmation does NOT submit an action",
+              f"status became {still.status}")
+
+    # 7 & 8. Arm again, confirm, and read what the page then shows.
+    b.js("submitModerationAction(" + json.dumps(pid) + ")")
+    time.sleep(0.4)
+    b.js("submitModerationAction(" + json.dumps(pid) + ")")
+    time.sleep(2.0)
+    after = str(b.js("document.getElementById('moderation-detail').textContent"))
+    check("closed" in after, "the page shows the report as closed after the action",
+          after[:200])
+    check("dismissed" in after, "the page shows the disposition it applied")
+    check("uicheck synthetic" in after,
+          "the audit note appears in the action history the page re-read")
+
+    with app.app_context():
+        from app import Report as R3
+        final = R3.query.filter_by(public_id=pid).first()
+        check(final.status == "closed" and final.disposition == "dismissed",
+              "the database agrees with what the page displayed",
+              f"db: status={final.status} disposition={final.disposition}")
+
+    # 9. Filters.
+    for status in ("closed", "all"):
+        b.js(f"loadModerationQueue(null, {json.dumps(status)})")
+        time.sleep(1.4)
+        t = str(b.js("document.getElementById('moderation-queue').textContent"))
+        check(pid[:12] in t, f"the '{status}' filter lists the closed report",
+              t[:160])
+
+    # 10. Usable at phone width: controls visible, tappable, no sideways scroll.
+    b.js("loadModerationQueue(null, 'pending')")
+    time.sleep(1.2)
+    metrics = b.js(
+        "(function(){var s=document.documentElement.scrollWidth,"
+        "i=window.innerWidth,"
+        "f=document.querySelector('.mod-filter'),"
+        "r=f?f.getBoundingClientRect():null;"
+        "return {scroll:s, inner:i, h:r?r.height:0, vis:!!(r&&r.width>0)};})()")
+    check(bool(metrics and metrics.get("vis")),
+          "the queue filters are visible at phone width")
+    check(bool(metrics and metrics.get("h", 0) >= 40),
+          "queue controls are a usable size at phone width",
+          f"height was {metrics.get('h') if metrics else '?'}px")
+    check(bool(metrics and metrics["scroll"] <= metrics["inner"] + 2),
+          "the moderation section does not force horizontal page scroll",
+          f"scrollWidth {metrics.get('scroll')} vs innerWidth {metrics.get('inner')}")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("base_url", nargs="?", default=None)
@@ -1998,6 +2130,7 @@ def main() -> int:
         check_team_witness(browser, base, flask_app)
         check_photo_sharing(browser, base, flask_app)
         check_side_quests_still_work(browser, base, flask_app)
+        check_moderation_operator_can_close_a_report(browser, base, flask_app)
         check_step_up_is_offered_not_imposed(browser, base, flask_app)
         check_panes_and_solo_first(browser, base, flask_app)
         check_brain_boost_can_be_answered(browser, base, flask_app)
