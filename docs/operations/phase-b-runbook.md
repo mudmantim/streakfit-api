@@ -282,6 +282,41 @@ Steps 1–8 are configuration. This is delivery:
 A `notification_run` row and a green self-check are not an email in an inbox.
 Only a person looking in a mailbox closes this, exactly as at A3.
 
+## Two findings from the final readiness review, 2026-09-22
+
+### The evidence-key check cannot name the key when there are no images
+
+`moderation.evidence_key` compares each stored `photo_evidence.key_id` against
+the configured key's fingerprint. Production has **zero sealed images**, so at
+Stage 6 it reports `PASS — 0 sealed image(s), all under the current key`
+**without ever emitting which key that is.**
+
+It is not a false green: with no key configured at all it correctly reports
+UNKNOWN. So PASS does prove *a* usable key is present. What it cannot prove
+from outside is that the key is `235efc374d3363a7`, the one whose passphrase
+is held.
+
+**What assures that today is provenance, not a check.** The value pasted into
+Render came straight out of the sealed key file via
+`streakfit-clip-secret.sh evidence-key`, so by construction it is that key.
+The residual risk is a paste into the wrong field, which Stage 6 cannot catch.
+
+**Proposed one-line improvement, requiring approval:** emit `current_key_id`
+in the check's `observed` text. It is non-secret by construction — a truncated
+HMAC, and the code says so — and would let Stage 6 confirm the fingerprint
+from outside with nothing exposed. Not implemented; this review is read-only.
+
+### Key Value can be created BEFORE Phase B
+
+The deployed build reacts to `RATELIMIT_STORAGE_URI`, **not** to a Key Value
+instance existing. Creating the instance has no effect on the old application;
+only setting the variable does, and that stays forbidden until the new build
+is live.
+
+So C1 can be done in advance, shrinking the per-worker rate-limiting window
+from "Phase B plus a provisioning trip" to **one redeploy**. Free plan, no
+cost.
+
 ## Stage 7 — Failure procedure, per stage
 
 | Stage | If it fails | Reversible? |
@@ -395,16 +430,27 @@ after suspending; the migration reports anything other than 12 upgrades to
 ## Remaining risks
 
 1. **Resume behaviour measured on Free, assumed for paid.** A Free-plan probe
-   showed resume restores the existing build without rebuilding. The paid
-   Starter instance is untested and may differ. Both possibilities are safe;
-   they differ only in whether one extra deploy cycle is needed.
-7. **Deploy-while-suspended is untested** — determines whether `fa92abd`
-   briefly crash-loops or never starts at all. Cheap to settle on the probe.
-2. **Resume-vs-deploy ordering unverified** — may briefly show the old build
-   crash-looping; that is the guard working. Confirm live at Stage 5.
-3. **Migration duration on real data is an estimate**, not a measurement. The
-   rehearsal ran against an empty database.
-4. **No lossless rollback after user data exists.** Structural, not fixable.
-5. **Rate limits stay per-worker between B and C** — keep the gap short.
+   showed twice that resume restores the existing build without rebuilding.
+   The paid Starter instance is untested and Render's own 2023 feature request
+   implies the opposite. Both possibilities are safe; they differ only in
+   whether one extra deploy cycle is needed, and the procedure carries both.
+
+2. **Migration duration on real data is an estimate**, not a measurement. The
+   rehearsal ran against an empty database. This is the least certain number
+   in the runbook.
+
+3. **No lossless rollback once user data exists.** Structural, not fixable.
+
+4. **Rate limits stay per-worker between B and C.** Minimised by provisioning
+   Key Value in advance — see the review findings above.
+
+5. **The evidence-key fingerprint cannot be confirmed from outside** while
+   there are zero sealed images. Provenance covers it; a check does not.
+
 6. **`onboarding@resend.dev` reaches only the account owner.** A branded
    sender needs DNS on `streakfit.pro`, separately approved.
+
+**Settled by measurement, no longer risks:** deploy-while-suspended (not
+possible — control greyed out, so the crash-loop is expected rather than
+merely possible); the Pre-Deploy command being a no-op at head, and the new
+start command booting (both observed in production on 2026-09-22).
