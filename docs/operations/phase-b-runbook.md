@@ -189,14 +189,32 @@ created — so there is no risk of an unexpected second migration either way.
 **After Stage 4's migration, go straight to deploying the new commit. Do not
 treat Resume as the step that brings the service back.**
 
-One unknown remains: **whether a manual deploy can be triggered while a
-service is suspended.** Untested, and cheap to test on the same probe.
+**MEASURED 2026-09-22: a manual deploy CANNOT be started while suspended.**
+The Manual Deploy control is greyed out in the dashboard for a suspended
+service. Precisely: *unavailable through the dashboard* — the REST API may
+still accept it, which is untested and academic while the dashboard is the
+tool in use.
 
-- **If it can:** suspend → migrate → deploy new commit → service returns on the
-  new build, and `fa92abd` never starts at all. Cleanest.
-- **If it cannot:** suspend → migrate → resume (old build crash-loops, service
-  still down) → immediately trigger "Deploy latest commit". Correct, with a
-  few alarming minutes in between.
+So the order is fixed, with no remaining unknowns:
+
+```
+suspend → migrate → resume → manual deploy
+```
+
+**Expect `fa92abd` to come back on resume and crash-loop** until the manual
+deploy lands. Its boot guard sees `47f7dc9962e3` against its own head
+`q1r2s3t4u5v6` and exits. That is the guard working, inside a planned outage
+where nothing was serving anyway — but it will look like a broken service for
+a few minutes, so do not react to it.
+
+**Both paid behaviours are still carried, because the probe was Free-plan:**
+
+| If paid resume… | Then | Response |
+|---|---|---|
+| restores the existing build *(observed twice on Free)* | `fa92abd` returns and crash-loops | trigger "Deploy latest commit" |
+| rebuilds from branch HEAD *(Render's 2023 feature request implies this)* | the intended commit builds; Pre-Deploy migration is a no-op | nothing — verify and continue |
+
+Do not let the Free-plan result narrow the recovery procedure to one branch.
 
 Order within the deploy, which is already configured and correct:
 
@@ -208,6 +226,29 @@ Start      : STREAKFIT_ENFORCE_DB_HEAD=1 STREAKFIT_RETENTION_SWEEPER=1 gunicorn 
 Both flags are inline on the start command only, so the Pre-Deploy migration
 runs with neither — the boot guard cannot deadlock it and the sweeper cannot
 start mid-migration.
+
+## Proven in production by an accidental redeploy, 2026-09-22
+
+`streakfit-api` was manually redeployed on its existing commit `fa92abd` while
+the probe experiment was running — the dashboard was on the wrong service.
+Production was verified unchanged afterwards: same commit, 13 migrations at
+`q1r2s3t4u5v6`, `/health` 200, roll-up PASS, moderation surface still 404.
+
+It cost nothing and incidentally converted three assumptions into
+observations:
+
+- **The Pre-Deploy Command runs and is a genuine no-op at head.** Asserted in
+  this runbook; now seen in production.
+- **The new Start Command boots.**
+  `STREAKFIT_ENFORCE_DB_HEAD=1 STREAKFIT_RETENTION_SWEEPER=1 gunicorn app:app`
+  had never actually run anywhere. It came up clean and the guard passed.
+- **`STREAKFIT_RETENTION_SWEEPER=1` is inert on `fa92abd`**, as predicted from
+  it appearing zero times in that build.
+
+**Operational lesson, worth more than the finding:** two services, one Manual
+Deploy button. Every dashboard instruction in this runbook names its service,
+and the reader should confirm the service name in the page header before
+clicking anything.
 
 ## Stage 6 — Verification, in this order
 
