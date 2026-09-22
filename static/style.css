@@ -63,6 +63,37 @@
     --t-header-border:   none;
     --t-auth-bg:         linear-gradient(150deg, #e0e7ff 0%, #f3e8ff 100%);
     --t-body-bg:         #f3f4f6;
+    /* Ambient page wash — painted by `body::before`, NOT by --t-body-bg.
+     *
+     * The page was a flat near-white field with white cards floating in it,
+     * and the header's indigo→violet ended in a hard seam against nothing.
+     * At desktop width the 680px column leaves ~440px of dead grey either
+     * side, which is what read as "plain white".
+     *
+     * This value is the NARROW one, and it is weak on purpose. The wide
+     * version lives in a min-width query further down.
+     *
+     * The tempting composition is: put the strong colour in the left and
+     * right margins, because a 680px centred column means those margins can
+     * never contain text. That is true on a desktop and false on a phone,
+     * where the column IS the screen and a 620px-radius stop at the left edge
+     * washes over everything. Measured, on a 320px viewport, the strong
+     * version took `.today-streak-none` from 4.39:1 to 3.39:1 — and 4.39 was
+     * already under AA before any of this, which is fixed separately below.
+     *
+     * So the rule is width-conditional, and the reason is structural rather
+     * than aesthetic: a gutter has to actually exist before it is safe to put
+     * colour in it. Body text on a card never sits on this at any width. */
+    --t-body-wash:
+        radial-gradient(1200px 380px at  50% -16%, rgba( 99,102,241,.13), transparent 72%),
+        radial-gradient( 620px 760px at  -6%  28%, rgba( 56,189,248,.12), transparent 66%),
+        radial-gradient( 660px 800px at 106%  40%, rgba(124, 58,237,.11), transparent 66%),
+        radial-gradient( 900px 500px at  50% 112%, rgba(245,158, 11,.10), transparent 70%);
+    --t-body-wash-wide:
+        radial-gradient(1200px 420px at  50% -14%, rgba( 99,102,241,.18), transparent 72%),
+        radial-gradient( 620px 760px at  -6%  28%, rgba( 56,189,248,.26), transparent 66%),
+        radial-gradient( 660px 800px at 106%  40%, rgba(124, 58,237,.24), transparent 66%),
+        radial-gradient( 900px 500px at  50% 112%, rgba(245,158, 11,.14), transparent 70%);
     --t-logo-color:      #3730a3;
     --t-daily-card-bg:   linear-gradient(180deg, #fafbff 0%, #fff 60%);
     --t-primary:         #4f46e5;
@@ -80,6 +111,16 @@ body.theme-bright {
     --t-header-bg:       linear-gradient(135deg, #0891b2 0%, #7c3aed 100%);
     --t-auth-bg:         linear-gradient(150deg, #cffafe 0%, #fef9c3 100%);
     --t-body-bg:         #fff7ed;
+    --t-body-wash:
+        radial-gradient(1200px 380px at  50% -16%, rgba(  8,145,178,.13), transparent 72%),
+        radial-gradient( 620px 760px at  -6%  28%, rgba(250,204, 21,.13), transparent 66%),
+        radial-gradient( 660px 800px at 106%  40%, rgba(124, 58,237,.10), transparent 66%),
+        radial-gradient( 900px 500px at  50% 112%, rgba(249,115, 22,.09), transparent 70%);
+    --t-body-wash-wide:
+        radial-gradient(1200px 420px at  50% -14%, rgba(  8,145,178,.18), transparent 72%),
+        radial-gradient( 620px 760px at  -6%  28%, rgba(250,204, 21,.26), transparent 66%),
+        radial-gradient( 660px 800px at 106%  40%, rgba(124, 58,237,.20), transparent 66%),
+        radial-gradient( 900px 500px at  50% 112%, rgba(249,115, 22,.13), transparent 70%);
     --t-logo-color:      #164e63;
     --t-daily-card-bg:   linear-gradient(180deg, #ecfeff 0%, #fff 60%);
     --t-primary:         #0891b2;
@@ -97,6 +138,11 @@ body.theme-classic {
     --t-header-border:   1px solid #e5e7eb;
     --t-auth-bg:         #f9fafb;
     --t-body-bg:         #f9fafb;
+    /* Classic stays flat. It exists for whoever wants the quiet version, and
+     * giving it a wash too would leave the theme picker with three colourful
+     * choices and no plain one. */
+    --t-body-wash:       none;
+    --t-body-wash-wide:  none;
     --t-logo-color:      #4f46e5;
     --t-daily-card-bg:   #ffffff;
     --t-primary:         #4f46e5;
@@ -120,6 +166,27 @@ body {
     min-height: 100vh;
     -webkit-font-smoothing: antialiased;
     overscroll-behavior-y: none;   /* prevent elastic bounce on iOS/Android */
+}
+
+/* A fixed layer rather than `background-attachment: fixed` on body itself.
+ * Both look identical; a fixed background-attachment forces a full-page
+ * repaint on every scroll frame, and this page already animates Rickie. A
+ * fixed pseudo-element gets its own compositor layer and costs nothing to
+ * scroll past. `pointer-events: none` so it can never eat a tap. */
+body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    background: var(--t-body-wash, none);
+    pointer-events: none;
+}
+
+/* 900px, not 680px: the column is 680 wide, so the margins only get wide
+   enough to be worth colouring somewhat past that. Below this the page keeps
+   the weak wash and every contrast ratio stays where it was. */
+@media (min-width: 900px) {
+    body::before { background: var(--t-body-wash-wide, var(--t-body-wash, none)); }
 }
 
 /* ── Auth view ────────────────────────────────────────────────────────────── */
@@ -1523,19 +1590,6 @@ input:focus {
     border-left: 4px solid var(--indigo-pale);
 }
 
-.team-rickie-card {
-    border-left-color: var(--amber);
-}
-
-.team-rickie-card-tappable {
-    cursor: pointer;
-    transition: box-shadow .15s;
-}
-.team-rickie-card-tappable:hover,
-.team-rickie-card-tappable:focus-visible {
-    box-shadow: var(--shadow-md);
-    outline: none;
-}
 
 .team-card-header {
     display: flex;
@@ -1551,12 +1605,6 @@ input:focus {
     margin: 0;
 }
 
-.team-rickie-line {
-    font-size: .8rem;
-    font-style: italic;
-    color: var(--gray-500);
-    margin: .15rem 0 0;
-}
 
 .team-card-meta {
     font-size: .8rem;
@@ -3479,7 +3527,16 @@ body.theme-classic .theme-btn.active { background: rgba(79,70,229,.2); }
     margin: var(--space-1) 0 0;
     font-size: var(--text-sm);
     font-weight: 600;
-    color: var(--gray-500);
+    /* gray-600, not gray-500. This is the only small text in the app that sits
+       on the page background instead of on a card, and at 13.12px/600 it is
+       "normal" text by WCAG — bold does not reach the large-text exemption
+       until 18.66px. On the flat #f3f4f6 it measured 4.39:1, already under the
+       4.5:1 AA threshold, which nothing had caught because nothing measures
+       the page background.
+       Found while checking that the new wash had not made anything worse. It
+       had — and it was already failing underneath, which is the more useful
+       half of the finding. */
+    color: var(--gray-600);
 }
 
 /* ── Surface hierarchy ─────────────────────────────────────────────────── */
@@ -3991,10 +4048,42 @@ body.theme-classic .theme-btn.active { background: rgba(79,70,229,.2); }
     position: absolute;
     top: 0;
     left: 0;
-    width: 56px;
-    height: 56px;
+    /* His size is set HERE and nowhere else — rickie-roam.js reads it back
+     * off the element, so these two lines are the whole decision.
+     *
+     * 64px on a phone, and that ceiling is measured rather than chosen.
+     * Rickie is only allowed to stand where nothing else is, and on a narrow
+     * screen the 680px content column IS the screen: the only clear space is
+     * the ~16px side padding and the gaps between cards. Driving the engine's
+     * own placement 20 times per size, against every visible control and
+     * every piece of text (scripts/uicheck.py):
+     *
+     *     320px wide    56px clear    64px clear
+     *     390px wide    64px clear    72px OBSTRUCTS 20/20
+     *     600px wide   112px OBSTRUCTS 20/20
+     *     680px wide   112px clear
+     *
+     * 72px at 390 is the row worth keeping: an earlier 10-placement run
+     * called it clear and 20 placements found it always obstructing, so the
+     * real ceiling there is 64 and anything above it is a coin toss, not a
+     * margin.
+     *
+     * `pointer-events: none` above means an obstruction is never a dead
+     * button — a tap passes through him to whatever is underneath. What he
+     * can do is COVER TEXT, which this project has shipped before, and which
+     * is what those numbers measure. */
+    width: 64px;
+    height: 64px;
     pointer-events: none;
     will-change: transform;
+}
+
+/* Twice the original 56, on a viewport with real margins to stand in. Same
+   900px threshold as the background wash, and for the same reason: that is
+   where the centred 680px column stops being the whole screen. Measured clear
+   from 680px up; 900 keeps a deliberate margin over the 600px that failed. */
+@media (min-width: 900px) {
+    .rickie-roam { width: 112px; height: 112px; }
 }
 
 .rickie-roam-img {

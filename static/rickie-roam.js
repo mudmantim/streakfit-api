@@ -295,6 +295,25 @@
         img.src = POSES[name] || POSES.neutral;
     }
 
+    /* Rickie's size, READ FROM THE ELEMENT — never a literal here.
+     *
+     * This was `var SIZE = 56;`, a copy of the number in style.css, with a
+     * comment on each side telling the next person to change both. That is
+     * not a mechanism, it is a request. Every bounds, clamp and overlap
+     * calculation below uses this value, so the moment the two copies
+     * disagree he is clamped to the wrong edge and judged to overlap the
+     * wrong things — placed for a character that is not the one on screen.
+     *
+     * Reading `offsetWidth` makes the stylesheet the single source of truth,
+     * which in turn is what lets his size be RESPONSIVE: style.css can give
+     * him one size on a phone and another where there is room, and this file
+     * needs to know nothing about it. A duplicated constant could not have
+     * expressed that at all.
+     *
+     * Refreshed in `place()`, which already runs on init and on every resize,
+     * so it tracks a media-query change for free and costs one layout read on
+     * events that were relayout anyway.
+     */
     var SIZE = 56;
 
     function stage() {
@@ -303,6 +322,7 @@
 
     function place() {
         if (!el) return;
+        SIZE = el.offsetWidth || SIZE;
         var s = stage();
         /* Same clamp as isClear uses, or the collision test and the render
          * would disagree about where he is. */

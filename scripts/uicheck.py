@@ -1279,9 +1279,25 @@ def check_display_name_can_be_set_changed_and_cleared(b: Browser, base: str, app
           helped)
 
     def set_name(value):
+        """Type it, then press Save — the way a person does it.
+
+        This used to type the value and dispatch a `change` event, because the
+        field once saved on change. The Save button that replaced that
+        behaviour landed without this file being touched, so every assertion
+        below went on typing into a box nothing was listening to. The feature
+        worked the whole time; six checks reported it broken, which is the
+        cheaper direction to fail but still a check measuring the wrong thing.
+
+        Clicking the real button is what keeps them honest: if the control is
+        renamed or unwired, `set_name` raises here rather than quietly
+        producing a page that never saved.
+        """
         b.js("(()=>{const i=document.getElementById('display-name-input');"
              f" i.value={json.dumps(value)};"
-             " i.dispatchEvent(new Event('change',{bubbles:true})); return 1;})()")
+             " i.dispatchEvent(new Event('input',{bubbles:true}));"
+             " const btn=document.getElementById('display-name-save');"
+             " if(!btn) throw new Error('no #display-name-save button to press');"
+             " btn.click(); return 1;})()")
         time.sleep(1.6)
 
     # SET
@@ -1471,11 +1487,17 @@ def _spots_he_may_stand_in_that_are_not_clear(b: Browser, tries: int = 8):
     blocked = []
     b.js("RickieRoam.setPaused(true)")   # he must hold still to be measured
     for _ in range(tries):
+        # `e.offsetWidth`, never a literal. This was `56`, copied from the CSS
+        # of the day. The moment Rickie was resized it placed him at the old
+        # size, measured overlap at that wrong position, and would have
+        # reported clear — the check surviving the change it exists to police.
+        # A harness that hardcodes the number under test cannot see it move.
         b.js("""(()=>{const s=RickieRoam._somewhereClear(); if(!s) return 0;
           const e=document.querySelector('.rickie-roam');
           const st=e.parentNode.getBoundingClientRect();
-          e.style.transform='translate('+Math.round(s.x*(st.width-56))+'px,'+
-            Math.round(s.y*(st.height-56))+'px)'; return 1;})()""")
+          const size=e.offsetWidth;
+          e.style.transform='translate('+Math.round(s.x*(st.width-size))+'px,'+
+            Math.round(s.y*(st.height-size))+'px)'; return 1;})()""")
         hit = b.js("""(()=>{const r=document.querySelector('.rickie-roam').getBoundingClientRect();
           const band=document.getElementById('rickie-roam-band');
           const bad=[];

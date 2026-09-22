@@ -1,7 +1,10 @@
 """R2.3 Campfire MVP — covers the verification list from the brief: no-teams
 user completes with no errors, one-team user gets +1, multi-team user gets
-+1 to each, repeated completion doesn't double-count, and Team Rickie never
-gets touched (it has no team_campfire row to increment in the first place).
++1 to each, and repeated completion doesn't double-count.
+
+The original brief also listed "Team Rickie never gets touched". That card was
+removed in Sept 2026 and never had a team_campfire row to touch, so there is
+nothing left to assert — the no-teams case below is now the whole of it.
 """
 from conftest import register_and_login, auth_headers
 

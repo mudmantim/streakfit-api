@@ -355,11 +355,18 @@ function _renderWeekStrip() {
 
 
 // ── Teams (R2.2 Team List UI) ────────────────────────────────────────────────
-// Read-only display of R2.1's team data. No create/join actions wired here —
-// this sprint is "make existing team data visible," not "add new interactive
-// capability." Team Rickie is UI-only throughout: no API call, no fake team
-// id, no campfire, no membership row — it renders from data the dashboard
-// already has (currentUser, currentRickieExpression).
+// Read-only display of R2.1's team data, plus the create/join entry points.
+//
+// A "Team Rickie" card used to render above the real teams: a card styled
+// like a team that was not one — no API call, no team id, no campfire, no
+// membership row. It existed so a brand-new user's Teams tab did not look
+// empty. Removed by owner decision (Option C, Sept 2026), because a card that
+// looks like a team you are in, for a team that does not exist, is a claim the
+// product cannot keep — and Rickie describing himself as "the starter team
+// everybody can be part of" made the claim explicit.
+//
+// Rickie himself is untouched. He is a PERSONAL coach, reachable from the
+// mission card, the insight card and the Coach panel, none of which are here.
 
 var CAMPFIRE_STAGE_EMOJI = {
     'Kindling':    '✨',
@@ -425,82 +432,24 @@ function renderTeamsSection(state) {
         return;
     }
 
-    // Team Rickie always renders first — present whether or not any real
-    // teams exist yet, same as day one.
-    container.appendChild(_buildTeamRickieCard());
-
     var teams = state.teams || [];
+    _setTeamsSubtitle(teams.length > 0);
     teams.forEach(function (team) {
         container.appendChild(_buildTeamCard(team));
     });
     container.appendChild(_buildTeamActionsCard(teams.length > 0));
 }
 
-function _buildTeamRickieCard() {
-    var card = document.createElement('div');
-    card.className = 'team-card team-rickie-card team-rickie-card-tappable';
-
-    // TEAM_UI_BASELINE Screen 1: Team Rickie's one action is opening the
-    // existing Coach panel -- no chat table of its own, no fake persistence,
-    // just the same Coach conversation every other Rickie entry point uses.
-    card.setAttribute('role', 'button');
-    card.setAttribute('tabindex', '0');
-    card.setAttribute('aria-label', 'Open Rickie chat');
-    card.addEventListener('click', function () { openCoach({ type: 'general' }); });
-    card.addEventListener('keydown', function (e) {
-        if (e.key === 'Enter' || e.key === ' ') {
-            e.preventDefault();
-            openCoach({ type: 'general' });
-        }
-    });
-
-    var header = document.createElement('div');
-    header.className = 'team-card-header';
-
-    var avatar = document.createElement('img');
-    avatar.className = 'rickie-avatar-sm';
-    avatar.src = RICKIE_EXPRESSION_SVG[currentRickieExpression] || RICKIE_EXPRESSION_SVG.neutral;
-    avatar.alt = '';
-
-    var titleWrap = document.createElement('div');
-    var title = document.createElement('p');
-    title.className = 'team-card-title';
-    title.textContent = '🦝 Team Rickie';
-    titleWrap.appendChild(title);
-
-    if (_rickieMode() !== 'minimal') {
-        var line = document.createElement('p');
-        line.className = 'team-rickie-line';
-        line.textContent = _pickRickieLine('general');
-        titleWrap.appendChild(line);
-    }
-
-    header.appendChild(avatar);
-    header.appendChild(titleWrap);
-    card.appendChild(header);
-
-    // Team Rickie has no Campfire — this shows the user's own Journey stats
-    // in that visual slot instead, per TEAM_SYSTEM_BASELINE Section 1.
-    var streak = (currentUser && currentUser.current_streak) || 0;
-    var stats = document.createElement('p');
-    stats.className = 'team-card-stats';
-    // "days together" reads oddly for someone with no team — Rickie IS the
-    // company here, so he counts the days he has been along for.
-    stats.textContent = '\uD83D\uDD25 ' + streak + (streak === 1 ? ' day' : ' days')
-        + ' with Rickie';
-    card.appendChild(stats);
-
-    return card;
-}
-
-// Team Rickie's avatar/streak are derived from currentUser and
-// currentRickieExpression, both of which change after every completion —
-// re-rendered wherever renderJourneyCard() is (same freshness dependency),
-// without re-fetching the real teams list, which nothing here changed.
-function _refreshTeamRickieCard() {
-    var existing = document.querySelector('.team-rickie-card');
-    if (!existing) return;
-    existing.replaceWith(_buildTeamRickieCard());
+// "Who you're building this with" is true of a populated tab and a small lie
+// on an empty one — it sat directly above "Teams are optional" and asserted
+// there were people, which is the same shape of claim the Team Rickie card
+// was making. The heading has to agree with the card underneath it.
+function _setTeamsSubtitle(hasTeams) {
+    var el = document.getElementById('teams-subtitle');
+    if (!el) return;
+    el.textContent = hasTeams
+        ? "Who you're building this with"
+        : 'Optional — StreakFit works on your own';
 }
 
 // R2.3 Campfire MVP: patches already-rendered team cards in place from the
@@ -620,21 +569,31 @@ function _buildTeamCard(team) {
 // zero-teams empty state and the "add another team" case once a user
 // already has teams, so there's exactly one implementation of this logic,
 // not two.
+// With no teams this is the WHOLE Teams tab, so it has to stand on its own —
+// it used to sit under a Team Rickie card that made the tab look populated.
+//
+// It says teams are optional in as many words. That is not softening: the
+// product is solo-first by design, the Team tab is hidden until somebody has
+// a team or asks for one, and a person who reads this and closes it has used
+// StreakFit correctly. An empty state that implies you are missing out is the
+// same mistake as a card for a team nobody is in.
 function _buildTeamActionsCard(hasTeams) {
     var card = document.createElement('div');
     card.className = 'team-card team-empty-card';
 
     var title = document.createElement('p');
     title.className = 'team-card-title';
-    title.textContent = hasTeams ? 'Create or join another team' : 'Create or join a team';
+    title.textContent = hasTeams ? 'Create or join another team' : 'Teams are optional';
     card.appendChild(title);
 
     if (!hasTeams) {
         var sub = document.createElement('p');
         sub.className = 'team-card-meta';
         sub.textContent = (_rickieMode() === 'minimal')
-            ? 'Build a shared Campfire with people you know.'
-            : "Bring people along — a family, a few friends, whoever you want cheering you on.";
+            ? 'Your streak is yours either way. A team just lets people you know see it.'
+            : "Your streak is yours either way — this works perfectly well on your own. "
+              + "A team is for people you already know: they see that you showed up, "
+              + "and you see that they did.";
         card.appendChild(sub);
     }
 
@@ -877,12 +836,10 @@ function _showTeamCreatedSuccess(team) {
     btnRow.appendChild(doneBtn);
     card.appendChild(btnRow);
 
-    var rickieCard = container.querySelector('.team-rickie-card');
-    if (rickieCard) {
-        rickieCard.insertAdjacentElement('afterend', card);
-    } else {
-        container.insertBefore(card, container.firstChild);
-    }
+    // First in the list. This used to be inserted after the Team Rickie card
+    // when one was present; with that card gone there is nothing above the
+    // real teams, so the freshly created team's invite belongs at the top.
+    container.insertBefore(card, container.firstChild);
 }
 
 function _buildGuestTeamsPreview() {
@@ -4742,7 +4699,6 @@ async function loadDailyExercises() {
     }
 
     renderJourneyCard();
-    _refreshTeamRickieCard();
 
     // Update progress bar
     var pct = (daily.completed_count / 5) * 100;
@@ -5315,7 +5271,6 @@ function renderBrainBoostQuestion(brainBoost) {
                 if (meResult && meResult.status === 200) {
                     currentUser = meResult.data;
                     renderJourneyCard();
-                    _refreshTeamRickieCard();
                 }
             });
         }
@@ -7669,8 +7624,10 @@ function openCoach(context) {
         // panel was its sibling, not its child. That is luck, not design, and
         // it stops being lucky the moment anyone wraps the panes in container
         // elements. Anchoring to the page is the thing that was actually meant.
-        // No pane class on purpose: Rickie is opened from Today, from the
-        // insight card and from the Team Rickie card, and belongs in all three.
+        // No pane class on purpose: Rickie is opened from Today and from the
+        // insight card, and belongs in both. (A third entry point, the Team
+        // Rickie card, was removed with that card — his personal coaching is
+        // deliberately unaffected, which is why this anchor stays page-level.)
         var host = document.querySelector('main.container');
         if (!host) return;
         host.appendChild(_coachPanel);

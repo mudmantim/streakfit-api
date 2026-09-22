@@ -94,69 +94,102 @@
   .badge.approx { color: var(--amber); background: rgba(251,191,36,.12); }
 
   /* ── Moderation queue ──────────────────────────────────────────────── */
+  /*
+   * Uses the dashboard's OWN tokens. The first version of this block was
+   * written in light-theme colours -- #fafafa panels, #4b5563 labels -- on a
+   * page whose background is #0f1117. The detail panel rendered as a pale box
+   * of near-invisible grey text, which is what the owner saw. Every colour
+   * here is now var(--…) or derived from it, so the section cannot drift from
+   * the theme again.
+   */
   .mod-filters { display:flex; gap:.4rem; flex-wrap:wrap; margin:.6rem 0; }
-  .mod-filter { border:1px solid #d1d5db; background:#fff; border-radius:999px;
-                padding:.3rem .8rem; font-size:.85rem; cursor:pointer; min-height:44px; }
-  .mod-filter.active { background:#4338ca; color:#fff; border-color:#4338ca; font-weight:700; }
-  .mod-counts { font-size:.9rem; margin:.4rem 0 .6rem; }
-  .mod-counts .overdue { color:#dc2626; }
-  .mod-table { width:100%; border-collapse:collapse; font-size:.88rem; }
+  .mod-filter { border:1px solid var(--border); background:var(--surface);
+                color:var(--text); border-radius:999px; padding:.3rem .8rem;
+                font-size:.85rem; cursor:pointer; min-height:44px; }
+  .mod-filter:hover { border-color:var(--accent); }
+  .mod-filter.active { background:var(--accent); color:#fff;
+                       border-color:var(--accent); font-weight:700; }
+  .mod-counts { font-size:.9rem; margin:.4rem 0 .6rem; color:var(--text); }
+  .mod-counts .overdue { color:var(--red); }
+
+  .mod-table { width:100%; border-collapse:collapse; font-size:.88rem;
+               color:var(--text); }
   .mod-table th { text-align:left; font-weight:700; padding:.4rem .5rem;
-                  border-bottom:2px solid #e5e7eb; white-space:nowrap; }
-  .mod-table td { padding:.45rem .5rem; border-bottom:1px solid #f3f4f6; vertical-align:middle; }
-  .mod-table tr.is-overdue { background:#fef2f2; }
-  .mod-table .mono { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:.82rem; }
-  .mod-due.soon { color:#b45309; font-weight:700; }
-  .mod-due.overdue { color:#dc2626; font-weight:800; }
-  .mod-open { border:1px solid #4338ca; background:#fff; color:#4338ca;
-              border-radius:6px; padding:.3rem .7rem; cursor:pointer; min-height:44px; font-weight:600; }
-  .mod-open:hover { background:#eef2ff; }
+                  border-bottom:2px solid var(--border); white-space:nowrap;
+                  color:var(--muted); text-transform:uppercase;
+                  font-size:.72rem; letter-spacing:.08em; }
+  .mod-table td { padding:.45rem .5rem; border-bottom:1px solid var(--border);
+                  vertical-align:middle; }
+  /* Tint rather than a light fill: a pale row on a dark table reads as a
+     rendering fault, not as urgency. */
+  .mod-table tr.is-overdue { background:rgba(248,113,113,.10); }
+  .mod-table .mono { font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+                     font-size:.82rem; color:var(--muted); }
+  .mod-due { color:var(--text); }
+  .mod-due.soon { color:var(--amber); font-weight:700; }
+  .mod-due.overdue { color:var(--red); font-weight:800; }
+  .mod-open { border:1px solid var(--accent); background:transparent;
+              color:var(--accent); border-radius:6px; padding:.3rem .7rem;
+              cursor:pointer; min-height:44px; font-weight:600; }
+  .mod-open:hover { background:var(--accent); color:#fff; }
 
-  #moderation-detail { margin-top:1rem; padding:1rem; border:1px solid #e5e7eb;
-                       border-radius:10px; background:#fafafa; }
+  #moderation-detail { margin-top:1rem; padding:1rem; border:1px solid var(--border);
+                       border-radius:10px; background:var(--surface); color:var(--text); }
   .mod-detail-head { display:flex; justify-content:space-between; align-items:center;
-                     gap:.5rem; margin-bottom:.6rem; }
-  .mod-close { border:none; background:#e5e7eb; border-radius:6px; padding:.3rem .7rem;
-               cursor:pointer; min-height:44px; }
-  .mod-fields { display:grid; grid-template-columns:auto 1fr; gap:.25rem .9rem;
+                     gap:.5rem; margin-bottom:.6rem; color:var(--text); }
+  .mod-close { border:1px solid var(--border); background:transparent; color:var(--text);
+               border-radius:6px; padding:.3rem .7rem; cursor:pointer; min-height:44px; }
+  .mod-close:hover { border-color:var(--accent); }
+  .mod-fields { display:grid; grid-template-columns:auto 1fr; gap:.3rem .9rem;
                 margin:0 0 .8rem; font-size:.88rem; }
-  .mod-fields dt { font-weight:700; color:#4b5563; }
-  .mod-fields dd { margin:0; }
+  /* The labels were #4b5563 on #0f1117 -- about 2.4:1, unreadable. --muted is
+     the dashboard's own secondary colour and is used everywhere else. */
+  .mod-fields dt { font-weight:700; color:var(--muted); }
+  .mod-fields dd { margin:0; color:var(--text); }
   .mod-evidence { font-size:.85rem; padding:.4rem .6rem; border-radius:6px;
-                  background:#eef2ff; margin-bottom:.8rem; }
-  .mod-evidence.none { background:#f3f4f6; color:#6b7280; }
-  .mod-subhead { font-weight:700; font-size:.85rem; margin:.6rem 0 .3rem; }
-  .mod-history { list-style:none; padding:0; margin:0 0 .9rem; font-size:.85rem; }
-  .mod-history li { padding:.4rem 0; border-bottom:1px solid #eee; }
-  .mod-note { color:#4b5563; margin-top:.2rem; }
+                  background:rgba(99,102,241,.14); color:var(--text);
+                  margin-bottom:.8rem; }
+  .mod-evidence.none { background:rgba(255,255,255,.04); color:var(--muted); }
+  .mod-subhead { font-weight:700; font-size:.8rem; margin:.8rem 0 .3rem;
+                 color:var(--muted); text-transform:uppercase; letter-spacing:.08em; }
+  .mod-history { list-style:none; padding:0; margin:0 0 .9rem; font-size:.85rem;
+                 color:var(--text); }
+  .mod-history li { padding:.45rem 0; border-bottom:1px solid var(--border); }
+  .mod-note { color:var(--muted); margin-top:.2rem; }
 
-  .mod-action { border-top:2px solid #e5e7eb; padding-top:.8rem; }
-  .mod-label { display:block; font-weight:700; font-size:.85rem; margin:.5rem 0 .25rem; }
-  .mod-req { color:#dc2626; font-weight:600; font-size:.78rem; }
+  .mod-action { border-top:2px solid var(--border); padding-top:.8rem; }
+  .mod-label { display:block; font-weight:700; font-size:.85rem; margin:.6rem 0 .25rem;
+               color:var(--text); }
+  .mod-req { color:var(--red); font-weight:600; font-size:.78rem; }
   #mod-action-select, #mod-action-note {
-    width:100%; padding:.45rem .6rem; border:1.5px solid #d1d5db; border-radius:8px;
-    font-size:.95rem; font-family:inherit; min-height:44px; box-sizing:border-box;
+    width:100%; padding:.45rem .6rem; border:1px solid var(--border);
+    border-radius:8px; font-size:.95rem; font-family:inherit; min-height:44px;
+    box-sizing:border-box; background:var(--bg); color:var(--text);
   }
-  .mod-confirm-row { display:flex; align-items:center; gap:.7rem; margin-top:.7rem; flex-wrap:wrap; }
-  .mod-submit { background:#4338ca; color:#fff; border:none; border-radius:8px;
+  #mod-action-select:focus, #mod-action-note:focus { border-color:var(--accent); outline:none; }
+  .mod-confirm-row { display:flex; align-items:center; gap:.7rem; margin-top:.7rem;
+                     flex-wrap:wrap; }
+  .mod-submit { background:var(--accent); color:#fff; border:none; border-radius:8px;
                 padding:.5rem 1.1rem; font-weight:700; cursor:pointer; min-height:44px; }
   .mod-submit:disabled { opacity:.6; cursor:default; }
-  .mod-feedback { font-size:.85rem; font-weight:600; }
-  .mod-feedback.is-ok { color:#059669; }
-  .mod-feedback.is-error { color:#dc2626; }
-  .mod-feedback.is-arming { color:#b45309; display:flex; align-items:center;
+  .mod-feedback { font-size:.85rem; font-weight:600; color:var(--text); }
+  .mod-feedback.is-ok { color:var(--green); }
+  .mod-feedback.is-error { color:var(--red); }
+  .mod-feedback.is-arming { color:var(--amber); display:flex; align-items:center;
                             gap:.5rem; flex-wrap:wrap; }
-  .mod-confirm { background:#dc2626; color:#fff; border:none; border-radius:8px;
+  .mod-confirm { background:var(--red); color:#0f1117; border:none; border-radius:8px;
                  padding:.45rem 1rem; font-weight:700; cursor:pointer; min-height:44px; }
-  .mod-cancel { background:#e5e7eb; color:#1f2937; border:none; border-radius:8px;
-                padding:.45rem 1rem; font-weight:600; cursor:pointer; min-height:44px; }
+  .mod-cancel { background:transparent; color:var(--text); border:1px solid var(--border);
+                border-radius:8px; padding:.45rem 1rem; font-weight:600;
+                cursor:pointer; min-height:44px; }
+  .mod-cancel:hover { border-color:var(--accent); }
 
-  /* Narrow screens: the table is the thing that breaks first, so it scrolls
-     rather than forcing the whole page sideways. */
+  /* Narrow screens: the table is what breaks first, so it scrolls rather than
+     forcing the whole page sideways. */
   @media (max-width: 560px) {
     .mod-table { display:block; overflow-x:auto; white-space:nowrap; }
     .mod-fields { grid-template-columns:1fr; gap:.1rem; }
-    .mod-fields dt { margin-top:.4rem; }
+    .mod-fields dt { margin-top:.5rem; }
   }
 
   /* ── Status dots / pills (shared by Project Status, System Health, Release Readiness) ── */

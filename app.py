@@ -4,6 +4,7 @@ import hmac
 import json
 import logging
 import random
+import secrets
 import re
 import string
 import subprocess
@@ -1817,8 +1818,19 @@ class ProgressEvent(db.Model):
     created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
 
 # --- Teams (R2.1 Team Foundations — see TEAM_SYSTEM_BASELINE.md) ---
-# Team Rickie is deliberately not represented here — it has no membership row,
-# no chat, no Campfire. It's UI-only, built from data these tables don't touch.
+# Every team is a real row here. There is no system-managed, StreakFit-wide or
+# otherwise special team, and nothing in this schema can produce one.
+#
+# A "Team Rickie" card used to render above the real teams, built entirely in
+# the front end from the user's own data — no row, no membership, no chat, no
+# Campfire. It was removed by owner decision (Option C, Sept 2026): a card
+# shaped like a team you belong to, for a team that does not exist, is a claim
+# the product cannot keep, and Rickie's own prompt had started repeating it
+# back to users as "the starter team everybody can be part of".
+#
+# The absence is worth stating because it is load-bearing for child safety:
+# the ONLY way one account reaches another is a team row plus its invite code,
+# so there is no default room anybody is dropped into.
 
 class Team(db.Model):
     __tablename__ = 'team'
@@ -5010,7 +5022,8 @@ def complete_daily_exercise(exercise_key):
             # idempotent, not something guarded separately. One completion
             # counts for every real team the user belongs to, simultaneously
             # (TEAM_SYSTEM_BASELINE Section 3) -- no "which team" picker.
-            # Team Rickie is UI-only and has no team_campfire row to touch.
+            # Every team here is a real row with a real campfire; there is
+            # no special or system team to skip.
             memberships = db.session.execute(
                 db.select(TeamMembership).where(TeamMembership.user_id == user_id)
             ).scalars().all()
@@ -5850,9 +5863,29 @@ def _campfire_progress(total_missions):
 
 
 def _generate_team_invite_code():
+    """Six characters of A-Z0-9, from `secrets` — not `random`.
+
+    This used `random.choice`, which is the Mersenne Twister: fast, uniform,
+    and completely predictable to anyone who has seen enough of its output.
+    Nothing else about the code changed — same alphabet, same length, same
+    collision retry — because the format is not the problem.
+
+    It matters here more than it looks. An invite code is the ONLY thing
+    standing between an adult and a child's team: `POST /api/teams/<id>/join`
+    takes the team id and this string and nothing else. The rate limits on
+    lookup are sized against brute force over a 2.2-billion space (see
+    `lookup_team_by_code`), and that sizing silently assumed the space was
+    actually being sampled at random. A generator whose internal state can be
+    reconstructed from prior outputs is not a 2.2-billion space to somebody
+    who has collected a few codes — and codes are handed out to be shared.
+
+    `import random` stays: this module also uses it for seeded, deliberately
+    reproducible shuffles (daily ordering, joke sampling), which must NOT
+    become unpredictable. Only the security-bearing call moved.
+    """
     alphabet = string.ascii_uppercase + string.digits
     for _ in range(20):
-        code = ''.join(random.choice(alphabet) for _ in range(6))
+        code = ''.join(secrets.choice(alphabet) for _ in range(6))
         exists = db.session.execute(
             db.select(TeamInviteCode).where(TeamInviteCode.code == code)
         ).scalar_one_or_none()
@@ -8783,9 +8816,14 @@ Photo Filters — unlocked by spending acorns, and used on team photos.
 XP and Levels — earned alongside acorns for completing exercises, missions and Brain \
 Boost. A measure of total activity over time, never a ranking against anybody.
 
-Teams — a small group a user can join or create. Team members see each other's name, \
-today's status and streak number. It is witness, not leaderboard: there is no ranking \
-and no score. Team Rickie is the starter team everybody can be part of.
+Teams — a small group a user can join or create, and entirely OPTIONAL: StreakFit works \
+completely on its own and nobody needs a team to keep a streak. Team members see each \
+other's name, today's status and streak number. It is witness, not leaderboard: there is \
+no ranking and no score. There is no StreakFit-wide or public team, and no way to find \
+strangers — a team is people who already know each other, joined with an invite code. You \
+are not a team and there is no "Team Rickie"; you are each person's own coach, which is a \
+different and better thing. If somebody asks to join your team, tell them plainly that \
+there isn't one, and that you are already here for them.
 
 Team Campfire — a shared, cumulative fire a team builds together by showing up. It only \
 ever grows and never resets, and it has five visual stages. It is not a shared streak \
