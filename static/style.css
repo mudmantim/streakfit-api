@@ -4053,6 +4053,63 @@ body.theme-classic .theme-btn.active { background: rgba(79,70,229,.2); }
 }
 .settings-help-error { color: var(--red-600, #dc2626); font-weight: 600; }
 
+/* Name field + explicit Save.
+ *
+ * The button sits beside the input rather than under it, so on a phone the
+ * thing that persists the name is visible without scrolling — the whole
+ * failure this replaces was a save nobody could see. Both are 44px tall,
+ * which is the minimum comfortable tap target. */
+.display-name-field {
+    display: flex;
+    gap: .5rem;
+    align-items: stretch;
+    flex: 1 1 auto;
+    min-width: 0;                /* lets the input shrink instead of overflowing */
+}
+.display-name-field .display-name-input {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+.display-name-save {
+    flex: 0 0 auto;
+    min-height: 44px;
+    padding: 0 .9rem;
+    border: none;
+    border-radius: 8px;
+    background: var(--indigo);
+    color: #fff;
+    font-weight: 700;
+    font-size: .9rem;
+    cursor: pointer;
+}
+.display-name-save:hover:not(:disabled) { background: var(--indigo-dark); }
+.display-name-save:disabled { opacity: .6; cursor: default; }
+.display-name-save:focus-visible {
+    outline: 3px solid var(--indigo-dark);
+    outline-offset: 2px;
+}
+
+/* Confirmation. Hidden until something is actually said, so an empty line
+ * does not reserve space that looks like a missing message. */
+.settings-saved {
+    margin: .35rem 0 0;
+    font-size: .85rem;
+    font-weight: 600;
+    color: var(--green);
+    opacity: 0;
+    transition: opacity .18s ease;
+}
+.settings-saved.is-visible { opacity: 1; }
+.settings-saved.is-error   { color: var(--red); }
+
+/* Your own row on the roster. Weight rather than colour alone, so it does not
+ * depend on colour vision. */
+.team-roster-name.is-self { font-weight: 800; }
+
+@media (prefers-reduced-motion: reduce) {
+    .settings-saved { transition: none; }
+}
+
 /* Theme buttons carried a bare emoji and a title attribute, which a phone
    never shows and a screen reader read as "clipboard". Words alongside. */
 .theme-btn { display: inline-flex; align-items: center; gap: .3rem; }

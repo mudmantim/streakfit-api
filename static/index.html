@@ -126,21 +126,35 @@
                         </button>
                     </div>
 
-                    <!-- What Rickie calls you. Separate from the login on
-                         purpose: a username is a credential people fill with
-                         email addresses, and he says this one out loud. Blank
-                         is a real choice — he then uses no name at all. -->
+                    <!-- Your StreakFit name. Separate from the login on purpose:
+                         a username is a credential people fill with email
+                         addresses, and this one is both said aloud by Rickie AND
+                         shown to teammates. Blank is a real choice — Rickie then
+                         uses no name, and teammates see a neutral "Member N".
+
+                         An explicit Save button, not `onchange`. The field used
+                         to persist only when it lost focus, which on a phone
+                         often never happened: people typed a name, navigated
+                         away, and it was silently discarded. Nothing said
+                         otherwise, because success and never-sent looked
+                         identical. -->
                     <div class="settings-row" id="settings-row-name">
-                        <label class="settings-label" for="display-name-input">Rickie calls you</label>
-                        <input id="display-name-input" class="display-name-input"
-                               type="text" maxlength="40" autocomplete="nickname"
-                               placeholder="Optional"
-                               aria-describedby="display-name-help"
-                               onchange="handleDisplayNameChange(this.value)">
+                        <label class="settings-label" for="display-name-input">Your StreakFit name</label>
+                        <div class="display-name-field">
+                            <input id="display-name-input" class="display-name-input"
+                                   type="text" maxlength="40" autocomplete="nickname"
+                                   placeholder="Optional"
+                                   aria-describedby="display-name-help">
+                            <button type="button" id="display-name-save"
+                                    class="display-name-save"
+                                    onclick="handleDisplayNameSave()">Save</button>
+                        </div>
                     </div>
                     <p class="settings-help" id="display-name-help">
-                        Not your login. Leave it blank and Rickie just won't use a name.
+                        Rickie uses this, and teammates see it if you join a team.
+                        Not your login. Leave it blank and Rickie won't use a name.
                     </p>
+                    <p class="settings-saved" id="display-name-saved" role="status" aria-live="polite"></p>
 
                     <div class="settings-row" id="settings-row-rickie">
                         <label class="settings-label" for="rickie-mode-select">Rickie</label>

@@ -1559,7 +1559,18 @@ function _buildRosterSection(data) {
         // `m.name`, not `m.username`: the server no longer sends other
         // people's logins at all. It sends a display name, or a stable
         // "Member N" for anybody who has not set one.
-        name.textContent = (m.name || 'Member') + (m.is_creator ? ' (Creator)' : '');
+        //
+        // "(You)" is decided HERE, from the id the roster already returns
+        // compared against your own /api/me id. It is not a server field and
+        // must not become one: which row is "you" is different for every
+        // reader of the same roster, so a cached or shared response carrying
+        // it would mark the wrong person.
+        var isSelf = !!(currentUser && m.user_id === currentUser.id);
+        var suffix = '';
+        if (isSelf) suffix += ' (You)';
+        if (m.is_creator) suffix += ' (Creator)';
+        name.textContent = (m.name || 'Member') + suffix;
+        if (isSelf) name.classList.add('is-self');
         main.appendChild(name);
 
         var status = _rosterStatusText(m);
@@ -4063,7 +4074,14 @@ async function api(path, method, body) {
     }
 
     // Authenticated request received 401 — token has expired
+    //
+    // Resets account state for the same reason logout does, and this path
+    // matters more: an expiry is involuntary and happens to everybody, where
+    // pressing Log out is a choice. Without it a session could lapse, someone
+    // else could sign in on the same device, and the previous account's
+    // identity and block list would still be in memory to render from.
     if (res.status === 401 && token) {
+        _resetAccountState();
         localStorage.removeItem('streakfit_token');
         showView('auth');
         setError('login-error', 'Session expired. Please log in again.');
@@ -4357,9 +4375,61 @@ async function handleRegister(event) {
     }
 }
 
-function handleLogout() {
+// EVERY piece of account-scoped state, in one place.
+//
+// Logout used to clear the token, `isGuest` and `guestCompleted`, and leave
+// the rest of this module populated. Dropping the token stops the SERVER
+// answering for the previous account, which is the important half — but the
+// browser kept rendering from what it already had until a fresh fetch landed,
+// so the next person to sign in on the same device could briefly see the
+// previous account's identity.
+//
+// `blockedUserIds` is the one that made this more than cosmetic. It is a
+// private moderation record — who YOU have blocked — and it drives the
+// Block/Unblock state on every roster row. Carried across a sign-out it would
+// render one account's blocking decisions inside another account's session.
+//
+// Anything account-scoped added later belongs here. The test that guards this
+// asserts the list is complete rather than that these particular names are
+// cleared, so a new global with no reset fails it.
+function _resetAccountState() {
+    currentUser = null;
+    blockedUserIds = [];
+
     isGuest = false;
     guestCompleted = new Set();
+    guestCompleteFired = false;
+    _pendingJoinCode = null;
+
+    // Personalised copy: greeting lines are chosen for a specific person.
+    _cachedGreetingLine = null;
+    _cachedDoneLine = null;
+    _lastRickieLineByPool = {};
+
+    // Team panel: roster, creator powers, and the painted thread.
+    _teamPanelIsCreator = false;
+    _teamPanelChatPane = null;
+    _teamPanelMembers = [];
+    _teamThreadPainted = false;
+
+    // Photo composer: which filters are unlocked is bought with acorns, so it
+    // is as account-specific as the acorns are.
+    _photoFilters = [];
+    _composerImage = null;
+    _composerOverlay = null;
+    _overlayImageCache = {};
+    _pendingFilterKey = null;
+
+    // Pending UI timers, so nothing from the old session fires into the new.
+    if (_displayNameSavedTimer) { clearTimeout(_displayNameSavedTimer); _displayNameSavedTimer = null; }
+    if (_rickieReactionHideTimer) { clearTimeout(_rickieReactionHideTimer); _rickieReactionHideTimer = null; }
+    if (_rickieReactionRemoveTimer) { clearTimeout(_rickieReactionRemoveTimer); _rickieReactionRemoveTimer = null; }
+    _rickieToastQueue = [];
+}
+
+
+function handleLogout() {
+    _resetAccountState();
     localStorage.removeItem('streakfit_token');
     clearErrors();
     showTab('login');
@@ -4438,13 +4508,50 @@ async function handleDisplayModeChange(mode) {
     }
 }
 
+// Pressed by the Save button. Reads the field itself rather than taking a
+// value, so there is exactly one place the current text comes from.
+function handleDisplayNameSave() {
+    var input = document.getElementById('display-name-input');
+    if (!input) return;
+    return handleDisplayNameChange(input.value);
+}
+
+
+function _showDisplayNameSaved(message, isError) {
+    var el = document.getElementById('display-name-saved');
+    if (!el) return;
+    el.textContent = message;
+    el.classList.toggle('is-error', !!isError);
+    el.classList.add('is-visible');
+    if (_displayNameSavedTimer) clearTimeout(_displayNameSavedTimer);
+    // Errors stay until the next attempt; a success message that lingers is
+    // indistinguishable from one left over from the previous edit.
+    if (!isError) {
+        _displayNameSavedTimer = setTimeout(function () {
+            el.classList.remove('is-visible');
+        }, 4000);
+    }
+}
+var _displayNameSavedTimer = null;
+
+
 // Set, change, or clear. An empty box is a deliberate choice, not a no-op:
 // it clears the stored name and Rickie goes back to using none.
+//
+// SAYS SO WHEN IT WORKS. The old version only spoke up on failure, so a save
+// that never left the browser and a save that succeeded looked exactly the
+// same — which is how a name could be typed, discarded, and believed saved.
 async function handleDisplayNameChange(value) {
     var input = document.getElementById('display-name-input');
     var help = document.getElementById('display-name-help');
+    var btn = document.getElementById('display-name-save');
+    if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
     var result = await api('/api/me', 'PATCH', { display_name: value });
-    if (!result) return;
+    if (btn) { btn.disabled = false; btn.textContent = 'Save'; }
+    if (!result) {
+        _showDisplayNameSaved("That didn't reach StreakFit — check your connection.", true);
+        return;
+    }
     if (result.status !== 200) {
         // Say what was wrong and put the box back to the stored value, rather
         // than leaving a rejected string sitting there looking saved.
@@ -4454,11 +4561,19 @@ async function handleDisplayNameChange(value) {
             help.classList.add('settings-help-error');
         }
         if (input && currentUser) input.value = currentUser.display_name || '';
+        _showDisplayNameSaved((result.data && result.data.error)
+            || "That name didn't work — try a shorter one.", true);
         return;
     }
     if (help) help.classList.remove('settings-help-error');
     currentUser = Object.assign(currentUser || {}, result.data);
     _syncDisplayNameField();
+    // The cleared case gets its own words. "Saved" over an empty box reads as
+    // though nothing happened, when in fact a name was deliberately removed.
+    _showDisplayNameSaved(currentUser.display_name
+        ? 'Saved — Rickie and your teammates will use "' + currentUser.display_name + '".'
+        : 'Cleared — Rickie won\'t use a name, and teammates see a neutral label.',
+        false);
 }
 
 async function handleRickieModeChange(mode) {
