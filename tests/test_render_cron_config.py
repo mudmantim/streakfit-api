@@ -80,8 +80,46 @@ def test_no_cron_can_run_a_migration(field):
 
 
 def test_only_the_web_service_migrates():
-    """One place runs migrations, and it is the deploy."""
-    assert "db upgrade" in web()["fields"]["startCommand"]
+    """One place runs migrations, and it is the deploy.
+
+    That place is now the PRE-DEPLOY command, not the start command. Verified
+    against the live dashboard 2026-09-22. In the start command the migration
+    re-ran on every process start -- restart, scale, crash recovery -- where
+    it was a no-op at best; as a pre-deploy step it runs once per deploy and a
+    failure aborts before the new version serves traffic, which is what
+    CLAUDE.md's "migrations run as an explicit deploy step" actually asks for.
+
+    So this asserts the stronger version of the original intent: exactly one
+    place migrates, and the start command is not it.
+    """
+    fields = web()["fields"]
+    assert "db upgrade" in fields.get("preDeployCommand", ""), (
+        "the web service must migrate in its pre-deploy command")
+    assert "db upgrade" not in fields.get("startCommand", ""), (
+        "the start command must NOT migrate -- it re-runs on every process "
+        "start, not once per deploy")
+
+
+def test_the_start_command_carries_the_flags_the_migration_must_not_see():
+    """Both flags inline on gunicorn, and therefore absent from pre-deploy.
+
+    Each is read at module import, and `flask db upgrade` imports the app. As
+    global environment variables the boot guard would fire during the
+    migration and deadlock the deploy, and the retention sweeper would start
+    deleting rows against a schema in the middle of changing. Scoping them to
+    the start command is what makes both impossible.
+    """
+    fields = web()["fields"]
+    start = fields.get("startCommand", "")
+    pre = fields.get("preDeployCommand", "")
+
+    assert "STREAKFIT_ENFORCE_DB_HEAD=1" in start
+    assert "STREAKFIT_RETENTION_SWEEPER=1" in start, (
+        "without this the delivery worker never starts and no alert is ever "
+        "sent -- _deliver_pending_notices has only the CLI and that thread")
+
+    assert "STREAKFIT_ENFORCE_DB_HEAD" not in pre
+    assert "STREAKFIT_RETENTION_SWEEPER" not in pre
 
 
 # ── A cron must not send, or claim to have sent, during setup ───────────────
