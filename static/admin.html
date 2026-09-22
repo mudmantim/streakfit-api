@@ -93,6 +93,66 @@
   .badge.exact  { color: var(--green); background: rgba(52,211,153,.12); }
   .badge.approx { color: var(--amber); background: rgba(251,191,36,.12); }
 
+  /* ── Moderation queue ──────────────────────────────────────────────── */
+  .mod-filters { display:flex; gap:.4rem; flex-wrap:wrap; margin:.6rem 0; }
+  .mod-filter { border:1px solid #d1d5db; background:#fff; border-radius:999px;
+                padding:.3rem .8rem; font-size:.85rem; cursor:pointer; min-height:44px; }
+  .mod-filter.active { background:#4338ca; color:#fff; border-color:#4338ca; font-weight:700; }
+  .mod-counts { font-size:.9rem; margin:.4rem 0 .6rem; }
+  .mod-counts .overdue { color:#dc2626; }
+  .mod-table { width:100%; border-collapse:collapse; font-size:.88rem; }
+  .mod-table th { text-align:left; font-weight:700; padding:.4rem .5rem;
+                  border-bottom:2px solid #e5e7eb; white-space:nowrap; }
+  .mod-table td { padding:.45rem .5rem; border-bottom:1px solid #f3f4f6; vertical-align:middle; }
+  .mod-table tr.is-overdue { background:#fef2f2; }
+  .mod-table .mono { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:.82rem; }
+  .mod-due.soon { color:#b45309; font-weight:700; }
+  .mod-due.overdue { color:#dc2626; font-weight:800; }
+  .mod-open { border:1px solid #4338ca; background:#fff; color:#4338ca;
+              border-radius:6px; padding:.3rem .7rem; cursor:pointer; min-height:44px; font-weight:600; }
+  .mod-open:hover { background:#eef2ff; }
+
+  #moderation-detail { margin-top:1rem; padding:1rem; border:1px solid #e5e7eb;
+                       border-radius:10px; background:#fafafa; }
+  .mod-detail-head { display:flex; justify-content:space-between; align-items:center;
+                     gap:.5rem; margin-bottom:.6rem; }
+  .mod-close { border:none; background:#e5e7eb; border-radius:6px; padding:.3rem .7rem;
+               cursor:pointer; min-height:44px; }
+  .mod-fields { display:grid; grid-template-columns:auto 1fr; gap:.25rem .9rem;
+                margin:0 0 .8rem; font-size:.88rem; }
+  .mod-fields dt { font-weight:700; color:#4b5563; }
+  .mod-fields dd { margin:0; }
+  .mod-evidence { font-size:.85rem; padding:.4rem .6rem; border-radius:6px;
+                  background:#eef2ff; margin-bottom:.8rem; }
+  .mod-evidence.none { background:#f3f4f6; color:#6b7280; }
+  .mod-subhead { font-weight:700; font-size:.85rem; margin:.6rem 0 .3rem; }
+  .mod-history { list-style:none; padding:0; margin:0 0 .9rem; font-size:.85rem; }
+  .mod-history li { padding:.4rem 0; border-bottom:1px solid #eee; }
+  .mod-note { color:#4b5563; margin-top:.2rem; }
+
+  .mod-action { border-top:2px solid #e5e7eb; padding-top:.8rem; }
+  .mod-label { display:block; font-weight:700; font-size:.85rem; margin:.5rem 0 .25rem; }
+  .mod-req { color:#dc2626; font-weight:600; font-size:.78rem; }
+  #mod-action-select, #mod-action-note {
+    width:100%; padding:.45rem .6rem; border:1.5px solid #d1d5db; border-radius:8px;
+    font-size:.95rem; font-family:inherit; min-height:44px; box-sizing:border-box;
+  }
+  .mod-confirm-row { display:flex; align-items:center; gap:.7rem; margin-top:.7rem; flex-wrap:wrap; }
+  .mod-submit { background:#4338ca; color:#fff; border:none; border-radius:8px;
+                padding:.5rem 1.1rem; font-weight:700; cursor:pointer; min-height:44px; }
+  .mod-submit:disabled { opacity:.6; cursor:default; }
+  .mod-feedback { font-size:.85rem; font-weight:600; }
+  .mod-feedback.is-ok { color:#059669; }
+  .mod-feedback.is-error { color:#dc2626; }
+
+  /* Narrow screens: the table is the thing that breaks first, so it scrolls
+     rather than forcing the whole page sideways. */
+  @media (max-width: 560px) {
+    .mod-table { display:block; overflow-x:auto; white-space:nowrap; }
+    .mod-fields { grid-template-columns:1fr; gap:.1rem; }
+    .mod-fields dt { margin-top:.4rem; }
+  }
+
   /* ── Status dots / pills (shared by Project Status, System Health, Release Readiness) ── */
   .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
   .dot.green  { background: var(--green);  box-shadow: 0 0 0 3px rgba(52,211,153,.15); }
@@ -280,6 +340,29 @@
   <section class="op-section">
     <div class="section-label">System Health <span class="section-sub">is the app alive right now</span></div>
     <div id="system-health"><div class="state">Enter admin secret to load.</div></div>
+  </section>
+
+  <!-- Moderation queue.
+       Placed inside /admin because that is where the child-safety alert email
+       already sends the reviewer: "Open <url>/admin to review it." Until this
+       existed that was a dead end — the API could action a report and nothing
+       in the interface could. A second URL would be one more thing to get
+       wrong at 2am. -->
+  <section class="op-section" id="moderation-section">
+    <div class="section-label">Moderation
+      <span class="section-sub">reports waiting for a human</span></div>
+    <div class="mod-filters" id="mod-filters" hidden>
+      <button type="button" class="mod-filter active" data-status="pending"
+              onclick="loadModerationQueue(null, 'pending')">Pending</button>
+      <button type="button" class="mod-filter" data-status="overdue"
+              onclick="loadModerationQueue(null, 'overdue')">Overdue</button>
+      <button type="button" class="mod-filter" data-status="closed"
+              onclick="loadModerationQueue(null, 'closed')">Closed</button>
+      <button type="button" class="mod-filter" data-status="all"
+              onclick="loadModerationQueue(null, 'all')">All</button>
+    </div>
+    <div id="moderation-queue"><div class="state">Enter admin secret to load.</div></div>
+    <div id="moderation-detail" hidden></div>
   </section>
 
   <!-- Section 4: Analytics (existing dashboard, unchanged, moved below the operational sections) -->
@@ -821,6 +904,231 @@
       });
   }
 
+  // ── Moderation queue ────────────────────────────────────────────────
+  //
+  // The operator interface the moderation API shipped without. Everything here
+  // goes through the documented endpoints and the documented dispositions; it
+  // introduces no sanction and changes no moderation rule.
+  //
+  // It deliberately does not trust its own success: after an action it
+  // RE-READS the report and renders what came back, because a 200 means the
+  // request was accepted, not that the status changed.
+
+  var MOD_ACTIONS = [
+    ['dismiss', 'Dismiss — no action needed'],
+    ['escalate', 'Escalate'],
+    ['restrict_content', 'Restrict this content'],
+    ['unrestrict_content', 'Un-restrict this content'],
+    ['suspend_social', 'Suspend social features'],
+    ['lift_suspension', 'Lift suspension'],
+    ['restrict_reporting', 'Restrict this reporter'],
+    ['lift_reporting_restriction', 'Lift reporting restriction'],
+    ['remove_from_team', 'Remove from team']
+  ];
+
+  function modSecret() {
+    return (document.getElementById('secret-input').value || '').trim();
+  }
+
+  function esc(v) {
+    return String(v === null || v === undefined ? '' : v)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+
+  function modWhen(iso) {
+    if (!iso) return '—';
+    var d = new Date(String(iso).slice(-1) === 'Z' ? iso : iso + 'Z');
+    return isNaN(d) ? esc(iso) : d.toLocaleString();
+  }
+
+  // "due in 3h" / "4h OVERDUE" — a deadline nobody has to subtract by hand.
+  function modDue(row) {
+    if (!row.due_at) return '<span class="mod-due">no deadline</span>';
+    var due = new Date(String(row.due_at).slice(-1) === 'Z' ? row.due_at : row.due_at + 'Z');
+    var hrs = (due - new Date()) / 3600000;
+    if (row.overdue || hrs < 0) {
+      return '<span class="mod-due overdue">' + Math.round(Math.abs(hrs)) + 'h OVERDUE</span>';
+    }
+    return '<span class="mod-due' + (hrs <= 6 ? ' soon' : '') + '">due in ' + Math.round(hrs) + 'h</span>';
+  }
+
+  function loadModerationQueue(secret, status) {
+    secret = secret || modSecret();
+    status = status || 'pending';
+    if (!secret) return;
+
+    Array.prototype.forEach.call(document.querySelectorAll('.mod-filter'), function (b) {
+      b.classList.toggle('active', b.dataset.status === status);
+    });
+    document.getElementById('mod-filters').hidden = false;
+    document.getElementById('moderation-detail').hidden = true;
+    var box = document.getElementById('moderation-queue');
+    box.innerHTML = '<div class="state">Loading…</div>';
+
+    apiGet(secret, '/api/admin/reports?status=' + encodeURIComponent(status))
+      .then(function (data) {
+        var rows = data.reports || [];
+        var counts = data.counts || {};
+        var head = '<div class="mod-counts"><strong>'
+          + (counts.pending !== undefined ? counts.pending : rows.length)
+          + '</strong> pending'
+          + (counts.overdue ? ' · <span class="overdue"><strong>' + counts.overdue + '</strong> overdue</span>' : '')
+          + '</div>';
+        if (!rows.length) {
+          box.innerHTML = head + '<div class="state">Nothing in this view.</div>';
+          return;
+        }
+        box.innerHTML = head + '<table class="mod-table"><thead><tr>'
+          + '<th>Report</th><th>Category</th><th>Filed</th><th>Deadline</th><th>Status</th><th></th>'
+          + '</tr></thead><tbody>'
+          + rows.map(function (r) {
+              return '<tr class="' + (r.overdue ? 'is-overdue' : '') + '">'
+                + '<td class="mono">' + esc(String(r.report_id || '').slice(0, 12)) + '…</td>'
+                + '<td>' + (r.urgent
+                    ? '<span class="pill red"><span class="dot red"></span>' + esc(r.category) + '</span>'
+                    : esc(r.category)) + '</td>'
+                + '<td>' + modWhen(r.created_at) + '</td>'
+                + '<td>' + (r.status === 'pending' ? modDue(r) : '—') + '</td>'
+                + '<td>' + esc(r.status) + (r.disposition ? ' (' + esc(r.disposition) + ')' : '') + '</td>'
+                + '<td><button type="button" class="mod-open" data-report="' + esc(r.report_id)
+                + '" onclick="openModerationReport(this.dataset.report)">Review</button></td>'
+                + '</tr>';
+            }).join('')
+          + '</tbody></table>';
+      })
+      .catch(function (err) { errorState('moderation-queue', err); });
+  }
+
+  function openModerationReport(reportId) {
+    var secret = modSecret();
+    if (!secret) return;
+    var panel = document.getElementById('moderation-detail');
+    panel.hidden = false;
+    panel.innerHTML = '<div class="state">Loading report…</div>';
+    apiGet(secret, '/api/admin/reports/' + encodeURIComponent(reportId))
+      .then(function (r) { renderModerationReport(r, reportId); })
+      .catch(function (err) { errorState('moderation-detail', err); });
+  }
+
+  function renderModerationReport(r, reportId) {
+    var panel = document.getElementById('moderation-detail');
+    var closed = r.status && r.status !== 'pending';
+    var actions = r.actions || [];
+
+    var history = actions.length
+      ? '<ul class="mod-history">' + actions.map(function (a) {
+          return '<li><strong>' + esc(a.action) + '</strong> by ' + esc(a.actor)
+            + ' · ' + modWhen(a.created_at)
+            + (a.note ? '<div class="mod-note">' + esc(a.note) + '</div>' : '') + '</li>';
+        }).join('') + '</ul>'
+      : '<div class="state small">No actions taken yet.</div>';
+
+    var evidence = r.evidence
+      ? '<div class="mod-evidence">Evidence is attached to this report.</div>'
+      : '<div class="mod-evidence none">No evidence captured.</div>';
+
+    var form = closed ? '<div class="state small">This report is closed. No further action.</div>' : (
+      '<div class="mod-action">'
+      + '<label class="mod-label" for="mod-action-select">Disposition</label>'
+      + '<select id="mod-action-select">'
+      + MOD_ACTIONS.map(function (a) {
+          return '<option value="' + a[0] + '">' + esc(a[1]) + '</option>';
+        }).join('')
+      + '</select>'
+      + '<label class="mod-label" for="mod-action-note">Audit note <span class="mod-req">required</span></label>'
+      + '<textarea id="mod-action-note" rows="3" placeholder="Why this decision. Recorded permanently."></textarea>'
+      + '<div class="mod-confirm-row">'
+      + '<button type="button" class="mod-submit" data-report="' + esc(reportId)
+      + '" onclick="submitModerationAction(this.dataset.report)">Apply</button>'
+      + '<span class="mod-feedback" id="mod-feedback" role="status" aria-live="polite"></span>'
+      + '</div></div>');
+
+    panel.innerHTML =
+      '<div class="mod-detail-head"><strong class="mono">' + esc(r.report_id || reportId) + '</strong>'
+      + '<button type="button" class="mod-close" onclick="document.getElementById(\'moderation-detail\').hidden = true">Close</button></div>'
+      + '<dl class="mod-fields">'
+      + '<dt>Category</dt><dd>' + esc(r.category) + '</dd>'
+      + '<dt>Status</dt><dd id="mod-status-value">' + esc(r.status)
+        + (r.disposition ? ' — ' + esc(r.disposition) : '') + '</dd>'
+      + '<dt>Filed</dt><dd>' + modWhen(r.created_at) + '</dd>'
+      + '<dt>Reviewed</dt><dd>' + modWhen(r.reviewed_at) + '</dd>'
+      + '<dt>Subject</dt><dd>' + esc(r.subject_type) + '</dd>'
+      + '<dt>Team</dt><dd>' + esc(r.team_id) + '</dd>'
+      + '<dt>Content hidden</dt><dd>' + (r.content_restricted ? 'yes' : 'no') + '</dd>'
+      + '</dl>'
+      + evidence
+      + '<div class="mod-subhead">Action history</div>' + history
+      + form;
+  }
+
+  function submitModerationAction(reportId) {
+    var secret = modSecret();
+    var sel = document.getElementById('mod-action-select');
+    var noteEl = document.getElementById('mod-action-note');
+    var fb = document.getElementById('mod-feedback');
+    var btn = document.querySelector('.mod-submit');
+    if (!sel || !noteEl || !fb) return;
+
+    var action = sel.value;
+    var note = (noteEl.value || '').trim();
+
+    // The note IS the audit trail. An action without one is a decision nobody
+    // can explain later, so it is refused here rather than stored empty.
+    if (!note) {
+      fb.textContent = 'An audit note is required.';
+      fb.className = 'mod-feedback is-error';
+      noteEl.focus();
+      return;
+    }
+
+    // Confirm the intended action by name. Several dispositions apply real
+    // sanctions to a real account, and a mis-click in a select is easy at speed.
+    if (!window.confirm('Apply "' + action + '" to report ' + reportId + '?\n\nThis is recorded permanently.')) {
+      fb.textContent = 'Cancelled — nothing was changed.';
+      fb.className = 'mod-feedback';
+      return;
+    }
+
+    if (btn) { btn.disabled = true; btn.textContent = 'Applying…'; }
+    fb.textContent = 'Applying…';
+    fb.className = 'mod-feedback';
+
+    fetch('/api/admin/reports/' + encodeURIComponent(reportId) + '/action', {
+      method: 'POST',
+      headers: { 'X-Admin-Secret': secret, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: action, note: note })
+    }).then(function (res) {
+      if (btn) { btn.disabled = false; btn.textContent = 'Apply'; }
+      if (!res.ok) {
+        return res.json().catch(function () { return {}; }).then(function (body) {
+          fb.textContent = 'Failed (' + res.status + ')'
+            + (body && body.error ? ': ' + body.error : '') + '. Nothing was changed.';
+          fb.className = 'mod-feedback is-error';
+        });
+      }
+      // Re-read rather than believe the 200: the operator needs the status
+      // that is actually stored, not the one we hoped for.
+      return apiGet(secret, '/api/admin/reports/' + encodeURIComponent(reportId))
+        .then(function (after) {
+          renderModerationReport(after, reportId);
+          var el = document.getElementById('mod-status-value');
+          var msg = 'Applied. Status is now "' + (after.status || '?')
+                  + (after.disposition ? ' — ' + after.disposition : '') + '".';
+          if (el) el.insertAdjacentHTML('afterend',
+            '<dd class="mod-feedback is-ok" id="mod-feedback">' + esc(msg) + '</dd>');
+          loadModerationQueue(secret, 'pending');
+        });
+    }).catch(function (err) {
+      if (btn) { btn.disabled = false; btn.textContent = 'Apply'; }
+      fb.textContent = 'Failed to reach StreakFit (' + err.message + '). Nothing was changed.';
+      fb.className = 'mod-feedback is-error';
+    });
+  }
+
+  window.loadModerationQueue = loadModerationQueue;
+  window.openModerationReport = openModerationReport;
+  window.submitModerationAction = submitModerationAction;
   // ── Master loader ──────────────────────────────────────────────────
   // A plain hoisted declaration, not `window.loadAll = function(){}` --
   // that pattern is a function *expression*, not hoisted, so the
@@ -838,6 +1146,7 @@
     loadSystemHealth(secret);
     loadAnalytics(secret);
     loadVerifyHistory(secret);
+    loadModerationQueue(secret, 'pending');
     loadVerifyStatus(secret).then(function (data) {
       loadReleaseReadiness(secret, data);
     });

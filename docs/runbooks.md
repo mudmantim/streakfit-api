@@ -53,6 +53,21 @@ Baseline facts:
 4. Only escalate if it stays degraded: while degraded the limits are
    per-worker, so the effective allowance is multiplied by the worker count.
 
+## Reviewing and closing a moderation report
+Open **https://streakfit.pro/admin**, enter the admin secret, and use the
+**Moderation** section. Pending reports are listed urgent-first with their
+deadlines; Review opens one, shows its action history, and applies a
+disposition with a required audit note. The action is confirmed by name before
+it is sent, and the page re-reads the report afterwards so the status shown is
+the one actually stored.
+
+> The queue did not exist until 2026-09-22. The moderation API shipped without
+> an operator interface, so a child-safety alert pointed at a page where
+> nothing could be done — see
+> [operations/moderation-safety-gaps.md](operations/moderation-safety-gaps.md).
+> `scripts/moderation_report.py` is the command-line fallback from that period
+> and can be deleted once the UI has been used in anger.
+
 ## Notification channel not delivering
 1. `python scripts/notification_preflight.py` **[in a shell with the app's
    environment]** — names which variable is missing or malformed, and never

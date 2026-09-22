@@ -34,6 +34,12 @@ ALLOWED = {
     'STREAKFIT_NOTIFY_FROM',
     'STREAKFIT_NOTIFY_TO',
     'STREAKFIT_PUBLIC_URL',
+    # ADMIN_SECRET is deliberately NOT here. The operator credential for
+    # /api/admin/* lives in its own file (~/.streakfit-admin.env) and is loaded
+    # by scripts/moderation_report.py alone. Two credentials of different blast
+    # radius should not be handed to a process together: anything that needs to
+    # send an alert has no business being able to dismiss a child-safety
+    # report, and a leak of one file should not be a leak of both.
 }
 
 

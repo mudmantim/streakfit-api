@@ -297,6 +297,11 @@ behind a routine one.)*
   `tests/test_delivery_end_to_end.py`. What that does **not** prove is TLS to
   `api.resend.com`, or that an email lands in a human's inbox. Only one real
   send does that.
+- **The alert pointed at a page that could not action it** until 2026-09-22,
+  and the worker is still a thread inside gunicorn — so nothing delivers while
+  the service is deploying, restarting or suspended. Both are covered in
+  [moderation-safety-gaps.md](moderation-safety-gaps.md), which also measures
+  the 57-minute filing-to-notice window.
 - **Nothing alerts on the alerter.** If Resend is down, the thing that would
   tell you is the thing that is down. That wants a second, independent
   channel or an external dead-man's-switch, and neither exists.
