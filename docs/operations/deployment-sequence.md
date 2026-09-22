@@ -237,6 +237,13 @@ the moment the new code boots, which is exactly when reporting appears.
 
 ### Phase B — the deploy
 
+> **Superseded in execution by
+> [phase-b-runbook.md](phase-b-runbook.md).** The steps below remain the
+> summary; the runbook carries the controlled procedure, the stage-by-stage
+> failure handling and the STOP/GO checklist. Note that the earlier
+> "scale to zero" recommendation is **withdrawn** — Render does not offer it
+> for a paid service; the supported mechanism is Suspend/Resume.
+
 > **Recovery points confirmed available, 2026-09-21:**
 > the encrypted backup (`…20260922T004424Z.rewrapped.dump.gpg`, 42,550 bytes,
 > mode 600, re-wrapped under a private passphrase after the disclosure
