@@ -140,14 +140,40 @@ git push origin main            # Auto-Deploy is Off — this deploys nothing
 
 Then in Render, trigger a manual deploy of `4b95bd1`.
 
-**The one platform behaviour to confirm live:** whether triggering a deploy on
-a *suspended* service also brings it back, or whether Resume is needed first.
-Render's documentation does not say. If a Resume is required:
+### ⚠️ RESEARCHED 2026-09-22 — resume triggers a build, and the commit is undocumented
 
-> **Resume, then IMMEDIATELY trigger the deploy.** A resume may restart the
-> OLD build, which will `SystemExit(1)` against the migrated schema and look
-> like a crash-loop. That is the guard working, not a fault — but do not leave
-> it in that state.
+**Established:** resuming a suspended Render service **automatically triggers
+a new build and deploy.** Render's own feature-request tracker carries
+*"Don't trigger a new build when an application is resumed"*, whose text is
+this exact scenario — *"Sometimes there's a need to suspend and then resume a
+service (for example, when performing maintenance actions like migrations).
+This is inconvenient when Render triggers a new build when the service is
+resumed."* Marked **"planned"** by Render in May 2023 and still planned, so
+the behaviour stands.
+
+**NOT established, after searching the scaling, deploys, FAQ and API docs:**
+
+- **which commit** that automatic build uses — branch HEAD, or the
+  last-deployed commit;
+- whether a **manual deploy can be triggered on a suspended service** at all.
+
+Render's deploy documentation describes "Deploy latest commit" (branch HEAD)
+and "Deploy a specific commit", and says nothing about suspended services.
+
+**Why this does not make the procedure unsafe — only uncertain in duration.**
+Both outcomes are fail-closed:
+
+| Resume builds… | Result |
+|---|---|
+| the new commit | correct: new code, migrated schema, serving |
+| `fa92abd` | boot guard sees DB at `47f7dc9962e3` ≠ its head `q1r2s3t4u5v6`, calls `SystemExit(1)`, **service does not serve**. Trigger "Deploy latest commit" to recover |
+
+In neither branch does old code serve against the new schema. The cost of the
+bad branch is one failed deploy cycle and a crash-looping service that looks
+alarming, not a data or correctness risk.
+
+**Push the intended commit to `main` BEFORE suspending**, so that if resume
+does build branch HEAD, it builds the right thing.
 
 Order within the deploy, which is already configured and correct:
 
