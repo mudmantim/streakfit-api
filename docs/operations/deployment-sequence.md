@@ -166,6 +166,23 @@ Custody (A1) and account setup (A2) produce values; this is where they are
 of the current commit, so six separate visits means six redeploys of a build
 that ignores all of them. One visit, one production change, one approval.
 
+**Getting the two secret values across without displaying them.**
+`~/backups/streakfit/streakfit-clip-secret.sh` pipes a secret straight to the
+clipboard — never to a terminal, never to a file, never an argument, never
+into a transcript — and wipes the clipboard after 90 seconds whether or not
+you pasted:
+
+```
+streakfit-clip-secret.sh evidence-key   # prompts for the gpg passphrase
+streakfit-clip-secret.sh resend-key     # from ~/.streakfit-notify.env
+```
+
+Verified: the clipboard holds the exact value mid-hold (so a paste works) and
+is empty afterwards, and the value appears nowhere in the script's output.
+The residual exposure is named rather than waved away — any app running as you
+can read the clipboard while it is set. That is a short exposure chosen over a
+permanent one in terminal scrollback.
+
 - [ ] Set, in one session:
 
       STREAKFIT_EVIDENCE_KEY     (from A1 `reveal`)
@@ -180,6 +197,24 @@ that ignores all of them. One visit, one production change, one approval.
       protections. It belongs in Phase C, after the new code is live.
 
 **Gate: owner — production configuration change.**
+
+**Baseline to preserve, captured 2026-09-21 before any change:**
+
+| | |
+|---|---|
+| `gitSha` | `fa92abdb3444` |
+| `environment` | `production` |
+| migrations | **13 applied**, `atHead: true`, latest `q1r2s3t4u5v6` |
+| `/health` | `200 {"status":"ok"}` |
+| self-check roll-up | **PASS** — `assets.present`, `coach.configured`, `db.reachable`, `db.schema-current` |
+
+Saving variables may trigger a redeploy of this same commit. All five values
+above must be unchanged afterwards. A different `gitSha`, a migration count
+other than 13, or any check dropping out of PASS means something other than a
+no-op restart happened.
+
+> `/api/health` does **not** exist on the deployed build — it is `/health`.
+> The `/api/health` path arrives with the integration branch.
 
 All six are inert on the deployed build (verified per-variable, zero
 occurrences each), so the redeploy this triggers is a no-op restart of the
