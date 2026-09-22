@@ -227,6 +227,12 @@ upgrade runs against a direct connection before relying on it.**
 
 ## Backup handling
 
+> **A passphrase an assistant produced, saw, or could have seen is not a
+> passphrase.** Generate it in a password manager, save it before using it,
+> and never let it enter a chat. This is not hypothetical — see
+> [operations/passphrase-disclosure-2026-09-21.md](operations/passphrase-disclosure-2026-09-21.md).
+
+
 A dump of this database contains every user's data, including coach
 conversations. It is not an ops artifact; it is the most concentrated copy of
 personal data this project produces.
