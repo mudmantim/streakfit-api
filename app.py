@@ -3113,17 +3113,33 @@ def verification_self():
                 db.select(db.func.count(PhotoEvidence.id)).where(
                     PhotoEvidence.purged_at.is_(None),
                     PhotoEvidence.ciphertext.isnot(None))).scalar() or 0
+            # The FINGERPRINT is named, not just compared.
+            #
+            # Without it this check could say PASS on a database with zero
+            # sealed images -- which production is -- while giving no way to
+            # tell WHICH key is loaded. That is exactly the state at first
+            # deploy, and the one moment somebody wants to confirm the
+            # deployed key is the one whose passphrase they hold. The check
+            # proved a key was usable and stayed silent about its identity.
+            #
+            # `key_id` is non-secret by construction: a truncated HMAC of the
+            # key under a fixed label, minted a few hundred lines below for
+            # exactly this purpose -- enough to tell two keys apart across a
+            # rotation, not enough to be useful to anybody. Printing it costs
+            # nothing and turns "a key is configured" into "THIS key is
+            # configured", which is the question being asked.
             if stale:
                 ev_status, ev_level = "FAIL", "VERIFIED"
                 ev_observed = (f"{stale} of {total} sealed images were "
-                               f"encrypted with a different key")
+                               f"encrypted with a different key; this build "
+                               f"holds {current_key_id}")
                 ev_reason = ("Those images cannot be decrypted by this build. "
                              "Restore the key that sealed them, or accept that "
                              "the evidence is gone.")
             else:
                 ev_status, ev_level = "PASS", "VERIFIED"
                 ev_observed = (f"{total} sealed image(s), all under the "
-                               f"current key")
+                               f"current key {current_key_id}")
                 ev_reason = None
         checks.append(_self_check(
             "moderation.evidence_key", "Sealed evidence is readable",

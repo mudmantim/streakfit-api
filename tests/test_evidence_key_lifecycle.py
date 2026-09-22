@@ -245,3 +245,49 @@ def test_expiry_is_measured_from_capture_not_from_closure(client, monkeypatch):
     db.session.commit()
 
     assert row.ciphertext is None, "an open report kept its image past 30 days"
+
+
+# ── The fingerprint has to be NAMED, not just compared ─────────────────────
+
+def test_the_check_names_which_key_is_loaded(client, monkeypatch):
+    """The gap this closes, found during the Phase B readiness review.
+
+    The check compares stored `photo_evidence.key_id` values against the
+    configured key. With ZERO sealed images -- which is production's state at
+    first deploy -- there is nothing to compare, so it reported
+    `PASS: 0 sealed image(s), all under the current key` and never said WHICH
+    key. That is precisely the moment an operator wants to confirm the
+    deployed key is the one whose passphrase they hold.
+
+    `key_id` is non-secret by construction: a truncated HMAC of the key under
+    a fixed label, enough to tell two keys apart and not enough to be useful
+    to anybody.
+    """
+    from cryptography.fernet import Fernet
+    key = Fernet.generate_key().decode('ascii')
+    monkeypatch.setenv('STREAKFIT_EVIDENCE_KEY', key)
+
+    _cipher, expected = appmod._evidence_cipher()
+    assert expected, "the app could not fingerprint its own key"
+
+    check = {c['id']: c for c in
+             client.get('/api/verification/self').get_json()['checks']
+             }['moderation.evidence_key']
+
+    assert check['status'] == 'PASS'
+    assert expected in check['observed'], (
+        f"the check passed without naming the key it is using; observed: "
+        f"{check['observed']!r}")
+
+
+def test_the_key_itself_never_appears(client, monkeypatch):
+    """Naming the fingerprint must not leak the key. /api/verification/self is
+    served without a credential."""
+    from cryptography.fernet import Fernet
+    key = Fernet.generate_key().decode('ascii')
+    monkeypatch.setenv('STREAKFIT_EVIDENCE_KEY', key)
+
+    body = client.get('/api/verification/self').get_data(as_text=True)
+
+    assert key not in body, "the evidence key appeared in an uncredentialed response"
+    assert key[:12] not in body, "a prefix of the evidence key appeared"
