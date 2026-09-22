@@ -103,6 +103,15 @@ Baseline facts:
 3. **Migration caveat:** if the bad deploy ran a forward migration, reverting code
    alone leaves the schema ahead. Run `flask db downgrade` to the matching revision
    **before/with** the code rollback, or the boot guard will refuse to start.
+
+   This is not theoretical for the pending release. `STREAKFIT_ENFORCE_DB_HEAD=1`
+   calls `SystemExit(1)` when the database revision is not the deployed build's
+   head, so a Render "rollback to previous deploy" **alone takes the site down**:
+   the database would be at `47f7dc9962e3` and `fa92abd` expects `q1r2s3t4u5v6`.
+   The downgrade path was tested end to end on a disposable database —
+   `flask db downgrade q1r2s3t4u5v6` reverses all twelve and lands exactly on
+   the old head with the core tables intact. A downgrade does **not** restore
+   data a destructive migration discarded; the encrypted backup is that answer.
 4. Verify `/health` → 200 and a normal login.
 
 ## Account deletion (a specific user)

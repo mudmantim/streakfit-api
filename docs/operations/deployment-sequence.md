@@ -242,6 +242,28 @@ the moment the new code boots, which is exactly when reporting appears.
       migration discards, in one run from one moment. Its verdict is valid for
       30 minutes; past that, run it again. A backup taken hours earlier is not
       a backup of what the migration is about to change.
+- [ ] **B1a · CHANGE THE START COMMAND — without this nothing delivers.**
+
+      Current live command:
+
+          flask db upgrade && STREAKFIT_ENFORCE_DB_HEAD=1 gunicorn app:app
+
+      Required:
+
+          flask db upgrade && STREAKFIT_ENFORCE_DB_HEAD=1 STREAKFIT_RETENTION_SWEEPER=1 gunicorn app:app
+
+      `_deliver_pending_notices` has exactly two call sites: the CLI, and the
+      in-process thread. That thread starts only when
+      `STREAKFIT_RETENTION_SWEEPER=1`. Deploy without it and reporting goes
+      live while **no alert is ever delivered** — notices accumulate against a
+      24-hour review clock and nobody is told.
+
+      **INLINE ON GUNICORN, never as a global environment variable.** The flag
+      is read at module import, and `flask db upgrade` imports the app — so as
+      a global it would start the sweeper *during the migration*, deleting
+      rows against a schema mid-change. Free; no new service.
+      **Gate: owner — production configuration change.**
+
 - [ ] **B2 · Push and deploy.** `git push origin main`, trigger the deploy in
       Render (Auto-Deploy stays **Off**). The start command runs the 12
       migrations, then gunicorn. **Gate: owner — production change.**
@@ -265,6 +287,35 @@ because storage is still `memory://`. That is Phase C, not a regression.
 - [ ] **C3 ·** `STREAKFIT_RETENTION_SWEEPER=1` **inline on the start command**
       (as a global it fires during `flask db upgrade` and deadlocks the
       deploy). Then the hourly notify cron.
+
+## Rollback — tested, and it is a TWO-PART operation
+
+A one-click Render rollback **is not enough and will take the site down.**
+`STREAKFIT_ENFORCE_DB_HEAD=1` makes the app `SystemExit(1)` when the database
+revision is not its own chain's head. After Phase B the database is at
+`47f7dc9962e3`; redeploying `fa92abd`, whose head is `q1r2s3t4u5v6`, means the
+guard fires and gunicorn never starts.
+
+So rollback is: **downgrade the database first, then the code.**
+
+**Verified 2026-09-21** on a disposable PostgreSQL 17, not assumed:
+
+```
+flask db upgrade                      -> 47f7dc9962e3, 36 tables
+flask db downgrade q1r2s3t4u5v6       -> q1r2s3t4u5v6, 16 tables   (exit 0)
+```
+
+All twelve reversed cleanly, landing on exactly production's current revision,
+with `user`, `team`, `challenge`, `coach_turn` and `coach_note` all intact —
+so the old build has the schema it expects.
+
+**What a downgrade does NOT restore is data the destructive migration
+discarded.** `t4u5v6w7x8y9` converts Coach Notes to an allow-list and drops
+free text; reversing the schema cannot bring it back. In practice this is
+empty — the audit counted **0 coach_note rows** — and `premigration.sh`
+re-counts it immediately before the migration precisely so that assumption is
+re-checked rather than inherited. The encrypted backup is the real answer if
+it is ever not zero.
 
 ## What "done" does not mean
 
