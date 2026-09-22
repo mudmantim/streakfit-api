@@ -159,7 +159,7 @@ exactly the property the first constraint needs.
 **Do not proceed to Phase B until A1–A4 are done.** A deploy without them is
 the thing constraint 1 forbids.
 
-### Phase A′ — one Render visit, six variables
+### Phase A′ — one Render visit, six variables ✅ DONE 2026-09-21
 
 Custody (A1) and account setup (A2) produce values; this is where they are
 *installed*. Batched deliberately: each save in Render can trigger a redeploy
@@ -215,6 +215,20 @@ no-op restart happened.
 
 > `/api/health` does **not** exist on the deployed build — it is `/health`.
 > The `/api/health` path arrives with the integration branch.
+
+**VERIFIED AFTER THE CHANGE — a true no-op.** Every baseline value identical:
+`gitSha` still `fa92abdb3444`, still 13 migrations at `q1r2s3t4u5v6`,
+`/health` 200, roll-up PASS with all four checks unchanged.
+
+And the thing the whole ordering exists to protect: the moderation surface is
+still **unreachable**. `POST /api/reports`, `/api/blocks`, `/api/appeals`,
+`/api/moderation/decisions` and `/api/admin/moderation` all return **404**.
+Reporting is not public, because the code that serves it is not deployed yet.
+The six variables sit configured and inert, exactly as intended.
+
+No secret or recipient value appears in any public response — checked
+`/health`, `/api/build-identity` and `/api/verification/self` for the key
+prefix, the sender, the recipient and the variable names.
 
 All six are inert on the deployed build (verified per-variable, zero
 occurrences each), so the redeploy this triggers is a no-op restart of the
