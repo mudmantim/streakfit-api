@@ -5,6 +5,10 @@ committed tests, production configuration or migrations were modified. Nothing
 was pushed, merged or deployed. No production data was read or written beyond
 two unauthenticated GETs of public endpoints.**
 
+> **Superseded for the release decision by [section 6](#6-real-phone-test-and-final-release-preparation--2026-09-23-afternoon)**,
+> written after the real-phone test passed. The release now also contains
+> `5e51274` and `0c5fcde`; sections 1–5 describe the overnight state.
+
 Everything below is separated into **Verified** (I ran it and saw the result),
 **Documented** (the repo asserts it; I did not independently confirm), and
 **Assumption / Unknown** (nobody has evidence).
@@ -346,3 +350,230 @@ Nothing is pushed. Nothing is deployed.
 running securely at the end of the audit and was reaped later by Claude Code
 under host memory pressure. It needs restarting before the phone test, and I
 did not restart it on my own because memory may still be short.
+
+---
+
+## 6. Real-phone test and final release preparation — 2026-09-23, afternoon
+
+Evidence classes as in the header: **Owner-observed** (Tim, on his own Android
+phone), **Verified** (Claude ran it and saw the result), **Documented**,
+**Not verified**.
+
+### 6.1 Real-phone test — PASSED
+
+Local server at `http://192.168.1.61:5000`, started with the section 4 command
+(no `ADMIN_SECRET`, no `DATABASE_URL`) from this worktree. It was stopped again
+after the test; port 5000 was confirmed free.
+
+**Owner-observed** — Android phone, new disposable local account `Humpty`:
+
+- All five exercises completed; each button became a checkmark; 5/5; 1-day streak.
+- Completion status survived a page refresh.
+- The first-mission celebration messages stayed **above** the bottom
+  Today/Progress navigation.
+- Both navigation tabs remained visible and tappable while messages showed.
+- The messages disappeared normally.
+- Earlier the same day, with `Johnny`, the owner completed a 5/5 on the phone
+  (the run that exposed the placement defect fixed in `0c5fcde`).
+
+**Verified by Claude:**
+
+| check | result |
+|---|---|
+| `/api/build-identity` on the phone-test server (owner ran the curl; output read by Claude) | `gitSha 0c5fcde4f7ef`, `environment: development`, `migration.atHead: true`, `latest 47f7dc9962e3`, `featureFlags.coach: false` |
+| Local SQLite, read-only, after the test | `Humpty` (id 379): **5** `daily_completion` rows for 2026-09-23 — floor_tricep_dip, bird_dog, thoracic_rotation, calf_raise, low_skip |
+| Same, `Johnny` (id 332) | **5** rows, unchanged from before the restart |
+| Local DB backed up before the restart | copy in the session scratchpad |
+
+**Not verified:**
+
+- The one owner screenshot shows the final toast at the bottom of the viewport
+  but **does not show the navigation bar**, so placement rests on the owner's
+  direct observation, not on the image.
+- `/admin` returning 403 on the restarted server was not re-checked (command
+  permissions were denied mid-session). The server is now stopped, so this no
+  longer has any exposure.
+- Service worker, PWA install and the `v0923b` cache bump — not exercised over
+  `http://` to a LAN IP (section 4, LAN limitations).
+
+### 6.2 What would ship
+
+**Verified.** Branch `integrate-product-completion`, clean tree. `main` and
+`origin/main` are both `4700708` (fetched today); HEAD is a strict descendant,
+so the merge is a **fast-forward**, no merge commits.
+
+| commit | kind | summary |
+|---|---|---|
+| `ed72c66` | app | Team Rickie card removed; teams optional; visual tokens |
+| `c40d837` | app | Rickie no longer stands on the mission during load |
+| `d38ac6f`, `292153b`, `e94487e` | docs | `RICKIE_3D_PLAN.md` — planning only, nothing implemented |
+| `52519bf`, `b57ac37` | docs | this audit |
+| `5e51274` | app | a completion that did not save says so; no sticky purple hover |
+| `0c5fcde` | app | celebration toasts sit above the section nav |
+| *(this commit)* | docs | section 6 |
+
+Application files changed vs `4700708`: `app.py`, `static/{admin.html, app.js,
+index.html, rickie-roam.js, style.css, sw.js}`. `app.py` changes are comments,
+Rickie's system-prompt text about teams, and invite codes generated with
+`secrets` instead of `random` (a security improvement). Plus tests,
+`scripts/uicheck.py` and `scripts/verification/`.
+
+pytest re-run today at `0c5fcde`: **1167 passed** (includes
+`tests/test_migrations.py`). Not re-run today: `uicheck` (225/225 on the
+second full run at commit time), `verify_all` (181/181 locally at commit time).
+
+### 6.3 Migrations and production data — none
+
+**Verified.** 0 files under `migrations/` differ from `4700708`; no
+`db.Column`/`db.Model`/`__tablename__`/`Index`/`ForeignKey`/`op.` changes;
+`render.yaml`, `requirements*.txt`, `runtime.txt`, `.python-version`
+unchanged. Local database stamped `47f7dc9962e3`, the same head production
+reported during the overnight audit. No code path writes data differently;
+no backfill, no script, no data change is part of the release.
+
+### 6.4 Moderation contrast — STILL UNRESOLVED
+
+**Verified today.** `static/admin.html:110`, `.mod-filter.active` is still
+`background: var(--accent)` with `--accent: #6366f1` and white text:
+**4.47:1**, below 4.5:1 by 0.03. No dark-mode override. Introduced by
+`ed72c66`; production (`#4338ca`) is 7.90:1. `#4f46e5` would give 6.29:1.
+Admin-only surface, one operator. Shipping it is a small accessibility
+regression on an internal page; fixing it is a one-line app change that needs
+owner approval.
+
+### 6.5 Intermittent Rickie roaming check — NOT reproduced as an app defect, NOT ruled out
+
+**Documented** (previous session transcript, 2026-09-23 ~13:17): the first
+full `uicheck` run on the `0c5fcde` fix failed 1 of 225 —
+`he steps aside when content appears under him, without a scroll — stayed at 206,29`.
+Run alone it passed 3 of 3; a second full run passed 225/225. A comparison run
+against the previous code was **not** performed (permission denied), so it is
+unknown whether this predates the release.
+
+**Assessment from reading the code (not reproduced):**
+
+- The failing check plants a fixed-position block exactly on Rickie and waits
+  up to 6s for him to move. It does not involve toasts, so `0c5fcde` is an
+  unlikely cause.
+- `stepAsideNow()` (`static/rickie-roam.js:405`) returns without moving when
+  `somewhereClear()` finds **no** clear spot (`if (!spot) return;`). A
+  real-but-rare path therefore exists in which he stays on newly-arrived
+  content — contrary to the file's own comment that he "leaves, by slipping
+  off an edge" when the band is busy. It also returns early while `paused`,
+  `suspended` or `walking` (walk arrival re-checks).
+- The check's own history says an earlier one-in-four flake **was** a real
+  defect. So this should be treated as a possible real defect of low
+  severity, not dismissed as test noise.
+
+**User impact if real:** cosmetic. Rickie is 64px with `pointer-events: none`
+(verified overnight), so a tap on content under him still reaches it; he can
+visually cover a few words until he next moves.
+
+**To settle it (not done, not authorised):** run `check_rickie_roams` ~20×
+on `0c5fcde` and ~20× on `4700708`, logging `somewhereClear()` and the
+early-return reason on failure.
+
+### 6.6 Deployment and rollback — appropriate as documented, with one caveat
+
+**Deploy.** The live Render configuration (documented, owner-verified
+2026-09-22): Auto-Deploy **Off**; Pre-Deploy `flask db upgrade`; Start
+`STREAKFIT_ENFORCE_DB_HEAD=1 STREAKFIT_RETENTION_SWEEPER=1 gunicorn app:app`.
+For this release the pre-deploy upgrade is a no-op (already at head) and the
+head guard cannot fire, because the chain is unchanged.
+
+**Rollback is code-only** (section 3): redeploy `4700708`. **Do not run
+`flask db downgrade`** — the two-part rollback in `deployment-sequence.md`
+applies to migration-bearing deploys, not this one.
+
+**Caveat.** A fresh backup is not strictly required (no schema or data change),
+but the newest encrypted dump is `2026-09-22 10:27` (~28h old). Taking one
+before the deploy is cheap insurance.
+
+**Not verified today:** that production is still on `4700708` — the read-only
+GET was denied this session. Last verified during the overnight audit. The
+first step of the proposed sequence re-checks it.
+
+### 6.7 Remaining blockers and risks
+
+**Release blockers: none found** — provided the owner accepts or fixes 6.4.
+
+**Regressions introduced by this release:**
+
+| item | severity | decision |
+|---|---|---|
+| `.mod-filter.active` 4.47:1 (6.4) | Low, admin-only | fix before deploy, or accept |
+| Possible rare Rickie step-aside failure (6.5) | Low, cosmetic, unconfirmed — may predate the release | accept and track, or investigate first |
+
+**Existing production risks, not introduced or worsened here:**
+
+- **Security — shared rate-limit storage (Phase C2) still not done.**
+  `ratelimit.shared_storage` FAIL; limits are `memory://`, per-worker and
+  reset on every deploy — including this one. This is the control in front of
+  invite-code lookup. (This release *improves* the same area: invite codes now
+  come from `secrets`.)
+- **Security/UX — sessions are a fixed 1-hour JWT with no refresh and no
+  "log out everywhere"**; a tap after expiry is lost (investigated
+  2026-09-23, options proposed, no decision yet).
+- **Durability — production database provider not machine-confirmable**
+  (`storageProvider: unknown`).
+- **Durability — newest encrypted backup ~28h old** (6.6).
+- **Operations — no staging** (merge to `main` is the production code
+  path) and **no alerting** on `/health`/5xx.
+- **Docs — deploy command wrong in four documents** (section 3).
+- **Unexplained — why the first phone taps never reached the server** is still
+  unproven; `5e51274` now makes that failure visible instead of silent.
+- `.settings-toggle` 38×38 on desktop (pre-existing).
+
+### 6.8 Proposed sequence — NOT EXECUTED, awaiting owner approval
+
+Run from `~/Desktop/Streakfit/integrate-product-completion`. `main` is not
+checked out in any worktree, so no branch switching is needed.
+
+**0 · Decisions first.** Contrast fix (6.4) yes/no; accept 6.5 or investigate.
+Any code change resets this sequence to "re-test".
+
+**1 · Pre-flight (read-only)**
+
+```bash
+git status --short                    # must be empty
+git fetch origin
+git rev-parse --short origin/main     # must be 4700708
+git merge-base --is-ancestor origin/main HEAD && echo fast-forward-ok
+curl -s https://streakfit.pro/api/build-identity   # gitSha 4700708…, migration.atHead true
+curl -s https://streakfit.pro/static/sw.js | head -1   # streakfit-v0922
+```
+
+**2 · Fresh encrypted backup (recommended)** — the owner's usual
+`~/backups/streakfit/streakfit-backup.sh` procedure. Claude does not handle
+the passphrase.
+
+**3 · Merge (fast-forward only) and push**
+
+```bash
+git push origin HEAD:refs/heads/main   # refused by git if not a fast-forward; no --force
+git fetch origin main:main             # bring the local main ref along
+```
+
+**4 · Deploy** — Render dashboard → `streakfit-api` → Manual Deploy →
+**Deploy latest commit** (the SHA from step 3). Watch the log: Pre-Deploy
+`flask db upgrade` should report nothing to do; gunicorn starts.
+
+**5 · Verify**
+
+```bash
+curl -s https://streakfit.pro/health                   # 200
+curl -s https://streakfit.pro/api/build-identity       # new gitSha; atHead true; appliedCount 25
+curl -s https://streakfit.pro/static/sw.js | head -1   # streakfit-v0923b
+python scripts/verify_all.py                           # production by default; qa_smoke_* accounts only
+```
+
+Then on the phone at `https://streakfit.pro`: close and reopen the app (or
+reload twice) so the service worker picks up `v0923b`; confirm no Team Rickie
+card, Rickie not parked on the mission, and — on an account that has not done
+today's mission — the celebrations sit above Today/Progress.
+
+**6 · Rollback, if needed** — Render → Manual Deploy → **Deploy a specific
+commit → `4700708`**. Do **not** run `flask db downgrade`. Confirm
+`/api/build-identity` shows `4700708` and `sw.js` reads `streakfit-v0922`.
+`origin/main` then sits ahead of production; decide afterwards whether to
+revert on `main` or fix forward.
