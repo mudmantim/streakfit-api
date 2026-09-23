@@ -579,6 +579,90 @@ def check_a_completion_that_did_not_save_says_so(b: Browser, base: str, app) -> 
         b.call("Emulation.setTouchEmulationEnabled", enabled=False)
 
 
+def check_celebration_stays_clear_of_the_nav(b: Browser, base: str, app) -> None:
+    """A real-phone test: at 5/5 the celebration toasts sat on top of the
+    Today / Progress tabs — four in a row on a first mission, about 21 seconds.
+    Measured from rendered positions at several phone sizes, through the whole
+    sequence and while the page scrolls, and the tabs are tapped by coordinate
+    while a toast is up, so "clear" means clear where a thumb goes.
+    """
+    print("\nThe 5/5 celebration stays above the section nav, at every phone size")
+    sizes = [(320, 568), (360, 640), (360, 800), (390, 844), (412, 915)]
+    b.call("Emulation.setTouchEmulationEnabled", enabled=True, maxTouchPoints=5)
+    sample = """(()=>{const t=document.getElementById('rickie-reaction');
+        const n=document.getElementById('pane-nav');
+        if(!t || t.hidden) return null;
+        const tr=t.getBoundingClientRect(); const nr=n.getBoundingClientRect();
+        return JSON.stringify({line: document.getElementById('rickie-reaction-line').textContent.slice(0,40),
+          tBottom: tr.bottom, tTop: tr.top, nTop: nr.top, nH: nr.height, vh: innerHeight,
+          settled: t.getAnimations().length === 0,
+          navOnScreen: nr.height>0 && nr.top<innerHeight && nr.bottom>0,
+          tabsReachable: [...n.querySelectorAll('.pane-nav-btn')].filter(x=>x.offsetParent).every(x=>{
+            const r=x.getBoundingClientRect(); const h=document.elementFromPoint(r.left+r.width/2, r.top+r.height/2);
+            return !!h && (h===x || x.contains(h));}),
+          // Any other control the toast is drawn over must still take the tap.
+          coveredButNotTappable: [...document.querySelectorAll('button, a, input, select')].filter(x=>{
+            if(!x.offsetParent || t.contains(x)) return false;
+            const r=x.getBoundingClientRect(); const cx=r.left+r.width/2, cy=r.top+r.height/2;
+            if(cy<tr.top || cy>tr.bottom || cx<tr.left || cx>tr.right || cy<0 || cy>innerHeight) return false;
+            const h=document.elementFromPoint(cx, cy); return !h || !(h===x || x.contains(h));
+          }).map(x=>(x.textContent||x.className).trim().slice(0,20))});})()"""
+    try:
+        for w, h in sizes:
+            b.call("Emulation.setDeviceMetricsOverride", width=w, height=h, deviceScaleFactor=2, mobile=True)
+            _, token = make_user(app, f"toast_{w}x{h}")
+            keys = [e["key"] for e in _api(base, "/api/daily", token=token)["exercises"]]
+            for k in keys[:4]:
+                _api(base, f"/api/daily/{k}/complete", "POST", token=token)
+            b.goto(base + "/", wait=1.0)
+            b.js(f"localStorage.setItem('streakfit_token', {json.dumps(token)})")
+            b.goto(base + "/", wait=3.5)
+
+            touch_tap(b, "[...document.querySelectorAll('.btn-daily-complete')]"
+                         ".find(x=>x.textContent.trim()==='I did this')")
+            seen, overlaps, blocked, lines = 0, [], [], set()
+            tapped_tab = None
+            start = time.time()
+            while time.time() - start < 23:
+                el = time.time() - start
+                if 7.0 < el < 7.3:
+                    b.js("window.scrollTo(0, document.documentElement.scrollHeight)")
+                if 12.0 < el < 12.3:
+                    b.js("window.scrollTo(0, 0)")
+                s = b.js(sample)
+                if s:
+                    s = json.loads(s)
+                    seen += 1
+                    lines.add(s["line"])
+                    # Only a settled toast counts: the entry and exit animations
+                    # slide it 16px, which is motion, not placement.
+                    if s["settled"] and s["navOnScreen"] and s["tBottom"] > s["nTop"] + 0.5:
+                        overlaps.append(f"{s['line']!r} bottom {s['tBottom']:.0f} > nav top {s['nTop']:.0f}")
+                    if not s["tabsReachable"] or s["coveredButNotTappable"]:
+                        blocked.append(f"{s['line']!r} {s['coveredButNotTappable']}")
+                    if tapped_tab is None and el > 2.0:
+                        spot = touch_tap(b, "document.querySelector('.pane-nav-btn[data-pane-target=\"progress\"]')")
+                        time.sleep(0.5)
+                        tapped_tab = {"spot": spot, "active": b.js(
+                            "(document.querySelector('.pane-nav-btn.is-active')||{}).dataset.paneTarget")}
+                        b.js("showPane('today')")
+                time.sleep(0.25)
+
+            label = f"{w}x{h}"
+            check(seen > 0 and len(lines) >= 2, f"{label}: the celebration sequence played",
+                  f"saw {seen} samples, lines {lines}")
+            check(not overlaps, f"{label}: no toast sits on the section nav",
+                  "; ".join(overlaps[:3]))
+            check(not blocked, f"{label}: every nav tab, and anything under the toast, stays tappable",
+                  f"blocked during {blocked[:2]}")
+            ok_tap = bool(tapped_tab) and tapped_tab["spot"].get("onTarget") and tapped_tab["active"] == "progress"
+            check(ok_tap, f"{label}: a touch on 'Progress' mid-celebration switches pane",
+                  f"{tapped_tab!r}")
+    finally:
+        b.call("Emulation.setTouchEmulationEnabled", enabled=False)
+        b.call("Emulation.setDeviceMetricsOverride", width=390, height=844, deviceScaleFactor=2, mobile=True)
+
+
 def check_team_witness(b: Browser, base: str, app) -> None:
     print("\nTeams — can a parent see that their kid moved today?")
     parent, parent_token = make_user(app, "parent")
@@ -2417,6 +2501,7 @@ def main() -> int:
         check_guest_gets_the_celebration(browser, base)
         check_guest_promise_is_true(browser, base)
         check_a_completion_that_did_not_save_says_so(browser, base, flask_app)
+        check_celebration_stays_clear_of_the_nav(browser, base, flask_app)
         check_team_witness(browser, base, flask_app)
         check_photo_sharing(browser, base, flask_app)
         check_side_quests_still_work(browser, base, flask_app)

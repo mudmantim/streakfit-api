@@ -3527,6 +3527,36 @@ function showRickieReaction(line, summary) {
     }
 }
 
+// Above the section nav, never on it.
+//
+// The toast is pinned a fixed distance from the bottom of the screen, and the
+// nav is sticky at the bottom of the page, so on a phone they occupied the same
+// strip: finishing a first mission put four toasts in a row — about 21 seconds
+// — over the Today / Progress tabs. The nav is sticky rather than fixed, so
+// where it actually is depends on the page length and the scroll position;
+// measured, not assumed. Its height already includes the safe-area inset (it
+// pads itself by it). When the nav is not on screen the stylesheet's own
+// bottom, which carries the inset, applies unchanged.
+var RICKIE_TOAST_GAP_PX = 12;
+
+function _placeRickieToast() {
+    var toast = document.getElementById('rickie-reaction');
+    if (!toast || toast.hidden) return;
+    var nav = document.getElementById('pane-nav');
+    var lift = 0;
+    if (nav && nav.getClientRects().length) {
+        var r = nav.getBoundingClientRect();
+        if (r.height > 0 && r.top < window.innerHeight && r.bottom > 0) {
+            lift = window.innerHeight - r.top;
+        }
+    }
+    toast.style.bottom = lift > 0 ? (lift + RICKIE_TOAST_GAP_PX) + 'px' : '';
+}
+
+window.addEventListener('resize', _placeRickieToast);
+// Capture phase: a scroll inside any container moves a sticky nav too.
+document.addEventListener('scroll', _placeRickieToast, { passive: true, capture: true });
+
 function _playNextRickieToast() {
     var toast = document.getElementById('rickie-reaction');
     if (!toast) { _rickieToastQueue.length = 0; _rickieToastPlaying = false; return; }
@@ -3571,6 +3601,7 @@ function _playNextRickieToast() {
     if (_rickieReactionRemoveTimer) clearTimeout(_rickieReactionRemoveTimer);
     toast.classList.remove('leaving');
     toast.hidden = false;
+    _placeRickieToast();
 
     // Confetti belongs to its own toast, so a queued celebration does not throw
     // it while a different line is still on screen.
