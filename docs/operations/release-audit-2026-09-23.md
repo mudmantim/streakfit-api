@@ -5,7 +5,7 @@ committed tests, production configuration or migrations were modified. Nothing
 was pushed, merged or deployed. No production data was read or written beyond
 two unauthenticated GETs of public endpoints.**
 
-> **Superseded for the release decision by [section 6](#6-real-phone-test-and-final-release-preparation--2026-09-23-afternoon)**,
+> **Superseded for the release decision by [section 6](#6-real-phone-test-and-final-release-preparation--2026-09-23-afternoon) and [section 7](#7-local-release-issues-resolved--2026-09-23-evening)**,
 > written after the real-phone test passed. The release now also contains
 > `5e51274` and `0c5fcde`; sections 1–5 describe the overnight state.
 
@@ -563,12 +563,12 @@ git fetch origin main:main             # bring the local main ref along
 ```bash
 curl -s https://streakfit.pro/health                   # 200
 curl -s https://streakfit.pro/api/build-identity       # new gitSha; atHead true; appliedCount 25
-curl -s https://streakfit.pro/static/sw.js | head -1   # streakfit-v0923b
+curl -s https://streakfit.pro/static/sw.js | head -1   # streakfit-v0923c (was v0923b before f3bb1f1)
 python scripts/verify_all.py                           # production by default; qa_smoke_* accounts only
 ```
 
 Then on the phone at `https://streakfit.pro`: close and reopen the app (or
-reload twice) so the service worker picks up `v0923b`; confirm no Team Rickie
+reload twice) so the service worker picks up `v0923c`; confirm no Team Rickie
 card, Rickie not parked on the mission, and — on an account that has not done
 today's mission — the celebrations sit above Today/Progress.
 
@@ -577,3 +577,159 @@ commit → `4700708`**. Do **not** run `flask db downgrade`. Confirm
 `/api/build-identity` shows `4700708` and `sw.js` reads `streakfit-v0922`.
 `origin/main` then sits ahead of production; decide afterwards whether to
 revert on `main` or fix forward.
+
+---
+
+## 7. Local release issues resolved — 2026-09-23, evening
+
+Owner-approved local work only. Nothing pushed, merged or deployed; no
+production access of any kind in this section.
+
+**Test environment used throughout:** isolated `flask run` servers bound to
+**127.0.0.1 only** (ports 5055/5056, not reachable from the LAN), each on its
+own throwaway SQLite database built from an empty file by `flask db upgrade`
+alone, with a random per-run `ADMIN_SECRET` (not `uicheck-local-secret`). The
+production baseline ran from a `git archive 4700708` snapshot in the session
+scratchpad — no extra git worktree. One headless Chrome at a time. All servers
+were stopped afterwards. The phone-test database (`instance/streakfit.db`,
+Johnny's and Humpty's records) was not touched.
+
+### 7.1 Moderation contrast — FIXED, `f3bb1f1`
+
+- New token `--accent-strong: #4f46e5` in `static/admin.html`, used for
+  `.mod-filter.active` background and border only. White on it: **6.29:1**
+  (was 4.47:1). `--accent` is unchanged everywhere else.
+- **Themes and states:** `/admin` has one (dark) theme. Unselected chip
+  passes; hover changes only the border; selected is now fixed.
+- **`sw.js` `v0923b` → `v0923c`.** Needed, not ceremony: `/sw.js` is scoped to
+  `/` and its fetch handler serves everything but `/` and `/api/*`
+  cache-first — **including `/admin`**. Without a bump an operator's browser
+  keeps the old page.
+- **Regression check:** uicheck's moderation check now measures every rendered
+  chip's computed colours and requires 4.5:1. **Proven to bite:** with the
+  previous `admin.html` swapped back in, it fails with
+  `pending (selected) 4.47:1 on rgb(99, 102, 241)`; with the fix, it passes.
+
+**Found while fixing, NOT changed (outside the approved scope):** the same
+`ed72c66` tokenisation also put white text on `var(--accent)` in
+`.mod-open:hover` and `.mod-submit` — both **4.47:1**, both **7.90:1** in
+production. Same one-token fix (`var(--accent-strong)`), same panel. The
+`.auth-bar button` (`admin.html:57`) is also white on `--accent` but is
+**pre-existing** at `4700708`.
+
+### 7.2 Verification after the fix — all at `f3bb1f1`'s content
+
+| check | result |
+|---|---|
+| pytest | **1167 passed** (incl. `test_migrations.py`) |
+| ruff / mypy | clean / clean |
+| `build_check.py` | **39 assertions, 0 problems** |
+| `uicheck.py`, full suite, isolated server | **227/227** (225 before + 2 new contrast checks) |
+| `verify_all.py --base-url http://127.0.0.1:5055` | **181/181**; output confirms `Target: http://127.0.0.1:5055` |
+
+### 7.3 Rickie "steps aside" failure — REPRODUCED; cause identified; real, low severity
+
+**Measured, `check_rickie_roams` alone, repeated:**
+
+| code under test | check version | runs with a failure | what failed |
+|---|---|---|---|
+| HEAD | HEAD's | **6 / 24** | step-aside ×2 (`stayed at 206,29`, `stayed at 8,619`); "0 free" ×1; standing on the mission from t=2794ms ×1; "not visible after settling" ×2 |
+| `4700708` | `4700708`'s | 0 / 24 | — (older, weaker check) |
+| `4700708` | HEAD's | **16 / 16** | the load obstruction `c40d837` fixed (on the mission for ~600ms, every load); "not visible after settling" ×2 |
+
+The `206,29` from the previous session reproduced exactly.
+
+**Cause — an expected no-clear-destination condition that the app handles by
+staying on content.** Probed directly (free-spot count sampled every 250ms
+through page loads, and at fixed scroll depths, 390×844):
+
+| | HEAD (64px Rickie) | `4700708` (56px) |
+|---|---|---|
+| clear spots, top of page | **8**, all in one cluster in the top row (y=29, x≈144–252) | 9–15 |
+| at `scrollY` 60 | 4–5 | 5–6 |
+| at `scrollY` 120 | **0 — and he is standing on content** (`isClear` false) | 4 |
+
+1. **The step-aside failure is the check hitting that condition.** It drops a
+   64px block on him; with the 6px margin and his own width that removes
+   everything within ±70px — the whole 8-spot cluster when he stands near its
+   middle (e.g. 206). `somewhereClear()` returns null and `stepAsideNow()`
+   (`static/rickie-roam.js`) does `if (!spot) return;` — **he stays on it.**
+   From an edge of the cluster, spots survive and he moves: hence
+   intermittent, and hence the same coordinates recurring.
+2. **The same condition is reachable by an ordinary user**, not only by the
+   test: at 120px of scroll on a 390px phone there is nowhere clear, and he
+   stays standing on content until something moves him. The file's own design
+   comment says that when the band is busy "he leaves, by slipping off an edge
+   rather than standing on top of what somebody is reading" — the code does
+   not do that in this path.
+3. **The rare "standing from t=2794ms"** is the same condition at load:
+   hidden-until-clear finds nowhere for 2.5s, and the `REVEAL_CAP_MS` cap then
+   shows him where he is — on content. That cap is a deliberate `c40d837`
+   trade-off ("hidden-until-clear can never become hidden-forever").
+4. **"Not visible after settling"** occurs on baseline too (2/16) — **not
+   introduced by this release**. Not investigated further; likely the check
+   sampling during a behaviour that hides him (a peek), but unproven.
+
+**Was it made worse by this release?** Yes, in frequency: the 56→64px size
+change (owner-decided) leaves fewer clear spots, so zero-spot moments that
+did not occur on baseline in these probes now occur. But the release is a
+large **net improvement** on the obstruction it targeted: under the same
+strict check the baseline stands on the mission on **every** load (16/16);
+HEAD did once in 24.
+
+**Severity: low, cosmetic.** `pointer-events: none` (verified), so taps pass
+through him; he can visually cover some text until he next moves.
+
+**Proposed smallest correction — NOT implemented, needs owner approval:**
+
+- **App (`rickie-roam.js`, ~8 lines):** in `stepAsideNow()`, replace
+  `if (!spot) return;` with: fade him out (`rickie-roam-hidden`, the class
+  the peek already uses) and mark him as waiting for room; on the next
+  scroll/mutation/walk-arrival that finds a clear spot, place him there and
+  fade him back in. That implements the documented "slip off" intent and
+  removes the user-visible case in (2). The load-time cap (3) is a separate
+  owner trade-off: keep "never hidden forever", or prefer "never on content".
+- **Check (`uicheck.py`):** the step-aside assertion should pass if he
+  **moves or hides**, and report the free-spot count when it fails, so a
+  no-destination case is distinguishable from a stuck handler. Today the
+  check's result depends on which spot in the cluster he happened to occupy.
+
+### 7.4 Production readiness — read-only review
+
+Documents reviewed: `deployment-sequence.md`, `phase-b-runbook.md`,
+`docs/runbooks.md`, `production-readiness.md`, and the header of
+`~/backups/streakfit/streakfit-backup.sh` (read, not run).
+
+**Backup procedure — sound.** The script embeds no secret; the owner supplies
+the Neon **direct** connection string via `read -rs` (never a history entry)
+and gpg prompts for the passphrase itself. It names its target explicitly:
+**Neon project `dark-sound-88083345`, branch `production`, database `neondb`,
+AWS us-east-2, PostgreSQL 17.** Restore is rehearsed by
+`streakfit-rehearse.sh` (section 3). Newest dump: 2026-09-22 10:27.
+
+**Database-provider verification — owner-only, and the most important gap.**
+`docs/runbooks.md` step 0: *"Identify the project first. Match the hostname in
+Render's `DATABASE_URL` to a Neon endpoint ID … there is more than one Neon
+project named `streakfit`."* Production still reports
+`storageProvider: unknown`, so this remains a manual console comparison.
+
+**Deployment — appropriate** for a migration-free, config-free release
+(section 6.6). **Rollback — code-only** to `4700708`; no `flask db downgrade`.
+
+### 7.5 Pre-deployment checks that require the owner
+
+| # | check | why it is yours |
+|---|---|---|
+| 1 | Decide: `.mod-open:hover` / `.mod-submit` contrast (7.1) — fix now or accept | app change |
+| 2 | Decide: Rickie no-clear-destination fix (7.3) — now, later, or accept | behaviour change |
+| 3 | Authorise the read-only GET of `https://streakfit.pro/api/build-identity` and `/static/sw.js`, or run it: must show `4700708…`, `atHead: true`, `streakfit-v0922` | production request (denied to Claude this session) |
+| 4 | **Render → `streakfit-api` → Environment:** `DATABASE_URL` hostname's endpoint ID matches a Neon endpoint in project **`dark-sound-88083345`**, branch **`production`** | credentials; console access |
+| 5 | **Render → Settings:** Auto-Deploy **Off**; Pre-Deploy `flask db upgrade`; Start `STREAKFIT_ENFORCE_DB_HEAD=1 STREAKFIT_RETENTION_SWEEPER=1 gunicorn app:app` (flags inline, not global); `RATELIMIT_STORAGE_URI` still absent unless you choose to do C2 separately | production configuration |
+| 6 | **Neon console:** history window / latest snapshot on `production` still present | provider console |
+| 7 | **Fresh encrypted backup** with `streakfit-backup.sh` (you paste the direct URL; gpg asks for the passphrase) | credentials and passphrase — Claude must not handle them |
+| 8 | Approve the push of the final SHA to `main`, then trigger **Manual Deploy** | production change |
+| 9 | After deploy: phone check at `https://streakfit.pro` (reopen the app so `v0923c` loads) | real device |
+| 10 | If rollback: **Deploy a specific commit → `4700708`**, no downgrade | production change |
+
+The command sequence in 6.8 stands, with the release SHA now being this
+section's commit and `sw.js` expected at **`streakfit-v0923c`**.
