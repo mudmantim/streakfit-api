@@ -2288,6 +2288,52 @@ def check_page_is_clean(b: Browser, base: str, app) -> None:
           f"too small: {small_list}")
 
 
+# WCAG contrast of an element's text against what is actually behind it.
+#
+# The background is the first non-transparent one walking up the ancestors: a
+# transparent button (.mod-open at rest) is read against the page it sits on,
+# not against "transparent", which would parse as black and flatter a light
+# label. Opacity on the element or an ancestor is not composited — no control
+# measured here uses it outside :disabled, which WCAG exempts.
+_CONTRAST_JS = (
+    "function lum(c){var m=c.match(/[\\d.]+/g).slice(0,3).map(function(v){"
+    "v=v/255;return v<=0.03928?v/12.92:Math.pow((v+0.055)/1.055,2.4);});"
+    "return 0.2126*m[0]+0.7152*m[1]+0.0722*m[2];}"
+    "function bgOf(n){for(;n&&n.nodeType===1;n=n.parentElement){"
+    "var b=getComputedStyle(n).backgroundColor,a=b.match(/[\\d.]+/g);"
+    "if(a&&(a.length<4||parseFloat(a[3])>0.99))return b;}return 'rgb(255,255,255)';}"
+    "function contrastOf(n){var s=getComputedStyle(n),bg=bgOf(n),"
+    "a=lum(s.color),g=lum(bg),r=(Math.max(a,g)+0.05)/(Math.min(a,g)+0.05);"
+    "return {ratio:Math.round(r*100)/100, bg:bg, fg:s.color};}"
+)
+
+
+def _hovered_contrast(b: Browser, selector: str) -> dict | None:
+    """Contrast of the first `selector` in its :hover state.
+
+    Forced through the DevTools CSS domain. A synthetic mouse move does not
+    reliably apply :hover here, because the browser emulates a touch phone;
+    forcing the pseudo-class exercises the same stylesheet rule. `changed`
+    proves the hover rule actually applied rather than measuring rest twice.
+    """
+    rest = b.js("(function(){" + _CONTRAST_JS + "var e=document.querySelector("
+                + json.dumps(selector) + ");return e?contrastOf(e):null;})()")
+    if not rest:
+        return None
+    b.call("DOM.enable")
+    b.call("CSS.enable")
+    root = b.call("DOM.getDocument")["root"]["nodeId"]
+    node = b.call("DOM.querySelector", nodeId=root, selector=selector)["nodeId"]
+    b.call("CSS.forcePseudoState", nodeId=node, forcedPseudoClasses=["hover"])
+    try:
+        got = b.js("(function(){" + _CONTRAST_JS + "return contrastOf("
+                   "document.querySelector(" + json.dumps(selector) + "));})()")
+    finally:
+        b.call("CSS.forcePseudoState", nodeId=node, forcedPseudoClasses=[])
+    got["hovered"] = got["bg"] != rest["bg"]
+    return got
+
+
 def check_moderation_operator_can_close_a_report(b: Browser, base: str, app) -> None:
     """The workflow that did not exist until 2026-09-22.
 
@@ -2354,6 +2400,27 @@ def check_moderation_operator_can_close_a_report(b: Browser, base: str, app) -> 
     check("No actions taken yet" in detail or "dismiss" in detail,
           "the action history is shown")
     check("evidence" in detail.lower(), "evidence state is shown")
+    # 4b. The queue's "open" button and the action's submit button are readable
+    # in every state that has text: at rest, under the pointer, and enabled.
+    # ed72c66 moved all three to var(--accent) at 4.47:1 or worse (the resting
+    # label, accent on this dark page, was 3.76:1); production had 7.90:1.
+    # :disabled is exempt under WCAG 1.4.3 (inactive components).
+    rest = b.js("(function(){" + _CONTRAST_JS + "var e=document.querySelector("
+                "'.mod-open');return e?contrastOf(e):null;})()")
+    check(bool(rest) and rest["ratio"] >= 4.5,
+          "the queue's open button meets 4.5:1 at rest",
+          f"{rest and rest['ratio']}:1, {rest and rest['fg']} on {rest and rest['bg']}")
+    hov = _hovered_contrast(b, ".mod-open")
+    check(bool(hov) and hov.get("hovered") and hov["ratio"] >= 4.5,
+          "and under the pointer",
+          f"hovered={hov and hov.get('hovered')} {hov and hov['ratio']}:1 on "
+          f"{hov and hov['bg']}")
+    sub = b.js("(function(){" + _CONTRAST_JS + "var e=document.querySelector("
+               "'.mod-submit');return e?{c:contrastOf(e),dis:e.disabled}:null;})()")
+    check(bool(sub) and not sub["dis"] and sub["c"]["ratio"] >= 4.5,
+          "the action's submit button meets 4.5:1 while enabled",
+          f"{sub and sub['c']['ratio']}:1 on {sub and sub['c']['bg']}, "
+          f"disabled={sub and sub['dis']}")
 
     # 5. Choose a disposition and write a note.
     b.js("document.getElementById('mod-action-select').value = 'dismiss';"
@@ -2427,15 +2494,10 @@ def check_moderation_operator_can_close_a_report(b: Browser, base: str, app) -> 
     # by an audit rather than by any check. 13.6px bold is not large text (that
     # starts at 18.66px bold), so 4.5:1 is the applicable threshold.
     chips = b.js(
-        "(function(){function L(c){var m=c.match(/[\\d.]+/g).slice(0,3)"
-        ".map(function(v){v=v/255;return v<=0.03928?v/12.92:"
-        "Math.pow((v+0.055)/1.055,2.4);});"
-        "return 0.2126*m[0]+0.7152*m[1]+0.0722*m[2];}"
-        "return Array.prototype.map.call(document.querySelectorAll('.mod-filter'),"
-        "function(f){var s=getComputedStyle(f),a=L(s.color),"
-        "g=L(s.backgroundColor),r=(Math.max(a,g)+0.05)/(Math.min(a,g)+0.05);"
+        "(function(){" + _CONTRAST_JS + "return Array.prototype.map.call("
+        "document.querySelectorAll('.mod-filter'),function(f){var c=contrastOf(f);"
         "return {status:f.dataset.status, active:f.classList.contains('active'),"
-        "ratio:Math.round(r*100)/100, bg:s.backgroundColor};});})()") or []
+        "ratio:c.ratio, bg:c.bg};});})()") or []
     check(any(c.get("active") for c in chips),
           "a filter chip is shown as selected", str(chips)[:160])
     weak = [c for c in chips if c.get("ratio", 0) < 4.5]

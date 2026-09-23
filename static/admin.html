@@ -131,10 +131,14 @@
   .mod-due { color:var(--text); }
   .mod-due.soon { color:var(--amber); font-weight:700; }
   .mod-due.overdue { color:var(--red); font-weight:800; }
+  /* Label in --text, not --accent: #6366f1 on this dark page is 3.8-4.2:1,
+     and on production's white button the #4338ca label was 7.9:1. The accent
+     border keeps it reading as the panel's action. */
   .mod-open { border:1px solid var(--accent); background:transparent;
-              color:var(--accent); border-radius:6px; padding:.3rem .7rem;
+              color:var(--text); border-radius:6px; padding:.3rem .7rem;
               cursor:pointer; min-height:44px; font-weight:600; }
-  .mod-open:hover { background:var(--accent); color:#fff; }
+  .mod-open:hover { background:var(--accent-strong); border-color:var(--accent-strong);
+                    color:#fff; }
 
   #moderation-detail { margin-top:1rem; padding:1rem; border:1px solid var(--border);
                        border-radius:10px; background:var(--surface); color:var(--text); }
@@ -172,7 +176,7 @@
   #mod-action-select:focus, #mod-action-note:focus { border-color:var(--accent); outline:none; }
   .mod-confirm-row { display:flex; align-items:center; gap:.7rem; margin-top:.7rem;
                      flex-wrap:wrap; }
-  .mod-submit { background:var(--accent); color:#fff; border:none; border-radius:8px;
+  .mod-submit { background:var(--accent-strong); color:#fff; border:none; border-radius:8px;
                 padding:.5rem 1.1rem; font-weight:700; cursor:pointer; min-height:44px; }
   .mod-submit:disabled { opacity:.6; cursor:default; }
   .mod-feedback { font-size:.85rem; font-weight:600; color:var(--text); }
