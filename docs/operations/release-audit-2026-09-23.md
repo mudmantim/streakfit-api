@@ -865,3 +865,52 @@ leaves 0 behind.
   and 2 are done. Add: **re-test Rickie on the real phone** — the hide-when-no
   -room behaviour is new and is the kind of change headless testing has
   missed before.
+
+---
+
+## 9. Real-phone Rickie test of `a444c94` — PASSED, 2026-09-23 evening
+
+**Environment.** `flask run` bound to **192.168.1.61:5000 only** (home Wi-Fi
+interface, not all interfaces; no firewall change), from this worktree at
+`a444c94`, on the existing local SQLite `instance/streakfit.db`. No
+`DATABASE_URL`, no `ADMIN_SECRET`, no `ANTHROPIC_API_KEY` (checked by name
+in the shell). Database backed up to the session scratchpad first. Stopped
+after the test; port 5000 confirmed free.
+
+**Owner-observed, Android phone** — all eight steps passed:
+
+1. Rickie appears in an empty spot when there is room.
+2. Scrolling into the no-room band, he hides instead of sitting on exercise text.
+3. He returns when room becomes available.
+4. When content appears where he stands (Reveal / Reveal Brain Boost), he steps
+   aside or hides.
+5. He never remains over workout text.
+6. Today / Progress stay visible and tappable.
+7. Settle: he holds still and still gets out from under content.
+8. Quiet and Minimal behave the same.
+
+Owner summary: *"All steps passed, Rickie hides and returns correctly."*
+
+**Verified by Claude:**
+
+| check | result |
+|---|---|
+| Server log | phone at `192.168.1.94`; 301 requests; signed-in dashboard, `/api/daily` 200; **no 5xx** |
+| Current code on the phone | `rickie-roam.js`, `app.js`, `style.css` answered **304** against the files on disk at `a444c94`, so the phone held the current versions |
+| Johnny (id 332) | **5** completions for 2026-09-23, `rickie_mode` full — unchanged |
+| Humpty (id 379) | **5** completions for 2026-09-23, `rickie_mode` full — unchanged |
+| New account | `bobby` (id 380), created by the owner for this test, ended on full |
+
+**Not verified:**
+
+- `/api/build-identity`, the served `sw.js` version and `/admin` 403 over the
+  LAN — Claude's requests to the LAN address were denied this session, and the
+  owner was not asked to run the one-line check before testing. Served code is
+  `a444c94` by construction (clean tree, server started from this checkout)
+  and the 304s above, not by the identity endpoint.
+- The service worker and the `v0923d` cache bump: not active over `http://` to
+  a LAN IP (section 4). Exercised only after deploy, on `streakfit.pro`.
+
+**Release state:** `integrate-product-completion`, clean; production still
+`4700708` as last verified; nothing pushed, merged or deployed. Remaining steps
+are the owner checks in 7.5, items 3–10.
