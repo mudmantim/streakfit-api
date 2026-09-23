@@ -1882,12 +1882,24 @@ def check_rickie_roams(b: Browser, base: str, app) -> None:
           f"{resting / DRAWS:.0%})")
 
     # Obstruction, measured on the page.
+    #
+    # Zero clear spots is a real page state, not a broken page: about one load
+    # in fifteen the Today greeting is a longer variant whose text starts at
+    # y=98 and removes the only clear cluster at the top of a 390px screen
+    # (measured 2/30). The rule for that state is "out of sight", so that is
+    # what is checked then — this used to fail the whole check and skip the
+    # rest of it ("0 free", 1 run in 24 on both this code and the last).
     spots = b.js("RickieRoam._freeSpots().length")
-    if not check(spots > 0, "there is somewhere clear for him to stand", f"{spots} free"):
-        return
-    blocked = _spots_he_may_stand_in_that_are_not_clear(b, tries=8)
-    check(not blocked, "every position he may stand in is clear of controls AND text",
-          "; ".join(blocked[:3]))
+    if spots == 0:
+        hidden = _wait_for(b, "parseFloat(getComputedStyle(document.querySelector("
+                              "'.rickie-roam')).opacity) <= 0.05", 1.5)
+        check(hidden, "with nowhere clear at the top of this page, he is out of sight",
+              "visible with 0 clear spots")
+    else:
+        check(True, f"there is somewhere clear for him to stand ({spots})")
+        blocked = _spots_he_may_stand_in_that_are_not_clear(b, tries=8)
+        check(not blocked, "every position he may stand in is clear of controls AND text",
+              "; ".join(blocked[:3]))
 
     # ...and the same question asked of the page instead of the engine.
     #
@@ -1896,7 +1908,17 @@ def check_rickie_roams(b: Browser, base: str, app) -> None:
     # to nominated coordinates and never looks at the position he really took.
     _, second_token = make_user(app, "roam_load")
     seen, standing, travelling = _watch_him_through_a_page_load(b, base, second_token)
-    if check(seen > 20, f"he can be observed through a page load ({seen} samples)"):
+    # A load with no clear spot anywhere (the long-greeting case above) keeps
+    # him hidden throughout — correct under the no-room rule, and nothing to
+    # observe. Accepted only when the page confirms there is no room.
+    load_no_room = (seen <= 20 and b.js("RickieRoam._state.noRoom") is True
+                    and b.js("RickieRoam._freeSpots().length") == 0)
+    if load_no_room:
+        print(f"    · this load had no clear spot; he stayed hidden "
+              f"({seen} visible samples)")
+    if check(seen > 20 or load_no_room,
+             f"he can be observed through a page load ({seen} samples), or "
+             f"is hidden because nowhere is clear"):
         # STANDING on something is the defect, and it is absolute.
         #
         # This is what the nominated-spot check above could not see: he was
@@ -1934,12 +1956,31 @@ def check_rickie_roams(b: Browser, base: str, app) -> None:
     # Hidden-until-clear must not become hidden-forever. He is a companion;
     # one who never turns up is a worse bug, and a much quieter one, than the
     # 600ms of covering this replaced.
-    b.goto(base + "/", wait=3.5)
-    shown = b.js("""(()=>{const e=document.querySelector('.rickie-roam');
-      if(!e) return null;
-      return parseFloat(getComputedStyle(e).opacity) > 0.05;})()""")
-    check(shown is True, "and he does actually turn up after the page settles",
-          f"opacity says visible={shown}")
+    #
+    # Polled, not sampled once at 3.5s. A single sample failed ~1 run in 12 on
+    # BOTH this release and 4700708, because he is legitimately out of sight
+    # for a few seconds at a time mid-peek or after slipping off an edge. The
+    # question is whether he turns up, so wait for that — ten seconds covers
+    # the longest hide a behaviour produces — and exit the moment he does.
+    b.goto(base + "/", wait=1.0)
+    shown = None
+    for _ in range(45):
+        shown = b.js("""(()=>{const e=document.querySelector('.rickie-roam');
+          if(!e) return null;
+          return parseFloat(getComputedStyle(e).opacity) > 0.05;})()""")
+        if shown is True:
+            break
+        time.sleep(0.2)
+    free_now = b.js("RickieRoam._freeSpots().length")
+    no_room = b.js("RickieRoam._state.noRoom") is True and free_now == 0
+    if shown is not True and no_room:
+        # The one legitimate reason to stay out of sight: nowhere to stand
+        # (see the greeting note above). The return path is covered by
+        # check_rickie_is_never_left_on_content.
+        print("    · this load had no clear spot at all; he stayed hidden, as he should")
+    check(shown is True or no_room,
+          "and he does actually turn up after the page settles",
+          f"opacity says visible={shown} after 10s; free spots {free_now}")
 
     # He must be wholly on screen. A walkthrough found him in ONE position for
     # 11 of 23 samples with half his body past the left edge — which reads as a
@@ -1990,19 +2031,37 @@ def check_rickie_roams(b: Browser, base: str, app) -> None:
     # Poll rather than sleep once: the debounce is 250ms and the move 420ms,
     # but if he was mid-walk when the content arrived he re-checks on arrival,
     # and a walk can be a couple of seconds. Six seconds is far longer than
-    # either path needs and the loop exits the moment he moves.
-    after = str(moved)
+    # either path needs and the loop exits the moment he is off it.
+    #
+    # Moving is not the only right answer. At 390px a 64px Rickie has one small
+    # cluster of clear spots, and a block dropped on him near its middle leaves
+    # NOWHERE clear — this check used to fail then (2 runs in 24, "stayed at
+    # 206,29"), because he stayed on the block. The rule now is: move if there
+    # is room, hide if there is not. Both are accepted; standing on it is not.
+    outcome, after, free = None, str(moved), None
     for _ in range(30):
         time.sleep(0.2)
-        after = b.js("(()=>{const r=document.querySelector('.rickie-roam')"
-                     ".getBoundingClientRect(); return r.left+','+r.top;})()")
-        if str(after) != str(moved):
+        row = b.js("""(()=>{const e=document.querySelector('.rickie-roam');
+          const r=e.getBoundingClientRect();
+          return {at:r.left+','+r.top,
+                  op:parseFloat(getComputedStyle(e).opacity),
+                  noRoom:!!RickieRoam._state.noRoom,
+                  free:RickieRoam._freeSpots().length};})()""")
+        after, free = row["at"], row["free"]
+        if row["op"] <= 0.05 and row["noRoom"]:
+            outcome = "hid"
+            break
+        if after != str(moved) and row["op"] > 0.05:
+            outcome = "moved"
             break
     b.js("(()=>{const d=document.getElementById('uicheck-intruder');"
          " if(d) d.remove(); return 1;})()")
-    check(str(after) != str(moved),
-          "he steps aside when content appears under him, without a scroll",
-          f"stayed at {after}")
+    print(f"    · content under him: he {outcome or 'stayed'} "
+          f"({free} clear spot(s) left with it there)")
+    check(outcome is not None,
+          "he steps aside when content appears under him, without a scroll — "
+          "or hides when nowhere is clear",
+          f"stayed at {after}, {free} clear spot(s)")
 
     # A tap at his position reaches the page underneath.
     #
@@ -2048,6 +2107,270 @@ def check_rickie_roams(b: Browser, base: str, app) -> None:
       RickieRoam._state.busy=false; RickieRoam.react('mission_done');
       seen.push(RickieRoam._state.pose);} return seen.join(',');})()""") or "").split(",")
     check(len(set(poses)) >= 2, f"a celebration is not always the same one ({sorted(set(poses))})")
+
+
+_RICKIE_JS = """
+  window.__rk = {
+    el: () => document.querySelector('.rickie-roam'),
+    visible: () => parseFloat(getComputedStyle(__rk.el()).opacity) > 0.05,
+    at: () => { const r=__rk.el().getBoundingClientRect();
+                return Math.round(r.left)+','+Math.round(r.top); },
+    plantOn: (id) => { const r=__rk.el().getBoundingClientRect();
+      const d=document.createElement('div'); d.id=id;
+      d.textContent='content that arrived underneath him';
+      d.style.cssText='position:fixed;z-index:1;background:#fff;left:'+
+        Math.round(r.left)+'px;top:'+Math.round(r.top)+'px;width:'+
+        Math.round(r.width)+'px;height:'+Math.round(r.height)+'px;';
+      document.body.appendChild(d); return __rk.at(); },
+    cover: (id) => { const d=document.createElement('div'); d.id=id;
+      d.textContent='a screen with no room anywhere '.repeat(40);
+      d.style.cssText='position:fixed;inset:0;z-index:1;background:#fff;'+
+        'font-size:14px;overflow:hidden;';
+      document.body.appendChild(d); return 1; },
+    drop: (id) => { const d=document.getElementById(id); if(d) d.remove(); return 1; },
+  }; 1;
+"""
+
+
+def _rickie_obstructing(b: Browser) -> list:
+    """What a VISIBLE Rickie overlaps, measured from the page, not his map."""
+    row = b.js(_WHAT_HE_IS_ACTUALLY_ON)
+    return (row or {}).get("hit") or [] if (row or {}).get("visible") else []
+
+
+def _watch_rickie(b: Browser, seconds: float, gap: float = 0.15) -> dict:
+    """Sample for `seconds`: how often he was visible, and every obstruction,
+    with its time in ms from the start of the watch."""
+    seen, standing, t0 = 0, [], time.time()
+    while time.time() - t0 < seconds:
+        row = b.js(_WHAT_HE_IS_ACTUALLY_ON) or {}
+        if row.get("visible"):
+            seen += 1
+            if row.get("hit") and not row.get("walking"):
+                standing.append((round((time.time() - t0) * 1000), row["hit"][:3]))
+        time.sleep(gap)
+    return {"seen": seen, "standing": standing}
+
+
+# How long he may still be on content after the page moves under him: the
+# 250ms step-aside debounce (scroll and mutation storms are coalesced) plus
+# the 260ms opacity fade when he hides, measured at ~0.5s. Bounded here so a
+# slow or missing reaction fails, while the reaction itself is not a defect.
+_RICKIE_REACTION_MS = 800
+
+
+def _wait_for(b: Browser, js: str, seconds: float) -> bool:
+    t0 = time.time()
+    while time.time() - t0 < seconds:
+        if b.js(js) is True:
+            return True
+        time.sleep(0.1)
+    return False
+
+
+def _appears_where_there_is_room(b: Browser, seconds: float) -> bool:
+    """Wait for him to be visible. If he is hidden because this screen truly
+    has no clear spot (the long-greeting load), scroll to where there is room
+    — he must then come back — and return to the top."""
+    if _wait_for(b, "__rk.visible()", seconds):
+        return True
+    if b.js("RickieRoam._state.noRoom === true && "
+            "RickieRoam._freeSpots().length === 0") is not True:
+        return False
+    b.js("window.scrollTo(0,240)")
+    ok = _wait_for(b, "__rk.visible()", 4.0)
+    b.js("window.scrollTo(0,0)")
+    time.sleep(0.6)
+    return ok
+
+
+def check_rickie_is_never_left_on_content(b: Browser, base: str, app) -> None:
+    """Owner-approved rule, Sept 2026: never stay on workout text or controls.
+
+    Move to a clear spot if there is one; if there is none, hide; come back
+    when there is room; at page load with no room, stay hidden rather than
+    appear on content. Holds in every mode he has — roaming, settled, reduced
+    motion, Quiet, Minimal — while keeping 64px and pointer-events: none.
+
+    The previous rule revealed him anyway after 2.5s and left him where he was
+    when nowhere was clear. At 390px, 64px, that was reachable by scrolling
+    120px: zero clear spots, and him standing on the exercise text.
+    Obstruction is always measured from the rendered page
+    (_WHAT_HE_IS_ACTUALLY_ON), never from the engine's own map.
+    """
+    print("\nRickie — never left on content")
+    _, token = make_user(app, "rk_room")
+    b.goto(base + "/", wait=1.0)
+    b.reset_storage()
+    b.js(f"localStorage.setItem('streakfit_token', {json.dumps(token)})")
+    b.goto(base + "/", wait=1.0)
+    b.js(_RICKIE_JS)
+    appeared = _appears_where_there_is_room(b, 10)
+    if not check(appeared, "he appears on a normal load (or once there is room)",
+                 str(b.js("""(()=>{const s=RickieRoam._state;return {noRoom:s.noRoom,
+                   free:RickieRoam._freeSpots().length,x:s.x,y:s.y,walking:s.walking,
+                   paused:s.paused,cls:__rk.el().className,
+                   op:getComputedStyle(__rk.el()).opacity,scrollY:scrollY};})()"""))):
+        return
+
+    # Size and taps: unchanged by any of this.
+    size = b.js("__rk.el().offsetWidth")
+    check(size == 64, "he is still 64px at phone width", f"{size}px")
+    pe = b.js("getComputedStyle(document.getElementById('rickie-roam-band')).pointerEvents")
+    check(pe == "none", "and still never intercepts a tap", f"pointer-events: {pe}")
+
+    # 1. Stationary, content arrives, room exists → he moves, stays visible.
+    #    Made deterministic: stand him at the LEFTMOST clear spot, so a block
+    #    on him leaves the far end of the cluster clear.
+    #    Behaviours are swapped for a long no-op for this scenario only, so no
+    #    walk can start mid-measurement; a walk already under way is waited out.
+    b.js("""(()=>{RickieRoam._behaviours.forEach(function(x){
+      x._run=x.run; x.run=function(done){setTimeout(done,60000);};}); return 1;})()""")
+    _wait_for(b, "RickieRoam._state.walking === false", 8.0)
+    #    "Room elsewhere" is constructed, not assumed. On the live page the
+    #    clear cluster is often narrower than the ~140px a block on him
+    #    removes, so the same setup sometimes leaves no room — the case
+    #    scenario 2 covers. Here the dashboard content is taken out of layout
+    #    (display:none; his layer lives outside it), leaving the screen open:
+    #    a block on him then always leaves room, and he must MOVE, not hide.
+    #    The real-page version (move or hide) is check_rickie_roams.
+    b.js("document.getElementById('dashboard-view').style.display='none'")
+    time.sleep(0.6)
+    b.js("""(()=>{const st=RickieRoam._state; st.x=0.5; st.y=0.5;
+      __rk.el().style.transition=''; RickieRoam._place(); return 1;})()""")
+    time.sleep(0.4)
+    before = b.js("__rk.plantOn('rk-block')")
+    free_with = b.js("RickieRoam._freeSpots().length")
+    moved = _wait_for(b, f"__rk.visible() && __rk.at() !== {json.dumps(before)}", 2.0)
+    time.sleep(0.6)   # let the 420ms step-aside finish before measuring
+    hit = _rickie_obstructing(b)
+    check(free_with > 0 and moved and not hit,
+          "content lands under a stationary Rickie with room elsewhere: he moves, "
+          "and is visible and clear",
+          f"free={free_with} moved={moved} on={hit}")
+    b.js("__rk.drop('rk-block')")
+    b.js("document.getElementById('dashboard-view').style.display=''")
+    time.sleep(0.4)
+    b.js("""(()=>{RickieRoam._behaviours.forEach(function(x){
+      if(x._run){x.run=x._run; delete x._run;}}); return 1;})()""")
+
+    # 2. No clear location anywhere → he hides.
+    b.js("__rk.cover('rk-cover')")
+    hid = _wait_for(b, "!__rk.visible() && RickieRoam._state.noRoom === true", 1.5)
+    check(hid, "with nowhere clear on screen, he hides",
+          f"visible={b.js('__rk.visible()')} free={b.js('RickieRoam._freeSpots().length')}")
+    watch = _watch_rickie(b, 3.0)
+    check(watch["seen"] == 0,
+          "and stays hidden while there is no room — no behaviour brings him back",
+          f"visible in {watch['seen']} samples")
+
+    # 3. Room returns → he comes back, somewhere clear.
+    b.js("__rk.drop('rk-cover')")
+    back = _appears_where_there_is_room(b, 3.0)
+    time.sleep(0.5)
+    check(back and not _rickie_obstructing(b),
+          "when room returns, he comes back — onto a clear spot",
+          f"visible={back} on={_rickie_obstructing(b)}")
+
+    # 4. Scrolling. At 390px a 64px Rickie has no clear spot at all ~120px down;
+    #    that was where he used to stand on the exercise text.
+    stood = []
+    for y in (60, 120, 180, 240, 120, 0):
+        b.js(f"window.scrollTo(0,{y})")
+        time.sleep(0.9)
+        on = _rickie_obstructing(b)
+        if on:
+            stood.append(f"scrollY {y}: {on[:3]}")
+    check(not stood, "scrolling never leaves him standing on content", "; ".join(stood))
+    check(_appears_where_there_is_room(b, 4.0),
+          "and after scrolling he is visible again wherever there is room")
+
+    # 5. First load with no room at all → hidden throughout, never shown on
+    #    content; then he appears once room exists.
+    ident = b.call("Page.addScriptToEvaluateOnNewDocument", source=(
+        "document.addEventListener('DOMContentLoaded',function(){"
+        "var d=document.createElement('div');d.id='rk-load-cover';"
+        "d.textContent='a screen with no room anywhere '.repeat(40);"
+        "d.style.cssText='position:fixed;inset:0;z-index:1;background:#fff;"
+        "font-size:14px;overflow:hidden;';document.body.appendChild(d);});"))
+    try:
+        b.call("Page.navigate", url=base + "/")
+        watch = _watch_rickie(b, 4.5)   # past the old 2.5s reveal cap
+        check(watch["seen"] == 0,
+              "a page that loads with no clear spot keeps him hidden — past the "
+              "old 2.5s cap that showed him on content",
+              f"visible in {watch['seen']} samples, standing {watch['standing'][:2]}")
+    finally:
+        b.call("Page.removeScriptToEvaluateOnNewDocument",
+               identifier=ident.get("identifier"))
+    b.js(_RICKIE_JS)
+    b.js("__rk.drop('rk-load-cover')")
+    back = _appears_where_there_is_room(b, 4.0)
+    time.sleep(0.5)
+    check(back and not _rickie_obstructing(b),
+          "and appears, somewhere clear, once there is room",
+          f"visible={back} on={_rickie_obstructing(b)}")
+
+    # 6. Settled ("Ask Rickie to settle"): still moves out of the way, with no
+    #    travel animation, and stays settled.
+    b.js("RickieRoam.setPaused(true)")
+    time.sleep(0.3)
+    b.js("__rk.plantOn('rk-block')")
+    time.sleep(1.0)
+    off = not _rickie_obstructing(b)
+    trans = b.js("getComputedStyle(__rk.el()).transitionDuration")
+    check(off and b.js("RickieRoam.isPaused()") is True,
+          "settled, he still gets out from under new content, and stays settled",
+          f"clear={off} paused={b.js('RickieRoam.isPaused()')}")
+    check(all(float(t.strip().rstrip("s") or 0) == 0 for t in str(trans).split(",")),
+          "without a travel animation", f"transition-duration {trans}")
+    b.js("__rk.drop('rk-block')")
+    b.js("RickieRoam.setPaused(false)")
+
+    # 7. Reduced motion: never roams; still never left on content.
+    b.call("Emulation.setEmulatedMedia",
+           features=[{"name": "prefers-reduced-motion", "value": "reduce"}])
+    try:
+        b.goto(base + "/", wait=1.0)
+        b.js(_RICKIE_JS)
+        if check(_appears_where_there_is_room(b, 6.0),
+                 "reduced motion: he is still there"):
+            here = b.js("__rk.at()")
+            time.sleep(4.0)
+            check(b.js("__rk.at()") == here and b.js("RickieRoam.isPaused()") is True,
+                  "and does not roam", f"{here} -> {b.js('__rk.at()')}")
+            b.js("__rk.plantOn('rk-block')")
+            time.sleep(1.0)
+            check(not _rickie_obstructing(b),
+                  "and still gets out from under new content",
+                  str(_rickie_obstructing(b)))
+            b.js("__rk.drop('rk-block')")
+            b.js("window.scrollTo(0,120)")
+            time.sleep(1.0)
+            check(not _rickie_obstructing(b),
+                  "and is not left on content by a scroll either",
+                  str(_rickie_obstructing(b)))
+    finally:
+        b.call("Emulation.setEmulatedMedia", features=[])
+
+    # 8. Quiet and Minimal: the same rule. (The app has Full/Quiet/Minimal plus
+    #    the roaming toggle above; there is no separate "Hidden" mode.)
+    for mode in ("quiet", "minimal"):
+        r = _api(base, "/api/me", "PATCH", token, {"rickie_mode": mode})
+        b.goto(base + "/", wait=1.0)
+        b.js(_RICKIE_JS)
+        b.js("window.scrollTo(0,120)")
+        watch = _watch_rickie(b, 3.0)
+        b.js("window.scrollTo(0,0)")
+        late = [s_ for s_ in watch["standing"] if s_[0] > _RICKIE_REACTION_MS]
+        react = max([s_[0] for s_ in watch["standing"]], default=0)
+        print(f"    · {mode}: on content for up to {react}ms after the scroll "
+              f"({len(watch['standing'])} sample(s)), then clear")
+        check("__status__" not in (r or {}) and not late,
+              f"{mode.capitalize()} mode: never left on content "
+              f"(clear within {_RICKIE_REACTION_MS}ms of a scroll)",
+              f"api={r if '__status__' in (r or {}) else 'ok'} late={late[:2]}")
+    _api(base, "/api/me", "PATCH", token, {"rickie_mode": "full"})
 
 
 def check_appeals_are_reachable(b: Browser, base: str, app) -> None:
@@ -2400,6 +2723,7 @@ def check_moderation_operator_can_close_a_report(b: Browser, base: str, app) -> 
     check("No actions taken yet" in detail or "dismiss" in detail,
           "the action history is shown")
     check("evidence" in detail.lower(), "evidence state is shown")
+
     # 4b. The queue's "open" button and the action's submit button are readable
     # in every state that has text: at rest, under the pointer, and enabled.
     # ed72c66 moved all three to var(--accent) at 4.47:1 or worse (the resting
@@ -2602,6 +2926,7 @@ def main() -> int:
         check_acorns_are_spendable_without_a_team(browser, base, flask_app)
         check_display_name_can_be_set_changed_and_cleared(browser, base, flask_app)
         check_rickie_roams(browser, base, flask_app)
+        check_rickie_is_never_left_on_content(browser, base, flask_app)
         check_appeals_are_reachable(browser, base, flask_app)
         check_appeals_stay_hidden_for_everybody_else(browser, base, flask_app)
         check_accessibility_basics(browser, base, flask_app)

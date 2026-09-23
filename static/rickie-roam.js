@@ -95,6 +95,7 @@
         timer: null,
         walkTimer: null,
         walking: false,     /* mid-walk: do not reposition under him */
+        noRoom: false,      /* hidden because nowhere on screen is clear */
         reactionGeneration: 0,  /* only the newest reaction may end the reaction */
         pose: 'neutral'
     };
@@ -354,20 +355,41 @@
      */
     var asideCheck = null;
 
-    /* Poll for a clear spot, reveal, and give up waiting after REVEAL_CAP_MS.
+    /* Poll for a clear spot, reveal, and stop polling after REVEAL_CAP_MS.
      *
-     * The cap is not a nicety. Without it, a page that never stops mutating —
-     * or a screen so full that `somewhereClear()` genuinely has no answer —
-     * would leave Rickie permanently invisible, which is a worse bug than the
-     * one being fixed and a much quieter one. He is a companion; a companion
-     * who silently never turns up is not a trade worth making for 600ms.
-     *
-     * So: appear as soon as there is somewhere clear, and appear anyway at
-     * 2.5s. In the second case `stepAsideIfCovered` is still watching and will
-     * move him the moment anything frees up.
+     * The cap bounds the POLLING, not his invisibility. It used to reveal him
+     * anyway at 2.5s — "a companion who silently never turns up" was judged
+     * worse than one standing on the mission — and on a phone with no clear
+     * spot that meant exactly that: shown on the exercise text, and left
+     * there. Now the cap hands over to `hideForRoom()` below, and the
+     * event-driven step-aside (plus the slow re-check while he waits) brings
+     * him back as soon as there is somewhere clear to stand.
      */
     var REVEAL_CAP_MS = 2500;
     var REVEAL_POLL_MS = 120;
+
+    /* Nowhere to stand: out of sight until somewhere is.
+     *
+     * Owner decision, Sept 2026, reversing the cap described above: when no
+     * clear spot exists he is HIDDEN, not shown on top of content. The
+     * never-invisible-forever worry is answered differently — he comes back
+     * the moment room appears (scroll, DOM change, resize, or the slow
+     * re-check in mount while he waits) rather than by a timer that puts him
+     * on the mission. Measured before this: at 390px a 64px Rickie has ONE
+     * cluster of ~8 clear spots at the top of the dashboard, and none at all
+     * 120px down, where he used to stand on the exercise text.
+     *
+     * Every path that makes him visible goes through `show()`, so a peek or a
+     * return from the edge cannot un-hide him while this holds. */
+    function hideForRoom() {
+        state.noRoom = true;
+        if (el) el.classList.add('rickie-roam-hidden');
+    }
+
+    function show() {
+        if (!el || state.noRoom) return;
+        el.classList.remove('rickie-roam-hidden');
+    }
 
     function revealWhenClear(startedAt) {
         if (!el) return;
@@ -378,11 +400,13 @@
             state.y = spot.y;
             el.style.transition = '';
             place();
-            el.classList.remove('rickie-roam-hidden');
+            state.noRoom = false;
+            show();
             return;
         }
         if (now() - began >= REVEAL_CAP_MS) {
-            el.classList.remove('rickie-roam-hidden');
+            /* Stop polling; the step-aside watchers bring him back. */
+            hideForRoom();
             return;
         }
         setTimeout(function () { revealWhenClear(began); }, REVEAL_POLL_MS);
@@ -416,14 +440,29 @@
          * clear when chosen, and moving him now would fight the transition.
          * `walkTo` calls this directly on arrival, which is where that
          * exemption is repaid. */
-        if (!el || state.paused || state.suspended || state.walking) return;
-        if (isClear(state.x, state.y, occupiedRects())) return;
+        if (!el || state.walking) return;
+        /* NOT gated on paused or suspended either, any more.
+         *
+         * Settled ("Ask Rickie to settle"), reduced motion (which settles him
+         * at mount) and suspended (a modal, the coach, settings, a focused
+         * input) all returned here, so in exactly the states where he holds
+         * still, content arriving beneath him left him on it for good. Those
+         * states mean "do not wander", not "stay on the text": he still moves
+         * out of the way — instantly, with no travel, so nothing animates for
+         * somebody who asked for stillness or less motion. */
+        if (isClear(state.x, state.y, occupiedRects())) {
+            if (state.noRoom) { state.noRoom = false; show(); }
+            return;
+        }
         var spot = somewhereClear();
-        if (!spot) return;
+        if (!spot) { hideForRoom(); return; }
+        var reappearing = state.noRoom;
         state.x = spot.x;
         state.y = spot.y;
-        el.style.transition = 'transform 420ms ease-in-out';
+        el.style.transition = (reappearing || state.paused || state.suspended || reducedMotion())
+            ? '' : 'transform 420ms ease-in-out';
         place();
+        if (reappearing) { state.noRoom = false; show(); }
     }
 
     function stepAsideIfCovered() {
@@ -531,7 +570,12 @@
                     state.y = spot.y;
                     el.style.transition = '';
                     place();
-                    el.classList.remove('rickie-roam-hidden');
+                    state.noRoom = false;
+                    show();
+                } else {
+                    /* Still nowhere: hand over to the step-aside watchers, so
+                     * the first moment of room brings him back. */
+                    hideForRoom();
                 }
                 done();
             }, rand(3000, 7000));
@@ -545,7 +589,11 @@
             el.classList.add('rickie-roam-hidden');
             setTimeout(function () {
                 setPose('peek');
-                el.classList.remove('rickie-roam-hidden');
+                /* Only if the edge he walked to is clear. Arrival already
+                 * moved him to a clear spot or, with none, hid him for room;
+                 * `show()` respects the second. */
+                if (isClear(state.x, state.y, occupiedRects())) show();
+                else hideForRoom();
                 el.classList.add('rickie-roam-peeking');
                 setTimeout(function () {
                     el.classList.remove('rickie-roam-peeking');
@@ -822,9 +870,18 @@
             if (document.hidden) { clearTimeout(state.timer); clearInterval(state.walkTimer); }
             else if (!state.paused) schedule(rand(2000, 6000));
         });
+        /* A rotation or resize moves everything under him without a mutation. */
+        window.addEventListener('resize', stepAsideIfCovered);
         document.addEventListener('focusin', updateSuspension);
         document.addEventListener('focusout', function () { setTimeout(updateSuspension, 50); });
-        setInterval(updateSuspension, 900);
+        setInterval(function () {
+            updateSuspension();
+            /* Only while hidden for lack of room: room can also appear with no
+             * event at all (an image finishing, a transition ending), and this
+             * is what stops "hidden until there is room" becoming "hidden
+             * forever". Idle and visible, it costs nothing. */
+            if (state.noRoom && !document.hidden) stepAsideNow();
+        }, 900);
 
         if (reducedMotion()) {
             /* He still exists and still reacts; he simply does not travel. */
