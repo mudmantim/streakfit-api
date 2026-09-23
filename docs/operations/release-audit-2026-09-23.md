@@ -224,9 +224,33 @@ The repo already maintains an honest register in
 
 ## 4. Phone test
 
-**URL: `http://192.168.1.61:5000`** — re-verified at the end of this audit:
-`/health` **200** and `/` **200** over the LAN, admin **403**, server outbound
-connections **0**.
+> ### ⚠️ The server is NOT running — it must be restarted first
+>
+> It was verified working at the end of the audit (`/health` 200, `/` 200 over
+> the LAN, admin 403, zero outbound connections) and was then **stopped by
+> Claude Code at about 06:25 on 2026-09-23, because the machine ran critically
+> low on memory while the session was idle** — 12 GiB of 15 GiB in use.
+>
+> That is a host-memory event, not a fault in the server, the audit or the
+> release. Nothing about the findings below changes. The local test database
+> survived intact (937,984 bytes) and a pre-restart backup is also held.
+>
+> **Ask Claude to restart it**, or run it yourself from
+> `~/Desktop/Streakfit/integrate-product-completion`:
+>
+> ```bash
+> FLASK_APP=app SECRET_KEY=localdev-secret-not-real \
+>   JWT_SECRET_KEY=localdev-jwt-not-real \
+>   ../streakfit_production_baseline/.venv/bin/python app.py
+> ```
+>
+> Deliberately **no `ADMIN_SECRET`** — that is what keeps `/admin` fail-closed.
+> Deliberately **no `DATABASE_URL`** — that is what keeps it on local SQLite.
+> Closing other applications first would help; the machine was short on memory.
+
+**URL: `http://192.168.1.61:5000`** — verified during the audit: `/health`
+**200** and `/` **200** over the LAN, admin **403**, server outbound
+connections **0**. Re-check the IP after restarting; it can change.
 
 `http`, not `https`. Keep the `:5000`. Phone on the same Wi-Fi.
 
@@ -316,4 +340,9 @@ characters. It exists only in the local SQLite file. Do not use a real password.
 Then decide on the contrast fix, and whether to merge
 `integrate-product-completion` → `main` and deploy.
 
-Nothing is pushed. Nothing is deployed. The server is left running securely.
+Nothing is pushed. Nothing is deployed.
+
+**The local server is stopped** — see the warning in section 4. It was left
+running securely at the end of the audit and was reaped later by Claude Code
+under host memory pressure. It needs restarting before the phone test, and I
+did not restart it on my own because memory may still be short.
