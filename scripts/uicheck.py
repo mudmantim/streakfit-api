@@ -157,6 +157,9 @@ class Browser:
         runs independent. STREAKFIT_UICHECK_PORT still pins it for anyone who
         needs to attach a debugger.
         """
+        # Only a profile this run named for itself is deleted on close; a
+        # pinned port's directory may be another session's.
+        self._owns_profile = False
         if port is None:
             env_port = os.environ.get("STREAKFIT_UICHECK_PORT", "").strip()
             if env_port.isdigit():
@@ -165,7 +168,9 @@ class Browser:
                 with socket.socket() as s:
                     s.bind(("127.0.0.1", 0))
                     port = s.getsockname()[1]
+                self._owns_profile = True
         self.port = port
+        self.profile = f"{tempfile.gettempdir()}/streakfit-uicheck-{port}"
         for binary in ("google-chrome", "google-chrome-stable", "chromium", "chromium-browser"):
             if _which(binary):
                 break
@@ -174,7 +179,7 @@ class Browser:
         self.proc = subprocess.Popen(
             [
                 binary, "--headless=new", f"--remote-debugging-port={port}",
-                f"--user-data-dir={tempfile.gettempdir()}/streakfit-uicheck-{port}",
+                f"--user-data-dir={self.profile}",
                 "--no-first-run", "--no-default-browser-check",
                 "--disable-extensions", "--disable-gpu", f"--window-size={width},{height}",
             ],
@@ -240,6 +245,17 @@ class Browser:
             self.proc.wait(timeout=5)
         except Exception:
             self.proc.kill()
+            try:
+                self.proc.wait(timeout=5)
+            except Exception:
+                pass
+        # The profile is ~40MB per browser and was never removed. /tmp is RAM
+        # (tmpfs) on the dev machine: 150 of these — 6.3GB — had accumulated
+        # in one day of runs, and a full-suite run died on a SQLite "disk I/O
+        # error" when it filled. Removed only after Chrome has exited.
+        if self._owns_profile:
+            import shutil
+            shutil.rmtree(self.profile, ignore_errors=True)
 
 
 def _which(binary: str) -> bool:
