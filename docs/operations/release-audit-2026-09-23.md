@@ -5,7 +5,7 @@ committed tests, production configuration or migrations were modified. Nothing
 was pushed, merged or deployed. No production data was read or written beyond
 two unauthenticated GETs of public endpoints.**
 
-> **Superseded for the release decision by [section 6](#6-real-phone-test-and-final-release-preparation--2026-09-23-afternoon) and [section 7](#7-local-release-issues-resolved--2026-09-23-evening)**,
+> **Superseded for the release decision by [section 6](#6-real-phone-test-and-final-release-preparation--2026-09-23-afternoon), [section 7](#7-local-release-issues-resolved--2026-09-23-evening) and [section 8](#8-rickie-no-room-rule-and-remaining-contrast--2026-09-23-night)**,
 > written after the real-phone test passed. The release now also contains
 > `5e51274` and `0c5fcde`; sections 1–5 describe the overnight state.
 
@@ -563,12 +563,12 @@ git fetch origin main:main             # bring the local main ref along
 ```bash
 curl -s https://streakfit.pro/health                   # 200
 curl -s https://streakfit.pro/api/build-identity       # new gitSha; atHead true; appliedCount 25
-curl -s https://streakfit.pro/static/sw.js | head -1   # streakfit-v0923c (was v0923b before f3bb1f1)
+curl -s https://streakfit.pro/static/sw.js | head -1   # streakfit-v0923d (see section 8)
 python scripts/verify_all.py                           # production by default; qa_smoke_* accounts only
 ```
 
 Then on the phone at `https://streakfit.pro`: close and reopen the app (or
-reload twice) so the service worker picks up `v0923c`; confirm no Team Rickie
+reload twice) so the service worker picks up `v0923d`; confirm no Team Rickie
 card, Rickie not parked on the mission, and — on an account that has not done
 today's mission — the celebrations sit above Today/Progress.
 
@@ -728,8 +728,140 @@ project named `streakfit`."* Production still reports
 | 6 | **Neon console:** history window / latest snapshot on `production` still present | provider console |
 | 7 | **Fresh encrypted backup** with `streakfit-backup.sh` (you paste the direct URL; gpg asks for the passphrase) | credentials and passphrase — Claude must not handle them |
 | 8 | Approve the push of the final SHA to `main`, then trigger **Manual Deploy** | production change |
-| 9 | After deploy: phone check at `https://streakfit.pro` (reopen the app so `v0923c` loads) | real device |
+| 9 | After deploy: phone check at `https://streakfit.pro` (reopen the app so `v0923d` loads) | real device |
 | 10 | If rollback: **Deploy a specific commit → `4700708`**, no downgrade | production change |
 
 The command sequence in 6.8 stands, with the release SHA now being this
-section's commit and `sw.js` expected at **`streakfit-v0923c`**.
+section's commit and `sw.js` expected at **`streakfit-v0923d`** (superseded by section 8).
+
+---
+
+## 8. Rickie no-room rule and remaining contrast — 2026-09-23, night
+
+Owner-approved local corrections. Nothing pushed, merged or deployed; no
+production access. Same isolated environment as section 7 (127.0.0.1-only
+servers, migrations-built throwaway SQLite, random admin secret, one headless
+Chrome at a time, all servers stopped afterwards).
+
+### 8.1 Commits
+
+| commit | files | what |
+|---|---|---|
+| `6d15b77` | `static/admin.html`, `scripts/uicheck.py` | open button (rest + hover) and submit button contrast |
+| `446eff8` | `static/rickie-roam.js`, `static/sw.js`, `scripts/uicheck.py` | Rickie no-room rule; new and updated checks; cache `v0923c` → **`v0923d`** |
+| `1bbe490` | `scripts/uicheck.py` | harness deletes its Chrome profile on close |
+| *(this commit)* | this document | section 8 |
+
+### 8.2 Contrast — every text-bearing state of the moderation controls passes
+
+| control / state | before (`ed72c66`) | now | production `4700708` |
+|---|---|---|---|
+| `.mod-filter.active` | 4.47:1 | **6.29:1** (`f3bb1f1`) | 7.90:1 |
+| `.mod-open` at rest | **3.76–4.22:1** — worse than known | **14.88:1** (`--text` label) | 7.90:1 |
+| `.mod-open:hover` | 4.47:1 | **6.29:1** (`--accent-strong`) | 7.90:1 |
+| `.mod-submit` enabled | 4.47:1 | **6.29:1** (`--accent-strong`) | 7.90:1 |
+| `.mod-submit:disabled` | 3.93:1 | unchanged | — (WCAG 1.4.3 exempts inactive controls) |
+
+The resting `.mod-open` was not in the earlier audit: its label is
+`--accent` on the dark page, not white on accent. Regression checks measure
+rendered colours; `:hover` is forced through the DevTools CSS domain (the
+harness emulates a touch phone). **All three new assertions fail on the
+previous `admin.html`** (4.22 / 4.47 / 4.47:1).
+
+The pre-existing `.auth-bar button` (white on `--accent`, 4.47:1, same at
+`4700708`) is unchanged — not introduced by this release, not in scope.
+
+### 8.3 Rickie — the rule, as implemented
+
+1. Content arrives under him → he moves to a clear spot if one exists.
+2. None exists → he fades out (`state.noRoom`).
+3. Room appears (scroll, DOM change, resize, or a 900ms re-check that runs
+   **only** while he is hidden for room) → he reappears on a clear spot.
+4. Page loads with no room → he stays hidden past the old 2.5s cap; the cap
+   now ends polling instead of revealing him on content.
+5. Settled, reduced motion and suspended: still get out from under content,
+   with **no transition** (instant, not a walk), and do not start roaming.
+6. Unchanged: 64px at phone width, `pointer-events: none`, behaviours,
+   poses, the roaming toggle, reduced-motion stillness, Full/Quiet/Minimal.
+
+**No "Hidden" mode exists in the app** — Rickie settings are Full / Quiet /
+Minimal plus the roaming toggle ("Ask Rickie to settle"). "Quiet/Hidden" as
+states belong to `RICKIE_3D_PLAN.md`; nothing was added for them. Quiet,
+Minimal and settled are each tested.
+
+### 8.4 Does Rickie ever remain over workout text?
+
+**In testing, no.** What was measured:
+
+- **Standing (stationary, visible) on content: never observed after the
+  reaction window**, across 16 repeated runs of both Rickie checks and two
+  full suites: page loads, scrolling 60–240px, content dropped on him,
+  no-room screens, settled, reduced motion, Quiet, Minimal.
+- **Reaction window: up to ~470ms.** When the page moves under a standing
+  Rickie, he is still drawn over it until the 250ms step-aside debounce fires
+  and then either a 420ms step aside or the 260ms fade completes. Measured
+  maximum 472ms; the check bounds it at 800ms.
+- **In transit:** walking between clear spots can still cross text for a
+  moment — the same bounded allowance as before (0/44 samples in the load
+  watch in these runs).
+- **Not tested:** real phones (safe-area, real scroll inertia), widths other
+  than 390px in the new check, and landscape.
+
+**Consequence the owner should know:** hiding is now common in normal use at
+390px. About **1 load in 15** has no clear spot at the top of Today at all (a
+longer greeting variant starts at y=98 and removes the only clear cluster);
+he stays hidden there until the user scrolls. And there is no clear spot
+~120px down, so he disappears for that part of the scroll. That is the rule
+working as specified with a 64px Rickie; if it reads as "Rickie is missing"
+on the phone, the levers are his size or where he may stand — not this code.
+
+### 8.5 Repeated runs and intermittent failures
+
+| run | result |
+|---|---|
+| both Rickie checks ×8, final code | **8/8 clean** |
+| both Rickie checks ×8, final code, again | **8/8 clean** |
+| new check against previous `rickie-roam.js` (×2) | **10 checks fail, both runs** — it bites |
+| full `uicheck.py` ×2 | **249/249, 249/249** |
+| `verify_all.py --base-url http://127.0.0.1:5055` | **181/181** (`Target` confirmed local) |
+| pytest | **1167 passed** |
+| ruff / mypy / `build_check.py` / `node --check` | clean / clean / 39, 0 problems / ok |
+
+**Intermittent failures met on the way, and what each was:**
+
+1. **"0 free" / "seen 0 samples" / "appears on a normal load" (early runs).**
+   Test assumptions, not app defects: the long-greeting load legitimately has
+   no clear spot, and the checks assumed there always was one. The checks now
+   require "hidden" in exactly that verified state (`noRoom` and 0 free).
+2. **"room elsewhere" setup found no room (2 runs).** My own test
+   construction: on some loads every clear spot is within one block's reach.
+   Replaced by a deterministic open screen (dashboard `display:none`).
+3. **Quiet/Minimal "standing" 2–4 samples right after a scroll.** The reaction
+   window above — now bounded at 800ms rather than required to be zero.
+4. **One full-suite run crashed: SQLite "disk I/O error".** Environmental —
+   see 8.6. Re-run on a clean database: 249/249 twice.
+5. **"Not visible after settling" (seen 2/16 on baseline, 2/24 on HEAD).**
+   The single 3.5s sample could land mid-peek. Now polled for up to 10s; not
+   seen since.
+
+### 8.6 A resource leak in the test harness — fixed (`1bbe490`)
+
+Every `uicheck` browser left a ~40MB Chrome profile in
+`/tmp/streakfit-uicheck-<port>`, never deleted. **150 had accumulated today —
+6.3GB — on a tmpfs `/tmp`, i.e. in RAM:** `/tmp` 80% full, 5.4GiB available.
+That caused the disk I/O crash above and is plausibly part of why the laptop
+has run out of memory during test sessions. They were removed (no process
+held them): `/tmp` back to 1%, 10GiB available. The harness now deletes its
+own profile on close (only when it picked the port itself); a full run
+leaves 0 behind.
+
+### 8.7 Release state
+
+- **HEAD:** this section's commit on `integrate-product-completion`; clean tree.
+- **Service-worker cache:** **`streakfit-v0923d`**. Post-deploy check in 6.8
+  should read `v0923d`.
+- **Migrations / schema / config / auth:** none changed.
+- **Owner checks before deploy:** section 7.5, items 3–10, unchanged. Items 1
+  and 2 are done. Add: **re-test Rickie on the real phone** — the hide-when-no
+  -room behaviour is new and is the kind of change headless testing has
+  missed before.
