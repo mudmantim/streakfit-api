@@ -2419,6 +2419,31 @@ def check_moderation_operator_can_close_a_report(b: Browser, base: str, app) -> 
           "the moderation section does not force horizontal page scroll",
           f"scrollWidth {metrics.get('scroll')} vs innerWidth {metrics.get('inner')}")
 
+    # 11. Every filter chip, selected or not, is readable: WCAG AA 4.5:1.
+    #
+    # Measured from the RENDERED colours, not the stylesheet. ed72c66 swapped
+    # the selected chip's hardcoded #4338ca for var(--accent) in a commit whose
+    # purpose was contrast, and white on #6366f1 is 4.47:1 -- 0.03 short, found
+    # by an audit rather than by any check. 13.6px bold is not large text (that
+    # starts at 18.66px bold), so 4.5:1 is the applicable threshold.
+    chips = b.js(
+        "(function(){function L(c){var m=c.match(/[\\d.]+/g).slice(0,3)"
+        ".map(function(v){v=v/255;return v<=0.03928?v/12.92:"
+        "Math.pow((v+0.055)/1.055,2.4);});"
+        "return 0.2126*m[0]+0.7152*m[1]+0.0722*m[2];}"
+        "return Array.prototype.map.call(document.querySelectorAll('.mod-filter'),"
+        "function(f){var s=getComputedStyle(f),a=L(s.color),"
+        "g=L(s.backgroundColor),r=(Math.max(a,g)+0.05)/(Math.min(a,g)+0.05);"
+        "return {status:f.dataset.status, active:f.classList.contains('active'),"
+        "ratio:Math.round(r*100)/100, bg:s.backgroundColor};});})()") or []
+    check(any(c.get("active") for c in chips),
+          "a filter chip is shown as selected", str(chips)[:160])
+    weak = [c for c in chips if c.get("ratio", 0) < 4.5]
+    check(bool(chips) and not weak,
+          "every queue filter chip meets 4.5:1 contrast, the selected one included",
+          "; ".join(f"{c['status']}{' (selected)' if c['active'] else ''} "
+                    f"{c['ratio']}:1 on {c['bg']}" for c in weak))
+
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)

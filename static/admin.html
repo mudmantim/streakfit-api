@@ -14,6 +14,9 @@
     --text:     #e2e4ed;
     --muted:    #6b7280;
     --accent:   #6366f1;
+    /* For white text ON the accent. #6366f1 under white is 4.47:1, just short
+       of AA's 4.5:1; this is the same indigo one step deeper, 6.29:1. */
+    --accent-strong: #4f46e5;
     --green:    #34d399;
     --amber:    #fbbf24;
     --red:      #f87171;
@@ -107,8 +110,8 @@
                 color:var(--text); border-radius:999px; padding:.3rem .8rem;
                 font-size:.85rem; cursor:pointer; min-height:44px; }
   .mod-filter:hover { border-color:var(--accent); }
-  .mod-filter.active { background:var(--accent); color:#fff;
-                       border-color:var(--accent); font-weight:700; }
+  .mod-filter.active { background:var(--accent-strong); color:#fff;
+                       border-color:var(--accent-strong); font-weight:700; }
   .mod-counts { font-size:.9rem; margin:.4rem 0 .6rem; color:var(--text); }
   .mod-counts .overdue { color:var(--red); }
 
