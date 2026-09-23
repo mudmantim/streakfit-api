@@ -80,6 +80,10 @@
     };
 
     var el = null, img = null;
+    function now() {
+        return (window.performance && performance.now) ? performance.now() : Date.now();
+    }
+
     var state = {
         x: 0.18,            /* 0..1 across the viewport */
         y: 0.86,            /* 0..1 down the viewport */
@@ -350,31 +354,81 @@
      */
     var asideCheck = null;
 
-    function stepAsideIfCovered() {
-        clearTimeout(asideCheck);
-        asideCheck = setTimeout(function () {
-            /* NOT gated on state.busy.
-             *
-             * `busy` is true for the whole of any behaviour — sitting,
-             * dozing, watching — which is most of the time. Gating on it
-             * made this check, and the scroll check it replaced, inert
-             * almost always: a diagnostic found him standing on occupied
-             * space with busy=true and the handler declining to act.
-             * Being mid-doze is not a reason to keep sitting on somebody's
-             * text.
-             *
-             * Mid-WALK is different: he is already travelling to a spot
-             * that was clear when chosen, and moving him now would fight
-             * the transition. */
-            if (!el || state.paused || state.suspended || state.walking) return;
-            if (isClear(state.x, state.y, occupiedRects())) return;
-            var spot = somewhereClear();
-            if (!spot) return;
+    /* Poll for a clear spot, reveal, and give up waiting after REVEAL_CAP_MS.
+     *
+     * The cap is not a nicety. Without it, a page that never stops mutating —
+     * or a screen so full that `somewhereClear()` genuinely has no answer —
+     * would leave Rickie permanently invisible, which is a worse bug than the
+     * one being fixed and a much quieter one. He is a companion; a companion
+     * who silently never turns up is not a trade worth making for 600ms.
+     *
+     * So: appear as soon as there is somewhere clear, and appear anyway at
+     * 2.5s. In the second case `stepAsideIfCovered` is still watching and will
+     * move him the moment anything frees up.
+     */
+    var REVEAL_CAP_MS = 2500;
+    var REVEAL_POLL_MS = 120;
+
+    function revealWhenClear(startedAt) {
+        if (!el) return;
+        var began = startedAt || now();
+        var spot = somewhereClear();
+        if (spot) {
             state.x = spot.x;
             state.y = spot.y;
-            el.style.transition = 'transform 420ms ease-in-out';
+            el.style.transition = '';
             place();
-        }, 250);
+            el.classList.remove('rickie-roam-hidden');
+            return;
+        }
+        if (now() - began >= REVEAL_CAP_MS) {
+            el.classList.remove('rickie-roam-hidden');
+            return;
+        }
+        setTimeout(function () { revealWhenClear(began); }, REVEAL_POLL_MS);
+    }
+
+    /* The check itself, undebounced.
+     *
+     * Split out because the debounce is only right for one of its two callers.
+     * Mutations and scrolls arrive in storms and want coalescing; a walk
+     * ARRIVING is a single discrete event, already known to be a moment when
+     * his position changed, and waiting 250ms there just means 250ms of
+     * standing on something.
+     *
+     * Measured: one run in eight at 390px showed him stationary on content for
+     * two samples (~280ms) after the load fix was in — the debounce window,
+     * almost exactly. It is the last piece of the page-load obstruction that
+     * hiding-until-clear did not cover, because it happens later, when he
+     * finishes a walk onto something that rendered while he was travelling.
+     */
+    function stepAsideNow() {
+        /* NOT gated on state.busy.
+         *
+         * `busy` is true for the whole of any behaviour — sitting, dozing,
+         * watching — which is most of the time. Gating on it made this check,
+         * and the scroll check it replaced, inert almost always: a diagnostic
+         * found him standing on occupied space with busy=true and the handler
+         * declining to act. Being mid-doze is not a reason to keep sitting on
+         * somebody's text.
+         *
+         * Mid-WALK is different: he is already travelling to a spot that was
+         * clear when chosen, and moving him now would fight the transition.
+         * `walkTo` calls this directly on arrival, which is where that
+         * exemption is repaid. */
+        if (!el || state.paused || state.suspended || state.walking) return;
+        if (isClear(state.x, state.y, occupiedRects())) return;
+        var spot = somewhereClear();
+        if (!spot) return;
+        state.x = spot.x;
+        state.y = spot.y;
+        el.style.transition = 'transform 420ms ease-in-out';
+        place();
+    }
+
+    function stepAsideIfCovered() {
+        clearTimeout(asideCheck);
+        asideCheck = setTimeout(stepAsideNow, 250);
     }
 
 
@@ -420,8 +474,12 @@
              * It also made the check for this behaviour flaky: a walk starting
              * in the instant between "is he still?" and "plant the content"
              * produced a real failure that looked like a race in the test. It
-             * was not — the test was right and this was the gap. */
-            stepAsideIfCovered();
+             * was not — the test was right and this was the gap.
+             *
+             * Undebounced on purpose: `stepAsideIfCovered` waits 250ms to
+             * coalesce mutation storms, and an arrival is not a storm. That
+             * quarter second was measurably him standing on content. */
+            stepAsideNow();
         }, ms + 40);
     }
 
@@ -703,7 +761,31 @@
         band.appendChild(el);
         document.body.appendChild(band);
 
+        /* He arrives INVISIBLE, and appears only once he is standing
+         * somewhere measured to be clear.
+         *
+         * The bug this fixes: `state` starts at a fixed x:0.18 / y:0.86, and
+         * he used to be placed there and shown immediately — before
+         * /api/daily had rendered anything. The mission cards then drew
+         * underneath him. `stepAsideIfCovered` did move him, correctly, on
+         * the first DOM mutation; it just could not do it before the content
+         * it was reacting to existed.
+         *
+         * Measured at 390px, three loads: he sat on exercise names, reps and
+         * the complete button from about t=213ms to t=817ms, roughly 600ms of
+         * a brand-new user's first impression, at the exact default position
+         * (59, 619) that those two constants produce. After that he was clear
+         * for the remaining eight seconds of every run.
+         *
+         * Shortening that window was the obvious fix and the wrong one: any
+         * delay short enough to be invisible is too short to wait for a
+         * network render, and any delay long enough is a visible stall. So he
+         * simply does not appear until there is a clear spot to appear IN,
+         * which is a property rather than a timing guess.
+         */
+        el.classList.add('rickie-roam-hidden');
         place();
+        revealWhenClear();
         window.addEventListener('resize', place);
 
         /* Step aside when the page changes under him.

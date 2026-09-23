@@ -1525,14 +1525,92 @@ def _spots_he_may_stand_in_that_are_not_clear(b: Browser, tries: int = 8):
     return blocked
 
 
+_WHAT_HE_IS_ACTUALLY_ON = """(()=>{
+  const e=document.querySelector('.rickie-roam');
+  if(!e) return null;
+  const r=e.getBoundingClientRect();
+  if(!r.width||!r.height) return null;
+  // Invisible is not obstructing. He is deliberately hidden until a clear
+  // spot exists, and counting that as an overlap would make the fix look
+  // like the bug.
+  let op=1; try{op=parseFloat(getComputedStyle(e).opacity)||0;}catch(err){}
+  if(op<=0.05) return {visible:false, hit:[]};
+  const band=document.getElementById('rickie-roam-band');
+  const textBearing=(n)=>{for(const c of n.childNodes)
+    if(c.nodeType===3&&c.nodeValue&&c.nodeValue.trim()) return true; return false;};
+  const nodes=new Set(document.querySelectorAll(
+      'button,a,input,select,textarea,img,svg,.bb-option-btn'));
+  for(const el of document.body.querySelectorAll('*'))
+    if(textBearing(el)) nodes.add(el);
+  const rendered=(el)=>{const q=el.getBoundingClientRect();
+    if(!q.width||!q.height) return false;
+    if(el.offsetParent) return true;
+    try{return getComputedStyle(el).position==='fixed';}catch(err){return false;}};
+  const bad=[];
+  for(const el of nodes){
+    if(!rendered(el)) continue;
+    if(band&&(el===band||band.contains(el))) continue;
+    const q=el.getBoundingClientRect();
+    if(!(q.right<r.left||q.left>r.right||q.bottom<r.top||q.top>r.bottom))
+      bad.push((el.id||el.className||el.tagName).toString().slice(0,30));
+  }
+  // Walking is reported, not merged into the verdict. See the caller.
+  const walking = !!(window.RickieRoam && RickieRoam._state
+                     && RickieRoam._state.walking);
+  return {visible:true, hit:bad, walking:walking,
+          t:Math.round(performance.now())};
+})()"""
+
+
+def _watch_him_through_a_page_load(b: Browser, base: str, token: str,
+                                   samples: int = 45, gap: float = 0.15):
+    """Load the page and watch where he ACTUALLY is, from the first frame.
+
+    This is the check the other one could not be. `_spots_he_may_stand_in_that_
+    are_not_clear` pauses him and teleports him to coordinates the engine
+    nominates, so it only ever asks "is the engine's idea of clear correct?".
+    That is worth asking, and it is not the user's question.
+
+    The user's question is "is he on my text right now", and the answer used to
+    be yes: for roughly 600ms of every single page load on a phone he sat on
+    the exercise names, the reps and the complete button, at the fixed default
+    position his starting coordinates produce — while the nominated-spot check
+    reported 0/20 clear, because by the time it ran he had already moved.
+
+    Sampling from navigation is what makes that visible. Returns every sample
+    where a VISIBLE Rickie overlapped something, with the time it happened.
+    """
+    b.goto(base + "/", wait=1.0)
+    b.reset_storage()
+    b.js(f"localStorage.setItem('streakfit_token', {json.dumps(token)})")
+    b.call("Page.navigate", url=base + "/")
+
+    seen, standing, travelling = 0, [], []
+    for _ in range(samples):
+        row = b.js(_WHAT_HE_IS_ACTUALLY_ON)
+        if row and row.get("visible"):
+            seen += 1
+            if row.get("hit"):
+                (travelling if row.get("walking") else standing).append(row)
+        time.sleep(gap)
+    return seen, standing, travelling
+
+
 def check_rickie_roams(b: Browser, base: str, app) -> None:
     """Rickie, moving, and never in the way.
 
-    The obstruction rule is checked against the real page rather than against
-    the engine's model of it: he is placed where the engine says is clear, and
-    then every visible control and every piece of exercise text is measured to
-    confirm none of them is under him. A character that dodges according to its
-    own map is not the same as a character that dodges.
+    Two different questions, and this check needs both:
+
+      1. Is the engine's idea of "clear" actually clear? Answered by placing
+         him where it nominates and measuring the real page.
+      2. Is he, in fact, ever standing on something? Answered by watching a
+         real page load and looking at where he really is.
+
+    (1) alone was the whole check for a long time, and it is the one that can
+    pass while the product is broken — it pauses him, moves him somewhere of
+    its own choosing, and never observes the position he actually took. A
+    character that dodges according to its own map is not the same as a
+    character that dodges.
     """
     print("\nRickie — roaming")
     _, token = make_user(app, "roam")
@@ -1589,6 +1667,58 @@ def check_rickie_roams(b: Browser, base: str, app) -> None:
     blocked = _spots_he_may_stand_in_that_are_not_clear(b, tries=8)
     check(not blocked, "every position he may stand in is clear of controls AND text",
           "; ".join(blocked[:3]))
+
+    # ...and the same question asked of the page instead of the engine.
+    #
+    # This is the check that would have caught the page-load obstruction. The
+    # one above reported 0/20 clear for it, honestly, because it teleports him
+    # to nominated coordinates and never looks at the position he really took.
+    _, second_token = make_user(app, "roam_load")
+    seen, standing, travelling = _watch_him_through_a_page_load(b, base, second_token)
+    if check(seen > 20, f"he can be observed through a page load ({seen} samples)"):
+        # STANDING on something is the defect, and it is absolute.
+        #
+        # This is what the nominated-spot check above could not see: he was
+        # placed at his default coordinates and shown before /api/daily had
+        # rendered anything, so for roughly 600ms of every phone page load he
+        # stood on the exercise names, the reps and the complete button. He is
+        # now hidden until there is a measured clear spot to appear in.
+        worst = sorted({h for row in standing for h in row["hit"]})
+        when = f"from t={standing[0]['t']}ms" if standing else ""
+        check(not standing,
+              "he is never standing on anything while visible, including "
+              "during the load",
+              f"{len(standing)}/{seen} samples {when}: {', '.join(worst[:4])}")
+
+        # WALKING over something is not the same claim, and pretending it is
+        # would make this check a liar in the other direction.
+        #
+        # The clear spots he moves between are separated by content — that is
+        # what "clear spot" means on a page this full — so a character who
+        # walks must cross things to get anywhere. Measured over 408 visible
+        # samples at 320px: 0 standing overlaps and 28 while travelling, all
+        # inside a single crossing. Forbidding it outright would mean either a
+        # character who never moves or a check that fails at random.
+        #
+        # So it is reported every run, and bounded: more than half his visible
+        # life spent crossing text is not travel, it is living there.
+        share = len(travelling) / seen if seen else 0
+        print(f"    · in transit over content for {len(travelling)}/{seen} "
+              f"samples ({share:.0%}) — inherent to a roaming character, "
+              f"bounded not forbidden")
+        check(share <= 0.60,
+              "and he is only ever passing over content, not living on it",
+              f"{share:.0%} of visible samples")
+
+    # Hidden-until-clear must not become hidden-forever. He is a companion;
+    # one who never turns up is a worse bug, and a much quieter one, than the
+    # 600ms of covering this replaced.
+    b.goto(base + "/", wait=3.5)
+    shown = b.js("""(()=>{const e=document.querySelector('.rickie-roam');
+      if(!e) return null;
+      return parseFloat(getComputedStyle(e).opacity) > 0.05;})()""")
+    check(shown is True, "and he does actually turn up after the page settles",
+          f"opacity says visible={shown}")
 
     # He must be wholly on screen. A walkthrough found him in ONE position for
     # 11 of 23 samples with half his body past the left edge — which reads as a

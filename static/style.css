@@ -4093,7 +4093,11 @@ body.theme-classic .theme-btn.active { background: rgba(79,70,229,.2); }
 }
 
 /* Out of sight at the edge, for the moment before he peeks back. */
+/* Fades rather than pops. He is hidden on arrival until a clear spot exists
+   (see revealWhenClear in rickie-roam.js) and hidden again mid-peek, and an
+   instant appearance at a new position reads as a glitch in both cases. */
 .rickie-roam-hidden { opacity: 0; }
+.rickie-roam { transition: opacity 260ms ease-out; }
 
 /* Peeking: only the top of him clears the edge. */
 .rickie-roam-peeking { transform-origin: bottom center; }
