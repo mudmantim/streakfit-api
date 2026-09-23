@@ -27,7 +27,9 @@ where the panel is.
 3. Build a standalone browser prototype, **separate from production StreakFit**.
 4. Test walking, waving, tap reactions, and screen-knocking.
 5. Evaluate performance, accessibility, and mobile compatibility.
-6. Integrate into StreakFit **only after the prototype is approved.**
+6. Integrate into StreakFit **only after the prototype is approved** — as a
+   second renderer alongside the retained 2D fallback (R8), never as a
+   deletion of it.
 
 Stage 3 is the first thing needing a green light. Nothing before it touches
 this repository.
@@ -40,23 +42,37 @@ Three user-selectable display modes:
 
 | Mode | Behaviour |
 |---|---|
-| **Full** | Roams freely. Moves in front of and behind interface elements, peeks around cards, climbs onto panels, celebrates, demonstrates exercises, responds to taps. |
-| **Quiet** | **Visible but stationary**, in the user's chosen corner. No roaming, no knocking, no climbing, no peeking, no self-initiated attention-getting of any kind. **Still tappable** — he reacts when the user starts it. |
-| **Hidden** | The roaming character is not rendered and its assets are not loaded. The existing small Rickie images and expression avatars **stay** — greeting, Journey card, Coach panel and anywhere else they appear today. Private AI coaching and every other StreakFit feature remain fully available. |
+| **Full** | Roams freely from the selected corner as his home position. Moves in front of and behind interface elements, peeks around cards, climbs onto panels, celebrates, demonstrates exercises, responds to taps. |
+| **Quiet** | **Visible but stationary**, in the user's selected corner. No roaming, no knocking, no climbing, no peeking, no self-initiated attention-getting of any kind. **Still tappable**, and a tap may be answered with a brief **in-place** reaction. |
+| **Hidden** | **Neither** roaming character is rendered — not the 3D one, not the 2D fallback — and the 3D assets are not loaded. The small Rickie images and expression avatars **stay**: greeting, Journey card, Coach panel and anywhere else they appear today. Private AI coaching and every other StreakFit feature remain fully available. |
 
-**Quiet is visible-but-still, not visible-on-demand** (owner decision, Sept
-2026). He is on screen the whole time; what he stops doing is moving and
-asking for attention. The distinction that matters is not "does he animate"
-but **who started it**: a tap the user chose to make may be answered with a
-wave or a celebration, because that is a reply, not an interruption.
+**Quiet is visible-but-still, not visible-on-demand** (owner decision). He is
+on screen the whole time; what he stops doing is moving and asking for
+attention.
+
+**Stationary is not motionless** (owner decision). A tap may be answered with a
+wave, a nod, a smile or an expression change — brief, in place, and only ever
+because the user started it. What a tap may **not** do is take him out of his
+corner: no walking across the interface, no climbing onto another element, no
+roaming sequence begun by a tap. The rule is short enough to hold in one line:
+
+> **A Quiet reaction may animate. It may not travel.**
+
+And Quiet still initiates nothing on its own. Every reaction in this mode has a
+user's finger behind it. Reduced motion applies on top (R4): it governs which
+reactions are chosen and how they are played, not whether Rickie may answer at
+all — a user who taps a character deserves some acknowledgement that the tap
+landed.
 
 Plus:
 
 - Separate controls for **character sounds** and for **attention-getting
   behaviour** (including screen-knocking), independent of the display mode.
   Both **default OFF**.
-- A **user-selectable corner** for Quiet, remembered between visits, with a
-  safe alternative whenever that corner would cover something essential.
+- A **user-selectable corner**, remembered between visits, applying **across
+  every display mode** rather than only Quiet, with a safe temporary
+  alternative whenever that corner would cover something essential — and the
+  saved preference never overwritten by that displacement.
 - One consolidated Rickie settings panel holding all of it, with display mode
   and chattiness kept as **independent** preferences.
 - Respect `prefers-reduced-motion`.
@@ -64,7 +80,11 @@ Plus:
 - **Apply saved preferences BEFORE displaying or loading the 3D character.**
 - Never obstruct essential controls or intercept unrelated taps.
 - Restore Rickie through the settings panel after hiding him.
-- Hidden mode must not download or render the roaming 3D model at all.
+- Hidden mode must not download or render the roaming 3D model at all, and
+  must not substitute the 2D roamer in its place.
+- The existing **2D roaming Rickie is retained as a fallback** for devices that
+  cannot run the 3D character adequately — obeying the same display mode,
+  corner, chattiness, sound, attention-getting and reduced-motion preferences.
 
 ---
 
@@ -134,7 +154,7 @@ delivered, and it has to be solved before a model exists to load.
 
 - character display mode — Full / Quiet / Hidden
 - the existing chattiness preference
-- preferred corner for Quiet
+- preferred character corner — applies in every mode (R1b), not Quiet only
 - character sound controls
 - attention-getting behaviour controls
 - the relevant accessibility / reduced-motion controls
@@ -159,10 +179,30 @@ in localStorage is the one signal that genuinely means "stop moving", and is
 the only reasonable candidate for seeding `quiet` — per-device, best-effort,
 and never in a way that loses data if it is absent.
 
-### R1b. The Quiet corner is a PREFERENCE, not a position
+### R1b. The corner is a PREFERENCE, it spans every mode, and it is not a position
 
-The user picks a preferred corner and it is remembered between visits (owner
-decision). The important consequence is in the wording: what is stored is the
+**The selected corner is a persistent character-position preference, not a
+Quiet-only setting** (owner decision). It means something different in each
+mode, and something in all of them:
+
+| Mode | What the corner means |
+|---|---|
+| **Full** | His **home / resting position** — where he returns between behaviours and where he starts. He may still roam and interact wherever permitted. |
+| **Quiet** | Where he stays, subject to safe placement. |
+| **Full + reduced motion** | His **stationary position**. The saved display mode stays Full (R4). |
+| **Hidden** | Nothing is rendered, and the preference is **preserved** for whenever he is made visible again. |
+
+That last row is the one most likely to be lost in implementation: hiding the
+character must not clear the corner. A user who hides Rickie for a month and
+brings him back should find him where they put him, not in a default corner
+they have to set again.
+
+Because it spans modes, the settings panel presents it as a live setting in
+all of them — including while reduced motion is active, where it is arguably
+*more* relevant, because the corner is then the only place he will ever be. It
+should not be greyed out or hidden outside Quiet.
+
+The second half of the wording matters as much: what is stored is the
 **preference**, and what gets rendered is a **resolved position** that may not
 be it.
 
@@ -186,12 +226,17 @@ uses (`occupiedRects`, `isClear`, `somewhereClear` in `static/rickie-roam.js`),
 with these rules:
 
 1. Use the chosen corner when it is clear.
-2. When it is not, use the nearest safe position — preferring the same side of
-   the screen, so he stays roughly where the user put him.
-3. **Return to the chosen corner when it becomes clear again.** The stored
+2. When it is not, use an appropriate temporary alternative — preferring the
+   same side of the screen, so he stays roughly where the user put him.
+3. **Never overwrite the saved preference with the fallback position** (owner
+   decision). Displacement is a runtime resolution, not a settings change. If
+   the app writes the alternative back, a user who set "bottom-left" and once
+   opened a keyboard has quietly had their choice changed for them.
+4. **Return to the chosen corner when it becomes clear again.** The stored
    preference is the anchor; displacement is temporary and must not become
-   permanent drift, or the setting silently stops meaning anything.
-4. Never resolve to a position that covers an essential control (see R5).
+   permanent drift.
+5. Never resolve to a position that covers an essential control (see R5). The
+   corner preference does not outrank that constraint in any mode.
 
 Displacement must be silent. A Quiet Rickie who shuffles visibly every time a
 toast appears has reintroduced the motion the user turned off.
@@ -233,18 +278,35 @@ The switches remain independently meaningful in Full and Quiet.
 ### R4. Reduced motion, extended — and where it now overlaps Quiet
 
 `prefers-reduced-motion: reduce` must continue to be honoured, and should now
-mean: no roaming, no celebration animation, no knocking. It should **not** by
-itself mean Hidden — a still Rickie is not an accessibility problem, and
+mean: no roaming, no **self-initiated** celebration animation, no knocking.
+
+It does **not** mean a tap goes unanswered. The Quiet decision permits brief
+in-place reactions and requires reduced motion to be respected *when choosing
+and displaying them* — which is a different instruction from suppressing them.
+A user who deliberately taps a character and gets absolutely nothing back
+cannot tell the difference between "reduced motion" and "broken". The
+reconciliation: under reduced motion a reaction is expressed as a **change of
+state rather than a change of position** — an expression swap or a cross-fade
+instead of a bounce or a wave — and never as travel, which is already
+forbidden in Quiet for everyone.
+
+It should **not** by itself mean Hidden — a still Rickie is not an accessibility problem, and
 removing him entirely is a bigger change than the user asked for. An explicit
 user choice always outranks the media query in the direction of *less*, never
 *more*: someone who set Full with reduced-motion on gets a stationary Rickie,
 not a roaming one.
 
 Now that Quiet exists and is defined as *visible but stationary*, the two
-converge: **reduced-motion + Full is behaviourally Quiet.** It should therefore
-resolve to the Quiet corner rather than freezing him wherever he happened to
+converge: **reduced-motion + Full is behaviourally Quiet.** It resolves to the
+user's selected corner (R1b) rather than freezing him wherever he happened to
 be standing, so the accessible experience is the designed one rather than an
 accident of timing.
+
+**The saved display mode stays Full** (owner decision). Reduced motion is a
+rendering constraint applied on top of the preference, never a rewrite of it.
+Two consequences to build to: the panel keeps showing Full, and a user who
+later turns the OS setting off gets roaming back without having to re-choose
+anything.
 
 The panel must not present this as the user having chosen Quiet. The setting
 still reads Full; the system is honouring a platform preference on top of it,
@@ -332,13 +394,22 @@ affordance pointing at the control that brings him back.
 
 ### R6b. What Hidden actually removes
 
-**Only the roaming 3D character** (owner decision, Sept 2026).
+**Only the roaming character — but BOTH implementations of it** (owner
+decision).
 
 | Removed in Hidden | Kept in Hidden |
 |---|---|
 | The roaming 3D model, its animation loop, its assets | The small Rickie images and expression avatars — greeting, Journey card, Coach panel, reaction toasts, Rise Again, anywhere they appear today |
-| Character sounds | Private AI coaching, in full |
-| Attention-getting behaviour, including knocking | Every other StreakFit feature |
+| **The roaming 2D fallback** | Private AI coaching, in full |
+| Character sounds | Every other StreakFit feature |
+| Attention-getting behaviour, including knocking | The saved corner preference, for when he comes back (R1b) |
+
+**A device that cannot run 3D is not permission to override Hidden** (owner
+decision). This is the failure mode to guard: the fallback logic sees "3D
+unavailable", reaches for the 2D roamer, and a user who asked for no roaming
+character gets one — on the oldest phones, which is the least likely place
+anyone would test for it. Hidden is checked **before** capability, not after.
+See R8.
 
 These are genuinely different things and the plan should stop calling both of
 them "Rickie" in the same sentence. The avatars are 2D inline images that are
@@ -365,6 +436,65 @@ lazy-loading mistake is easy and quiet — importing a renderer at module scope
 "just in case" costs every Hidden user the download while the character
 correctly never appears, and nothing on screen would ever reveal it.
 
+**The 2D fallback costs nothing in Hidden either.** Since Hidden removes both
+roaming implementations (R6b), the 2D engine must not mount, must not start its
+behaviour timers or its MutationObserver, and must not append its band to the
+DOM. It is cheap, not free, and "cheap" is not the requirement. `mount()` is
+already the single entry point for all of that, so the gate is one call site —
+worth writing down precisely because it is easy to assume the old lightweight
+path does not need gating.
+
+### R8. One roaming Rickie at a time — 3D when it can run, 2D when it cannot
+
+**The 3D character replaces the roaming 2D Rickie when it is available and
+enabled** (owner decision). **The 2D roamer is retained as a fallback**, not
+retired, for devices and browsers that cannot run the 3D experience adequately
+(owner decision).
+
+**Two roaming Rickies must never be on screen at once.** They are mutually
+exclusive renderers of one character, chosen per session.
+
+This is the decision that keeps `static/rickie-roam.js` alive after stage 6,
+and it changes how stage 6 should be approached: integration is not a deletion
+followed by a replacement, it is a **second renderer behind a shared
+preference layer**. The preferences, the corner resolution, the clearance
+machinery and the obstruction checks belong to neither renderer and should be
+factored out of the 2D engine rather than reimplemented in the 3D one — the
+alternative is two implementations of "never stand on the mission", which is
+exactly the kind of duplication that produced the hardcoded-`56` bug in the
+check harness.
+
+**Resolution order, and it matters:**
+
+1. **Hidden?** Render nothing. Stop. Do not evaluate capability, do not fetch
+   anything. A device that cannot run 3D is never a reason to show the 2D
+   roamer to somebody who asked for neither.
+2. **Can this device run the 3D character adequately?** If yes, 3D. If no, the
+   2D fallback.
+3. Apply the display mode (Full / Quiet), the corner, chattiness, sounds,
+   attention-getting and reduced motion to whichever renderer was chosen.
+
+The fallback obeys **all** the same preferences and **all** the same safety
+requirements — it is a different renderer, not a different product, and it does
+not get a lighter set of rules because it is the older code:
+
+| | 3D | 2D fallback |
+|---|---|---|
+| Full | Roams, depth, climbing, peeking | Roams, within its existing safeguards |
+| Quiet | Stationary in the selected corner; tap-initiated in-place reactions | Stationary in the selected corner; whatever in-place reactions it supports |
+| Hidden | Not rendered, assets not loaded | Not rendered |
+| Obstruction rules (R5) | Apply | Apply — already enforced today |
+| Corner preference (R1b) | Applies | Applies |
+| Sounds / attention-getting / chattiness / reduced motion | Apply | Apply as supported |
+
+Where the 2D engine cannot do something the 3D one can — it has no depth, no
+climbing, and today no concept of a home corner — the honest position is that
+the fallback is a **reduced** experience, not a broken one. What it must never
+be is a **less safe** one.
+
+**Do not retire or remove the 2D roaming engine.** Stage 6 previously implied
+replacement-by-deletion; it does not, and this document is the record of that.
+
 ---
 
 ## Decisions on record (Sept 2026)
@@ -375,8 +505,12 @@ The four questions this document opened with are all answered.
 |---|---|
 | Is Quiet visible-but-still, or visible-on-demand? | **Visible but stationary.** On screen the whole time; stays in the user's corner; no roaming, knocking, climbing or peeking; still tappable. |
 | Where does Quiet stand? | **A corner the user picks**, remembered between visits, with a safe alternative whenever that corner would cover something essential. No corner is assumed safe on any screen size. |
-| One settings surface or two? | **One consolidated Rickie panel** holding display mode, chattiness, Quiet corner, sounds, attention-getting and the accessibility controls — while display mode and chattiness stay **independent preferences**. |
-| Does Hidden remove the 2D avatars too? | **No.** Hidden removes only the roaming 3D character and its assets. The small Rickie images and expression avatars stay, and private AI coaching is untouched. |
+| One settings surface or two? | **One consolidated Rickie panel** holding display mode, chattiness, the character corner, sounds, attention-getting and the accessibility controls — while display mode and chattiness stay **independent preferences**. |
+| Does Hidden remove the 2D avatars too? | **No.** Hidden removes only the roaming character and its assets. The small Rickie images and expression avatars stay, and private AI coaching is untouched. |
+| What may a tap do in Quiet? | **Animate in place, never travel.** Wave, nod, smile, change expression — brief, user-initiated, and he does not leave his corner, climb, or begin roaming. Stationary is not motionless. |
+| Does the corner apply outside Quiet? | **Yes — it is a persistent character-position preference across every mode.** Home position in Full, standing position in Quiet, stationary position under reduced motion, and preserved through Hidden. |
+| Does the 3D character replace the 2D roamer? | **Yes, when available and enabled.** Never two roaming Rickies at once. |
+| What happens on a device that cannot run 3D? | **The 2D roamer is retained as a fallback**, obeying the same modes, corner, preferences and safety rules. Inability to run 3D never overrides a Hidden preference. |
 
 Also reaffirmed: character sounds and unsolicited attention-getting stay **OFF
 by default**, and the full capability set — walking, waving, celebrating,
@@ -386,29 +520,39 @@ standalone prototype.
 
 ## Open questions that remain
 
-1. **What does a tap do in Quiet?** Quiet forbids self-initiated attention-
-   getting but keeps him tappable, and a tap has to be answered with
-   *something*. A wave is clearly fine. A full celebration that leaves the
-   corner is arguably the roaming the user switched off. Suggested rule, for
-   confirmation: **a Quiet reaction may animate but may not travel** — he can
-   wave, nod, or bounce in place, and does not leave his corner.
-2. **Does the Quiet corner preference apply to Full mode at all?** Full roams,
-   so it has no corner — but reduced-motion + Full resolves to a stationary
-   position (R4), and the natural place is the Quiet corner. That means a user
-   on Full may need to set a corner they will normally never see. Either the
-   corner control is always visible and occasionally pointless, or it appears
-   only in Quiet and the reduced-motion case has no anchor.
-3. **Does the 3D character replace the existing 2D roaming Rickie, or coexist
-   with it?** This plan assumes replacement — one roaming character, in one
-   generation of technology. Worth stating explicitly, because if they coexist
-   then `rickie_presence` governs two different renderers and "Hidden" has to
-   mean both.
-4. **What happens on a device that cannot run the 3D character?** An old phone,
-   a blocked WebGL context, a failed asset fetch. Falling back to today's 2D
-   roaming Rickie is the graceful answer and the one that keeps the product
-   whole; falling back to nothing is simpler and means some users silently lose
-   the companion. This decides whether the 2D engine is kept alive after stage
-   6 or retired.
+All four questions this document previously carried are now answered above.
+These are what is genuinely still undecided — recorded rather than guessed.
+
+1. **What counts as "adequately" for running the 3D character?** R8's
+   resolution order turns on it, and it is the one input nobody can pick from
+   a spec: a WebGL2 context alone is a weak signal, and a device can create one
+   and still render at eight frames a second. Whether the test is a capability
+   probe, a measured first-frame budget, a device allow/deny list, or a
+   downgrade that happens *after* a few seconds of real frame timing changes
+   what stage 5 has to measure. A mid-session downgrade also raises its own
+   question: is swapping renderers in front of the user acceptable, or does
+   the choice have to be made once per session and kept?
+
+2. **Does the corner preference have a sensible default, or must it be
+   chosen?** Every corner collides with something on some screen (R1b), so
+   there is no safe universal default. Shipping one means picking the least-bad
+   and accepting it will sometimes be wrong; requiring a choice puts a settings
+   question in front of a user who has not yet seen the character. This is a
+   first-run experience decision, not a technical one.
+
+3. **Is the 2D fallback expected to gain a corner and in-place tap reactions,
+   or only to honour what it already supports?** R8 says the fallback is a
+   reduced experience but never a less safe one. Today's 2D engine has no
+   concept of a home corner and no tap handling at all — it is
+   `pointer-events: none` by design (R5). Making it honour Quiet properly is a
+   real change to shipped production code, with its own testing, and it is not
+   in this project's stages.
+
+4. **Where does the consolidated settings panel live, and does building it wait
+   for the 3D work?** The panel is specified (R1) but it also improves things
+   that exist today — the roam pause is currently unreachable in the UI, stored
+   only in `localStorage`. It could ship against the 2D character well before
+   any 3D work starts. Whether it does is a sequencing call.
 
 ---
 
