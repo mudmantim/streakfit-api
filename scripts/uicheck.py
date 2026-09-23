@@ -442,6 +442,143 @@ def check_guest_gets_the_celebration(b: Browser, base: str) -> None:
           f"banner was {banner[:60]!r}")
 
 
+def touch_tap(b: Browser, target_js: str) -> dict:
+    """Tap an element the way a thumb does: a touch at its on-screen centre.
+
+    Everything else in this file taps with `el.click()`, which goes straight to
+    the element and so can never notice something drawn on top of it. This
+    dispatches a real touch at coordinates, so whatever is actually under the
+    finger receives it, and reports what that was. `target_js` is an expression
+    that evaluates to the element.
+    """
+    measure = (f"(()=>{{const el=({target_js}); if(!el) return null;"
+               "const r=el.getBoundingClientRect(); const x=r.left+r.width/2, y=r.top+r.height/2;"
+               "const top=document.elementFromPoint(x,y);"
+               "return JSON.stringify({x, y, onTarget: !!top && (top===el || el.contains(top)),"
+               " hit: top ? (top.className || top.tagName) : null});})()")
+    b.js(f"(()=>{{const el=({target_js}); if(el) el.scrollIntoView({{block:'center'}}); return 1;}})()")
+    time.sleep(0.4)
+    spot = b.js(measure)
+    if not spot:
+        return {"found": False}
+    spot = json.loads(spot)
+    point = [{"x": spot["x"], "y": spot["y"], "radiusX": 6, "radiusY": 6, "force": 1, "id": 1}]
+    b.call("Input.dispatchTouchEvent", type="touchStart", touchPoints=point)
+    time.sleep(0.08)
+    b.call("Input.dispatchTouchEvent", type="touchEnd", touchPoints=[])
+    return dict(spot, found=True)
+
+
+def check_a_completion_that_did_not_save_says_so(b: Browser, base: str, app) -> None:
+    """A real-phone test: "I did this" appeared to respond, nothing stuck, the
+    mission sat at 0/5, and nothing on screen said why. The server log showed
+    the completion requests never arrived; the app then put the button back
+    exactly as it was, silently. Failure has to be visible, retryable, and
+    never counted — and success afterwards has to be real and survive a reload.
+    """
+    print("\nA completion that did not save says so, and can be retried")
+    username, token = make_user(app, "complete_fail")
+    b.call("Emulation.setTouchEmulationEnabled", enabled=True, maxTouchPoints=5)
+    try:
+        b.goto(base + "/", wait=1.0)
+        b.reset_storage()
+        b.js(f"localStorage.setItem('streakfit_token', {json.dumps(token)})")
+        b.goto(base + "/", wait=3.5)
+
+        # The row that is NOT next, so its button starts outlined: that is the
+        # one where a stuck hover used to fill it solid purple.
+        row = "document.querySelectorAll('.daily-exercise-row')[1]"
+        btn = f"{row}.querySelector('.btn-daily-complete')"
+        name = b.js(f"(()=>{{const n={row}.querySelector('.daily-exercise-name');"
+                    " return n ? n.textContent.trim() : null;})()")
+
+        # Every completion request fails, first the way a server error does,
+        # then the way an unreachable server does (the phone's case).
+        b.js("""(()=>{ const real = window.fetch; window.__completeMode = 'http503';
+            window.fetch = function (u, o) {
+              if (String(u).includes('/complete') && window.__completeMode === 'http503')
+                return Promise.resolve(new Response('{"error":"unavailable"}',
+                  {status: 503, headers: {'Content-Type': 'application/json'}}));
+              if (String(u).includes('/complete') && window.__completeMode === 'offline')
+                return Promise.reject(new TypeError('Failed to fetch'));
+              return real.apply(this, arguments);
+            }; return 1; })()""")
+
+        spot = touch_tap(b, btn)
+        check(spot.get("found") and spot.get("onTarget"),
+              "a touch on 'I did this' lands on the button, not on something drawn over it",
+              f"the touch landed on {spot.get('hit')!r}")
+        time.sleep(1.2)
+        err = b.js(f"(()=>{{const e={row}.querySelector('.daily-complete-error');"
+                   " return e ? JSON.stringify([e.textContent, e.getAttribute('role'), !!e.offsetParent]) : null;})()")
+        err = json.loads(err) if err else None
+        check(bool(err) and err[2] and "Not saved" in err[0],
+              "a completion the server refused puts 'Not saved' on screen beside the button",
+              f"saw {err!r}")
+        check(bool(err) and err[1] == "alert",
+              "that message is announced to a screen reader (role=alert)",
+              f"role was {err and err[1]!r}")
+
+        b.js("window.__completeMode = 'offline'")
+        touch_tap(b, btn)
+        time.sleep(1.2)
+        errs = json.loads(b.js("JSON.stringify([...document.querySelectorAll('.daily-complete-error')]"
+                               ".map(e => e.textContent))"))
+        check(len(errs) == 1 and "could not be reached" in errs[0],
+              "an unreachable server gets its own message, replacing the last one rather than stacking",
+              f"messages on screen: {errs}")
+
+        state = json.loads(b.js(f"""(()=>{{const b={btn};
+            return JSON.stringify({{text: b ? b.textContent.trim() : null, disabled: b ? b.disabled : null,
+              badge: document.getElementById('daily-count-badge').textContent.trim(),
+              done: document.querySelectorAll('.btn-daily-done').length,
+              bg: b ? getComputedStyle(b).backgroundColor : null,
+              nextBg: (()=>{{const n=document.querySelector('.daily-exercise-row.is-next .btn-daily-complete');
+                              return n ? getComputedStyle(n).backgroundColor : null;}})()}});}})()"""))
+        check(state["text"] == "I did this" and state["disabled"] is False,
+              "the button is back and tappable for a retry",
+              f"text={state['text']!r} disabled={state['disabled']!r}")
+        check(state["badge"] == "0/5" and state["done"] == 0,
+              "nothing was counted or ticked for a completion that did not save",
+              f"badge={state['badge']!r} ticked={state['done']}")
+        server = _api(base, "/api/daily", token=token)
+        check(server.get("completed_count") == 0,
+              "and the server agrees: nothing was recorded",
+              f"completed_count={server.get('completed_count')!r}")
+        check(state["bg"] in ("rgba(0, 0, 0, 0)", "transparent"),
+              "a tapped button does not stay filled purple on a touchscreen (no stuck hover)",
+              f"background after the tap was {state['bg']}")
+        check(state["nextBg"] not in (None, "rgba(0, 0, 0, 0)", "transparent"),
+              "the next-exercise highlight is still filled",
+              f"next button background was {state['nextBg']}")
+
+        b.js("window.__completeMode = 'through'")
+        touch_tap(b, btn)
+        time.sleep(1.8)
+        after = json.loads(b.js("""JSON.stringify({
+            errs: document.querySelectorAll('.daily-complete-error').length,
+            badge: document.getElementById('daily-count-badge').textContent.trim(),
+            done: document.querySelectorAll('.btn-daily-done').length})"""))
+        check(after["badge"] == "1/5" and after["done"] == 1,
+              "a retry that reaches the server is counted",
+              f"badge={after['badge']!r} ticked={after['done']}")
+        check(after["errs"] == 0,
+              "and the old 'Not saved' message is gone once it has saved",
+              f"{after['errs']} error message(s) still on screen")
+
+        b.goto(base + "/", wait=3.5)
+        reloaded = json.loads(b.js("""JSON.stringify({
+            badge: document.getElementById('daily-count-badge').textContent.trim(),
+            done: [...document.querySelectorAll('.daily-exercise-row')]
+                    .filter(r => r.querySelector('.btn-daily-done'))
+                    .map(r => r.querySelector('.daily-exercise-name').textContent.trim())})"""))
+        check(reloaded["badge"] == "1/5" and reloaded["done"] == [name],
+              "the completion survives a full reload, on the exercise that was tapped",
+              f"after reload: badge={reloaded['badge']!r} ticked={reloaded['done']} expected [{name!r}]")
+    finally:
+        b.call("Emulation.setTouchEmulationEnabled", enabled=False)
+
+
 def check_team_witness(b: Browser, base: str, app) -> None:
     print("\nTeams — can a parent see that their kid moved today?")
     parent, parent_token = make_user(app, "parent")
@@ -2279,6 +2416,7 @@ def main() -> int:
         check_first_mission_celebration(browser, base, flask_app)
         check_guest_gets_the_celebration(browser, base)
         check_guest_promise_is_true(browser, base)
+        check_a_completion_that_did_not_save_says_so(browser, base, flask_app)
         check_team_witness(browser, base, flask_app)
         check_photo_sharing(browser, base, flask_app)
         check_side_quests_still_work(browser, base, flask_app)

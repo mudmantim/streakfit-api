@@ -17,6 +17,23 @@ from verification._fixtures import build_team_scenario, complete_daily_mission
 
 def run(api, results, scenario):
     token = scenario.users["a"]["token"]
+
+    # A completion the server refuses must say so and count for nothing. The
+    # app's "Not saved" message is built on exactly this contract: a non-200
+    # means nothing was recorded, so the button can honestly be offered again.
+    status, body = api.request("POST", "/api/daily/not_a_real_exercise/complete", token=token)
+    results.check(
+        "mission.refused_completion_is_reported",
+        status == 400 and bool((body or {}).get("error")),
+        f"status={status} body={body!r}",
+    )
+    status, daily = api.request("GET", "/api/daily", token=token)
+    results.check(
+        "mission.refused_completion_counts_nothing",
+        status == 200 and daily.get("completed_count") == 0,
+        f"status={status} completed_count={(daily or {}).get('completed_count')!r}",
+    )
+
     finish = {}
     complete_daily_mission(api, results, token, capture=finish)
 

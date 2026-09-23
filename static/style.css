@@ -1355,7 +1355,13 @@ input:focus {
     -webkit-tap-highlight-color: transparent;
 }
 
-.btn-daily-complete:hover    { background: var(--indigo-dark); }
+/* Only where something can actually hover. On a touchscreen :hover sticks to
+   the last button a finger touched, which filled it solid purple — the same
+   look as the next-exercise highlight — and moved from button to button as
+   they were tapped, reading as progress that had not happened. */
+@media (hover: hover) {
+    .btn-daily-complete:hover { background: var(--indigo-dark); }
+}
 .btn-daily-complete:active   { transform: scale(.95); }
 .btn-daily-complete:disabled { background: #a5b4fc; cursor: default; transform: none; }
 
@@ -3908,6 +3914,19 @@ body.theme-classic .theme-btn.active { background: rgba(79,70,229,.2); }
     flex-direction: column;
     align-items: stretch;
     gap: var(--space-1);
+}
+
+/* A completion that did not save. Its own background and ink rather than the
+   theme's, so it reads the same on every theme: #b91c1c on #fef2f2 is 5.9:1. */
+.daily-complete-error {
+    margin: 0;
+    padding: .5rem .75rem;
+    border-radius: 8px;
+    background: #fef2f2;
+    color: #b91c1c;
+    font-size: var(--text-sm);
+    font-weight: 600;
+    line-height: 1.35;
 }
 
 /* The main line never wraps: illustration, name and prescription, button. */

@@ -6973,13 +6973,39 @@ function renderDailyExercise(ex, isNext) {
     return row;
 }
 
-async function handleCompleteExercise(key, btn, row) {
-    btn.disabled    = true;
-    btn.textContent = '✓';
+// Said out loud, beside the button, when a completion did not save.
+//
+// A failed completion used to put the button back exactly as it was and say
+// nothing, so the screen looked as though the tap had never happened: on a
+// real phone whose requests never reached the server, "I did this" appeared to
+// respond and the mission sat at 0/5 with no hint why. role="alert" so a
+// screen reader hears it too, not only somebody looking at the row.
+function _showCompleteError(row, status) {
+    if (!row) return;
+    _clearCompleteError(row);
+    var err = document.createElement('p');
+    err.className = 'daily-complete-error';
+    err.setAttribute('role', 'alert');
+    err.textContent = status === 0
+        ? 'Not saved — StreakFit could not be reached. Check your connection and tap "I did this" again.'
+        : 'Not saved — something went wrong on our end. Tap "I did this" to try again.';
+    row.appendChild(err);
+}
 
-    if (row) row.classList.add('completing');
+function _clearCompleteError(row) {
+    var old = row && row.querySelector('.daily-complete-error');
+    if (old) old.remove();
+}
+
+async function handleCompleteExercise(key, btn, row) {
+    btn.disabled = true;
+    // A retry starts clean: the last attempt's error is about a request that
+    // is no longer the one in flight.
+    _clearCompleteError(row);
 
     if (isGuest) {
+        btn.textContent = '✓';
+        if (row) row.classList.add('completing');
         guestCompleted.add(key);
         // A guest doing the exact same thing as a registered user used to get
         // none of the response: no Rickie line, no confetti, not even on 5/5 --
@@ -7008,10 +7034,17 @@ async function handleCompleteExercise(key, btn, row) {
     // rather than the generic pool.
     var wasFirstMissionEver = !!(currentUser && currentUser.total_missions === 0);
 
+    // Not a tick yet. Nothing is done until the server says it is — the tick
+    // and the completion flash belong to the confirmed result below, never to
+    // the tap, or a request that fails reads as one that worked.
+    btn.textContent = 'Saving…';
+
     var result = await api('/api/daily/' + key + '/complete', 'POST');
     if (!result) return;
 
     if (result.status === 200) {
+        btn.textContent = '✓';
+        if (row) row.classList.add('completing');
         var summary = _summarizeProgress(result.data);
         var isMilestoneMoment = result.data.completed_count === 5 || summary.leveledUp;
         var allowsReaction = _rickieAllowsReaction(isMilestoneMoment);
@@ -7056,9 +7089,9 @@ async function handleCompleteExercise(key, btn, row) {
         // Let the flash animation play, then reload
         setTimeout(function () { loadDailyExercises(); }, 480);
     } else {
-        if (row) row.classList.remove('completing');
         btn.disabled    = false;
         btn.textContent = 'I did this';
+        _showCompleteError(row, result.status);
     }
 }
 
