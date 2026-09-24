@@ -184,6 +184,10 @@ different rules: text and caption evidence goes 30 days after the report
 *closes*, photo bytes 30 days from *capture*. A legal hold, with a written
 reason, is the only thing that suppresses either. What survives is the minimal
 audit record — that a report existed, its category, its dates, its outcome.
+The same record survives a reporter, reported person or appellant deleting
+their account; it simply stops saying who they were
+(`docs/operations/privacy-retention.md`, "When somebody in a report deletes
+their account").
 
 **7. Repeated false reports need a human.** Dismissals alone never restrict
 anyone; no counter acts by itself. Restricting somebody's ability to report is

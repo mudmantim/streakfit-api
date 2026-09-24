@@ -61,6 +61,31 @@ def test_every_postgres_foreign_key_into_user_has_a_deletion_rule(migrated_pg):
     assert {rule for _t, _c, rule in rows} == {'a'}
 
 
+def _flask_db(env, *args):
+    return subprocess.run([sys.executable, '-m', 'flask', 'db', *args],
+                          cwd=REPO, env=env, capture_output=True, text=True)
+
+
+def _nullable(engine, table, column):
+    with engine.connect() as conn:
+        return conn.execute(text(
+            "select is_nullable from information_schema.columns "
+            "where table_name = :t and column_name = :c"), {'t': table, 'c': column}).scalar()
+
+
+def test_the_migration_round_trips_while_no_record_has_lost_its_person(migrated_pg):
+    engine, env = migrated_pg
+    assert _nullable(engine, 'report', 'reporter_user_id') == 'YES'
+    assert _nullable(engine, 'appeal', 'user_id') == 'YES'
+    down = _flask_db(env, 'downgrade', '47f7dc9962e3')
+    assert down.returncode == 0, down.stderr[-2000:]
+    assert _nullable(engine, 'report', 'reporter_user_id') == 'NO'
+    assert _nullable(engine, 'appeal', 'user_id') == 'NO'
+    up = _flask_db(env, 'upgrade')
+    assert up.returncode == 0, up.stderr[-2000:]
+    assert _nullable(engine, 'report', 'reporter_user_id') == 'YES'
+
+
 def test_deletion_scenario_on_postgres(migrated_pg):
     _engine, env = migrated_pg
     result = subprocess.run(
@@ -73,3 +98,12 @@ def test_deletion_scenario_on_postgres(migrated_pg):
                     f'\nSTDERR:\n{result.stderr[-3000:]}')
     failed = {k: v['detail'] for k, v in out.items() if not v['ok']}
     assert not failed and result.returncode == 0, failed
+
+
+def test_the_downgrade_refuses_once_a_reporter_has_left(migrated_pg):
+    """Runs after the scenario, which deleted a reporter and an appellant."""
+    engine, env = migrated_pg
+    down = _flask_db(env, 'downgrade', '47f7dc9962e3')
+    assert down.returncode != 0
+    assert 'belong to deleted accounts' in down.stderr
+    assert _nullable(engine, 'report', 'reporter_user_id') == 'YES'

@@ -2057,14 +2057,16 @@ class Report(db.Model):
     """Somebody telling us something is wrong.
 
     `reporter_user_id` is never serialized into any non-operator response, and
-    the reported person is never told a report exists. The subject is recorded
+    the reported person is never told a report exists. It is NULL once the
+    reporter has deleted their account: the report outlives them as the
+    minimal audit record (policy decision 6) and no longer says who filed it. The subject is recorded
     as (type, ref) rather than a foreign key so a report survives its content
     being deleted -- the evidence snapshot is what a reviewer actually reads.
     """
     __tablename__ = 'report'
     id = db.Column(db.Integer, primary_key=True)
     public_id = db.Column(db.String(32), nullable=False, unique=True, index=True)
-    reporter_user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False, index=True)
+    reporter_user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True, index=True)
     reported_user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True, index=True)
     team_id = db.Column(db.Integer, db.ForeignKey('team.id'), nullable=True, index=True)
     category = db.Column(db.String(24), nullable=False)      # see REPORT_CATEGORIES
@@ -2247,14 +2249,17 @@ class Appeal(db.Model):
     __tablename__ = 'appeal'
     id = db.Column(db.Integer, primary_key=True)
     public_id = db.Column(db.String(32), nullable=False, unique=True, index=True)
-    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False, index=True)
+    # NULL once the appellant has deleted their account (see
+    # delete_user_account): the appeal stays as a record that one was filed
+    # and how it ended, without their words or a link to them.
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True, index=True)
     # What is being appealed. A moderation action, so the trail stays intact:
     # the action row is never edited or deleted by an appeal.
     action_id = db.Column(db.Integer, db.ForeignKey('moderation_action.id'),
                           nullable=False, index=True)
     reason = db.Column(db.Text, nullable=True)
     status = db.Column(db.String(16), nullable=False, default='open', index=True)
-    outcome = db.Column(db.String(24), nullable=True)     # upheld | overturned
+    outcome = db.Column(db.String(24), nullable=True)     # upheld | overturned | withdrawn
     outcome_note = db.Column(db.Text, nullable=True)      # shown to the appellant
     created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
     decided_at = db.Column(db.DateTime, nullable=True)
@@ -4282,7 +4287,9 @@ def delete_my_account():
 
     app.logger.info("event=account_self_deleted user_id=%s photos=%s",
                     user_id, report.get("counts", {}).get("team_photo_shared", 0))
-    return jsonify({"deleted": True, "counts": report.get("counts", {})}), 200
+    counts = report.get("counts", {})
+    return jsonify({"deleted": True,
+                    "counts": {k: counts[k] for k in _SELF_DELETION_COUNTS if k in counts}}), 200
 
 
 @app.route('/api/me/data', methods=['GET'])
@@ -8125,6 +8132,8 @@ def admin_report_detail(public_id):
         "subject_ref": report.subject_ref,
         "team_id": report.team_id,
         "reporter_user_id": report.reporter_user_id,   # operator view only
+        # NULL means the reporter deleted their account; nothing else nulls it.
+        "reporter_account_deleted": report.reporter_user_id is None,
         "reported_user_id": report.reported_user_id,
         "note": report.note,
         "status": report.status,
@@ -8597,6 +8606,12 @@ def admin_decide_appeal(public_id):
     ).scalar_one_or_none()
     if appeal is None:
         abort(404)
+    if appeal.outcome == 'withdrawn':
+        # The appellant deleted their account. There is nobody to restore
+        # anything to, and "overturned" here would lift nothing while the
+        # trail claimed a reversal.
+        return jsonify({"error": "This appeal was withdrawn: the account was deleted.",
+                        "code": "appeal_withdrawn"}), 409
     data = request.get_json(silent=True) or {}
     outcome = (data.get('outcome') or '').strip()
     if outcome not in ('upheld', 'overturned'):
@@ -10497,6 +10512,10 @@ _USER_LINK_NULLS = [
     ("team_challenge_created", TeamChallenge,  "created_by_user_id"),
     ("team_challenge_target",  TeamChallenge,  "target_user_id"),
     ("report_about",           Report,         "reported_user_id"),
+    # The reporter too. The report is a review obligation that does not end
+    # because the person who raised it left, and its note and evidence stay on
+    # the evidence clock (30 days after closure) like any other report's.
+    ("report_filed",           Report,         "reporter_user_id"),
     ("report_evidence_author", ReportEvidence, "author_user_id"),
     ("moderation_action_target", ModerationAction, "target_user_id"),
     ("permission_audit_actor", PermissionAudit, "actor_user_id"),
@@ -10504,13 +10523,11 @@ _USER_LINK_NULLS = [
 
 # Rows that must outlive the person but cannot lose them: the column is NOT
 # NULL, so the only honest answers are a schema change or refusing. Until the
-# owner decides what a deleted reporter, appellant or child looks like in these
-# records, deletion refuses -- with a reason -- rather than destroying an audit
-# trail or failing on a foreign key with a 500.
+# owner decides what a deleted child or guardian looks like in these records,
+# deletion refuses -- with a reason -- rather than destroying an audit trail or
+# failing on a foreign key with a 500.
 _USER_DELETION_BLOCKERS = [
     ("team_owned",        Team,            "created_by_user_id"),
-    ("report_filed",      Report,          "reporter_user_id"),
-    ("appeal_filed",      Appeal,          "user_id"),
     ("guardian_link_child",    GuardianLink, "child_user_id"),
     ("guardian_link_guardian", GuardianLink, "guardian_user_id"),
     ("consent_child",     Consent,         "child_user_id"),
@@ -10522,10 +10539,24 @@ _USER_DELETION_BLOCKERS = [
 # this against the models and against a migrated PostgreSQL database, so a new
 # foreign key cannot quietly turn account deletion back into a 500.
 _USER_FK_HANDLED_BY_HAND = {
+    ("appeal", "user_id"),
     ("team_message", "sender_user_id"),
     ("team_moment", "subject_user_id"),
     ("team_photo", "sender_user_id"),
 }
+
+
+# What the person deleting their own account is told was removed. An allow-list,
+# not the whole plan: the plan also counts reports ABOUT them, evidence of
+# their words and moderation actions against them, and the reported person is
+# never told a report exists (see Report). A new count stays private until it
+# is added here on purpose.
+_SELF_DELETION_COUNTS = (
+    "challenge", "daily_completion", "brain_boost_answer", "progress_event",
+    "team_membership", "coach_turn", "coach_note", "user_filter_unlock",
+    "daily_effort", "team_challenge_completion", "user_block_made",
+    "team_message_authored", "team_photo_shared",
+)
 
 
 def _user_fk_classification():
@@ -10552,6 +10583,7 @@ def _account_dependent_counts(user_id):
         TeamMoment.subject_user_id == user_id).count()
     counts["team_photo_shared"] = TeamPhoto.query.filter(
         TeamPhoto.sender_user_id == user_id, TeamPhoto.deleted_at.is_(None)).count()
+    counts["appeal_filed"] = Appeal.query.filter(Appeal.user_id == user_id).count()
     for label, model, attr in _USER_DELETION_BLOCKERS:
         counts[label] = model.query.filter(getattr(model, attr) == user_id).count()
     return counts
@@ -10559,13 +10591,38 @@ def _account_dependent_counts(user_id):
 
 _ACCOUNT_DELETION_BLOCKER_TEXT = {
     "team_owned": "owns {n} team(s) — supply an explicit team-owner policy to delete",
-    "report_filed": "filed {n} report(s) — a report keeps its reporter until the owner decides how a deleted reporter is recorded",
-    "appeal_filed": "filed {n} appeal(s) — an appeal keeps its appellant until the owner decides how a deleted appellant is recorded",
     "guardian_link_child": "has {n} guardian link(s) as a child — child-safety records need an owner decision",
     "guardian_link_guardian": "has {n} guardian link(s) as a guardian — child-safety records need an owner decision",
     "consent_child": "has {n} consent record(s) — child-safety records need an owner decision",
     "permission_audit_subject": "has {n} permission-audit row(s) — child-safety records need an owner decision",
 }
+
+
+def _withdraw_appeals_of(user_id):
+    """An appeal outlives its appellant as a record, not as a request.
+
+    Kept: that it was filed, what it was about (action_id), when, and how it
+    ended. An open one ends now, as `withdrawn` -- nobody is left to restore
+    anything to, and an operator must not be asked to decide it. Removed: the
+    link to the person, their own words (`reason`) and the note addressed to
+    them (`outcome_note`; the operator's reasoning is kept on the
+    `appeal_upheld` / `appeal_overturned` ModerationAction row).
+    """
+    now = datetime.utcnow()
+    for appeal in Appeal.query.filter(Appeal.user_id == user_id).all():
+        if appeal.status == 'open':
+            action = db.session.get(ModerationAction, appeal.action_id)
+            appeal.status = 'closed'
+            appeal.outcome = 'withdrawn'
+            appeal.decided_at = now
+            db.session.add(ModerationAction(
+                report_id=action.report_id if action else None, actor='system',
+                action='appeal_withdrawn', team_id=action.team_id if action else None,
+                note='appellant deleted their account'))
+        appeal.reason = None
+        appeal.outcome_note = None
+        appeal.user_id = None
+    db.session.flush()
 
 
 def _account_deletion_blockers(counts, allow_team_owner=False):
@@ -10622,6 +10679,7 @@ def delete_user_account(user_id, allow_team_owner=False, dry_run=True):
              TeamPhoto.caption: None, TeamPhoto.sender_user_id: None,
              TeamPhoto.deleted_at: datetime.utcnow()},
             synchronize_session=False)
+        _withdraw_appeals_of(user_id)
         # Shared and moderation records stay; only the pointer to this person goes.
         for _label, model, attr in _USER_LINK_NULLS:
             model.query.filter(getattr(model, attr) == user_id).update(

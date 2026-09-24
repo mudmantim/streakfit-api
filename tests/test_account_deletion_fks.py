@@ -86,3 +86,36 @@ def test_deletion_scenario_with_foreign_keys_enforced(fk_app):
     results = run(appmod, fk_app.test_client())
     failed = {name: detail for name, (ok, detail) in results.items() if not ok}
     assert not failed, failed
+
+
+def test_self_deletion_never_tells_you_that_you_were_reported(fk_app):
+    """The deletion plan counts reports about the person, evidence of their
+    words, actions against them and blocks others made of them. None of that
+    may reach them in the response -- the reported person is never told a
+    report exists."""
+    import uuid
+    client = fk_app.test_client()
+    for name in ('reported_one', 'someone_else'):
+        client.post('/api/register', json={'username': name, 'password': 'WalkTest123!'})
+    tok = client.post('/api/login', json={'username': 'reported_one',
+                                          'password': 'WalkTest123!'}).get_json()['access_token']
+    me = appmod.User.query.filter_by(username='reported_one').one().id
+    other = appmod.User.query.filter_by(username='someone_else').one().id
+    rep = appmod.Report(public_id=uuid.uuid4().hex, reporter_user_id=other,
+                        reported_user_id=me, category='harassment', subject_type='user')
+    db.session.add(rep)
+    db.session.flush()
+    db.session.add_all([
+        appmod.ReportEvidence(report_id=rep.id, content_type='user', author_user_id=me),
+        appmod.ModerationAction(report_id=rep.id, action='dismiss', target_user_id=me),
+        appmod.UserBlock(blocker_user_id=other, blocked_user_id=me),
+    ])
+    db.session.commit()
+    resp = client.delete('/api/me', json={'password': 'WalkTest123!'},
+                         headers={'Authorization': f'Bearer {tok}'})
+    assert resp.status_code == 200
+    body = resp.get_json()
+    assert set(body['counts']) <= set(appmod._SELF_DELETION_COUNTS)
+    blob = str(body).lower()
+    for word in ('report', 'moderation', 'evidence', 'received', 'restriction', 'appeal'):
+        assert word not in blob, word

@@ -243,6 +243,29 @@ Deletion removes the content and keeps the accounting. After a sweep:
 facts about a report, and a reviewer looking at an empty evidence list is
 entitled to know which one they are seeing.
 
+## When somebody in a report deletes their account
+
+Account deletion (`DELETE /api/me`, `delete_user_account`) does not delete
+moderation records, and it does not shorten or stretch the evidence clock.
+It removes the **person**, not the report:
+
+| Their role | What changes at deletion | What stays |
+|---|---|---|
+| Reporter | `report.reporter_user_id` → `NULL`. The operator view shows `reporter_account_deleted: true` | The report, its category, dates, deadline, status and outcome. A pending report stays in the review queue: the obligation did not leave with the reporter |
+| Reported person | `report.reported_user_id`, `report_evidence.author_user_id`, `moderation_action.target_user_id` → `NULL` | Everything else |
+| Appellant | `appeal.user_id`, `appeal.reason` (their words) and `appeal.outcome_note` (the note addressed to them) → `NULL`. An **open** appeal is closed with outcome `withdrawn` and a `system` `appeal_withdrawn` action; it can no longer be decided | That an appeal was filed, against which decision, when, and how it ended. The operator's reasoning stays on the `appeal_upheld` / `appeal_overturned` action |
+
+The reporter's `note` and all evidence text are **not** removed at deletion:
+they are removed by the sweep above, 30 days after the report closes, exactly
+as for any other report. That is the moderation promise taking precedence over
+the account promise for these specific rows, and it is bounded: nothing here
+outlives closure by more than 30 days (plus sweep latency), unless a legal
+hold is set.
+
+Deletion is still **refused** (409, nothing changed) for a team creator and
+for anyone with guardian-link, consent or permission-audit rows. How a deleted
+child or guardian is recorded is an owner decision that has not been made.
+
 ## What is NOT guaranteed — read this part
 
 **None of this is scheduled in production yet.** The in-process thread only runs
