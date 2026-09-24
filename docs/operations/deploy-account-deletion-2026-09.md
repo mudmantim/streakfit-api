@@ -9,7 +9,7 @@ it is taken; approval of one step is not approval of the next.
 | | |
 |---|---|
 | Base (production now) | `4979354` — migrations at `47f7dc9962e3` |
-| Commits | `28ce314` FK-complete deletion · `e58b189` reporter/appellant deletion + migration · `88af476` closed-report note, admin label, privacy limits, this procedure · `0b5c05d` independent-review fixes · the commit after it: section-10 decisions, race locks, CLAUDE.md |
+| Commits | `28ce314` FK-complete deletion · `e58b189` reporter/appellant deletion + migration · `88af476` closed-report note, admin label, privacy limits, this procedure · `0b5c05d` first-review fixes · `358af56` section-10 decisions, race locks, CLAUDE.md · `afda493` second-review fixes · the docs-only commit carrying this line. **Code last changed in `afda493`; all checks ran there.** |
 | Migration | **one**: `08920334bccd` — `report.reporter_user_id`, `appeal.user_id` → nullable. No data changed by the upgrade |
 | Static | `static/admin.html` (labels), `static/sw.js` → `streakfit-v0924a` |
 | Config / env | none |
