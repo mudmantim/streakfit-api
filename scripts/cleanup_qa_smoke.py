@@ -5,16 +5,19 @@ dependent rows. DRY RUN by default — pass --execute to actually delete.
 Classification:
   * Any username beginning with the EXACT prefix 'qa_smoke_' is a QA account.
     (Exact Python prefix match — never a SQL LIKE, whose '_' is a wildcard.)
-  * SAFE to delete: a QA account that owns no team.
-  * BLOCKED (requires manual cleanup): a QA account that created a team — tearing a
-    team down would touch other users' data, so it's left untouched here.
+  * SAFE to delete: a QA account the app's deletion service would delete.
+  * BLOCKED (requires manual cleanup): whatever that service refuses — a QA account
+    that created a team (tearing a team down would touch other users' data), or one
+    with guardian/consent/permission-audit rows. Left untouched here.
+  * NOTE: deleting an account that FILED a report or an appeal cuts the link to it
+    (the report stays). Once any such link is cut, migration 08920334bccd can no
+    longer be downgraded -- see docs/operations/deploy-account-deletion-2026-09.md.
 
 Behavior:
   * Dry run lists both groups and changes nothing.
   * --execute deletes ONLY the safe group, ONE TRANSACTION PER ACCOUNT (each
     account is all-or-nothing; the run as a whole is not), then re-queries and
-    reports both groups. Blocked accounts -- team owners, and anyone who filed
-    a report or appeal -- are left in place, with the reason.
+    reports both groups. Blocked accounts are left in place, with the reason.
   * Aborts entirely only if the match count exceeds a sanity cap (a matching bug
     at scale would be dangerous). Touches no migrations and no app behavior.
 
@@ -45,8 +48,8 @@ def _matches():
 def survey():
     """Return (safe, blocked, counts_by_id). `blocked` is a list of (user, reason).
     Returns None if the sanity cap is exceeded (hard abort). Dependency counts and
-    the team-owner blocker come from the app's account-deletion service — this
-    script no longer maintains its own deletion/counting logic."""
+    EVERY blocker come from the app's account-deletion service, so the dry run
+    classifies exactly as --execute will -- this script keeps no rules of its own."""
     users = _matches()
     if len(users) > SANITY_CAP:
         return None
@@ -55,10 +58,10 @@ def survey():
         # Belt-and-suspenders: never operate on anything not exactly prefixed.
         if not u.username.startswith(PREFIX):
             continue
-        c = A._account_dependent_counts(u.id)
-        counts_by_id[u.id] = c
-        if c["team_owned"] > 0:
-            blocked.append((u, f"owns {c['team_owned']} team(s)"))
+        plan = A.delete_user_account(u.id, dry_run=True)
+        counts_by_id[u.id] = plan["counts"]
+        if plan["blocked"]:
+            blocked.append((u, "; ".join(plan["blockers"])))
         else:
             safe.append(u)
     return safe, blocked, counts_by_id

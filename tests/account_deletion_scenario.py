@@ -334,6 +334,16 @@ def run_reporter_and_appellant(A, client, other, team_id):
         results['a withdrawn appeal cannot be decided'] = (
             r.status_code == 409 and (r.get_json() or {}).get('code') == 'appeal_withdrawn',
             str(r.status_code))
+        actions_before = A.ModerationAction.query.count()
+        r = client.post(f'/api/admin/appeals/{d.public_id}/decide',
+                        json={'outcome': 'overturned', 'note': 'lifting'},
+                        headers={'X-Admin-Secret': ADMIN})
+        db.session.remove()
+        d = db.session.get(A.Appeal, ap_ids[1])
+        results['nor can one decided before its appellant left'] = (
+            r.status_code == 409 and (d.outcome, d.outcome_note) == ('upheld', None)
+            and A.ModerationAction.query.count() == actions_before,
+            f'{r.status_code} {d.outcome} {d.outcome_note!r}')
     finally:
         if prev is None:
             os.environ.pop('ADMIN_SECRET', None)

@@ -20,11 +20,18 @@ the audit on `main`, but pushing them is its own decision.
 
 ## 2. Why this deploy is different: rollback needs a downgrade
 
-`STREAKFIT_ENFORCE_DB_HEAD=1` makes the old code refuse to boot on the new
-schema (verified: `4979354` exits 1, "database is at Alembic revision
-'08920334bccd' but the code expects head '47f7dc9962e3'"). Render's
-pre-deploy `flask db upgrade` of `4979354` would also not recognise
-`08920334bccd`. So **redeploying `4979354` alone does not roll back** — the
+Two things stop `4979354` from running on the new schema, both verified on
+PostgreSQL 17:
+
+- Render's **Pre-Deploy** `flask db upgrade` of `4979354` exits 1: "Can't
+  locate revision identified by '08920334bccd'". The deploy stops there and
+  the running instance keeps serving.
+- If it got past that, `STREAKFIT_ENFORCE_DB_HEAD=1` makes every gunicorn
+  worker refuse to start ("database is at Alembic revision '08920334bccd' but
+  the code expects head '47f7dc9962e3'"). Note the shape of that failure: the
+  gunicorn **master keeps running and listening** while its workers die and
+  respawn, so `/health` **times out** rather than failing fast.
+ So **redeploying `4979354` alone does not roll back** — the
 database has to be downgraded first, and the downgrade works only while no
 report or appeal has lost its person:
 
@@ -38,6 +45,13 @@ Once that is non-zero (the first reporter or appellant deletes their account),
 the only ways back are forward fixes, or the fresh backup below — which loses
 everything written after it.
 
+**Things that close the rollback window, besides real users:**
+`scripts/cleanup_qa_smoke.py --execute` (it now deletes QA accounts that filed
+reports, e.g. verify_all's own `qa_smoke_a_*`), and any operator deletion of a
+reporter. **Do not run the QA cleanup until rollback is no longer wanted**, and
+re-run the query immediately before any rollback — never rely on an earlier
+reading.
+
 ## 3. Pre-flight (read-only)
 
 1. Worktree clean, HEAD is the reviewed commit; `git merge-base --is-ancestor
@@ -49,8 +63,14 @@ everything written after it.
    `/api/verification/self` → 14 PASS / 1 UNKNOWN baseline.
 4. `/admin` → pending 0, undelivered notices 0 (so the verify_all run in
    step 7 is the only new moderation traffic).
-5. Render: Auto-Deploy **Off**; Start Command unchanged
-   (`flask db upgrade && STREAKFIT_ENFORCE_DB_HEAD=1 … gunicorn app:app`).
+5. Render: Auto-Deploy **Off**; **Pre-Deploy Command** `flask db upgrade`;
+   **Start Command** `STREAKFIT_ENFORCE_DB_HEAD=1 STREAKFIT_RETENTION_SWEEPER=1
+   gunicorn app:app` (as `render.yaml` and deployment-sequence.md; §12.3 of the
+   release audit saw exactly this). Any difference: stop and reconcile first.
+6. Crons: `render.yaml` declares crons on `main` with
+   `STREAKFIT_ENFORCE_DB_HEAD=1`. Confirm in the dashboard they are still not
+   created. If any exist, they redeploy with this push and are part of the
+   rollback too.
 
 ## 4. Fresh encrypted backup — **OWNER**
 
@@ -77,16 +97,24 @@ used is the one saved in the password manager.
 ## 5. Restore rehearsal with the pending migration — **OWNER** (passphrase)
 
 ```bash
-git -C ~/Desktop/Streakfit/streakfit_production_baseline archive <release-sha> \
-  | tar -x -C "$(mktemp -d)"     # the release source; pass its path as SFRH_REPO
+D=$(mktemp -d)                  # the release source, kept for the next steps
+git -C ~/Desktop/Streakfit/streakfit_production_baseline archive <release-sha> | tar -x -C "$D"
 SFRH_BACKUP="$F" SFRH_SHA=<sha from step 4> SFRH_BEFORE=47f7dc9962e3 \
-SFRH_REPO=<that directory> ~/backups/streakfit/streakfit-rehearse.sh
+SFRH_REPO="$D" ~/backups/streakfit/streakfit-rehearse.sh
 ```
 
 Must show: checksum unchanged; restore 0 errors; **1 pending migration
 applied (`47f7dc9962e3 → 08920334bccd`)**; head reached; schema vs models 0
 differences; release app starts on 127.0.0.1 only; cleanup 0 containers /
 listeners / temp files.
+
+**Rehearse the rollback too, on the same restored copy**, before it is torn
+down (the rehearsal script only runs the upgrade; this needs a manual step or
+a small extension to the script, from the release source `$D`, with
+`STREAKFIT_ENFORCE_DB_HEAD` and `STREAKFIT_RETENTION_SWEEPER` unset):
+`flask db downgrade 47f7dc9962e3` → exit 0 and both columns `NOT NULL` again;
+the section-2 query → 0; `flask db upgrade` → back at `08920334bccd`. This is
+the only time the rollback runs against real data before it might be needed.
 
 ## 6. Push and deploy — **OWNER**, one approval each
 
@@ -128,10 +156,17 @@ Phone: open `https://streakfit.pro`, reload twice so `v0924a` loads.
 
 **While the section-2 query returns 0:**
 
-1. `flask db downgrade 47f7dc9962e3` against production (Render shell, or
-   locally with the direct connection string supplied as in step 4). The
-   running new code works on the old schema except that deleting a reporter
-   or appellant would fail — so do step 2 promptly.
+0. Re-run the section-2 query now. Non-zero: stop, this path is closed.
+1. `flask db downgrade 47f7dc9962e3` against production, **run from the
+   release source** (`$D`, or the Render shell of the release instance) —
+   `4979354` cannot do it: it does not know `08920334bccd` ("Can't locate
+   revision"). Environment: `STREAKFIT_ENFORCE_DB_HEAD` and
+   `STREAKFIT_RETENTION_SWEEPER` **unset**; the direct connection string
+   supplied as in step 4. The running release code then works on the old
+   schema, except that deleting a reporter or appellant returns 500 and rolls
+   back (verified) — so do step 2 promptly. **If Render restarts the release
+   instance before step 2**, its head check refuses to start it and the site
+   is down until step 2 completes.
 2. Render: Manual Deploy of `4979354`. Its pre-deploy upgrade is a no-op and
    the head check passes at `47f7dc9962e3`.
 3. Verify as section 7 against the old expectations (`v0923d`, 25 applied).
@@ -146,3 +181,30 @@ Record in the release audit: backup file, SHA, delete-by date; rehearsal
 result; push range; deploy id; section-7 results; the two smoke reports
 dismissed. Delete the backup by its date (`shred -u`), once no rollback to it
 is wanted.
+
+## 10. Open owner decisions (from the independent review, 2026-09-24)
+
+Not blockers for the code; each changes what this release promises.
+
+1. **Legal hold does not keep the reported person's identity.** A reported
+   person — including on a pending, legally held `child_safety` report — can
+   delete their account; the report, evidence and hold survive, but
+   `reported_user_id`, the evidence author and the action target become NULL.
+   On `4979354` that deletion 500'd, so this release makes it possible.
+   Options: block deletion (409, the generic "safety record" message, which
+   reveals nothing) while a held — or any pending — report names the person;
+   or accept and document it.
+2. **An active suspension is deleted with the account.** A suspended person can
+   delete and register again (they could always register a second account).
+   The `ModerationAction` stays.
+3. **A challenge addressed to the deleted person becomes a whole-team
+   challenge.** `team_challenge.target_user_id = NULL` already means "everyone",
+   so "Mom → Olivia" reads "Mom → everyone" after Olivia deletes. Challenges
+   expire (`expires_at`), which bounds it, but it is wrong while live. Options:
+   expire it at deletion, or delete it and cut the message's challenge link.
+4. **Deletion log lines carry the user id** (`event=account_deleted
+   user_id=…`), the sharpest re-identification route in
+   privacy-retention.md. Options: log without the id, or accept and keep the
+   doc's limit.
+5. **Races return 500, not 409**, when an operator acts on a report or appeal
+   whose person deletes at the same moment. No partial state (verified).

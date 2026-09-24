@@ -268,7 +268,9 @@ clock (text 30 days after closure, photo bytes 30 days from capture).
 
 **The claim:** after deletion, no column in the database links a report,
 appeal, notice or moderation action to the reporter's (former) account, and no
-text the reporter wrote remains on a closed report.
+note the reporter wrote remains on a closed report **they filed**. (Evidence of
+their words as a *reported* person is a different record and stays on its own
+clock.)
 
 **It is not a claim of anonymity.** What remains can still narrow down who
 filed a report, for anyone who can read the operator view or the database:
@@ -278,7 +280,9 @@ filed a report, for anyone who can read the operator view or the database:
 | `report.team_id` | The review needs to know where it happened | The reporter was a member of that team. In a family team of three, that is nearly a name |
 | `report.subject_type` / `subject_ref`, and evidence `context_json` | The reviewer reads the reported message or photo | Who could see that content — the same membership inference |
 | `report.created_at`, `due_at` | The minimal record keeps dates | Correlates with a member leaving the team or deleting their account around then (team messages keep their rows, sender cut) |
-| A pending report's `note` | The investigator needs it | The reporter's own words, which may name themselves, until 30 days after closure |
+| A pending report's `note` | The investigator needs it | The reporter's own words, which may name themselves — until 30 days after closure, **which assumes someone closes it**. A report left pending keeps its note indefinitely |
+| `reporter_note_removed` / `appeal_withdrawn` actions | The trail must explain an empty note or a withdrawn appeal | Their `created_at` is the moment of the account deletion. Joined with anything else that records that moment (below), it names the former account |
+| `appeal_upheld` / `appeal_overturned` action `note` | The operator's reasoning is the audit | The same text as the `outcome_note` that deletion clears — clearing `outcome_note` removes a copy, not the words |
 | Evidence text / photo bytes | Moderation clock | The reported person's content — not the reporter's, but it shows what they saw |
 
 **Outside the database, and not changed by deletion:**
@@ -290,6 +294,12 @@ filed a report, for anyone who can read the operator view or the database:
   plan's history window — 6 hours on Free.
 - **Render request logs** record `POST /api/reports` with time and client IP
   (no user id, no body), for the platform's log retention.
+- **Render application logs** record `event=account_self_deleted user_id=…`
+  and `event=account_deleted user_id=…` at the moment of deletion. **This is
+  the sharpest re-identification route:** its timestamp matches the
+  `reporter_note_removed` / `appeal_withdrawn` rows written in the same
+  transaction, which gives the former user id of the reporter of every closed
+  report that had a note. It lasts as long as Render keeps logs.
 - **Rate-limit keys** in Redis are per user id for `/api/reports` and expire
   within the hour.
 - **Email notices** carry a report id and a link, never a person; they are
@@ -297,11 +307,12 @@ filed a report, for anyone who can read the operator view or the database:
 - **PostgreSQL** does not overwrite a value on UPDATE: the old row version
   remains on disk until vacuumed. Not reachable through the application.
 
-So the precise statement is: *deletion removes every stored link between the
-reporter and their reports, and on closed reports every word they wrote; it
-does not stop someone with operator or database access from inferring the
-reporter from team membership and timing, and it does not reach backups,
-snapshots or logs until those expire.*
+So the precise statement is: *deletion removes every stored link in the
+database between the reporter and the reports they filed, and on the closed
+ones the note they wrote; it does not stop someone with operator, database or
+log access from inferring the reporter from team membership, timing or the
+deletion log line, and it does not reach backups, snapshots or logs until
+those expire.*
 
 Deletion is still **refused** (409, nothing changed) for a team creator and
 for anyone with guardian-link, consent or permission-audit rows. How a deleted

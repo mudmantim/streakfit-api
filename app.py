@@ -8606,11 +8606,13 @@ def admin_decide_appeal(public_id):
     ).scalar_one_or_none()
     if appeal is None:
         abort(404)
-    if appeal.outcome == 'withdrawn':
-        # The appellant deleted their account. There is nobody to restore
-        # anything to, and "overturned" here would lift nothing while the
+    if appeal.user_id is None:
+        # The appellant deleted their account -- whether the appeal was still
+        # open (now `withdrawn`) or already decided. There is nobody to restore
+        # anything to, and a new decision here would lift nothing while the
         # trail claimed a reversal.
-        return jsonify({"error": "This appeal was withdrawn: the account was deleted.",
+        return jsonify({"error": "The appellant deleted their account; this appeal "
+                                 "can no longer be decided.",
                         "code": "appeal_withdrawn"}), 409
     data = request.get_json(silent=True) or {}
     outcome = (data.get('outcome') or '').strip()

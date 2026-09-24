@@ -70,3 +70,22 @@ def test_sanity_cap_aborts(app, monkeypatch):
     _mk("qa_smoke_a_1")
     _mk("qa_smoke_a_2")
     assert C.survey() is None   # over the cap -> hard-abort signal, no classification
+
+
+def test_the_dry_run_blocks_exactly_what_execute_would(app):
+    """survey() used to check team ownership only, so a QA account with a
+    guardian link was listed SAFE, then skipped by --execute, and the run
+    ended in a false 'STILL PRESENT' alarm."""
+    import scripts.cleanup_qa_smoke as cq
+    from app import db, User, GuardianLink
+    kid = User(username="qa_smoke_kid_z", password_hash="x")
+    parent = User(username="qa_smoke_parent_z", password_hash="x")
+    db.session.add_all([kid, parent])
+    db.session.commit()
+    db.session.add(GuardianLink(child_user_id=kid.id, guardian_user_id=parent.id,
+                                method="test"))
+    db.session.commit()
+    safe, blocked, _counts = cq.survey()
+    blocked_ids = {u.id for u, _reason in blocked}
+    assert {kid.id, parent.id} <= blocked_ids
+    assert not ({kid.id, parent.id} & {u.id for u in safe})
