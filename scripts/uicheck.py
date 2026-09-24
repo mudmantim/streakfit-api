@@ -2762,6 +2762,18 @@ def check_moderation_operator_can_close_a_report(b: Browser, base: str, app) -> 
           f"{sub and sub['c']['ratio']}:1 on {sub and sub['c']['bg']}, "
           f"disabled={sub and sub['dis']}")
 
+    # 4c. The reporting-restriction actions act on the person the report is
+    # ABOUT. They were labelled "Restrict this reporter", which reads as the
+    # person who filed it -- the one account those actions never touch.
+    labels = b.js("(function(){var s=document.getElementById('mod-action-select');"
+                  "if(!s)return null;var o={};for(var i=0;i<s.options.length;i++)"
+                  "o[s.options[i].value]=s.options[i].text;return o;})()") or {}
+    rr = labels.get("restrict_reporting", "")
+    check("reported person" in rr and "reporter" not in rr.lower(),
+          "the reporting restriction says it acts on the reported person", rr)
+    check("reported person" in labels.get("lift_reporting_restriction", ""),
+          "and so does lifting it", labels.get("lift_reporting_restriction"))
+
     # 5. Choose a disposition and write a note.
     b.js("document.getElementById('mod-action-select').value = 'dismiss';"
          "document.getElementById('mod-action-note').value = "

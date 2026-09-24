@@ -255,12 +255,53 @@ It removes the **person**, not the report:
 | Reported person | `report.reported_user_id`, `report_evidence.author_user_id`, `moderation_action.target_user_id` → `NULL` | Everything else |
 | Appellant | `appeal.user_id`, `appeal.reason` (their words) and `appeal.outcome_note` (the note addressed to them) → `NULL`. An **open** appeal is closed with outcome `withdrawn` and a `system` `appeal_withdrawn` action; it can no longer be decided | That an appeal was filed, against which decision, when, and how it ended. The operator's reasoning stays on the `appeal_upheld` / `appeal_overturned` action |
 
-The reporter's `note` and all evidence text are **not** removed at deletion:
-they are removed by the sweep above, 30 days after the report closes, exactly
-as for any other report. That is the moderation promise taking precedence over
-the account promise for these specific rows, and it is bounded: nothing here
-outlives closure by more than 30 days (plus sweep latency), unless a legal
-hold is set.
+The reporter's `note` — the only free text in a report that the reporter
+wrote — goes **at deletion** if the report is closed, with a `system`
+`reporter_note_removed` action on the trail. On a **pending** report it stays,
+because an investigator still has to decide it and the note is often the only
+explanation; it then leaves on the ordinary clock, 30 days after closure. A
+legal hold keeps it either way. Evidence is the *reported* content, not the
+reporter's, and is never touched by account deletion: it leaves on its own
+clock (text 30 days after closure, photo bytes 30 days from capture).
+
+### What "no longer identifies the reporter" does and does not mean
+
+**The claim:** after deletion, no column in the database links a report,
+appeal, notice or moderation action to the reporter's (former) account, and no
+text the reporter wrote remains on a closed report.
+
+**It is not a claim of anonymity.** What remains can still narrow down who
+filed a report, for anyone who can read the operator view or the database:
+
+| What stays | Why it stays | What it can reveal |
+|---|---|---|
+| `report.team_id` | The review needs to know where it happened | The reporter was a member of that team. In a family team of three, that is nearly a name |
+| `report.subject_type` / `subject_ref`, and evidence `context_json` | The reviewer reads the reported message or photo | Who could see that content — the same membership inference |
+| `report.created_at`, `due_at` | The minimal record keeps dates | Correlates with a member leaving the team or deleting their account around then (team messages keep their rows, sender cut) |
+| A pending report's `note` | The investigator needs it | The reporter's own words, which may name themselves, until 30 days after closure |
+| Evidence text / photo bytes | Moderation clock | The reported person's content — not the reporter's, but it shows what they saw |
+
+**Outside the database, and not changed by deletion:**
+
+- **Encrypted backups** (`~/backups/streakfit/`) and the **Neon snapshot**
+  keep every row as it was when taken — including `reporter_user_id` — until
+  that file or snapshot is destroyed (see the backup retention dates).
+- **Neon history** (point-in-time restore) holds the earlier values for the
+  plan's history window — 6 hours on Free.
+- **Render request logs** record `POST /api/reports` with time and client IP
+  (no user id, no body), for the platform's log retention.
+- **Rate-limit keys** in Redis are per user id for `/api/reports` and expire
+  within the hour.
+- **Email notices** carry a report id and a link, never a person; they are
+  unaffected.
+- **PostgreSQL** does not overwrite a value on UPDATE: the old row version
+  remains on disk until vacuumed. Not reachable through the application.
+
+So the precise statement is: *deletion removes every stored link between the
+reporter and their reports, and on closed reports every word they wrote; it
+does not stop someone with operator or database access from inferring the
+reporter from team membership and timing, and it does not reach backups,
+snapshots or logs until those expire.*
 
 Deletion is still **refused** (409, nothing changed) for a team creator and
 for anyone with guardian-link, consent or permission-audit rows. How a deleted

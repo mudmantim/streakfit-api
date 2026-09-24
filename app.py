@@ -10513,8 +10513,9 @@ _USER_LINK_NULLS = [
     ("team_challenge_target",  TeamChallenge,  "target_user_id"),
     ("report_about",           Report,         "reported_user_id"),
     # The reporter too. The report is a review obligation that does not end
-    # because the person who raised it left, and its note and evidence stay on
-    # the evidence clock (30 days after closure) like any other report's.
+    # because the person who raised it left. Their note goes at deletion if the
+    # report is closed (_remove_closed_report_notes_of); a pending report keeps
+    # it for the investigator, and it leaves on the evidence clock.
     ("report_filed",           Report,         "reporter_user_id"),
     ("report_evidence_author", ReportEvidence, "author_user_id"),
     ("moderation_action_target", ModerationAction, "target_user_id"),
@@ -10625,6 +10626,31 @@ def _withdraw_appeals_of(user_id):
     db.session.flush()
 
 
+def _remove_closed_report_notes_of(user_id):
+    """A reporter's own words leave with them once nobody needs them.
+
+    The note is the only free text in a report that the REPORTER wrote. On a
+    CLOSED report the review it served is over, so it goes now rather than on
+    the 30-days-after-closure evidence clock. On a PENDING report it stays: an
+    investigator still has to decide the report, and the note is often the
+    only explanation of it. It then leaves on the ordinary clock like any
+    other report's. A legal hold keeps it, because a legal hold is the one
+    thing that suppresses moderation deletion.
+
+    Evidence is not touched here: it is the REPORTED content, not the
+    reporter's, and stays on its own clock.
+    """
+    for report in Report.query.filter(Report.reporter_user_id == user_id,
+                                      Report.status == 'closed',
+                                      Report.note.isnot(None),
+                                      Report.legal_hold.is_(False)).all():
+        report.note = None
+        db.session.add(ModerationAction(
+            report_id=report.id, actor='system', action='reporter_note_removed',
+            note='reporter deleted their account'))
+    db.session.flush()
+
+
 def _account_deletion_blockers(counts, allow_team_owner=False):
     """The labels that stop a deletion, in the order a person should hear them."""
     return [label for label, _model, _attr in _USER_DELETION_BLOCKERS
@@ -10680,6 +10706,7 @@ def delete_user_account(user_id, allow_team_owner=False, dry_run=True):
              TeamPhoto.deleted_at: datetime.utcnow()},
             synchronize_session=False)
         _withdraw_appeals_of(user_id)
+        _remove_closed_report_notes_of(user_id)
         # Shared and moderation records stay; only the pointer to this person goes.
         for _label, model, attr in _USER_LINK_NULLS:
             model.query.filter(getattr(model, attr) == user_id).update(

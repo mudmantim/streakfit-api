@@ -212,8 +212,14 @@ def run_reporter_and_appellant(A, client, other, team_id):
                       disposition='dismissed',
                       created_at=now - datetime.timedelta(days=40),
                       reviewed_at=now - datetime.timedelta(days=35))
-    db.session.add_all([pending, closed])
+    held = A.Report(public_id=uuid.uuid4().hex, reporter_user_id=reporter,
+                    reported_user_id=other, team_id=team_id, category='harassment',
+                    subject_type='user', note='held words', status='closed',
+                    disposition='dismissed', reviewed_at=now, legal_hold=True,
+                    legal_hold_reason='test hold')
+    db.session.add_all([pending, closed, held])
     db.session.flush()
+    held_id = held.id
     db.session.add_all([
         A.ReportEvidence(report_id=closed.id, content_type='message',
                          content_text='what they wrote', author_user_id=other,
@@ -242,8 +248,18 @@ def run_reporter_and_appellant(A, client, other, team_id):
             for p, r in after.items()), '')
     results['the pending report is still in the review queue'] = (
         after[pend_pid].status == 'pending', '')
-    results["the note stays on the evidence clock, not the reporter's"] = (
+    results["a pending report keeps the note for the investigator"] = (
         after[pend_pid].note == 'my own words', '')
+    results["a closed report loses the reporter's note at deletion"] = (
+        after[closed_pid].note is None, str(after[closed_pid].note))
+    results['the note removal is on the trail'] = (
+        A.ModerationAction.query.filter_by(report_id=ids[closed_pid], actor='system',
+                                           action='reporter_note_removed').count() == 1
+        and A.ModerationAction.query.filter_by(report_id=ids[pend_pid],
+                                               action='reporter_note_removed').count() == 0, '')
+    results['a legal hold keeps the note of a closed report'] = (
+        db.session.get(A.Report, held_id).note == 'held words'
+        and db.session.get(A.Report, held_id).reporter_user_id is None, '')
 
     prev = os.environ.get('ADMIN_SECRET')
     os.environ['ADMIN_SECRET'] = ADMIN

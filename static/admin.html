@@ -967,8 +967,12 @@
     ['unrestrict_content', 'Un-restrict this content'],
     ['suspend_social', 'Suspend social features'],
     ['lift_suspension', 'Lift suspension'],
-    ['restrict_reporting', 'Restrict this reporter'],
-    ['lift_reporting_restriction', 'Lift reporting restriction'],
+    // Both act on the person this report is ABOUT (report.reported_user_id),
+    // never on whoever filed it: to act on an abusive reporter, a report
+    // naming them is filed first. The labels say so, because "this reporter"
+    // read as the filer.
+    ['restrict_reporting', 'Stop the reported person from filing reports'],
+    ['lift_reporting_restriction', 'Let the reported person file reports again'],
     ['remove_from_team', 'Remove from team']
   ];
 
