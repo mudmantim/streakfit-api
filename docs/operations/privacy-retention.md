@@ -257,10 +257,10 @@ It removes the **person**, not the report:
 
 The reporter's `note` — the only free text in a report that the reporter
 wrote — goes **at deletion** if the report is closed, with a `system`
-`reporter_note_removed` action on the trail. On a **pending** report it stays,
-because an investigator still has to decide it and the note is often the only
-explanation; it then leaves on the ordinary clock, 30 days after closure. A
-legal hold keeps it either way. Evidence is the *reported* content, not the
+`reporter_note_removed` action on the trail. A reporter cannot delete their
+account while any report they filed is **pending** or **held** (below), so by
+the time they can, every report they filed is closed and unheld, and every
+note they wrote goes. Evidence is the *reported* content, not the
 reporter's, and is never touched by account deletion: it leaves on its own
 clock (text 30 days after closure, photo bytes 30 days from capture).
 
@@ -284,7 +284,6 @@ filed a report, for anyone who can read the operator view or the database:
 | `report.team_id` | The review needs to know where it happened | The reporter was a member of that team. In a family team of three, that is nearly a name |
 | `report.subject_type` / `subject_ref`, and evidence `context_json` | The reviewer reads the reported message or photo | Who could see that content — the same membership inference |
 | `report.created_at`, `due_at` | The minimal record keeps dates | Correlates with a member leaving the team or deleting their account around then (team messages keep their rows, sender cut) |
-| A pending report's `note` | The investigator needs it | The reporter's own words, which may name themselves — until 30 days after closure, **which assumes someone closes it**. A report left pending keeps its note indefinitely |
 | `reporter_note_removed` / `appeal_withdrawn` actions | The trail must explain an empty note or a withdrawn appeal | Their `created_at` is the moment of the account deletion. Joined with anything else that records that moment (below), it names the former account |
 | `appeal_upheld` / `appeal_overturned` action `note` | The operator's reasoning is the audit | The same text as the `outcome_note` that deletion clears — clearing `outcome_note` removes a copy, not the words |
 | Evidence text / photo bytes | Moderation clock | The reported person's content — not the reporter's, but it shows what they saw |
@@ -332,8 +331,11 @@ Deletion is **refused** (409, nothing changed) for:
 - a team creator (told why, since it is theirs to fix);
 - anyone **named in a report that is pending or under legal hold** — as the
   reported person or as the author of reported content — and anyone who
-  **filed** a report under legal hold. The record is still needed, and deleting
-  them would erase who it is about;
+  **filed** a report that is **pending** or under **legal hold**. The record
+  is still needed, and deleting them would erase who it is about or the person
+  a reviewer may need to follow up with. The block ends when the report is
+  decided, unless a legal hold remains; the review queue, deadlines and
+  notices carry on unchanged while it lasts;
 - anyone with guardian-link, consent or permission-audit rows (how a deleted
   child or guardian is recorded is an owner decision not yet made).
 
@@ -368,7 +370,9 @@ PostgreSQL; the deletion is retried (up to 3 times), which in testing turned
 second each. Verified on PostgreSQL in `tests/account_deletion_race.py`.
 
 A challenge addressed to the deleted person is **expired** at deletion, so it
-does not reopen as a whole-team challenge. A person's own suspension is
+does not reopen as a whole-team challenge, and marked (`target_left_at`) so
+its card reads "challenged a former teammate" — never who, and never "the
+team". A person's own suspension is
 deleted with their account; the `ModerationAction` that imposed it stays.
 
 ## What is NOT guaranteed — read this part

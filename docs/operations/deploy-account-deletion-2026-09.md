@@ -9,9 +9,9 @@ it is taken; approval of one step is not approval of the next.
 | | |
 |---|---|
 | Base (production now) | `4979354` — migrations at `47f7dc9962e3` |
-| Commits | `28ce314` FK-complete deletion · `e58b189` reporter/appellant deletion + migration · `88af476` closed-report note, admin label, privacy limits, this procedure · `0b5c05d` first-review fixes · `358af56` section-10 decisions, race locks, CLAUDE.md · `afda493` second-review fixes · the docs-only commit carrying this line. **Code last changed in `afda493`; all checks ran there.** |
-| Migration | **one**: `08920334bccd` — `report.reporter_user_id`, `appeal.user_id` → nullable. No data changed by the upgrade |
-| Static | `static/admin.html` (labels), `static/sw.js` → `streakfit-v0924a` |
+| Commits | `28ce314` FK-complete deletion · `e58b189` reporter/appellant deletion + migration · `88af476` closed-report note, admin label, privacy limits, this procedure · `0b5c05d` first-review fixes · `358af56` section-10 decisions, race locks, CLAUDE.md · `afda493` second-review fixes · `78047de` docs · the final commit: a pending report blocks its reporter's deletion, and the former-teammate challenge card. The release commit is the tip of `fix/account-deletion-fks`; see the release summary for its hash |
+| Migration | **one**: `08920334bccd` — `report.reporter_user_id`, `appeal.user_id` → nullable; adds nullable `team_challenge.target_left_at`. No existing data changed by the upgrade |
+| Static | `static/admin.html` (labels), `static/app.js` (challenge card), `static/sw.js` → `streakfit-v0924b` |
 | Config / env | none |
 
 Not included: `364e97a`, `15c5eaa` (release-audit docs on
@@ -140,7 +140,7 @@ migration is a single `ALTER … DROP NOT NULL` per column, in one transaction.
 | check | expect |
 |---|---|
 | `/api/build-identity` | `<release-sha>`, `atHead: true`, `latest 08920334bccd`, 26 applied |
-| `/sw.js` | `streakfit-v0924a` |
+| `/sw.js` | `streakfit-v0924b` |
 | `/health` | 200 |
 | `/api/verification/self` | 14 PASS / 1 UNKNOWN, as before |
 | `verify_all.py --base-url https://streakfit.pro` | all pass, **including `auth.delete_account_with_dependent_rows`** (a throwaway `qa_smoke_leaver_*` account that blocks someone and deletes itself) |
@@ -157,7 +157,7 @@ pending, `qa_smoke_b_*` cannot be deleted (a pending report names it). None
 of this touches the section-2 rollback query: the leaver is not a reporter and
 `qa_smoke_a_*` is never deleted.
 
-Phone: open `https://streakfit.pro`, reload twice so `v0924a` loads.
+Phone: open `https://streakfit.pro`, reload twice so `v0924b` loads.
 
 ## 8. Rollback — **OWNER**
 
@@ -226,14 +226,12 @@ Second independent review (2026-09-24), fixed in the final commit:
 
 Still open, for the owner:
 
-- **A reporter can unlink themselves from a PENDING child_safety report.**
-  The report stays pending with its note; investigators lose the person to
-  follow up with. Decision 1 only protects people the report names. Options:
-  block a reporter's deletion while any report they filed is pending (or only
-  child_safety), or accept.
-- **An expired challenge addressed to a deleted person reads "challenged the
-  team"** in history, because NULL target means everyone. Nobody can complete
-  it; the card text is wrong. Fix is display-side (e.g. "challenged a former
-  member" when expired with no target and a creator) — not in this release.
+- ~~A reporter can unlink themselves from a pending child_safety report~~ —
+  **decided and built:** a reporter's deletion is refused (generic 409) while
+  any report they filed is pending; it ends when the report is decided,
+  unless a hold remains.
+- ~~An expired challenge to a deleted person reads "challenged the team"~~ —
+  **fixed:** `team_challenge.target_left_at` (in the same migration) makes the
+  card read "challenged a former teammate".
 - **Deadlock retry costs ~1 s** per colliding pair; a stable lock order across
   shared rows would avoid it. Latent while production runs one worker.

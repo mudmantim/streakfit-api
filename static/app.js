@@ -2071,7 +2071,12 @@ function _buildChallengeCard(ch) {
 
     var who = document.createElement('p');
     who.className = 'tchallenge-who';
-    who.textContent = ch.for_everyone
+    // A challenge to someone who has since deleted their account keeps saying
+    // it was to one person -- not "the team", which is what its cut link
+    // would otherwise read as -- and never says who.
+    who.textContent = ch.to_former_member
+        ? (ch.from_username || 'Someone') + ' challenged a former teammate'
+        : ch.for_everyone
         ? (ch.from_username || 'Someone') + ' challenged the team'
         : (ch.from_username || 'Someone') + ' challenged ' + (ch.to_username || 'someone');
     headText.appendChild(who);

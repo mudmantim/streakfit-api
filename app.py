@@ -2001,6 +2001,9 @@ class TeamChallenge(db.Model):
     created_by_user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True)
     # NULL means the whole team; otherwise one person was named.
     target_user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True)
+    # Set when the named person deleted their account. Their link is cut, and
+    # without this a NULL target would read as "the whole team" in history.
+    target_left_at = db.Column(db.DateTime, nullable=True)
     preset_key = db.Column(db.String(40), nullable=False)
     created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, index=True)
     expires_at = db.Column(db.DateTime, nullable=True)
@@ -5481,7 +5484,9 @@ def _serialize_challenge(challenge, completions_by_id, usernames, viewer_id):
         'blurb': preset.get('blurb', ''),
         'from_username': usernames.get(challenge.created_by_user_id),
         'to_username': usernames.get(challenge.target_user_id) if challenge.target_user_id else None,
-        'for_everyone': challenge.target_user_id is None,
+        'for_everyone': challenge.target_user_id is None and challenge.target_left_at is None,
+        # Named someone who has since deleted their account. Never who.
+        'to_former_member': challenge.target_left_at is not None,
         # Named or not, anyone on the team may do it -- a challenge is an
         # invitation, not an assignment.
         'open': _challenge_is_open(challenge),
@@ -10655,6 +10660,11 @@ def _account_dependent_counts(user_id):
                    ReportEvidence.author_user_id == user_id)))).count()
     counts["report_held_filed"] = Report.query.filter(
         Report.legal_hold.is_(True), Report.reporter_user_id == user_id).count()
+    # And any report they filed that is still being decided: the reviewer may
+    # need the person who raised it. The block ends when the report is
+    # decided (unless a hold remains, which report_held_filed keeps).
+    counts["report_pending_filed"] = Report.query.filter(
+        Report.status == 'pending', Report.reporter_user_id == user_id).count()
     for label, model, attr in _USER_DELETION_BLOCKERS:
         counts[label] = model.query.filter(getattr(model, attr) == user_id).count()
     return counts
@@ -10668,6 +10678,7 @@ _ACCOUNT_DELETION_BLOCKER_TEXT = {
     "permission_audit_subject": "has {n} permission-audit row(s) — child-safety records need an owner decision",
     "report_open_about": "named in {n} pending or legally held report(s) — decide or release them first",
     "report_held_filed": "filed {n} report(s) under legal hold — release the hold first",
+    "report_pending_filed": "filed {n} report(s) still pending — decide them first",
 }
 
 
@@ -10778,6 +10789,10 @@ def _expire_challenges_addressed_to(user_id):
         TeamChallenge.target_user_id == user_id,
         db.or_(TeamChallenge.expires_at.is_(None), TeamChallenge.expires_at > now)
     ).update({TeamChallenge.expires_at: now}, synchronize_session=False)
+    # Every challenge ever addressed to them, open or long finished, so its
+    # card reads "challenged a former teammate", not "challenged the team".
+    TeamChallenge.query.filter(TeamChallenge.target_user_id == user_id).update(
+        {TeamChallenge.target_left_at: now}, synchronize_session=False)
 
 
 def _remove_closed_report_notes_of(user_id):
@@ -10807,7 +10822,8 @@ def _remove_closed_report_notes_of(user_id):
 
 # Blockers that are conditions on moderation records rather than a foreign key
 # existing. NEVER shown to the person by name: see delete_my_account.
-_MODERATION_DELETION_BLOCKERS = ("report_open_about", "report_held_filed")
+_MODERATION_DELETION_BLOCKERS = ("report_open_about", "report_held_filed",
+                                 "report_pending_filed")
 
 
 def _account_deletion_blockers(counts, allow_team_owner=False):

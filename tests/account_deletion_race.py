@@ -369,6 +369,44 @@ def main():
     check('10 deletion first: the challenge waited, then 400 (not a member), no 500',
           waited and (_status(b1), _status(b2)) == (200, 400), (waited, _status(b1), _status(b2)))
 
+    # 11. a reporter deleting while their pending report is being decided
+    def pending_report_by(reporter, reported):
+        with A.app.app_context():
+            r = A.Report(public_id=uuid.uuid4().hex, reporter_user_id=reporter,
+                         reported_user_id=reported, category='harassment',
+                         subject_type='user',
+                         due_at=datetime.datetime.utcnow() + datetime.timedelta(hours=72))
+            db.session.add(r)
+            db.session.commit()
+            return r.public_id, r.id
+
+    def dismiss(pid):
+        return lambda c: c.post(f'/api/admin/reports/{pid}/action',
+                                json={'action': 'dismiss', 'note': 'race'}, headers=H)
+
+    filer, fh = person('pfiler')
+    about, _ = person('pabout')
+    pid, rid = pending_report_by(filer, about)
+    b1, b2, waited = race(A, dismiss(pid), delete_me(fh))
+    with A.app.app_context():
+        r = db.session.get(A.Report, rid)
+        check('11a decision first: the deletion waited, then succeeded',
+              waited and (_status(b1), _status(b2)) == (200, 200)
+              and r.status == 'closed' and r.reporter_user_id is None,
+              (waited, _status(b1), _status(b2), r.status))
+    filer, fh = person('pfiler')
+    about, _ = person('pabout')
+    pid, rid = pending_report_by(filer, about)
+    b1, b2, waited = race(A, delete_me(fh), dismiss(pid))
+    with A.app.app_context():
+        r = db.session.get(A.Report, rid)
+        body = b1['resp'].get_json() if 'resp' in b1 else {}
+        check('11b deletion first: refused (report pending), then the decision lands',
+              (_status(b1), _status(b2)) == (409, 200)
+              and body.get('blocker_codes') == ['safety_record']
+              and r.status == 'closed' and r.reporter_user_id == filer,
+              (_status(b1), _status(b2), r.status))
+
     print(json.dumps(results, indent=1))
     return 0 if all(v['ok'] for v in results.values()) else 1
 

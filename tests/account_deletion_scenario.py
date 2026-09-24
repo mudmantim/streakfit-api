@@ -142,6 +142,10 @@ def _blocker_rows(A, code, user_id, other_id, team_id):
                          reported_user_id=user_id, category='child_safety',
                          subject_type='user', status='closed', legal_hold=True,
                          legal_hold_reason='test', reviewed_at=datetime.datetime(2026, 9, 1))]
+    if code == 'report_pending_filed':       # they filed it; still pending
+        return [A.Report(public_id=uuid.uuid4().hex, reporter_user_id=user_id,
+                         reported_user_id=other_id, category='harassment',
+                         subject_type='user', team_id=team_id)]
     if code == 'report_held_filed':          # they filed it; it is held
         return [A.Report(public_id=uuid.uuid4().hex, reporter_user_id=user_id,
                          reported_user_id=other_id, category='harassment',
@@ -211,6 +215,16 @@ def run(A, client):
     results["a challenge addressed to them is expired, not reopened to everyone"] = (
         for_leaver.target_user_id is None and not A._challenge_is_open(for_leaver),
         str(for_leaver.expires_at))
+    card = A._serialize_challenge(for_leaver, {}, {}, None)
+    results["its card says a former teammate, not the whole team"] = (
+        card['to_former_member'] is True and card['for_everyone'] is False
+        and card['to_username'] is None, str(card))
+    whole = A.TeamChallenge(team_id=s['team'], public_id=uuid.uuid4().hex,
+                            preset_key='x', created_by_user_id=s['friend'],
+                            created_at=datetime.datetime.utcnow())
+    results["a real whole-team challenge still reads as the team"] = (
+        A._serialize_challenge(whole, {}, {}, None)['for_everyone'] is True
+        and A._serialize_challenge(whole, {}, {}, None)['to_former_member'] is False, '')
     results["a challenge they set for someone else keeps running"] = (
         by_leaver.expires_at is None and by_leaver.target_user_id == s['friend'],
         str(by_leaver.expires_at))
@@ -227,7 +241,7 @@ def run(A, client):
                               'guardian_link_guardian', 'consent_child',
                               'permission_audit_subject', 'report_open_about',
                               'report_held_about', 'report_open_evidence',
-                              'report_held_filed']):
+                              'report_held_filed', 'report_pending_filed']):
         h = _register(client, f'blocked{i}')
         uid, other = _uid(A, f'blocked{i}'), s['friend']
         A.db.session.add(A.DailyEffort(user_id=uid, date=datetime.date(2026, 9, 2),
@@ -264,9 +278,10 @@ ADMIN = 'scenario-admin-secret'
 def run_reporter_and_appellant(A, client, other, team_id):
     """A reporter and an appellant delete their accounts; the records stay.
 
-    Kept: category, dates, status, disposition / outcome. Gone: the link to
-    the person, the appellant's words. The reporter's note and the evidence
-    stay on the evidence clock and go when the retention sweep reaches them."""
+    A reporter is refused while any report they filed is pending or held;
+    once decided and unheld, they can go. Kept: category, dates, status,
+    outcome. Gone: the link to the person, their note, the appellant's words.
+    Evidence stays on its clock and goes when the retention sweep reaches it."""
     db, results = A.db, {}
     now = datetime.datetime.utcnow()
     h = _register(client, 'reporter')
@@ -298,34 +313,73 @@ def run_reporter_and_appellant(A, client, other, team_id):
     ids = {pending.public_id: pending.id, closed.public_id: closed.id}
     pend_pid, closed_pid = pending.public_id, closed.public_id
 
-    resp = client.delete('/api/me', json={'password': PASSWORD}, headers=h)
-    db.session.remove()
-    results['a reporter can delete their account'] = (resp.status_code == 200,
-                                                      str(resp.status_code))
-    after = {r.public_id: r for r in A.Report.query.filter(
-        A.Report.id.in_(ids.values())).all()}
-    results['both reports survive'] = (len(after) == 2, str(len(after)))
-    results['neither report names the reporter any more'] = (
-        all(r.reporter_user_id is None for r in after.values()), '')
-    results['category, dates, status and outcome are unchanged'] = (
-        all((r.category, r.created_at, r.due_at, r.reviewed_at, r.status,
-             r.disposition, r.team_id, r.reported_user_id) == before[p]
-            for p, r in after.items()), '')
-    results['the pending report is still in the review queue'] = (
-        after[pend_pid].status == 'pending', '')
-    results["a pending report keeps the note for the investigator"] = (
-        after[pend_pid].note == 'my own words', '')
-    results["a closed report loses the reporter's note at deletion"] = (
-        after[closed_pid].note is None, str(after[closed_pid].note))
-    results['the note removal is on the trail'] = (
-        A.ModerationAction.query.filter_by(report_id=ids[closed_pid], actor='system',
-                                           action='reporter_note_removed').count() == 1
-        and A.ModerationAction.query.filter_by(report_id=ids[pend_pid],
-                                               action='reporter_note_removed').count() == 0, '')
-
     prev = os.environ.get('ADMIN_SECRET')
     os.environ['ADMIN_SECRET'] = ADMIN
+    AH = {'X-Admin-Secret': ADMIN}
     try:
+        # 1. While a report they filed is pending, deletion is refused -- with
+        #    the generic answer -- and nothing moves: the report stays in the
+        #    queue on its original deadline, and its notice is still raised.
+        snap = row_counts(A)
+        resp = client.delete('/api/me', json={'password': PASSWORD}, headers=h)
+        db.session.remove()
+        body = resp.get_json() or {}
+        results['a reporter with a pending report is refused, generically'] = (
+            resp.status_code == 409 and body.get('blocker_codes') == ['safety_record']
+            and 'report' not in json.dumps(body).lower() and row_counts(A) == snap,
+            f'{resp.status_code} {body}')
+        pend = db.session.get(A.Report, ids[pend_pid])
+        results['the report stays pending, on its original deadline'] = (
+            pend.status == 'pending' and pend.due_at == before[pend_pid][2]
+            and pend.reporter_user_id == reporter, '')
+        A._generate_moderation_notices()
+        db.session.commit()
+        results['the review queue still raises its notice'] = (
+            A.ModerationNotice.query.filter_by(subject_ref=pend_pid,
+                                               kind='report_filed').count() == 1, '')
+        queue = client.get('/api/admin/reports', headers=AH).get_json()
+        results['and lists it as pending'] = (
+            pend_pid in [r['report_id'] for r in queue['reports']], '')
+
+        # 2. Decided, but put under legal hold: still refused.
+        r = client.post(f'/api/admin/reports/{pend_pid}/action',
+                        json={'action': 'dismiss', 'note': 'decided'}, headers=AH)
+        client.post(f'/api/admin/reports/{pend_pid}/legal-hold',
+                    json={'hold': True, 'reason': 'test'}, headers=AH)
+        resp = client.delete('/api/me', json={'password': PASSWORD}, headers=h)
+        db.session.remove()
+        results['decided but held: still refused'] = (
+            r.status_code == 200 and resp.status_code == 409
+            and (resp.get_json() or {}).get('blocker_codes') == ['safety_record'],
+            f'{r.status_code} {resp.status_code}')
+
+        # 3. Hold released: the block ends.
+        client.post(f'/api/admin/reports/{pend_pid}/legal-hold',
+                    json={'hold': False}, headers=AH)
+        resp = client.delete('/api/me', json={'password': PASSWORD}, headers=h)
+        db.session.remove()
+        results['decided and not held: the reporter can delete'] = (
+            resp.status_code == 200, str(resp.status_code))
+
+        after = {r.public_id: r for r in A.Report.query.filter(
+            A.Report.id.in_(ids.values())).all()}
+        results['both reports survive'] = (len(after) == 2, str(len(after)))
+        results['neither report names the reporter any more'] = (
+            all(r.reporter_user_id is None for r in after.values()), '')
+        results['category, filed date and deadline are unchanged'] = (
+            all((r.category, r.created_at, r.due_at, r.team_id, r.reported_user_id)
+                == (before[p][0], before[p][1], before[p][2], before[p][6], before[p][7])
+                for p, r in after.items()), '')
+        results['the decided report keeps its outcome'] = (
+            (after[pend_pid].status, after[pend_pid].disposition) == ('closed', 'dismissed'),
+            '')
+        results["both closed reports lose the reporter's note at deletion"] = (
+            after[closed_pid].note is None and after[pend_pid].note is None,
+            str((after[closed_pid].note, after[pend_pid].note)))
+        results['the note removal is on the trail'] = (
+            all(A.ModerationAction.query.filter_by(
+                report_id=ids[p], actor='system',
+                action='reporter_note_removed').count() == 1 for p in ids), '')
         detail = client.get(f'/api/admin/reports/{pend_pid}',
                             headers={'X-Admin-Secret': ADMIN}).get_json() or {}
         results['the operator sees the reporter left, not who they were'] = (

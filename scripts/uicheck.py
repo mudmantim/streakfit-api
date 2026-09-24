@@ -771,6 +771,95 @@ def check_team_witness(b: Browser, base: str, app) -> None:
           "and it says the thing somebody hesitating is afraid of", note[:90])
 
 
+def check_leaving_while_a_report_is_open(b: Browser, base: str, app) -> None:
+    """Account deletion waits for a report its user filed, and says so without
+    naming it; a challenge to someone who left does not become 'the team'."""
+    print("\nLeaving — refused while your report is open; history stays true")
+    secret = os.environ.get("ADMIN_SECRET") or "uicheck-local-secret"
+    os.environ["ADMIN_SECRET"] = secret
+    owner, owner_token = make_user(app, "lv_owner")
+    kid, kid_token = make_user(app, "lv_kid")
+    mate, mate_token = make_user(app, "lv_mate")
+    created = _api(base, "/api/teams", "POST", owner_token, {"name": "UICheck Leaving"})
+    team = created.get("team")
+    if not team:
+        bad(f"could not create a team to check ({created})")
+        return
+    for tok in (kid_token, mate_token):
+        _api(base, f"/api/teams/{team['id']}/join", "POST", tok, {"code": team["invite_code"]})
+    ids = {n: _api(base, "/api/me", token=t).get("id")
+           for n, t in (("owner", owner_token), ("kid", kid_token), ("mate", mate_token))}
+
+    # --- history: a challenge to the mate, who then leaves; one to the team ---
+    from app import CHALLENGE_PRESETS
+    preset = CHALLENGE_PRESETS[0]["key"]
+    _api(base, f"/api/teams/{team['id']}/challenges", "POST", owner_token,
+         {"preset_key": preset, "target_user_id": ids["mate"]})
+    _api(base, f"/api/teams/{team['id']}/challenges", "POST", owner_token,
+         {"preset_key": preset})
+    gone = _api(base, "/api/me", "DELETE", mate_token, {"password": "x"})
+    check(gone.get("deleted") is True, "the challenged teammate can delete their account",
+          str(gone)[:120])
+
+    b.goto(base + "/", wait=1.0)
+    b.js(f"localStorage.setItem('streakfit_token', {json.dumps(owner_token)})")
+    b.goto(base + "/", wait=3.0)
+    go_to_pane(b, "team")
+    b.js("(()=>{const x=[...document.querySelectorAll('button')]"
+         ".find(e=>e.textContent.trim()==='Open'); if(x) x.click(); return 1;})()")
+    time.sleep(2.5)
+    whos = json.loads(b.js("JSON.stringify([...document.querySelectorAll('.tchallenge-who')]"
+                           ".map(e=>e.textContent))") or "[]")
+    check(any("challenged a former teammate" in w for w in whos),
+          "the card for the departed teammate says 'a former teammate'", str(whos))
+    check(sum("challenged the team" in w for w in whos) == 1,
+          "and only the real whole-team challenge says 'the team'", str(whos))
+    page = b.js("document.body.innerText") or ""
+    check(mate not in page, "and the departed teammate's login is nowhere on screen")
+
+    # --- the kid files a report; deletion is refused, generically, in the UI ---
+    rep = _api(base, "/api/reports", "POST", kid_token,
+               {"category": "harassment", "subject_type": "user",
+                "reported_user_id": ids["owner"], "team_id": team["id"]})
+    rid = rep.get("report_id")
+    check(bool(rid), "the kid can file a report", str(rep)[:120])
+
+    def try_delete():
+        b.goto(base + "/", wait=1.0)
+        b.js(f"localStorage.setItem('streakfit_token', {json.dumps(kid_token)})")
+        b.goto(base + "/", wait=3.0)
+        b.js("openDeleteAccount()")
+        time.sleep(0.8)
+        b.js("(()=>{const i=document.querySelector('.danger-input'); i.value='x';"
+             " i.dispatchEvent(new Event('input')); return 1;})()")
+        b.js("document.querySelector('.danger-confirm').click()")
+        time.sleep(2.5)
+        return (b.js("(()=>{const e=document.querySelector('.danger-error');"
+                     " return e ? e.textContent : '';})()") or "")
+
+    err = try_delete()
+    check("safety record" in err.lower(),
+          "while the report is open, deleting shows the safety-record message", err[:120])
+    check("report" not in err.lower(), "and the message names no report", err[:120])
+    still = _api(base, "/api/me", token=kid_token)
+    check(still.get("id") == ids["kid"], "and the account is still there")
+
+    # --- the operator decides it; the same button now works ---
+    req = urllib.request.Request(f"{base}/api/admin/reports/{rid}/action", method="POST",
+                                 data=json.dumps({"action": "dismiss",
+                                                  "note": "uicheck"}).encode())
+    req.add_header("Content-Type", "application/json")
+    req.add_header("X-Admin-Secret", secret)
+    with urllib.request.urlopen(req, timeout=20) as r:
+        check(r.status == 200, "the operator dismisses the report")
+    err = try_delete()
+    after = _api(base, "/api/me", token=kid_token)
+    check(after.get("__status__") in (401, 404),
+          "once it is decided, the same button deletes the account",
+          f"error text {err[:80]!r}, /api/me {str(after)[:80]}")
+    b.js("localStorage.removeItem('streakfit_token')")
+
+
 def check_photo_sharing(b: Browser, base: str, app) -> None:
     """The Olivia test: take a photo, filter it, send it, family sees it."""
     print("\nTeam photos — can Olivia send her family a goofy picture?")
@@ -2943,6 +3032,7 @@ def main() -> int:
         check_celebration_stays_clear_of_the_nav(browser, base, flask_app)
         check_team_witness(browser, base, flask_app)
         check_photo_sharing(browser, base, flask_app)
+        check_leaving_while_a_report_is_open(browser, base, flask_app)
         check_side_quests_still_work(browser, base, flask_app)
         check_moderation_operator_can_close_a_report(browser, base, flask_app)
         check_step_up_is_offered_not_imposed(browser, base, flask_app)
