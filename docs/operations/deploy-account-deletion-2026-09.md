@@ -9,7 +9,7 @@ it is taken; approval of one step is not approval of the next.
 | | |
 |---|---|
 | Base (production now) | `4979354` — migrations at `47f7dc9962e3` |
-| Commits | `28ce314` FK-complete deletion · `e58b189` reporter/appellant deletion + migration · the commit carrying this file (closed-report note, admin label, privacy limits, this procedure) |
+| Commits | `28ce314` FK-complete deletion · `e58b189` reporter/appellant deletion + migration · `88af476` closed-report note, admin label, privacy limits, this procedure · `0b5c05d` independent-review fixes · the commit after it: section-10 decisions, race locks, CLAUDE.md |
 | Migration | **one**: `08920334bccd` — `report.reporter_user_id`, `appeal.user_id` → nullable. No data changed by the upgrade |
 | Static | `static/admin.html` (labels), `static/sw.js` → `streakfit-v0924a` |
 | Config / env | none |
@@ -182,29 +182,24 @@ result; push range; deploy id; section-7 results; the two smoke reports
 dismissed. Delete the backup by its date (`shred -u`), once no rollback to it
 is wanted.
 
-## 10. Open owner decisions (from the independent review, 2026-09-24)
+## 10. Owner decisions from the independent review — DECIDED 2026-09-24
 
-Not blockers for the code; each changes what this release promises.
+Each is implemented and tested; the reasoning is in privacy-retention.md.
 
-1. **Legal hold does not keep the reported person's identity.** A reported
-   person — including on a pending, legally held `child_safety` report — can
-   delete their account; the report, evidence and hold survive, but
-   `reported_user_id`, the evidence author and the action target become NULL.
-   On `4979354` that deletion 500'd, so this release makes it possible.
-   Options: block deletion (409, the generic "safety record" message, which
-   reveals nothing) while a held — or any pending — report names the person;
-   or accept and document it.
-2. **An active suspension is deleted with the account.** A suspended person can
-   delete and register again (they could always register a second account).
-   The `ModerationAction` stays.
-3. **A challenge addressed to the deleted person becomes a whole-team
-   challenge.** `team_challenge.target_user_id = NULL` already means "everyone",
-   so "Mom → Olivia" reads "Mom → everyone" after Olivia deletes. Challenges
-   expire (`expires_at`), which bounds it, but it is wrong while live. Options:
-   expire it at deletion, or delete it and cut the message's challenge link.
-4. **Deletion log lines carry the user id** (`event=account_deleted
-   user_id=…`), the sharpest re-identification route in
-   privacy-retention.md. Options: log without the id, or accept and keep the
-   doc's limit.
-5. **Races return 500, not 409**, when an operator acts on a report or appeal
-   whose person deletes at the same moment. No partial state (verified).
+1. **Pending or held report names them → deletion refused** (409,
+   `safety_record`, no detail). Also a reporter of a held report.
+2. **Suspension:** deleted with the account; the `ModerationAction` stays
+   (documented, unchanged behaviour).
+3. **Challenge addressed to them:** expired at deletion, not reopened to the
+   team.
+4. **Deletion log lines:** no user id.
+5. **Races:** fixed, not accepted. Deletion takes `FOR UPDATE` on the person;
+   report filing, legal hold, report actions and appeal decisions take
+   `FOR KEY SHARE` first and re-read. Six orderings tested on PostgreSQL with
+   the second request proven to wait; with the locks removed, 16 of 18 checks
+   fail, including a foreign-key 500.
+
+Still open, deliberately: other user-to-user writes naming a person who is
+deleting at that instant (a block, a team challenge addressed to them) take
+no lock and can still fail with a foreign-key 500 in that window. No partial
+state; rare; a follow-up if it is ever seen.

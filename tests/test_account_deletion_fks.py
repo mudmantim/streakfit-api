@@ -102,7 +102,8 @@ def test_self_deletion_never_tells_you_that_you_were_reported(fk_app):
     me = appmod.User.query.filter_by(username='reported_one').one().id
     other = appmod.User.query.filter_by(username='someone_else').one().id
     rep = appmod.Report(public_id=uuid.uuid4().hex, reporter_user_id=other,
-                        reported_user_id=me, category='harassment', subject_type='user')
+                        reported_user_id=me, category='harassment', subject_type='user',
+                        status='closed', disposition='dismissed')  # pending would block
     db.session.add(rep)
     db.session.flush()
     db.session.add_all([
@@ -119,3 +120,22 @@ def test_self_deletion_never_tells_you_that_you_were_reported(fk_app):
     blob = str(body).lower()
     for word in ('report', 'moderation', 'evidence', 'received', 'restriction', 'appeal'):
         assert word not in blob, word
+
+
+def test_deletion_log_lines_carry_no_user_id(fk_app, caplog):
+    """The deletion line, timed to the same moment as the reporter_note_removed
+    row, would name the reporter those rows were written to forget."""
+    import logging
+    client = fk_app.test_client()
+    client.post('/api/register', json={'username': 'logless', 'password': 'WalkTest123!'})
+    tok = client.post('/api/login', json={'username': 'logless',
+                                          'password': 'WalkTest123!'}).get_json()['access_token']
+    uid = appmod.User.query.filter_by(username='logless').one().id
+    with caplog.at_level(logging.INFO, logger=fk_app.logger.name):
+        resp = client.delete('/api/me', json={'password': 'WalkTest123!'},
+                             headers={'Authorization': f'Bearer {tok}'})
+    assert resp.status_code == 200
+    lines = [r.getMessage() for r in caplog.records if 'account_' in r.getMessage()]
+    assert any('event=account_deleted' in l for l in lines)
+    assert any('event=account_self_deleted' in l for l in lines)
+    assert not any('user_id' in l or str(uid) in l.split('photos=')[0] for l in lines), lines

@@ -4232,6 +4232,34 @@ def _resolve_exercise_meta(exercise_key):
     return exercise_key, None
 
 
+def _account_deletion_refusal(plan):
+    """409 for a blocked self-deletion, saying no more than the person may know.
+
+    Team ownership is theirs to fix, so it is named. Everything else -- above
+    all a pending or held report ABOUT them, which they must never be told
+    exists -- collapses into one code and one message. What this cannot hide:
+    that some record is keeping the account. Refusing at all says that much.
+    """
+    codes = plan.get("blocker_codes", [])
+    if codes == ["team_owned"]:
+        return jsonify({
+            "error": "account_deletion_blocked",
+            "message": ("You created a team that other people are still using. "
+                        "Hand it over or remove the team first, then you can "
+                        "delete your account."),
+            "blockers": plan.get("blockers", []),
+            "blocker_codes": codes,
+        }), 409
+    return jsonify({
+        "error": "account_deletion_blocked",
+        "message": ("Your account is linked to a safety record we have to "
+                    "keep, so it can't be deleted from the app yet. Nothing "
+                    "has been changed."),
+        "blockers": [],
+        "blocker_codes": ["safety_record"],
+    }), 409
+
+
 @app.route('/api/me', methods=['DELETE'])
 @jwt_required()
 @limiter.limit("5 per hour", key_func=user_or_ip_key)
@@ -4263,30 +4291,18 @@ def delete_my_account():
     # them would tear down a team other people are still using.
     plan = delete_user_account(user_id, dry_run=True)
     if plan.get("blocked"):
-        codes = plan.get("blocker_codes", [])
-        if codes == ["team_owned"]:
-            message = ("You created a team that other people are still using. "
-                       "Hand it over or remove the team first, then you can "
-                       "delete your account.")
-        else:
-            # Not something the person can fix from here, so say so plainly
-            # rather than suggest a step that does not exist.
-            message = ("Your account is linked to a safety record we have to "
-                       "keep, so it can't be deleted from the app yet. Nothing "
-                       "has been changed.")
-        return jsonify({
-            "error": "account_deletion_blocked",
-            "message": message,
-            "blockers": plan.get("blockers", []),
-            "blocker_codes": codes,
-        }), 409
+        return _account_deletion_refusal(plan)
 
     report = delete_user_account(user_id, dry_run=False)
+    if report.get("blocked"):
+        # Something that blocks appeared between the plan and the lock -- a
+        # report filed about them a moment ago. Same answer as above.
+        return _account_deletion_refusal(report)
     if not report.get("executed"):
         return jsonify({"error": "account_deletion_failed"}), 500
 
-    app.logger.info("event=account_self_deleted user_id=%s photos=%s",
-                    user_id, report.get("counts", {}).get("team_photo_shared", 0))
+    app.logger.info("event=account_self_deleted photos=%s",
+                    report.get("counts", {}).get("team_photo_shared", 0))
     counts = report.get("counts", {})
     return jsonify({"deleted": True,
                     "counts": {k: counts[k] for k in _SELF_DELETION_COUNTS if k in counts}}), 200
@@ -7972,6 +7988,15 @@ def create_report():
         # Derived from the row, never from the request body.
         reported_user_id = resolved["author_id"]
 
+    # Serialise with that person deleting their account (see
+    # delete_user_account). If the deletion won, they are gone: answer as for
+    # anyone this route cannot see, never with a foreign-key 500.
+    if reported_user_id is not None and not _lock_moderation_subject(reported_user_id):
+        db.session.rollback()
+        if subject_type == 'user':
+            return jsonify({"error": "Forbidden"}), 403
+        return jsonify({"error": "not_found"}), 404
+
     now = datetime.utcnow()
     report = Report(
         public_id=uuid.uuid4().hex,
@@ -8224,9 +8249,7 @@ def admin_legal_hold(public_id):
     sweep, which is how "we kept everything forever" happens by accident.
     """
     _require_admin_secret()
-    report = db.session.execute(
-        db.select(Report).where(Report.public_id == public_id)
-    ).scalar_one_or_none()
+    report = _load_report_for_action(public_id)
     if report is None:
         abort(404)
     data = request.get_json(silent=True) or {}
@@ -8268,9 +8291,7 @@ def admin_report_action(public_id):
     this code can reach.
     """
     _require_admin_secret()
-    report = db.session.execute(
-        db.select(Report).where(Report.public_id == public_id)
-    ).scalar_one_or_none()
+    report = _load_report_for_action(public_id)
     if report is None:
         abort(404)
 
@@ -8606,6 +8627,12 @@ def admin_decide_appeal(public_id):
     ).scalar_one_or_none()
     if appeal is None:
         abort(404)
+    # Lock the appellant, then re-read: an account deletion in flight either
+    # finishes first (and this reads user_id NULL) or waits for this decision.
+    _lock_moderation_subject(appeal.user_id)
+    appeal = db.session.execute(
+        db.select(Appeal).where(Appeal.id == appeal.id).with_for_update()
+        .execution_options(populate_existing=True)).scalar_one()
     if appeal.user_id is None:
         # The appellant deleted their account -- whether the appeal was still
         # open (now `withdrawn`) or already decided. There is nobody to restore
@@ -10587,6 +10614,18 @@ def _account_dependent_counts(user_id):
     counts["team_photo_shared"] = TeamPhoto.query.filter(
         TeamPhoto.sender_user_id == user_id, TeamPhoto.deleted_at.is_(None)).count()
     counts["appeal_filed"] = Appeal.query.filter(Appeal.user_id == user_id).count()
+    # A report still being decided, or under legal hold, that names this
+    # person -- as the one reported or as the author of reported content.
+    # Deleting them would erase who the record is about while it is still
+    # needed. Plus any held report they filed: a hold suppresses deletion.
+    open_or_held = db.or_(Report.status == 'pending', Report.legal_hold.is_(True))
+    counts["report_open_about"] = Report.query.filter(
+        open_or_held,
+        db.or_(Report.reported_user_id == user_id,
+               Report.id.in_(db.select(ReportEvidence.report_id).where(
+                   ReportEvidence.author_user_id == user_id)))).count()
+    counts["report_held_filed"] = Report.query.filter(
+        Report.legal_hold.is_(True), Report.reporter_user_id == user_id).count()
     for label, model, attr in _USER_DELETION_BLOCKERS:
         counts[label] = model.query.filter(getattr(model, attr) == user_id).count()
     return counts
@@ -10598,6 +10637,8 @@ _ACCOUNT_DELETION_BLOCKER_TEXT = {
     "guardian_link_guardian": "has {n} guardian link(s) as a guardian — child-safety records need an owner decision",
     "consent_child": "has {n} consent record(s) — child-safety records need an owner decision",
     "permission_audit_subject": "has {n} permission-audit row(s) — child-safety records need an owner decision",
+    "report_open_about": "named in {n} pending or legally held report(s) — decide or release them first",
+    "report_held_filed": "filed {n} report(s) under legal hold — release the hold first",
 }
 
 
@@ -10628,6 +10669,53 @@ def _withdraw_appeals_of(user_id):
     db.session.flush()
 
 
+def _lock_moderation_subject(user_id):
+    """FOR KEY SHARE on a person's row before a write that names them.
+
+    The other half of the FOR UPDATE in delete_user_account. Returns False if
+    the person no longer exists -- which, after waiting on the lock, is how a
+    caller learns that a deletion won the race. Key share, not update: it
+    blocks deletion of the row but not ordinary updates to it.
+    """
+    if user_id is None:
+        return False
+    return db.session.execute(
+        db.select(User.id).where(User.id == user_id).with_for_update(key_share=True)
+    ).scalar_one_or_none() is not None
+
+
+def _load_report_for_action(public_id):
+    """A report, re-read under lock AFTER its subject is locked.
+
+    The first read only learns whom to lock. The second, FOR UPDATE with
+    populate_existing, sees the committed state after any deletion that was
+    in flight -- so a reported person who deleted meanwhile reads as NULL
+    here, not as an id that no longer exists.
+    """
+    report = db.session.execute(
+        db.select(Report).where(Report.public_id == public_id)).scalar_one_or_none()
+    if report is None:
+        return None
+    _lock_moderation_subject(report.reported_user_id)
+    return db.session.execute(
+        db.select(Report).where(Report.id == report.id).with_for_update()
+        .execution_options(populate_existing=True)).scalar_one()
+
+
+def _expire_challenges_addressed_to(user_id):
+    """A challenge to one person ends when that person leaves.
+
+    `target_user_id = NULL` means "the whole team", so cutting the link alone
+    would reopen "Mom -> Olivia" as "Mom -> everyone". Expired first, so it
+    can no longer be completed by anyone; the row and the thread stay.
+    """
+    now = datetime.utcnow()
+    TeamChallenge.query.filter(
+        TeamChallenge.target_user_id == user_id,
+        db.or_(TeamChallenge.expires_at.is_(None), TeamChallenge.expires_at > now)
+    ).update({TeamChallenge.expires_at: now}, synchronize_session=False)
+
+
 def _remove_closed_report_notes_of(user_id):
     """A reporter's own words leave with them once nobody needs them.
 
@@ -10653,11 +10741,17 @@ def _remove_closed_report_notes_of(user_id):
     db.session.flush()
 
 
+# Blockers that are conditions on moderation records rather than a foreign key
+# existing. NEVER shown to the person by name: see delete_my_account.
+_MODERATION_DELETION_BLOCKERS = ("report_open_about", "report_held_filed")
+
+
 def _account_deletion_blockers(counts, allow_team_owner=False):
     """The labels that stop a deletion, in the order a person should hear them."""
     return [label for label, _model, _attr in _USER_DELETION_BLOCKERS
             if counts.get(label, 0) > 0
-            and not (label == "team_owned" and allow_team_owner)]
+            and not (label == "team_owned" and allow_team_owner)] + [
+        label for label in _MODERATION_DELETION_BLOCKERS if counts.get(label, 0) > 0]
 
 
 def delete_user_account(user_id, allow_team_owner=False, dry_run=True):
@@ -10675,8 +10769,22 @@ def delete_user_account(user_id, allow_team_owner=False, dry_run=True):
       `blocker_codes` names which, so a caller can say something useful.
     - Any DB failure rolls the whole thing back and re-raises (no partial state).
     """
-    user = db.session.get(User, user_id)
+    if dry_run:
+        user = db.session.get(User, user_id)
+    else:
+        # FOR UPDATE on the person's row before anything is counted. Every
+        # moderation write that names this person takes FOR KEY SHARE on the
+        # same row first (_lock_moderation_subject), so the two serialise: a
+        # report or operator action that got there first is committed and
+        # then seen by the plan below (a pending report now blocks); one that
+        # arrives second waits, then finds the person gone and answers
+        # cleanly instead of failing on a foreign key.
+        user = db.session.execute(
+            db.select(User).where(User.id == user_id).with_for_update()
+            .execution_options(populate_existing=True)).scalar_one_or_none()
     if user is None:
+        if not dry_run:
+            db.session.rollback()
         return {"user_id": user_id, "found": False, "blocked": False,
                 "blockers": [], "dry_run": dry_run, "executed": False, "counts": {}}
 
@@ -10690,6 +10798,8 @@ def delete_user_account(user_id, allow_team_owner=False, dry_run=True):
               "blocker_codes": blocker_codes,
               "dry_run": dry_run, "executed": False}
     if dry_run or blockers:
+        if not dry_run:
+            db.session.rollback()     # release the row lock
         return report
 
     try:
@@ -10709,6 +10819,7 @@ def delete_user_account(user_id, allow_team_owner=False, dry_run=True):
             synchronize_session=False)
         _withdraw_appeals_of(user_id)
         _remove_closed_report_notes_of(user_id)
+        _expire_challenges_addressed_to(user_id)
         # Shared and moderation records stay; only the pointer to this person goes.
         for _label, model, attr in _USER_LINK_NULLS:
             model.query.filter(getattr(model, attr) == user_id).update(
@@ -10723,7 +10834,10 @@ def delete_user_account(user_id, allow_team_owner=False, dry_run=True):
         raise
 
     report["executed"] = True
-    app.logger.info("event=account_deleted user_id=%s", user_id)
+    # No user id: a deletion line carrying one, timed to the same second as
+    # the reporter_note_removed / appeal_withdrawn rows, would name the
+    # reporter those rows were written to forget (privacy-retention.md).
+    app.logger.info("event=account_deleted")
     return report
 
 

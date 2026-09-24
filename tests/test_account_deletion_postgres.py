@@ -107,3 +107,20 @@ def test_the_downgrade_refuses_once_a_reporter_has_left(migrated_pg):
     assert down.returncode != 0
     assert 'belong to deleted accounts' in down.stderr
     assert _nullable(engine, 'report', 'reporter_user_id') == 'YES'
+
+
+def test_deletion_races_answer_cleanly_on_postgres(migrated_pg):
+    """Deletion vs. operator actions and report filing, each ordering both ways,
+    with the second request proven to wait on the first one's lock."""
+    _engine, env = migrated_pg
+    result = subprocess.run(
+        [sys.executable, os.path.join('tests', 'account_deletion_race.py')],
+        cwd=REPO, env={**env, 'PYTHONPATH': REPO}, capture_output=True, text=True,
+        timeout=300)
+    try:
+        out = json.loads(result.stdout[result.stdout.index('{'):])
+    except ValueError:
+        pytest.fail(f'no result from the race script\nSTDOUT:\n{result.stdout[-2000:]}'
+                    f'\nSTDERR:\n{result.stderr[-3000:]}')
+    failed = {k: v['detail'] for k, v in out.items() if not v['ok']}
+    assert not failed and result.returncode == 0, failed

@@ -23,7 +23,7 @@ This is enforced by `tests/test_migrations.py`, which runs `flask db upgrade` ag
 
 **Why:** the baseline migration silently shipped as a no-op and nothing in the chain ever created the `user` or `challenge` tables, so a fresh database could not be built from migrations at all — invisible for weeks because the rest of the suite builds its test DB with `create_all()`, bypassing Alembic. This test closes that gap permanently: models and migrations can no longer drift apart without CI failing.
 
-**Operational contract:** migrations run as an explicit deploy step, never inside the app on boot. The production Start Command is `flask db upgrade && STREAKFIT_ENFORCE_DB_HEAD=1 gunicorn app:app` — the upgrade runs once per deploy (a failure stops gunicorn from starting), and the serving process refuses to boot (`SystemExit(1)`) if the database isn't stamped at the Alembic head.
+**Operational contract:** migrations run as an explicit deploy step, never inside the app on boot. Render's **Pre-Deploy Command** is `flask db upgrade` and the **Start Command** is `STREAKFIT_ENFORCE_DB_HEAD=1 STREAKFIT_RETENTION_SWEEPER=1 gunicorn app:app` (see `render.yaml`) — the upgrade runs once per deploy and a failure aborts the deploy before the new version serves, and each serving worker refuses to boot (`SystemExit(1)`) if the database isn't stamped at the code's Alembic head. Under gunicorn that shows as a master that stays up while its workers die and respawn, so `/health` times out rather than failing fast.
 
 ## Verification Suite
 

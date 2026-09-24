@@ -294,12 +294,15 @@ filed a report, for anyone who can read the operator view or the database:
   plan's history window — 6 hours on Free.
 - **Render request logs** record `POST /api/reports` with time and client IP
   (no user id, no body), for the platform's log retention.
-- **Render application logs** record `event=account_self_deleted user_id=…`
-  and `event=account_deleted user_id=…` at the moment of deletion. **This is
-  the sharpest re-identification route:** its timestamp matches the
-  `reporter_note_removed` / `appeal_withdrawn` rows written in the same
-  transaction, which gives the former user id of the reporter of every closed
-  report that had a note. It lasts as long as Render keeps logs.
+- **Render application logs.** Deletion used to log `event=account_deleted
+  user_id=…`; timed to the same moment as the `reporter_note_removed` /
+  `appeal_withdrawn` rows, that line would have named the reporter. It now
+  logs no id. Lines written before this release do carry ids, but no reporter
+  or appellant could be deleted before it (the deletion failed), so none of
+  them names one.
+- **Timing alone.** The `reporter_note_removed` / `appeal_withdrawn` rows are
+  still dated at the deletion. Anyone who knows *when* somebody left — a team
+  member who noticed — can match that to those rows.
 - **Rate-limit keys** in Redis are per user id for `/api/reports` and expire
   within the hour.
 - **Email notices** carry a report id and a link, never a person; they are
@@ -314,9 +317,32 @@ log access from inferring the reporter from team membership, timing or the
 deletion log line, and it does not reach backups, snapshots or logs until
 those expire.*
 
-Deletion is still **refused** (409, nothing changed) for a team creator and
-for anyone with guardian-link, consent or permission-audit rows. How a deleted
-child or guardian is recorded is an owner decision that has not been made.
+Deletion is **refused** (409, nothing changed) for:
+
+- a team creator (told why, since it is theirs to fix);
+- anyone **named in a report that is pending or under legal hold** — as the
+  reported person or as the author of reported content — and anyone who
+  **filed** a report under legal hold. The record is still needed, and deleting
+  them would erase who it is about;
+- anyone with guardian-link, consent or permission-audit rows (how a deleted
+  child or guardian is recorded is an owner decision not yet made).
+
+Everything but team ownership gets one answer: code `safety_record`, the
+message "Your account is linked to a safety record we have to keep…", and no
+detail. That still tells the person *some* record exists — refusing at all
+says that much — but never which, and never that it is a report about them.
+The refusal lasts while the report is open or held; a closed, unheld report no
+longer blocks.
+
+Deletion and every moderation write that names the same person are
+serialised on that person's row (`FOR UPDATE` / `FOR KEY SHARE`): a report
+filed or an operator action taken a moment before a deletion is seen by it
+(and may block it); one arriving a moment after finds the person gone and
+answers as for anyone it cannot see. Verified both ways round on PostgreSQL.
+
+A challenge addressed to the deleted person is **expired** at deletion, so it
+does not reopen as a whole-team challenge. A person's own suspension is
+deleted with their account; the `ModerationAction` that imposed it stays.
 
 ## What is NOT guaranteed — read this part
 

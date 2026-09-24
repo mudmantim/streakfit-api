@@ -71,9 +71,11 @@ def build_tangled_user(A, client, tag):
                                     target_user_id=leaver)
     db.session.add_all([ch_by_leaver, ch_for_leaver])
     db.session.flush()
+    # Closed: a PENDING report about the leaver would (rightly) block them.
     report = A.Report(public_id=uuid.uuid4().hex, reporter_user_id=friend,
                       reported_user_id=leaver, category='harassment',
-                      subject_type='user', team_id=team.id)
+                      subject_type='user', team_id=team.id, status='closed',
+                      disposition='dismissed', reviewed_at=datetime.datetime(2026, 9, 1))
     db.session.add(report)
     db.session.flush()
     db.session.add_all([
@@ -117,12 +119,34 @@ def _blocker_rows(A, code, user_id, other_id, team_id):
         return [A.PermissionAudit(subject_user_id=user_id,
                                   capability=sorted(A.CAPABILITIES)[0],
                                   decision='deny', reason='test')]
+    if code == 'report_open_about':          # pending, names them as reported
+        return [A.Report(public_id=uuid.uuid4().hex, reporter_user_id=other_id,
+                         reported_user_id=user_id, category='harassment',
+                         subject_type='user', team_id=team_id)]
+    if code == 'report_held_about':          # closed but held, names them
+        return [A.Report(public_id=uuid.uuid4().hex, reporter_user_id=other_id,
+                         reported_user_id=user_id, category='child_safety',
+                         subject_type='user', status='closed', legal_hold=True,
+                         legal_hold_reason='test', reviewed_at=datetime.datetime(2026, 9, 1))]
+    if code == 'report_held_filed':          # they filed it; it is held
+        return [A.Report(public_id=uuid.uuid4().hex, reporter_user_id=user_id,
+                         reported_user_id=other_id, category='harassment',
+                         subject_type='user', status='closed', legal_hold=True,
+                         legal_hold_reason='test', reviewed_at=datetime.datetime(2026, 9, 1))]
     raise KeyError(code)
 
 
 def _add_blocker(A, code, user_id, other_id, team_id):
     db = A.db
-    if code == 'consent_child':
+    if code == 'report_open_evidence':       # pending, quotes their message
+        rep = A.Report(public_id=uuid.uuid4().hex, reporter_user_id=other_id,
+                       category='inappropriate_content', subject_type='message',
+                       subject_ref='e' * 32, team_id=team_id)
+        db.session.add(rep)
+        db.session.flush()
+        db.session.add(A.ReportEvidence(report_id=rep.id, content_type='message',
+                                        content_text='x', author_user_id=user_id))
+    elif code == 'consent_child':
         link = A.GuardianLink(child_user_id=user_id, guardian_user_id=other_id,
                               method='test')
         db.session.add(link)
@@ -160,30 +184,52 @@ def run(A, client):
     }
     for name, ok in kept.items():
         results[name] = (ok, '')
+    by_leaver, for_leaver = (A.db.session.get(A.TeamChallenge, i) for i in s['challenges'])
+    results["a challenge addressed to them is expired, not reopened to everyone"] = (
+        for_leaver.target_user_id is None and not A._challenge_is_open(for_leaver),
+        str(for_leaver.expires_at))
+    results["a challenge they set for someone else keeps running"] = (
+        by_leaver.expires_at is None and by_leaver.target_user_id == s['friend'],
+        str(by_leaver.expires_at))
     gone = {t: after[t] for t in ('daily_effort', 'user_block', 'user_restriction',
                                   'team_challenge_completion') if after[t]}
     results['private rows are deleted'] = (not gone, str(gone))
 
-    # Each blocker refuses, with its code, and changes nothing at all.
-    for i, code in enumerate(['team_owned', 'guardian_link_child', 'guardian_link_guardian',
-                              'consent_child', 'permission_audit_subject']):
+    # Each blocker refuses and changes nothing. The PLAN names the reason
+    # exactly; the RESPONSE names only team ownership, and collapses every
+    # other reason -- above all a report about them -- into 'safety_record'.
+    internal = {'report_held_about': 'report_open_about',
+                'report_open_evidence': 'report_open_about'}
+    for i, code in enumerate(['team_owned', 'guardian_link_child',
+                              'guardian_link_guardian', 'consent_child',
+                              'permission_audit_subject', 'report_open_about',
+                              'report_held_about', 'report_open_evidence',
+                              'report_held_filed']):
         h = _register(client, f'blocked{i}')
         uid, other = _uid(A, f'blocked{i}'), s['friend']
         A.db.session.add(A.DailyEffort(user_id=uid, date=datetime.date(2026, 9, 2),
                                        level='easy'))
         A.db.session.commit()
         _add_blocker(A, code, uid, other, s['team'])
+        want = internal.get(code, code)
+        want_plan = (['guardian_link_child', 'consent_child'] if code == 'consent_child'
+                     else [want])
+        plan_codes = A.delete_user_account(uid, dry_run=True)['blocker_codes']
         snap = row_counts(A)
         resp = client.delete('/api/me', json={'password': PASSWORD}, headers=h)
         A.db.session.remove()
         body = resp.get_json() or {}
-        # A consent cannot exist without the guardian link it was granted under.
-        expected = (['guardian_link_child', 'consent_child'] if code == 'consent_child'
-                    else [code])
-        ok = (resp.status_code == 409 and body.get('blocker_codes') == expected
+        shown = ['team_owned'] if code == 'team_owned' else ['safety_record']
+        ok = (resp.status_code == 409 and plan_codes == want_plan
+              and body.get('blocker_codes') == shown
+              and (code == 'team_owned' or body.get('blockers') == [])
               and bool(body.get('message')) and row_counts(A) == snap)
         results[f'{code} blocks with 409 and changes nothing'] = (
-            ok, f"{resp.status_code} {body.get('blocker_codes')}")
+            ok, f"{resp.status_code} plan={plan_codes} shown={body.get('blocker_codes')}")
+        if code != 'team_owned':
+            blob = json.dumps(body).lower()
+            results[f'{code} refusal names no report'] = (
+                not any(w in blob for w in ('report', 'legal', 'hold', 'moderation')), blob)
 
     results.update(run_reporter_and_appellant(A, client, s['friend'], s['team']))
     return results
@@ -212,14 +258,10 @@ def run_reporter_and_appellant(A, client, other, team_id):
                       disposition='dismissed',
                       created_at=now - datetime.timedelta(days=40),
                       reviewed_at=now - datetime.timedelta(days=35))
-    held = A.Report(public_id=uuid.uuid4().hex, reporter_user_id=reporter,
-                    reported_user_id=other, team_id=team_id, category='harassment',
-                    subject_type='user', note='held words', status='closed',
-                    disposition='dismissed', reviewed_at=now, legal_hold=True,
-                    legal_hold_reason='test hold')
-    db.session.add_all([pending, closed, held])
+    # (A report under legal hold that they filed would block the deletion:
+    # see 'report_held_filed' above.)
+    db.session.add_all([pending, closed])
     db.session.flush()
-    held_id = held.id
     db.session.add_all([
         A.ReportEvidence(report_id=closed.id, content_type='message',
                          content_text='what they wrote', author_user_id=other,
@@ -257,9 +299,6 @@ def run_reporter_and_appellant(A, client, other, team_id):
                                            action='reporter_note_removed').count() == 1
         and A.ModerationAction.query.filter_by(report_id=ids[pend_pid],
                                                action='reporter_note_removed').count() == 0, '')
-    results['a legal hold keeps the note of a closed report'] = (
-        db.session.get(A.Report, held_id).note == 'held words'
-        and db.session.get(A.Report, held_id).reporter_user_id is None, '')
 
     prev = os.environ.get('ADMIN_SECRET')
     os.environ['ADMIN_SECRET'] = ADMIN
