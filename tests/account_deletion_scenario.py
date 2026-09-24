@@ -205,7 +205,8 @@ def run(A, client):
     ctx = [json.loads(e.context_json) for e in A.ReportEvidence.query.filter_by(
         report_id=s['report'], content_type='challenge').all()]
     results["challenge evidence no longer records the deleted person's id"] = (
-        ctx and all(c.get('target_user_id') is None for c in ctx)
+        ctx and all(c.get('target_user_id') is None and c.get('target_left') is True
+                    for c in ctx)
         and all(c.get('preset_key') == 'x' for c in ctx), str(ctx))
     held_ctx = json.loads(A.ReportEvidence.query.filter_by(
         report_id=s['held_other']).one().context_json)

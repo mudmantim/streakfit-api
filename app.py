@@ -2096,6 +2096,12 @@ class Report(db.Model):
     # An explicit, operator-set hold. Nothing else may suppress deletion.
     legal_hold = db.Column(db.Boolean, nullable=False, default=False)
     legal_hold_reason = db.Column(db.String(200), nullable=True)
+    # When someone linked to this report -- reporter, or the person it is
+    # about -- first asked to delete their account and was refused because of
+    # it. Operator-only, and deliberately says neither who nor which role: it
+    # tells the reviewer that deciding this report is now also holding up a
+    # person's deletion. Nothing about it reaches the person.
+    deletion_requested_at = db.Column(db.DateTime, nullable=True)
 
     __table_args__ = (
         db.Index('ix_report_status_created', 'status', 'created_at'),
@@ -4235,6 +4241,33 @@ def _resolve_exercise_meta(exercise_key):
     return exercise_key, None
 
 
+def _mark_reports_holding_deletion(user_id):
+    """Tell the operator -- not the person -- that a report is now holding up
+    an account deletion. Sets `deletion_requested_at` on each pending or held
+    report that links this person, the first time only. It records no user id
+    and no role; the person's response is the same with or without it.
+    """
+    if user_id is None:
+        return
+    open_or_held = db.or_(Report.status == 'pending', Report.legal_hold.is_(True))
+    linked = db.or_(
+        Report.reporter_user_id == user_id,
+        Report.reported_user_id == user_id,
+        Report.id.in_(db.select(ReportEvidence.report_id).where(
+            ReportEvidence.author_user_id == user_id)))
+    try:
+        Report.query.filter(open_or_held, linked,
+                            Report.deletion_requested_at.is_(None)).update(
+            {Report.deletion_requested_at: datetime.utcnow()},
+            synchronize_session=False)
+        db.session.commit()
+    except Exception:
+        # A signal for the operator must never turn the person's clean 409
+        # into a 500.
+        db.session.rollback()
+        app.logger.exception("event=deletion_hold_mark_failed")
+
+
 def _account_deletion_refusal(plan):
     """409 for a blocked self-deletion, saying no more than the person may know.
 
@@ -4259,11 +4292,15 @@ def _account_deletion_refusal(plan):
                          if c == "team_owned"],
             "blocker_codes": ["team_owned"],
         }), 409
+    _mark_reports_holding_deletion(plan.get("user_id"))
+    # No "from the app": there is no other route, and the wording must not
+    # suggest one. "For now" is true of every case behind this answer -- a
+    # report being decided, or a hold that will be released.
     return jsonify({
         "error": "account_deletion_blocked",
-        "message": ("Your account is linked to a safety record we have to "
-                    "keep, so it can't be deleted from the app yet. Nothing "
-                    "has been changed."),
+        "message": ("Your account is linked to a safety record that has to "
+                    "stay as it is for now, so your account can't be deleted "
+                    "yet. Nothing has been changed."),
         "blockers": [],
         "blocker_codes": ["safety_record"],
     }), 409
@@ -7783,7 +7820,10 @@ def _resolve_reportable_content(user_id, subject_type, subject_ref):
         created_at = row.created_at
         context.update({"created_at": created_at.isoformat(),
                         "preset_key": row.preset_key,
-                        "target_user_id": row.target_user_id})
+                        "target_user_id": row.target_user_id,
+                        # Addressed to someone who has since deleted their
+                        # account: NULL here must not read as the whole team.
+                        "target_left": row.target_left_at is not None})
     else:
         return None
 
@@ -8125,7 +8165,16 @@ def _serialize_report_row(r):
         "escalated": bool(r.escalated_at),
         "legal_hold": bool(r.legal_hold),
         "evidence_purged": bool(r.evidence_purged_at),
+        # Someone linked to this report asked to delete their account and was
+        # refused because of it. Shown only while it still holds them up.
+        "deletion_waiting": _deletion_waiting(r),
+        "deletion_requested_at": (r.deletion_requested_at.isoformat()
+                                  if _deletion_waiting(r) else None),
     }
+
+
+def _deletion_waiting(r):
+    return bool(r.deletion_requested_at and (r.status == 'pending' or r.legal_hold))
 
 
 def _review_queue_counts():
@@ -8154,9 +8203,15 @@ def _review_queue_counts():
         db.select(db.func.count(ModerationNotice.id)).where(
             ModerationNotice.delivered_at.is_(None))
     ).scalar() or 0
+    deletion_waiting = db.session.execute(
+        db.select(db.func.count(Report.id)).where(
+            Report.deletion_requested_at.isnot(None),
+            db.or_(Report.status == 'pending', Report.legal_hold.is_(True)))
+    ).scalar() or 0
     return {"pending": pending, "urgent_pending": urgent,
             "overdue": overdue, "open_appeals": open_appeals,
-            "undelivered_notices": undelivered}
+            "undelivered_notices": undelivered,
+            "deletion_waiting": deletion_waiting}
 
 
 @app.route('/api/admin/reports/<string:public_id>', methods=['GET'])
@@ -8185,6 +8240,9 @@ def admin_report_detail(public_id):
         "reporter_user_id": report.reporter_user_id,   # operator view only
         # NULL means the reporter deleted their account; nothing else nulls it.
         "reporter_account_deleted": report.reporter_user_id is None,
+        "deletion_waiting": _deletion_waiting(report),
+        "deletion_requested_at": (report.deletion_requested_at.isoformat()
+                                  if report.deletion_requested_at else None),
         "reported_user_id": report.reported_user_id,
         "note": report.note,
         "status": report.status,
@@ -10773,6 +10831,9 @@ def _scrub_evidence_context_of(user_id):
         ctx = json.loads(ev.context_json)
         if ctx.get("target_user_id") == int(user_id):   # not 1630 for 163
             ctx["target_user_id"] = None
+            # Without this, a NULL target reads as "the whole team" -- the
+            # same misreading target_left_at prevents on the card.
+            ctx["target_left"] = True
             ev.context_json = json.dumps(ctx)
     db.session.flush()
 
@@ -10798,13 +10859,12 @@ def _expire_challenges_addressed_to(user_id):
 def _remove_closed_report_notes_of(user_id):
     """A reporter's own words leave with them once nobody needs them.
 
-    The note is the only free text in a report that the REPORTER wrote. On a
-    CLOSED report the review it served is over, so it goes now rather than on
-    the 30-days-after-closure evidence clock. On a PENDING report it stays: an
-    investigator still has to decide the report, and the note is often the
-    only explanation of it. It then leaves on the ordinary clock like any
-    other report's. A legal hold keeps it, because a legal hold is the one
-    thing that suppresses moderation deletion.
+    The note is the only free text in a report that the REPORTER wrote. A
+    reporter can only get here once every report they filed is closed and
+    unheld (report_pending_filed / report_held_filed block them before), so
+    the review each note served is over and it goes now rather than on the
+    30-days-after-closure evidence clock. The legal-hold filter stays as a
+    second line: a hold is the one thing that suppresses moderation deletion.
 
     Evidence is not touched here: it is the REPORTED content, not the
     reporter's, and stays on its own clock.

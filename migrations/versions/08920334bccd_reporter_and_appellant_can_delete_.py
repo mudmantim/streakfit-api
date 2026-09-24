@@ -9,9 +9,14 @@ sets them to NULL, so a report or an appeal survives as the minimal audit
 record (moderation policy decision 6: that it existed, its category, its dates,
 its outcome) without saying who filed it.
 
-Also adds team_challenge.target_left_at (nullable): set when the person a
-challenge named deletes their account, so history does not read their cut
-link as "the whole team". No existing data is changed by the upgrade.
+Also adds two nullable columns:
+- team_challenge.target_left_at: set when the person a challenge named
+  deletes their account, so history does not read their cut link as "the
+  whole team";
+- report.deletion_requested_at: set when someone linked to a pending or held
+  report is refused account deletion because of it -- an operator-only
+  signal that deciding the report is holding a person up.
+No existing data is changed by the upgrade; the downgrade drops both.
 
 The downgrade refuses once any row has actually lost its person: restoring NOT
 NULL would need a user id that no longer exists, and inventing one would be a
@@ -32,6 +37,7 @@ def upgrade():
         batch_op.add_column(sa.Column('target_left_at', sa.DateTime(), nullable=True))
     with op.batch_alter_table('report', schema=None) as batch_op:
         batch_op.alter_column('reporter_user_id', existing_type=sa.Integer(), nullable=True)
+        batch_op.add_column(sa.Column('deletion_requested_at', sa.DateTime(), nullable=True))
     with op.batch_alter_table('appeal', schema=None) as batch_op:
         batch_op.alter_column('user_id', existing_type=sa.Integer(), nullable=True)
 
@@ -48,6 +54,7 @@ def downgrade():
     with op.batch_alter_table('appeal', schema=None) as batch_op:
         batch_op.alter_column('user_id', existing_type=sa.Integer(), nullable=False)
     with op.batch_alter_table('report', schema=None) as batch_op:
+        batch_op.drop_column('deletion_requested_at')
         batch_op.alter_column('reporter_user_id', existing_type=sa.Integer(), nullable=False)
     # Dropping it loses only the "former teammate" wording on old cards, which
     # the old code could not show anyway.

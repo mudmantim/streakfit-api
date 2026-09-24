@@ -167,3 +167,103 @@ def test_a_team_owner_cannot_use_deletion_to_learn_about_a_report(fk_app):
     assert after.get_json()['blocker_codes'] == ['team_owned']
     assert appmod.delete_user_account(owner, dry_run=True)['blocker_codes'] == [
         'team_owned', 'report_open_about']      # the plan still knows
+
+
+def _person(client, name):
+    client.post('/api/register', json={'username': name, 'password': 'WalkTest123!'})
+    tok = client.post('/api/login', json={'username': name,
+                                          'password': 'WalkTest123!'}).get_json()['access_token']
+    return (appmod.User.query.filter_by(username=name).one().id,
+            {'Authorization': f'Bearer {tok}'})
+
+
+def test_a_refusal_tells_the_operator_not_the_person(fk_app, monkeypatch):
+    """A report holding up a deletion is flagged in /admin -- once, with no id
+    and no role -- and the person's answer is exactly what it was without it."""
+    import uuid
+    monkeypatch.setenv('ADMIN_SECRET', 'ind-secret')
+    AH = {'X-Admin-Secret': 'ind-secret'}
+    client = fk_app.test_client()
+    filer, fh = _person(client, 'ind_filer')
+    about, _ = _person(client, 'ind_about')
+    rep = appmod.Report(public_id=uuid.uuid4().hex, reporter_user_id=filer,
+                        reported_user_id=about, category='harassment', subject_type='user')
+    other = appmod.Report(public_id=uuid.uuid4().hex, reporter_user_id=about,
+                          category='harassment', subject_type='user')   # unrelated to filer
+    db.session.add_all([rep, other])
+    db.session.commit()
+    pid, rid, oid = rep.public_id, rep.id, other.id
+
+    first = client.delete('/api/me', json={'password': 'WalkTest123!'}, headers=fh)
+    db.session.remove()
+    body = first.get_json()
+    assert first.status_code == 409 and body['blocker_codes'] == ['safety_record']
+    assert set(body) == {'error', 'message', 'blockers', 'blocker_codes'}
+    assert 'from the app' not in body['message'] and 'report' not in body['message'].lower()
+    marked = db.session.get(appmod.Report, rid).deletion_requested_at
+    assert marked is not None
+    assert db.session.get(appmod.Report, oid).deletion_requested_at is None
+
+    again = client.delete('/api/me', json={'password': 'WalkTest123!'}, headers=fh)
+    db.session.remove()
+    assert again.get_json() == body                               # same answer
+    assert db.session.get(appmod.Report, rid).deletion_requested_at == marked   # first time only
+
+    queue = client.get('/api/admin/reports', headers=AH).get_json()
+    row = next(r for r in queue['reports'] if r['report_id'] == pid)
+    assert row['deletion_waiting'] is True and queue['counts']['deletion_waiting'] == 1
+    assert 'reporter' not in str(row).lower().replace('reported_user_id', '')
+    detail = client.get(f'/api/admin/reports/{pid}', headers=AH).get_json()
+    assert detail['deletion_waiting'] is True
+
+    client.post(f'/api/admin/reports/{pid}/action', json={'action': 'dismiss', 'note': 'x'},
+                headers=AH)
+    queue = client.get('/api/admin/reports?status=all', headers=AH).get_json()
+    row = next(r for r in queue['reports'] if r['report_id'] == pid)
+    assert row['deletion_waiting'] is False and queue['counts']['deletion_waiting'] == 0
+    assert client.delete('/api/me', json={'password': 'WalkTest123!'},
+                         headers=fh).status_code == 200
+
+
+def test_a_team_owner_refusal_marks_nothing(fk_app):
+    """The owner's refusal is about the team; flagging a report would point the
+    operator at the wrong thing."""
+    import uuid
+    client = fk_app.test_client()
+    owner, oh = _person(client, 'ind_owner')
+    mate, _ = _person(client, 'ind_mate')
+    db.session.add(appmod.Team(name='t', created_by_user_id=owner))
+    rep = appmod.Report(public_id=uuid.uuid4().hex, reporter_user_id=mate,
+                        reported_user_id=owner, category='harassment', subject_type='user')
+    db.session.add(rep)
+    db.session.commit()
+    rid = rep.id
+    assert client.delete('/api/me', json={'password': 'WalkTest123!'},
+                         headers=oh).get_json()['blocker_codes'] == ['team_owned']
+    db.session.remove()
+    assert db.session.get(appmod.Report, rid).deletion_requested_at is None
+
+
+def test_challenge_evidence_says_the_target_left(fk_app):
+    """Captured after the target deleted: target_left, not a whole-team read."""
+    client = fk_app.test_client()
+    owner, oh = _person(client, 'ev_owner')
+    kid, kh = _person(client, 'ev_kid')
+    mate, mh = _person(client, 'ev_mate')
+    team = client.post('/api/teams', json={'name': 'ev'}, headers=oh).get_json()['team']
+    for h in (kh, mh):
+        client.post(f"/api/teams/{team['id']}/join", json={'code': team['invite_code']}, headers=h)
+    preset = appmod.CHALLENGE_PRESETS[0]['key']
+    ch = client.post(f"/api/teams/{team['id']}/challenges",
+                     json={'preset_key': preset, 'target_user_id': mate}, headers=oh).get_json()
+    assert client.delete('/api/me', json={'password': 'WalkTest123!'}, headers=mh).status_code == 200
+    db.session.remove()
+    cid = ch.get('challenge', ch).get('public_id')
+    r = client.post('/api/reports', json={'category': 'inappropriate_content',
+                                          'subject_type': 'challenge', 'subject_ref': cid},
+                    headers=kh)
+    assert r.status_code == 201, r.get_json()
+    import json as _json
+    rep = appmod.Report.query.filter_by(public_id=r.get_json()['report_id']).one()
+    ctx = _json.loads(appmod.ReportEvidence.query.filter_by(report_id=rep.id).one().context_json)
+    assert ctx['target_user_id'] is None and ctx['target_left'] is True

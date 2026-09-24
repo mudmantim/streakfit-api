@@ -114,6 +114,7 @@
                        border-color:var(--accent-strong); font-weight:700; }
   .mod-counts { font-size:.9rem; margin:.4rem 0 .6rem; color:var(--text); }
   .mod-counts .overdue { color:var(--red); }
+  .mod-waiting { color:var(--amber); font-weight:700; }
 
   .mod-table { width:100%; border-collapse:collapse; font-size:.88rem;
                color:var(--text); }
@@ -1024,6 +1025,8 @@
           + (counts.pending !== undefined ? counts.pending : rows.length)
           + '</strong> pending'
           + (counts.overdue ? ' · <span class="overdue"><strong>' + counts.overdue + '</strong> overdue</span>' : '')
+          + (counts.deletion_waiting ? ' · <span class="mod-waiting"><strong>' + counts.deletion_waiting
+              + '</strong> holding up an account deletion</span>' : '')
           + '</div>';
         if (!rows.length) {
           box.innerHTML = head + '<div class="state">Nothing in this view.</div>';
@@ -1040,7 +1043,9 @@
                     : esc(r.category)) + '</td>'
                 + '<td>' + modWhen(r.created_at) + '</td>'
                 + '<td>' + (r.status === 'pending' ? modDue(r) : '—') + '</td>'
-                + '<td>' + esc(r.status) + (r.disposition ? ' (' + esc(r.disposition) + ')' : '') + '</td>'
+                + '<td>' + esc(r.status) + (r.disposition ? ' (' + esc(r.disposition) + ')' : '')
+                + (r.deletion_waiting ? ' <span class="mod-waiting" title="Someone linked to this report asked to delete their account and is waiting on it">deletion waiting</span>' : '')
+                + '</td>'
                 + '<td><button type="button" class="mod-open" data-report="' + esc(r.report_id)
                 + '" onclick="openModerationReport(this.dataset.report)">Review</button></td>'
                 + '</tr>';
@@ -1107,6 +1112,10 @@
       + '<dt>Subject</dt><dd>' + esc(r.subject_type) + '</dd>'
       + '<dt>Team</dt><dd>' + esc(r.team_id) + '</dd>'
       + '<dt>Content hidden</dt><dd>' + (r.content_restricted ? 'yes' : 'no') + '</dd>'
+      // Who asked is never shown -- not even whether it was the reporter or the
+      // person the report is about. Only that deciding this now matters to someone.
+      + (r.deletion_waiting ? '<dt>Account deletion</dt><dd class="mod-waiting">waiting on this report since '
+          + modWhen(r.deletion_requested_at) + '</dd>' : '')
       + '</dl>'
       + evidence
       + '<div class="mod-subhead">Action history</div>' + history
