@@ -805,9 +805,13 @@ def check_leaving_while_a_report_is_open(b: Browser, base: str, app) -> None:
     b.js(f"localStorage.setItem('streakfit_token', {json.dumps(owner_token)})")
     b.goto(base + "/", wait=3.0)
     go_to_pane(b, "team")
-    b.js("(()=>{const x=[...document.querySelectorAll('button')]"
-         ".find(e=>e.textContent.trim()==='Open'); if(x) x.click(); return 1;})()")
+    # With an open challenge the card's button reads "Take it on", not "Open"
+    # (app.js buildTeamCard); either is the same real button.
+    opened = b.js("(()=>{const x=[...document.querySelectorAll('button')]"
+                  ".find(e=>['Open','Take it on'].includes(e.textContent.trim()));"
+                  " if(!x) return 0; x.click(); return 1;})()")
     time.sleep(2.5)
+    check(bool(opened), "the owner can open the team from its card")
     whos = json.loads(b.js("JSON.stringify([...document.querySelectorAll('.tchallenge-who')]"
                            ".map(e=>e.textContent))") or "[]")
     check(any("challenged a former teammate" in w for w in whos),
