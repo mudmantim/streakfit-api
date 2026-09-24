@@ -170,8 +170,12 @@ Phone: open `https://streakfit.pro`, reload twice so `v0924b` loads.
    revision"). Environment: `STREAKFIT_ENFORCE_DB_HEAD` and
    `STREAKFIT_RETENTION_SWEEPER` **unset**; the direct connection string
    supplied as in step 4. The running release code then works on the old
-   schema, except that deleting a reporter or appellant returns 500 and rolls
-   back (verified) — so do step 2 promptly. **If Render restarts the release
+   schema **except** (verified on PostgreSQL): deleting a reporter or
+   appellant returns 500 and rolls back; and, because the downgrade drops
+   `team_challenge.target_left_at`, **team chat for any team with a challenge
+   and creating a challenge return 500** (profile, Daily Mission, team list
+   and team view stay 200). Both end when step 2's deploy is live (about 90 s
+   last time) — so start step 2 immediately after step 1. **If Render restarts the release
    instance before step 2**, its head check refuses to start it and the site
    is down until step 2 completes.
 2. Render: Manual Deploy of `4979354`. Its pre-deploy upgrade is a no-op and
