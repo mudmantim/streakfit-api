@@ -47,8 +47,9 @@ everything written after it.
 
 **Things that close the rollback window, besides real users:**
 `scripts/cleanup_qa_smoke.py --execute` (it now deletes QA accounts that filed
-reports, e.g. verify_all's own `qa_smoke_a_*`), and any operator deletion of a
-reporter. **Do not run the QA cleanup until rollback is no longer wanted**, and
+reports and own no team — verify_all's `qa_smoke_a_*` owns the Smoke Test team
+so it stays, but earlier runs' reporters, and any hand-made QA reporter, go),
+and any operator deletion of a reporter. **Do not run the QA cleanup until rollback is no longer wanted**, and
 re-run the query immediately before any rollback — never rely on an earlier
 reading.
 
@@ -146,9 +147,15 @@ migration is a single `ALTER … DROP NOT NULL` per column, in one transaction.
 | `/admin` | the two reporting-restriction actions read "…the reported person…" |
 | downgrade-still-possible query (section 2) | 0 |
 
-The suite's side effects, as last time: 4 `qa_smoke_*` accounts, one Smoke Test
-team, and **two smoke reports to dismiss in `/admin`** (identify by reporter →
-reported ids, as in audit 13.1).
+The suite's side effects, as last time: 4 `qa_smoke_*` accounts plus one
+`qa_smoke_leaver_*` that deletes itself, one Smoke Test team, and **two smoke
+reports to dismiss in `/admin`** (identify by reporter → reported ids, as in
+audit 13.1). Each report creates a `report_filed` notice, so **two real emails
+arrive** through the live channel; if they are not dismissed within 54 hours,
+`deadline_approaching` and then `overdue` emails follow. While they are
+pending, `qa_smoke_b_*` cannot be deleted (a pending report names it). None
+of this touches the section-2 rollback query: the leaver is not a reporter and
+`qa_smoke_a_*` is never deleted.
 
 Phone: open `https://streakfit.pro`, reload twice so `v0924a` loads.
 
@@ -199,7 +206,34 @@ Each is implemented and tested; the reasoning is in privacy-retention.md.
    the second request proven to wait; with the locks removed, 16 of 18 checks
    fail, including a foreign-key 500.
 
-Still open, deliberately: other user-to-user writes naming a person who is
-deleting at that instant (a block, a team challenge addressed to them) take
-no lock and can still fail with a foreign-key 500 in that window. No partial
-state; rare; a follow-up if it is ever seen.
+Second independent review (2026-09-24), fixed in the final commit:
+
+- **Owner oracle (blocker):** a team owner always gets the team answer, so
+  polling `DELETE /api/me` no longer reveals a report about them.
+- **Legal hold vs a deleting reporter:** report actions now lock both the
+  reporter and the reported person (id order); a hold placed first now blocks
+  the reporter's deletion (409).
+- **Two simultaneous deletions deadlocking:** retried; 40/40 natural
+  collisions end 200/200 (was 37/40 with a 500).
+- **Sweeper vs legal hold** (pre-existing): the sweep locks each report
+  (`SKIP LOCKED`) and re-reads the hold.
+- **Challenge evidence kept the deleted person's id:** cleared at deletion,
+  except under legal hold.
+- **Team challenge addressed to someone deleting:** now 400
+  `not_a_team_member`, not 500; a reporter filing while deleting in another
+  tab gets 404, not 500. **Blocks were already safe** (`create_block` catches
+  the IntegrityError; 204).
+
+Still open, for the owner:
+
+- **A reporter can unlink themselves from a PENDING child_safety report.**
+  The report stays pending with its note; investigators lose the person to
+  follow up with. Decision 1 only protects people the report names. Options:
+  block a reporter's deletion while any report they filed is pending (or only
+  child_safety), or accept.
+- **An expired challenge addressed to a deleted person reads "challenged the
+  team"** in history, because NULL target means everyone. Nobody can complete
+  it; the card text is wrong. Fix is display-side (e.g. "challenged a former
+  member" when expired with no target and a creator) — not in this release.
+- **Deadlock retry costs ~1 s** per colliding pair; a stable lock order across
+  shared rows would avoid it. Latent while production runs one worker.

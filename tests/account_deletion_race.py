@@ -32,6 +32,8 @@ _pause = threading.local()
 def _install_hooks(A):
     """Pause a thread right after it takes its lock, when asked to."""
     orig_counts, orig_lock = A._account_dependent_counts, A._lock_moderation_subject
+    orig_locks = A._lock_moderation_subjects
+    orig_load = A._load_report_for_action
 
     def hold_here():
         gate = getattr(_pause, 'gate', None)
@@ -50,11 +52,35 @@ def _install_hooks(A):
 
     def lock(user_id):
         out = orig_lock(user_id)
+        if not getattr(_pause, 'in_plural', False):
+            hold_here()
+        return out
+
+    def locks(*user_ids):
+        # Pause only once EVERY person is locked, not after the first.
+        _pause.in_plural = True
+        try:
+            out = orig_locks(*user_ids)
+        finally:
+            _pause.in_plural = False
+        if not getattr(_pause, 'in_load', False):
+            hold_here()
+        return out
+
+    def load(public_id):
+        # For report actions, pause only once the REPORT row is locked too.
+        _pause.in_load = True
+        try:
+            out = orig_load(public_id)
+        finally:
+            _pause.in_load = False
         hold_here()
         return out
 
     A._account_dependent_counts = counts
     A._lock_moderation_subject = lock
+    A._lock_moderation_subjects = locks
+    A._load_report_for_action = load
 
 
 def _run(A, fn, gate=None):
@@ -248,6 +274,100 @@ def main():
         check('6 deletion first: deletion 200, report 403 (as for anyone unseen)',
               (_status(b1), _status(b2)) == (200, 403), (_status(b1), _status(b2)))
         check('6 no report was written', A.Report.query.count() == before)
+
+    # 7. hold first, then the REPORTER of that report tries to delete
+    rep_by, rh = person('filer')
+    other, _ = person('about')
+    pid, rid = closed_report_about(rep_by, other)
+    b1, b2, waited = race(A, lambda c: c.post(
+        f'/api/admin/reports/{pid}/legal-hold', json={'hold': True, 'reason': 'race'},
+        headers=H), delete_me(rh))
+    with A.app.app_context():
+        r = db.session.get(A.Report, rid)
+        check("7 hold first: the reporter's deletion waited for the hold", waited)
+        check('7 hold first: hold 200, reporter deletion 409',
+              (_status(b1), _status(b2)) == (200, 409), (_status(b1), _status(b2)))
+        check('7 the held report still names its reporter',
+              r.legal_hold and r.reporter_user_id == rep_by)
+
+    # 8. hold first, retention sweep meanwhile: the held report is not purged
+    rep_by, _ = person('swp')
+    other, _ = person('swp')
+    pid, rid = closed_report_about(rep_by, other)
+    with A.app.app_context():
+        r = db.session.get(A.Report, rid)
+        r.reviewed_at = datetime.datetime.utcnow() - datetime.timedelta(days=45)
+        r.note = 'reporter words'
+        db.session.add(A.ReportEvidence(report_id=rid, content_type='message',
+                                        content_text='kept', author_user_id=other,
+                                        context_json='{}'))
+        db.session.commit()
+
+    def sweep(_client):
+        out = A._sweep_moderation_evidence()
+        db.session.commit()
+        return type('R', (), {'status_code': 200, 'out': out})()
+    b1, b2, waited = race(A, lambda c: c.post(
+        f'/api/admin/reports/{pid}/legal-hold', json={'hold': True, 'reason': 'race'},
+        headers=H), sweep)
+    with A.app.app_context():
+        r = db.session.get(A.Report, rid)
+        ev = A.ReportEvidence.query.filter_by(report_id=rid).one()
+        check('8 hold first: the sweep did not purge the report being held',
+              _status(b1) == 200 and r.legal_hold and r.note == 'reporter words'
+              and ev.content_text == 'kept', (_status(b1), r.note, ev.content_text))
+        again = A._sweep_moderation_evidence()
+        db.session.commit()
+        ev = A.ReportEvidence.query.filter_by(report_id=rid).one()
+        check('8 the next sweep counts it as held and still keeps it',
+              again['held_by_legal_hold'] >= 1 and ev.content_text == 'kept', again)
+
+    # 9. two people who blocked, challenged and reported each other delete at once
+    def mutual_pair():
+        p, ph, q, qh, tid = teammates()
+        with A.app.app_context():
+            now = datetime.datetime.utcnow()
+            db.session.add_all([
+                A.UserBlock(blocker_user_id=p, blocked_user_id=q),
+                A.UserBlock(blocker_user_id=q, blocked_user_id=p),
+                A.TeamChallenge(public_id=uuid.uuid4().hex, team_id=tid, preset_key='x',
+                                created_by_user_id=p, target_user_id=q,
+                                expires_at=now + datetime.timedelta(hours=1)),
+                A.TeamChallenge(public_id=uuid.uuid4().hex, team_id=tid, preset_key='x',
+                                created_by_user_id=q, target_user_id=p,
+                                expires_at=now + datetime.timedelta(hours=1)),
+            ])
+            db.session.commit()
+            # The team's creator would be blocked; hand the team to nobody by
+            # making a third person its creator.
+            third, _ = person('owner')
+            t = db.session.get(A.Team, tid)
+            t.created_by_user_id = third
+            db.session.commit()
+        closed_report_about(p, q)
+        closed_report_about(q, p)
+        return p, ph, q, qh
+    codes = []
+    for _ in range(8):
+        p, ph, q, qh = mutual_pair()
+        t1, x = _run(A, delete_me(ph))
+        t2, y = _run(A, delete_me(qh))
+        t1.join(60)
+        t2.join(60)
+        codes.append((_status(x), _status(y)))
+    check('9 simultaneous mutual deletions all succeed (deadlocks retried)',
+          all(c == (200, 200) for c in codes), codes)
+
+    # 10. a challenge addressed to someone deleting at that instant, both ways
+    a, ah, b, bh, tid = teammates()
+    preset = A.CHALLENGE_PRESETS[0]['key']
+
+    def challenge(h, target):
+        return lambda c: c.post(f'/api/teams/{tid}/challenges',
+                                json={'preset_key': preset, 'target_user_id': target}, headers=h)
+    b1, b2, waited = race(A, delete_me(bh), challenge(ah, b))
+    check('10 deletion first: the challenge waited, then 400 (not a member), no 500',
+          waited and (_status(b1), _status(b2)) == (200, 400), (waited, _status(b1), _status(b2)))
 
     print(json.dumps(results, indent=1))
     return 0 if all(v['ok'] for v in results.values()) else 1

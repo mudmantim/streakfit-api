@@ -21,7 +21,7 @@ from datetime import datetime, date, timedelta
 from typing import Any
 from flask import Flask, request, jsonify, abort, make_response
 from flask_sqlalchemy import SQLAlchemy
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import DBAPIError, IntegrityError
 from flask_migrate import Migrate
 from werkzeug.middleware.proxy_fix import ProxyFix
 from werkzeug.security import generate_password_hash, check_password_hash
@@ -4241,14 +4241,20 @@ def _account_deletion_refusal(plan):
     that some record is keeping the account. Refusing at all says that much.
     """
     codes = plan.get("blocker_codes", [])
-    if codes == ["team_owned"]:
+    if "team_owned" in codes:
+        # ALWAYS the team answer while they own a team, whatever else also
+        # blocks. Switching to 'safety_record' when a report appeared would let
+        # an owner -- who is refused either way and so loses nothing by asking
+        # -- poll this route to learn when a report about them is filed and
+        # closed. Only the team's own blocker text is returned.
         return jsonify({
             "error": "account_deletion_blocked",
             "message": ("You created a team that other people are still using. "
                         "Hand it over or remove the team first, then you can "
                         "delete your account."),
-            "blockers": plan.get("blockers", []),
-            "blocker_codes": codes,
+            "blockers": [b for b, c in zip(plan.get("blockers", []), codes)
+                         if c == "team_owned"],
+            "blocker_codes": ["team_owned"],
         }), 409
     return jsonify({
         "error": "account_deletion_blocked",
@@ -7003,6 +7009,16 @@ def create_team_challenge(team_id):
         if _is_blocked_between(user_id, target_user_id):
             return jsonify({"error": "not_a_team_member"}), 400
 
+    # Serialise with either person deleting their account: a target who is
+    # gone answers like any non-member, never with a foreign-key 500.
+    alive = _lock_moderation_subjects(user_id, target_user_id)
+    if user_id not in alive:
+        db.session.rollback()
+        return jsonify({"error": "User not found"}), 404
+    if target_user_id is not None and target_user_id not in alive:
+        db.session.rollback()
+        return jsonify({"error": "not_a_team_member"}), 400
+
     now = datetime.utcnow()
     challenge = TeamChallenge(
         public_id=uuid.uuid4().hex,
@@ -7991,7 +8007,12 @@ def create_report():
     # Serialise with that person deleting their account (see
     # delete_user_account). If the deletion won, they are gone: answer as for
     # anyone this route cannot see, never with a foreign-key 500.
-    if reported_user_id is not None and not _lock_moderation_subject(reported_user_id):
+    alive = _lock_moderation_subjects(user_id, reported_user_id)
+    if user_id not in alive:
+        # The reporter's own account was deleted a moment ago (another tab).
+        db.session.rollback()
+        return jsonify({"error": "User not found"}), 404
+    if reported_user_id is not None and reported_user_id not in alive:
         db.session.rollback()
         if subject_type == 'user':
             return jsonify({"error": "Forbidden"}), 403
@@ -9602,11 +9623,17 @@ def _sweep_moderation_evidence(now=None):
     text_cutoff = now - timedelta(days=EVIDENCE_RETENTION_DAYS_AFTER_CLOSURE)
     purged_text = purged_photos = held = 0
 
+    # FOR UPDATE, SKIP LOCKED: a report an operator is putting on legal hold
+    # right now is skipped this hour rather than purged from a stale read of
+    # `legal_hold`; a locked row that is not skipped is re-read after the
+    # other transaction commits, so the check below sees the hold.
     closed = db.session.execute(
         db.select(Report).where(Report.status == 'closed',
                                 Report.reviewed_at.isnot(None),
                                 Report.reviewed_at <= text_cutoff,
                                 Report.evidence_purged_at.is_(None))
+        .with_for_update(skip_locked=True)
+        .execution_options(populate_existing=True)
     ).scalars().all()
     for report in closed:
         if report.legal_hold:
@@ -9631,7 +9658,9 @@ def _sweep_moderation_evidence(now=None):
                                        PhotoEvidence.expires_at <= now)
     ).scalars().all()
     for row in photo_rows:
-        report = db.session.get(Report, row.report_id)
+        report = db.session.execute(
+            db.select(Report).where(Report.id == row.report_id).with_for_update()
+            .execution_options(populate_existing=True)).scalar_one_or_none()
         if report is not None and report.legal_hold:
             held += 1
             continue
@@ -10684,6 +10713,17 @@ def _lock_moderation_subject(user_id):
     ).scalar_one_or_none() is not None
 
 
+def _lock_moderation_subjects(*user_ids):
+    """_lock_moderation_subject for several people, ALWAYS in ascending id
+    order, so two writers naming the same pair can never wait on each other
+    in a cycle. Returns the set of those ids that still exist."""
+    alive = set()
+    for uid in sorted({u for u in user_ids if u is not None}):
+        if _lock_moderation_subject(uid):
+            alive.add(uid)
+    return alive
+
+
 def _load_report_for_action(public_id):
     """A report, re-read under lock AFTER its subject is locked.
 
@@ -10696,10 +10736,34 @@ def _load_report_for_action(public_id):
         db.select(Report).where(Report.public_id == public_id)).scalar_one_or_none()
     if report is None:
         return None
-    _lock_moderation_subject(report.reported_user_id)
+    # Both people the report names: the reporter too, or a legal hold placed
+    # while the reporter is deleting could land after their deletion planned
+    # and before it cut their link -- the hold would then not hold.
+    _lock_moderation_subjects(report.reporter_user_id, report.reported_user_id)
     return db.session.execute(
         db.select(Report).where(Report.id == report.id).with_for_update()
         .execution_options(populate_existing=True)).scalar_one()
+
+
+def _scrub_evidence_context_of(user_id):
+    """Evidence of a reported CHALLENGE records whom it was addressed to
+    (`context_json.target_user_id`). That id is a link to the person like any
+    foreign key, only one the database cannot see, so it is cut the same way.
+    The rest of the evidence stays on its clock. A report under legal hold
+    keeps it: a hold suppresses every moderation deletion.
+    """
+    needle = f'"target_user_id": {int(user_id)}'
+    rows = db.session.execute(
+        db.select(ReportEvidence).join(Report, Report.id == ReportEvidence.report_id)
+        .where(ReportEvidence.content_type == 'challenge',
+               ReportEvidence.context_json.contains(needle),
+               Report.legal_hold.is_(False))).scalars().all()
+    for ev in rows:
+        ctx = json.loads(ev.context_json)
+        if ctx.get("target_user_id") == int(user_id):   # not 1630 for 163
+            ctx["target_user_id"] = None
+            ev.context_json = json.dumps(ctx)
+    db.session.flush()
 
 
 def _expire_challenges_addressed_to(user_id):
@@ -10754,7 +10818,34 @@ def _account_deletion_blockers(counts, allow_team_owner=False):
         label for label in _MODERATION_DELETION_BLOCKERS if counts.get(label, 0) > 0]
 
 
+_DELETION_DEADLOCK_ATTEMPTS = 3
+
+
+def _is_deadlock(exc):
+    return getattr(getattr(exc, 'orig', None), 'pgcode', None) == '40P01'
+
+
 def delete_user_account(user_id, allow_team_owner=False, dry_run=True):
+    """delete_user_account, retried when PostgreSQL breaks a deadlock.
+
+    Two people deleting at the same moment who share rows -- blocks of each
+    other, challenges to each other, reports about each other -- lock those
+    rows in opposite orders, and PostgreSQL aborts one of them (40P01). That
+    transaction rolled back whole, so running it again is safe, and the other
+    one has usually committed by then. Anything else propagates unchanged.
+    """
+    for attempt in range(_DELETION_DEADLOCK_ATTEMPTS):
+        try:
+            return _delete_user_account_once(user_id, allow_team_owner, dry_run)
+        except DBAPIError as exc:
+            if dry_run or not _is_deadlock(exc) or attempt == _DELETION_DEADLOCK_ATTEMPTS - 1:
+                raise
+            db.session.rollback()
+            app.logger.warning("event=account_deletion_deadlock_retry attempt=%s", attempt + 1)
+            time.sleep(0.05 + random.random() * 0.2)
+
+
+def _delete_user_account_once(user_id, allow_team_owner=False, dry_run=True):
     """Delete a user and their private data in ONE transaction, preserving shared
     team data. Returns a report dict:
         {user_id, found, username, counts, blocked, blockers, dry_run, executed}
@@ -10820,6 +10911,7 @@ def delete_user_account(user_id, allow_team_owner=False, dry_run=True):
         _withdraw_appeals_of(user_id)
         _remove_closed_report_notes_of(user_id)
         _expire_challenges_addressed_to(user_id)
+        _scrub_evidence_context_of(user_id)
         # Shared and moderation records stay; only the pointer to this person goes.
         for _label, model, attr in _USER_LINK_NULLS:
             model.query.filter(getattr(model, attr) == user_id).update(

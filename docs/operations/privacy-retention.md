@@ -267,10 +267,14 @@ clock (text 30 days after closure, photo bytes 30 days from capture).
 ### What "no longer identifies the reporter" does and does not mean
 
 **The claim:** after deletion, no column in the database links a report,
-appeal, notice or moderation action to the reporter's (former) account, and no
-note the reporter wrote remains on a closed report **they filed**. (Evidence of
-their words as a *reported* person is a different record and stays on its own
-clock.)
+appeal, notice or moderation action to the reporter's (former) account — and
+neither does the one id kept inside evidence, a reported challenge's
+`context_json.target_user_id`, which is cleared the same way — and no note the
+reporter wrote remains on a closed report **they filed**. Two exceptions, both
+deliberate: a report under **legal hold** keeps that evidence id (a hold
+suppresses every moderation deletion), and a person named by a pending or held
+report cannot be deleted at all. (Evidence of their words as a *reported*
+person is a different record and stays on its own clock.)
 
 **It is not a claim of anonymity.** What remains can still narrow down who
 filed a report, for anyone who can read the operator view or the database:
@@ -292,8 +296,14 @@ filed a report, for anyone who can read the operator view or the database:
   that file or snapshot is destroyed (see the backup retention dates).
 - **Neon history** (point-in-time restore) holds the earlier values for the
   plan's history window — 6 hours on Free.
-- **Render request logs** record `POST /api/reports` with time and client IP
-  (no user id, no body), for the platform's log retention.
+- **Render request logs** record `POST /api/reports` and `DELETE /api/me`
+  with time and client IP (no user id, no body), for the platform's log
+  retention. The `DELETE /api/me` line is timed to the same moment as the
+  `reporter_note_removed` / `appeal_withdrawn` rows, and its IP may match that
+  person's other requests.
+- **Other application log lines** (for example `event=login user_id=…`) still
+  carry user ids. They do not mention reports, but they can put a name to a
+  former id if one is ever found elsewhere.
 - **Render application logs.** Deletion used to log `event=account_deleted
   user_id=…`; timed to the same moment as the `reporter_note_removed` /
   `appeal_withdrawn` rows, that line would have named the reporter. It now
@@ -327,18 +337,35 @@ Deletion is **refused** (409, nothing changed) for:
 - anyone with guardian-link, consent or permission-audit rows (how a deleted
   child or guardian is recorded is an owner decision not yet made).
 
-Everything but team ownership gets one answer: code `safety_record`, the
-message "Your account is linked to a safety record we have to keep…", and no
-detail. That still tells the person *some* record exists — refusing at all
-says that much — but never which, and never that it is a report about them.
-The refusal lasts while the report is open or held; a closed, unheld report no
-longer blocks.
+A **team owner** always gets the team answer, whatever else also blocks —
+otherwise an owner, refused either way, could ask repeatedly and watch the
+answer change when a report about them was filed or closed. Everyone else gets
+one answer: code `safety_record`, the message "Your account is linked to a
+safety record we have to keep…", and no detail.
 
-Deletion and every moderation write that names the same person are
-serialised on that person's row (`FOR UPDATE` / `FOR KEY SHARE`): a report
-filed or an operator action taken a moment before a deletion is seen by it
-(and may block it); one arriving a moment after finds the person gone and
-answers as for anyone it cannot see. Verified both ways round on PostgreSQL.
+**What a refusal still tells the person, precisely:** that some record is
+keeping the account — refusing at all says that much. A person with no team
+and no guardian links, refused with `safety_record`, can infer it is a report
+about them, and can ask again to learn roughly when it closes (the next
+attempt succeeds and deletes the account). An owner learns this only after
+handing the team over. A reporter refused with `safety_record` can infer a
+report they filed is on legal hold. Never which report, who filed it, or its
+category. This is the cost of keeping the record; the alternative was letting
+the person erase it.
+
+Deletion and every write that names a person are serialised on that
+person's row: deletion takes `FOR UPDATE`; report filing, legal hold, report
+actions, appeal decisions and addressed challenges take `FOR KEY SHARE` on
+**every** person they name (reporter and reported), always in ascending id
+order, then lock and re-read the report. A write that got there first is seen
+by the deletion (and a pending or held report blocks it); one arriving after
+finds the person gone and answers as for anyone it cannot see. The retention
+sweeper locks each report before purging (`SKIP LOCKED`), so a hold being
+placed is never purged from a stale read. Two people deleting at once who
+share rows (blocks, challenges, reports of each other) can still deadlock in
+PostgreSQL; the deletion is retried (up to 3 times), which in testing turned
+40 of 40 such collisions into two successful deletions, at the cost of about a
+second each. Verified on PostgreSQL in `tests/account_deletion_race.py`.
 
 A challenge addressed to the deleted person is **expired** at deletion, so it
 does not reopen as a whole-team challenge. A person's own suspension is

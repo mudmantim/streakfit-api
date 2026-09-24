@@ -76,9 +76,17 @@ def build_tangled_user(A, client, tag):
                       reported_user_id=leaver, category='harassment',
                       subject_type='user', team_id=team.id, status='closed',
                       disposition='dismissed', reviewed_at=datetime.datetime(2026, 9, 1))
-    db.session.add(report)
+    held_other = A.Report(public_id=uuid.uuid4().hex, reporter_user_id=friend,
+                          category='harassment', subject_type='challenge',
+                          subject_ref='c' * 32, team_id=team.id, status='closed',
+                          disposition='dismissed', legal_hold=True, legal_hold_reason='x',
+                          reviewed_at=datetime.datetime(2026, 9, 1))
+    db.session.add_all([report, held_other])
     db.session.flush()
     db.session.add_all([
+        A.ReportEvidence(report_id=held_other.id, content_type='challenge',
+                         author_user_id=friend, context_json=json.dumps(
+                             {'preset_key': 'x', 'target_user_id': leaver, 'team_id': team.id})),
         A.TeamMembership(team_id=team.id, user_id=friend),
         A.TeamMembership(team_id=team.id, user_id=leaver),
         A.DailyEffort(user_id=leaver, date=datetime.date(2026, 9, 1), level='easy'),
@@ -95,13 +103,19 @@ def build_tangled_user(A, client, tag):
         A.ModerationAction(report_id=report.id, action='dismiss',
                            target_user_id=leaver),
         A.UserRestriction(user_id=leaver, kind='social_suspended'),
+        # Evidence of a reported challenge addressed to the leaver records
+        # their id in context_json; one on the closed report, one on a held
+        # report (someone else's) that must keep it.
+        A.ReportEvidence(report_id=report.id, content_type='challenge',
+                         author_user_id=friend, context_json=json.dumps(
+                             {'preset_key': 'x', 'target_user_id': leaver, 'team_id': team.id})),
         A.PermissionAudit(subject_user_id=friend, actor_user_id=leaver,
                           capability=sorted(A.CAPABILITIES)[0], decision='deny',
                           reason='test'),
     ])
     db.session.commit()
     return {'leaver': leaver, 'friend': friend, 'leaver_h': leaver_h,
-            'team': team.id, 'report': report.id,
+            'team': team.id, 'report': report.id, 'held_other': held_other.id,
             'challenges': [ch_by_leaver.id, ch_for_leaver.id]}
 
 
@@ -184,6 +198,15 @@ def run(A, client):
     }
     for name, ok in kept.items():
         results[name] = (ok, '')
+    ctx = [json.loads(e.context_json) for e in A.ReportEvidence.query.filter_by(
+        report_id=s['report'], content_type='challenge').all()]
+    results["challenge evidence no longer records the deleted person's id"] = (
+        ctx and all(c.get('target_user_id') is None for c in ctx)
+        and all(c.get('preset_key') == 'x' for c in ctx), str(ctx))
+    held_ctx = json.loads(A.ReportEvidence.query.filter_by(
+        report_id=s['held_other']).one().context_json)
+    results['a legal hold keeps even that id'] = (
+        held_ctx.get('target_user_id') == s['leaver'], str(held_ctx))
     by_leaver, for_leaver = (A.db.session.get(A.TeamChallenge, i) for i in s['challenges'])
     results["a challenge addressed to them is expired, not reopened to everyone"] = (
         for_leaver.target_user_id is None and not A._challenge_is_open(for_leaver),

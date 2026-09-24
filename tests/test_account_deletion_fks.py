@@ -139,3 +139,31 @@ def test_deletion_log_lines_carry_no_user_id(fk_app, caplog):
     assert any('event=account_deleted' in l for l in lines)
     assert any('event=account_self_deleted' in l for l in lines)
     assert not any('user_id' in l or str(uid) in l.split('photos=')[0] for l in lines), lines
+
+
+def test_a_team_owner_cannot_use_deletion_to_learn_about_a_report(fk_app):
+    """An owner is refused either way, so they lose nothing by asking. If the
+    answer changed when a report about them appeared, polling DELETE /api/me
+    would reveal when one was filed and closed."""
+    import uuid
+    client = fk_app.test_client()
+    for name in ('owner_o', 'mate_o'):
+        client.post('/api/register', json={'username': name, 'password': 'WalkTest123!'})
+    tok = client.post('/api/login', json={'username': 'owner_o',
+                                          'password': 'WalkTest123!'}).get_json()['access_token']
+    h = {'Authorization': f'Bearer {tok}'}
+    owner = appmod.User.query.filter_by(username='owner_o').one().id
+    mate = appmod.User.query.filter_by(username='mate_o').one().id
+    db.session.add(appmod.Team(name='mine', created_by_user_id=owner))
+    db.session.commit()
+    before = client.delete('/api/me', json={'password': 'WalkTest123!'}, headers=h)
+    db.session.add(appmod.Report(public_id=uuid.uuid4().hex, reporter_user_id=mate,
+                                 reported_user_id=owner, category='harassment',
+                                 subject_type='user', legal_hold=True, legal_hold_reason='x'))
+    db.session.commit()
+    after = client.delete('/api/me', json={'password': 'WalkTest123!'}, headers=h)
+    assert before.status_code == after.status_code == 409
+    assert before.get_json() == after.get_json()
+    assert after.get_json()['blocker_codes'] == ['team_owned']
+    assert appmod.delete_user_account(owner, dry_run=True)['blocker_codes'] == [
+        'team_owned', 'report_open_about']      # the plan still knows
