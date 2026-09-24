@@ -10842,8 +10842,12 @@ def _expire_challenges_addressed_to(user_id):
     """A challenge to one person ends when that person leaves.
 
     `target_user_id = NULL` means "the whole team", so cutting the link alone
-    would reopen "Mom -> Olivia" as "Mom -> everyone". Expired first, so it
-    can no longer be completed by anyone; the row and the thread stay.
+    would reopen "Mom -> Olivia" as "Mom -> everyone". Expired first, so its
+    card shows it closed (`open: false`) instead of offering it to the team;
+    the row and the thread stay. NOTE: the completion route does not check
+    expiry -- in any build, for any expired challenge -- so this closes it in
+    the product, not against a hand-made request. See the release procedure,
+    section 10.
     """
     now = datetime.utcnow()
     TeamChallenge.query.filter(

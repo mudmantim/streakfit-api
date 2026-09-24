@@ -9,7 +9,7 @@ it is taken; approval of one step is not approval of the next.
 | | |
 |---|---|
 | Base (production now) | `4979354` — migrations at `47f7dc9962e3` |
-| Commits | 13, in order: `28ce314` `e58b189` `88af476` `0b5c05d` `358af56` `afda493` `78047de` `d1c59d3` `753780f` `bb96d8d` `0b90d98` `dfd56e2`, then the docs commit at the tip that carries this list (its hash is the release commit, given in the release summary) |
+| Commits | 14, in order: `28ce314` `e58b189` `88af476` `0b5c05d` `358af56` `afda493` `78047de` `d1c59d3` `753780f` `bb96d8d` `0b90d98` `dfd56e2` `0b5b480`, then the commit at the tip that carries this list (its hash is the release commit, given in the release summary) |
 | Migration | **one**: `08920334bccd` — `report.reporter_user_id`, `appeal.user_id` → nullable; adds nullable `team_challenge.target_left_at` and `report.deletion_requested_at`. No existing data changed by the upgrade; the downgrade drops both columns |
 | Static | `static/admin.html` (labels; "deletion waiting" indicator), `static/app.js` (challenge card), `static/sw.js` → `streakfit-v0924c` |
 | Rollback build | `ef3178e` on local branch `rollback/account-deletion-compat` — see section 2. Not part of the release; prepared and tested with it |
@@ -57,8 +57,8 @@ Consequences:
 ## 3. Pre-flight (read-only)
 
 1. Worktree clean, HEAD is the reviewed release commit; `git merge-base
-   --is-ancestor 4979354 HEAD`; `git log --oneline 4979354..HEAD` shows **13**
-   commits: the 12 listed in section 1, in that order, plus the tip;
+   --is-ancestor 4979354 HEAD`; `git log --oneline 4979354..HEAD` shows **14**
+   commits: the 13 listed in section 1, in that order, plus the tip;
    `git diff --stat 4979354..HEAD -- migrations/` shows one file.
    Rollback build: `git -C <rollback worktree> log --oneline 4979354..HEAD` is
    exactly `ef3178e`; `cmp` of its `migrations/versions/08920334bccd_*.py`
@@ -240,6 +240,17 @@ Third review (2026-09-24), decided and built:
 - **Rollback:** by code (`ef3178e`), not by downgrade (section 2). The
   migration's downgrade is unchanged and drops its columns.
 - **Challenge evidence:** `target_left: true` when its target has gone.
+
+Rollback-build test (2026-09-24), found and NOT fixed in this release —
+both pre-date it, in `4979354` too:
+
+- **An expired challenge can still be completed** by a direct request:
+  `complete_team_challenge` never checks `expires_at` (the card hides it).
+  One guard (`if not _challenge_is_open(challenge): 404/409`) would close it;
+  left for a follow-up so this release changes no challenge behaviour.
+- **A closed appeal can be decided again** (outcome and note overwritten,
+  the lifted restriction stays lifted): `admin_decide_appeal` checks for a
+  missing appellant but not `status == 'open'`. Operator-only.
 
 Still open, for the owner:
 

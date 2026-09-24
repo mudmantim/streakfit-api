@@ -866,6 +866,9 @@ def check_leaving_while_a_report_is_open(b: Browser, base: str, app) -> None:
           "and the report's detail says since when", detail[:160])
     check(kid not in qtext + detail and owner not in qtext + detail,
           "and neither names who asked", detail[:160])
+    # admin.html keeps the secret in sessionStorage; leave /admin signed out
+    # so a later check's "unauthenticated" really is.
+    b.js("sessionStorage.clear()")
 
     # --- the operator decides it; the same button now works ---
     req = urllib.request.Request(f"{base}/api/admin/reports/{rid}/action", method="POST",
