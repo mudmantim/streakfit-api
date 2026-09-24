@@ -9,55 +9,60 @@ it is taken; approval of one step is not approval of the next.
 | | |
 |---|---|
 | Base (production now) | `4979354` — migrations at `47f7dc9962e3` |
-| Commits | `28ce314` FK-complete deletion · `e58b189` reporter/appellant deletion + migration · `88af476` closed-report note, admin label, privacy limits, this procedure · `0b5c05d` first-review fixes · `358af56` section-10 decisions, race locks, CLAUDE.md · `afda493` second-review fixes · `78047de` docs · the final commit: a pending report blocks its reporter's deletion, and the former-teammate challenge card. The release commit is the tip of `fix/account-deletion-fks`; see the release summary for its hash |
-| Migration | **one**: `08920334bccd` — `report.reporter_user_id`, `appeal.user_id` → nullable; adds nullable `team_challenge.target_left_at`. No existing data changed by the upgrade |
-| Static | `static/admin.html` (labels), `static/app.js` (challenge card), `static/sw.js` → `streakfit-v0924b` |
+| Commits | 13, in order: `28ce314` `e58b189` `88af476` `0b5c05d` `358af56` `afda493` `78047de` `d1c59d3` `753780f` `bb96d8d` `0b90d98` `dfd56e2`, then the docs commit at the tip that carries this list (its hash is the release commit, given in the release summary) |
+| Migration | **one**: `08920334bccd` — `report.reporter_user_id`, `appeal.user_id` → nullable; adds nullable `team_challenge.target_left_at` and `report.deletion_requested_at`. No existing data changed by the upgrade; the downgrade drops both columns |
+| Static | `static/admin.html` (labels; "deletion waiting" indicator), `static/app.js` (challenge card), `static/sw.js` → `streakfit-v0924c` |
+| Rollback build | `ef3178e` on local branch `rollback/account-deletion-compat` — see section 2. Not part of the release; prepared and tested with it |
 | Config / env | none |
 
 Not included: `364e97a`, `15c5eaa` (release-audit docs on
 `integrate-product-completion`). They are docs only; merging them first keeps
 the audit on `main`, but pushing them is its own decision.
 
-## 2. Why this deploy is different: rollback needs a downgrade
+## 2. Rollback is a code deploy, never a database downgrade
 
-Two things stop `4979354` from running on the new schema, both verified on
-PostgreSQL 17:
+`4979354` cannot run on the new schema: Render's Pre-Deploy `flask db
+upgrade` of it exits 1 ("Can't locate revision identified by
+'08920334bccd'"), and even past that, `STREAKFIT_ENFORCE_DB_HEAD=1` makes
+every gunicorn worker refuse to start (the master stays up and `/health`
+times out). Downgrading the database first was the previous plan; on
+PostgreSQL it broke reporter/appellant deletion, team chat for teams with a
+challenge, creating, completing **and reporting** a challenge until the old
+code was live, and it became impossible once any reporter or appellant had
+deleted their account.
 
-- Render's **Pre-Deploy** `flask db upgrade` of `4979354` exits 1: "Can't
-  locate revision identified by '08920334bccd'". The deploy stops there and
-  the running instance keeps serving.
-- If it got past that, `STREAKFIT_ENFORCE_DB_HEAD=1` makes every gunicorn
-  worker refuse to start ("database is at Alembic revision '08920334bccd' but
-  the code expects head '47f7dc9962e3'"). Note the shape of that failure: the
-  gunicorn **master keeps running and listening** while its workers die and
-  respawn, so `/health` **times out** rather than failing fast.
- So **redeploying `4979354` alone does not roll back** — the
-database has to be downgraded first, and the downgrade works only while no
-report or appeal has lost its person:
+So the rollback target is a **rollback build**, `ef3178e` on branch
+`rollback/account-deletion-compat`: `4979354` plus the release's migration
+file (byte-identical), the four model declarations that migration implies,
+the guard that refuses to decide an appeal whose appellant has gone, and a
+distinct service-worker cache (`streakfit-v0924r`). On the release schema its
+Pre-Deploy upgrade is a no-op and its head check passes. It never writes the
+database differently from `4979354` and does not need the database to change.
+It works **after** reporters and appellants have been deleted. Rolling back
+means account deletion goes back to `4979354`'s behaviour (it 500s on
+PostgreSQL for most users) — which is what rolling back means.
 
-```sql
--- read-only: is a downgrade still possible?  0 = yes
-select (select count(*) from report where reporter_user_id is null)
-     + (select count(*) from appeal where user_id is null);
-```
+Consequences:
 
-Once that is non-zero (the first reporter or appellant deletes their account),
-the only ways back are forward fixes, or the fresh backup below — which loses
-everything written after it.
-
-**Things that close the rollback window, besides real users:**
-`scripts/cleanup_qa_smoke.py --execute` (it now deletes QA accounts that filed
-reports and own no team — verify_all's `qa_smoke_a_*` owns the Smoke Test team
-so it stays, but earlier runs' reporters, and any hand-made QA reporter, go),
-and any operator deletion of a reporter. **Do not run the QA cleanup until rollback is no longer wanted**, and
-re-run the query immediately before any rollback — never rely on an earlier
-reading.
+- There is no rollback window and no "rollback closes" query. The QA cleanup
+  (`scripts/cleanup_qa_smoke.py --execute`) no longer affects rollback, but
+  still waits until the release is verified.
+- `flask db downgrade 47f7dc9962e3` remains possible only while no report or
+  appeal has lost its person, and is **not** part of this procedure. It is a
+  last resort with the failures above; if ever used, use Render maintenance
+  mode for its duration.
+- The rollback build must stay in step with the release's migration file. If
+  the migration changes again before deploy, rebuild and retest it.
 
 ## 3. Pre-flight (read-only)
 
-1. Worktree clean, HEAD is the reviewed commit; `git merge-base --is-ancestor
-   4979354 HEAD`; `git log --oneline 4979354..HEAD` lists exactly the commits
-   in section 1; `git diff --stat 4979354..HEAD -- migrations/` shows one file.
+1. Worktree clean, HEAD is the reviewed release commit; `git merge-base
+   --is-ancestor 4979354 HEAD`; `git log --oneline 4979354..HEAD` shows **13**
+   commits: the 12 listed in section 1, in that order, plus the tip;
+   `git diff --stat 4979354..HEAD -- migrations/` shows one file.
+   Rollback build: `git -C <rollback worktree> log --oneline 4979354..HEAD` is
+   exactly `ef3178e`; `cmp` of its `migrations/versions/08920334bccd_*.py`
+   against the release's shows no difference.
 2. `git fetch origin` then `origin/main` = `4979354` (fast-forward, 0 merges).
 3. Production read-only: `/api/build-identity` → `4979354…`, `atHead: true`,
    `latest 47f7dc9962e3`; `/sw.js` → `v0923d`; `/health` 200;
@@ -109,13 +114,13 @@ applied (`47f7dc9962e3 → 08920334bccd`)**; head reached; schema vs models 0
 differences; release app starts on 127.0.0.1 only; cleanup 0 containers /
 listeners / temp files.
 
-**Rehearse the rollback too, on the same restored copy**, before it is torn
-down (the rehearsal script only runs the upgrade; this needs a manual step or
-a small extension to the script, from the release source `$D`, with
-`STREAKFIT_ENFORCE_DB_HEAD` and `STREAKFIT_RETENTION_SWEEPER` unset):
-`flask db downgrade 47f7dc9962e3` → exit 0 and both columns `NOT NULL` again;
-the section-2 query → 0; `flask db upgrade` → back at `08920334bccd`. This is
-the only time the rollback runs against real data before it might be needed.
+**Rehearse the rollback too, on the same restored copy, after the upgrade**
+(a manual step or a small extension to the rehearsal script): from a
+`git archive ef3178e` source, `flask db upgrade` → exit 0 and still at
+`08920334bccd`; start it on 127.0.0.1 with `STREAKFIT_ENFORCE_DB_HEAD=1` →
+the head check passes; `/health` 200; `/api/admin/reports?status=all` 200.
+Then the release source again: `flask db upgrade` → no-op. No downgrade is
+rehearsed because none is planned.
 
 ## 6. Push and deploy — **OWNER**, one approval each
 
@@ -140,12 +145,11 @@ migration is a single `ALTER … DROP NOT NULL` per column, in one transaction.
 | check | expect |
 |---|---|
 | `/api/build-identity` | `<release-sha>`, `atHead: true`, `latest 08920334bccd`, 26 applied |
-| `/sw.js` | `streakfit-v0924b` |
+| `/sw.js` | `streakfit-v0924c` |
 | `/health` | 200 |
 | `/api/verification/self` | 14 PASS / 1 UNKNOWN, as before |
 | `verify_all.py --base-url https://streakfit.pro` | all pass, **including `auth.delete_account_with_dependent_rows`** (a throwaway `qa_smoke_leaver_*` account that blocks someone and deletes itself) |
-| `/admin` | the two reporting-restriction actions read "…the reported person…" |
-| downgrade-still-possible query (section 2) | 0 |
+| `/admin` | the two reporting-restriction actions read "…the reported person…"; the queue loads (the "holding up an account deletion" count appears only once a refusal has happened) |
 
 The suite's side effects, as last time: 4 `qa_smoke_*` accounts plus one
 `qa_smoke_leaver_*` that deletes itself, one Smoke Test team, and **two smoke
@@ -153,38 +157,36 @@ reports to dismiss in `/admin`** (identify by reporter → reported ids, as in
 audit 13.1). Each report creates a `report_filed` notice, so **two real emails
 arrive** through the live channel; if they are not dismissed within 54 hours,
 `deadline_approaching` and then `overdue` emails follow. While they are
-pending, `qa_smoke_b_*` cannot be deleted (a pending report names it). None
-of this touches the section-2 rollback query: the leaver is not a reporter and
-`qa_smoke_a_*` is never deleted.
+pending, `qa_smoke_b_*` cannot be deleted (a pending report names it), nor
+can `qa_smoke_a_*` (it filed them, and owns the team).
 
-Phone: open `https://streakfit.pro`, reload twice so `v0924b` loads.
+Phone: open `https://streakfit.pro`, reload twice so `v0924c` loads.
 
 ## 8. Rollback — **OWNER**
 
-**While the section-2 query returns 0:**
+Deploy the rollback build. No database change; works whether or not anyone
+has deleted an account since the release.
 
-0. Re-run the section-2 query now. Non-zero: stop, this path is closed.
-1. `flask db downgrade 47f7dc9962e3` against production, **run from the
-   release source** (`$D`, or the Render shell of the release instance) —
-   `4979354` cannot do it: it does not know `08920334bccd` ("Can't locate
-   revision"). Environment: `STREAKFIT_ENFORCE_DB_HEAD` and
-   `STREAKFIT_RETENTION_SWEEPER` **unset**; the direct connection string
-   supplied as in step 4. The running release code then works on the old
-   schema **except** (verified on PostgreSQL): deleting a reporter or
-   appellant returns 500 and rolls back; and, because the downgrade drops
-   `team_challenge.target_left_at`, **team chat for any team with a challenge
-   and creating a challenge return 500** (profile, Daily Mission, team list
-   and team view stay 200). Both end when step 2's deploy is live (about 90 s
-   last time) — so start step 2 immediately after step 1. **If Render restarts the release
-   instance before step 2**, its head check refuses to start it and the site
-   is down until step 2 completes.
-2. Render: Manual Deploy of `4979354`. Its pre-deploy upgrade is a no-op and
-   the head check passes at `47f7dc9962e3`.
-3. Verify as section 7 against the old expectations (`v0923d`, 25 applied).
+1. Make `main` carry the rollback build's exact tree **without a force-push**:
+   ```bash
+   git fetch origin && git switch -c rollback-deploy origin/main
+   git read-tree -u --reset ef3178e       # working tree := rollback build
+   git commit -m "rollback: deploy ef3178e's tree (account-deletion release)"
+   git diff ef3178e HEAD --stat           # MUST print nothing
+   git push origin HEAD:refs/heads/main   # fast-forward
+   ```
+2. Render: **Manual Deploy → that commit.** Expect the Pre-Deploy upgrade to
+   print no "Running upgrade" and the start log to say `Database migration
+   check passed (at head 08920334bccd)`.
+3. Verify: `/api/build-identity` → the new commit, `atHead: true`, latest
+   `08920334bccd`, 26 applied; `/sw.js` → `streakfit-v0924r`; `/health` 200;
+   `/api/verification/self` at its baseline; `/admin` queue loads.
+4. Record it in the release audit. Rolling forward again later is a normal
+   deploy of the fixed release; its upgrade is a no-op.
 
-**Once it is non-zero:** no downgrade. Fix forward, or restore the step-4
-backup into a new Neon branch — which discards every write since the backup,
-including the deletions themselves.
+If the release has to be abandoned for a longer time, `ef3178e` can stay
+deployed indefinitely: its models match the schema, and the migration-parity
+test passes on it.
 
 ## 9. After
 
@@ -227,6 +229,17 @@ Second independent review (2026-09-24), fixed in the final commit:
   `not_a_team_member`, not 500; a reporter filing while deleting in another
   tab gets 404, not 500. **Blocks were already safe** (`create_block` catches
   the IntegrityError; 204).
+
+Third review (2026-09-24), decided and built:
+
+- **Open-ended block:** `/admin` marks a report the first time it holds up an
+  account deletion (no id, no role; the 409 unchanged). Legal holds extending
+  the block, and the block having no limit, are documented in
+  privacy-retention.md.
+- **Refusal wording:** no longer implies a route that does not exist.
+- **Rollback:** by code (`ef3178e`), not by downgrade (section 2). The
+  migration's downgrade is unchanged and drops its columns.
+- **Challenge evidence:** `target_left: true` when its target has gone.
 
 Still open, for the owner:
 

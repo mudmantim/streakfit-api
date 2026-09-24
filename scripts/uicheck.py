@@ -847,6 +847,25 @@ def check_leaving_while_a_report_is_open(b: Browser, base: str, app) -> None:
     check("report" not in err.lower(), "and the message names no report", err[:120])
     still = _api(base, "/api/me", token=kid_token)
     check(still.get("id") == ids["kid"], "and the account is still there")
+    check("from the app" not in err.lower(),
+          "and it does not suggest another way to delete", err[:120])
+
+    # --- the operator is told the report is holding someone up; not who ---
+    b.js("localStorage.removeItem('streakfit_token')")
+    b.goto(f"{base}/admin", wait=2.0)
+    b.js("document.getElementById('secret-input').value = "
+         + json.dumps(secret) + "; loadAll();")
+    time.sleep(2.5)
+    qtext = str(b.js("document.getElementById('moderation-queue').textContent"))
+    check("holding up an account deletion" in qtext and "deletion waiting" in qtext,
+          "/admin shows the report is holding up an account deletion", qtext[:200])
+    b.js("openModerationReport(" + json.dumps(rid) + ")")
+    time.sleep(1.5)
+    detail = str(b.js("document.getElementById('moderation-detail').textContent"))
+    check("waiting on this report since" in detail,
+          "and the report's detail says since when", detail[:160])
+    check(kid not in qtext + detail and owner not in qtext + detail,
+          "and neither names who asked", detail[:160])
 
     # --- the operator decides it; the same button now works ---
     req = urllib.request.Request(f"{base}/api/admin/reports/{rid}/action", method="POST",

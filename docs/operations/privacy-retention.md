@@ -343,7 +343,24 @@ A **team owner** always gets the team answer, whatever else also blocks —
 otherwise an owner, refused either way, could ask repeatedly and watch the
 answer change when a report about them was filed or closed. Everyone else gets
 one answer: code `safety_record`, the message "Your account is linked to a
-safety record we have to keep…", and no detail.
+safety record that has to stay as it is for now, so your account can't be
+deleted yet. Nothing has been changed.", and no detail. It does not say "from
+the app" or point anywhere else: there is no other way to delete an account,
+and the wording must not suggest one.
+
+**How long the block lasts — not bounded.** Nothing closes a report on its
+own: deadlines only raise notices, and a pending report blocks until an
+operator decides it. **A legal hold extends the block beyond the decision**,
+for as long as the hold stays — which has no limit either. A person can
+therefore wait indefinitely, and the app offers them no other route. What
+exists instead is on the operator's side: the first time a person is refused
+because of a report, that report is marked (`report.deletion_requested_at`)
+and `/admin` shows it — a "holding up an account deletion" count in the queue
+header, and "deletion waiting (since …)" on the row and in the detail — for as
+long as the report is still pending or held. The mark records no user id and
+not whether it was the reporter or the person reported; the person's 409 is
+identical with or without it. A team owner's refusal marks nothing (it is
+about the team).
 
 **What a refusal still tells the person, precisely:** that some record is
 keeping the account — refusing at all says that much. A person with no team
