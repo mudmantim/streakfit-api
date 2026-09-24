@@ -4258,12 +4258,22 @@ def delete_my_account():
     # them would tear down a team other people are still using.
     plan = delete_user_account(user_id, dry_run=True)
     if plan.get("blocked"):
+        codes = plan.get("blocker_codes", [])
+        if codes == ["team_owned"]:
+            message = ("You created a team that other people are still using. "
+                       "Hand it over or remove the team first, then you can "
+                       "delete your account.")
+        else:
+            # Not something the person can fix from here, so say so plainly
+            # rather than suggest a step that does not exist.
+            message = ("Your account is linked to a safety record we have to "
+                       "keep, so it can't be deleted from the app yet. Nothing "
+                       "has been changed.")
         return jsonify({
             "error": "account_deletion_blocked",
-            "message": ("You created a team that other people are still using. "
-                        "Hand it over or remove the team first, then you can "
-                        "delete your account."),
+            "message": message,
             "blockers": plan.get("blockers", []),
+            "blocker_codes": codes,
         }), 409
 
     report = delete_user_account(user_id, dry_run=False)
@@ -10465,22 +10475,104 @@ _USER_PRIVATE_DELETES = [
     ("coach_turn",         CoachTurn,        "user_id"),
     ("coach_note",         CoachNote,        "user_id"),
     ("user_filter_unlock", UserFilterUnlock, "user_id"),
+    ("daily_effort",       DailyEffort,      "user_id"),
+    ("team_challenge_completion", TeamChallengeCompletion, "user_id"),
+    # Both directions of a block. A block about a person who no longer exists
+    # protects nobody, and the one this person made is their own private list.
+    ("user_block_made",     UserBlock,       "blocker_user_id"),
+    ("user_block_received", UserBlock,       "blocked_user_id"),
+    # The restriction goes with the account it restricted. The decision itself
+    # survives as a ModerationAction, which is the audit record policy keeps.
+    ("user_restriction",   UserRestriction,  "user_id"),
 ]
+
+# Rows that outlive the person, with the link back to them cut. Team messages,
+# moments and photos are handled separately below, because a photo also loses
+# its pixels; these lose only the pointer.
+#
+# The moderation ones are what policy decision 6 means by "the minimal audit
+# record": that a report existed, its category, its dates, its outcome -- not
+# who it was about once that person has left.
+_USER_LINK_NULLS = [
+    ("team_challenge_created", TeamChallenge,  "created_by_user_id"),
+    ("team_challenge_target",  TeamChallenge,  "target_user_id"),
+    ("report_about",           Report,         "reported_user_id"),
+    ("report_evidence_author", ReportEvidence, "author_user_id"),
+    ("moderation_action_target", ModerationAction, "target_user_id"),
+    ("permission_audit_actor", PermissionAudit, "actor_user_id"),
+]
+
+# Rows that must outlive the person but cannot lose them: the column is NOT
+# NULL, so the only honest answers are a schema change or refusing. Until the
+# owner decides what a deleted reporter, appellant or child looks like in these
+# records, deletion refuses -- with a reason -- rather than destroying an audit
+# trail or failing on a foreign key with a 500.
+_USER_DELETION_BLOCKERS = [
+    ("team_owned",        Team,            "created_by_user_id"),
+    ("report_filed",      Report,          "reporter_user_id"),
+    ("appeal_filed",      Appeal,          "user_id"),
+    ("guardian_link_child",    GuardianLink, "child_user_id"),
+    ("guardian_link_guardian", GuardianLink, "guardian_user_id"),
+    ("consent_child",     Consent,         "child_user_id"),
+    ("permission_audit_subject", PermissionAudit, "subject_user_id"),
+]
+
+# Every foreign key into `user`, by (table, column), must be named in exactly
+# one of the lists above or in the team rows handled by hand. A test compares
+# this against the models and against a migrated PostgreSQL database, so a new
+# foreign key cannot quietly turn account deletion back into a 500.
+_USER_FK_HANDLED_BY_HAND = {
+    ("team_message", "sender_user_id"),
+    ("team_moment", "subject_user_id"),
+    ("team_photo", "sender_user_id"),
+}
+
+
+def _user_fk_classification():
+    """{(table, column): 'delete' | 'null' | 'block' | 'by_hand'}"""
+    out = {}
+    for kind, rows in (("delete", _USER_PRIVATE_DELETES),
+                       ("null", _USER_LINK_NULLS),
+                       ("block", _USER_DELETION_BLOCKERS)):
+        for _label, model, attr in rows:
+            out[(model.__tablename__, getattr(model, attr).property.columns[0].name)] = kind
+    for key in _USER_FK_HANDLED_BY_HAND:
+        out[key] = "by_hand"
+    return out
 
 
 def _account_dependent_counts(user_id):
     """Everything a deletion of this user would touch, by table (read-only)."""
     counts = {}
-    for label, model, attr in _USER_PRIVATE_DELETES:
+    for label, model, attr in _USER_PRIVATE_DELETES + _USER_LINK_NULLS:
         counts[label] = model.query.filter(getattr(model, attr) == user_id).count()
     counts["team_message_authored"] = TeamMessage.query.filter(
         TeamMessage.sender_user_id == user_id).count()
     counts["team_moment_subject"] = TeamMoment.query.filter(
         TeamMoment.subject_user_id == user_id).count()
-    counts["team_owned"] = Team.query.filter(Team.created_by_user_id == user_id).count()
     counts["team_photo_shared"] = TeamPhoto.query.filter(
         TeamPhoto.sender_user_id == user_id, TeamPhoto.deleted_at.is_(None)).count()
+    for label, model, attr in _USER_DELETION_BLOCKERS:
+        counts[label] = model.query.filter(getattr(model, attr) == user_id).count()
     return counts
+
+
+_ACCOUNT_DELETION_BLOCKER_TEXT = {
+    "team_owned": "owns {n} team(s) — supply an explicit team-owner policy to delete",
+    "report_filed": "filed {n} report(s) — a report keeps its reporter until the owner decides how a deleted reporter is recorded",
+    "appeal_filed": "filed {n} appeal(s) — an appeal keeps its appellant until the owner decides how a deleted appellant is recorded",
+    "guardian_link_child": "has {n} guardian link(s) as a child — child-safety records need an owner decision",
+    "guardian_link_guardian": "has {n} guardian link(s) as a guardian — child-safety records need an owner decision",
+    "consent_child": "has {n} consent record(s) — child-safety records need an owner decision",
+    "permission_audit_subject": "has {n} permission-audit row(s) — child-safety records need an owner decision",
+}
+
+
+def _account_deletion_blockers(counts, allow_team_owner=False):
+    """The labels that stop a deletion, in the order a person should hear them."""
+    return [label for label, _model, _attr in _USER_DELETION_BLOCKERS
+            if counts.get(label, 0) > 0
+            and not (label == "team_owned" and allow_team_owner)]
 
 
 def delete_user_account(user_id, allow_team_owner=False, dry_run=True):
@@ -10492,9 +10584,10 @@ def delete_user_account(user_id, allow_team_owner=False, dry_run=True):
     - Team ownership BLOCKS deletion unless allow_team_owner=True is passed as an
       explicit policy (and the caller has already dealt with the owned teams — this
       service never tears down a shared team on its own).
-    - Private rows (challenges, completions, brain-boost, progress, memberships,
-      coach turns/notes) are deleted; team messages authored by / moments about the
-      user have their sender/subject link SET NULL so the shared record survives.
+    - Private rows (_USER_PRIVATE_DELETES) are deleted; team messages, moments and
+      the rows in _USER_LINK_NULLS keep existing with the link to the user cut.
+    - Anything in _USER_DELETION_BLOCKERS refuses the deletion with a reason;
+      `blocker_codes` names which, so a caller can say something useful.
     - Any DB failure rolls the whole thing back and re-raises (no partial state).
     """
     user = db.session.get(User, user_id)
@@ -10503,13 +10596,13 @@ def delete_user_account(user_id, allow_team_owner=False, dry_run=True):
                 "blockers": [], "dry_run": dry_run, "executed": False, "counts": {}}
 
     counts = _account_dependent_counts(user_id)
-    blockers = []
-    if counts["team_owned"] > 0 and not allow_team_owner:
-        blockers.append(f"owns {counts['team_owned']} team(s) — supply an explicit "
-                        "team-owner policy to delete")
+    blocker_codes = _account_deletion_blockers(counts, allow_team_owner)
+    blockers = [_ACCOUNT_DELETION_BLOCKER_TEXT[code].format(n=counts[code])
+                for code in blocker_codes]
 
     report = {"user_id": user_id, "found": True, "username": user.username,
               "counts": counts, "blocked": bool(blockers), "blockers": blockers,
+              "blocker_codes": blocker_codes,
               "dry_run": dry_run, "executed": False}
     if dry_run or blockers:
         return report
@@ -10529,6 +10622,10 @@ def delete_user_account(user_id, allow_team_owner=False, dry_run=True):
              TeamPhoto.caption: None, TeamPhoto.sender_user_id: None,
              TeamPhoto.deleted_at: datetime.utcnow()},
             synchronize_session=False)
+        # Shared and moderation records stay; only the pointer to this person goes.
+        for _label, model, attr in _USER_LINK_NULLS:
+            model.query.filter(getattr(model, attr) == user_id).update(
+                {getattr(model, attr): None}, synchronize_session=False)
         # Delete private data, then the user.
         for _label, model, attr in _USER_PRIVATE_DELETES:
             model.query.filter(getattr(model, attr) == user_id).delete(synchronize_session=False)

@@ -1,0 +1,88 @@
+"""Account deletion against every foreign key into `user`.
+
+DELETE /api/me shipped returning 500 on PostgreSQL for anyone who had ever set
+a daily effort level: `daily_effort.user_id` references `user`, the deletion
+service did not know the table existed, and SQLite -- which the rest of this
+suite runs on -- ignores foreign keys unless asked. These tests ask.
+
+The PostgreSQL run of the same scenario is tests/test_account_deletion_postgres.py.
+"""
+import pytest
+from sqlalchemy import event
+
+import app as appmod
+from app import db
+from tests.account_deletion_scenario import run
+
+
+def _user_foreign_keys():
+    return sorted((t.name, c.name)
+                  for t in db.metadata.sorted_tables for c in t.columns
+                  if any(fk.column.table.name == 'user' for fk in c.foreign_keys))
+
+
+def test_every_foreign_key_into_user_has_a_deletion_rule():
+    """A new column pointing at `user` must be given a rule -- delete, cut the
+    link, or block -- before account deletion can be trusted with it."""
+    rules = appmod._user_fk_classification()
+    fks = _user_foreign_keys()
+    assert sorted(rules) == fks, (
+        f"no rule: {sorted(set(fks) - set(rules))}; "
+        f"rule for a key that does not exist: {sorted(set(rules) - set(fks))}")
+
+
+def test_no_foreign_key_has_two_rules():
+    seen = []
+    for rows in (appmod._USER_PRIVATE_DELETES, appmod._USER_LINK_NULLS,
+                 appmod._USER_DELETION_BLOCKERS):
+        for _label, model, attr in rows:
+            seen.append((model.__tablename__,
+                         getattr(model, attr).property.columns[0].name))
+    seen += list(appmod._USER_FK_HANDLED_BY_HAND)
+    assert len(seen) == len(set(seen))
+
+
+def test_a_nullified_link_is_actually_nullable():
+    """Cutting a link on a NOT NULL column would fail exactly like the bug."""
+    for _label, model, attr in appmod._USER_LINK_NULLS:
+        assert getattr(model, attr).property.columns[0].nullable, (model, attr)
+
+
+@pytest.fixture()
+def fk_app(app):
+    """The app fixture, with SQLite enforcing foreign keys on every connection."""
+    def _on(dbapi_conn, _record):
+        dbapi_conn.execute('PRAGMA foreign_keys=ON')
+    event.listen(db.engine, 'connect', _on)
+    db.session.remove()
+    db.engine.dispose()
+    try:
+        assert db.session.execute(db.text('PRAGMA foreign_keys')).scalar() == 1
+        yield app
+    finally:
+        db.session.remove()
+        event.remove(db.engine, 'connect', _on)
+        db.engine.dispose()
+
+
+def test_the_production_bug_a_daily_effort_no_longer_stops_deletion(fk_app):
+    client = fk_app.test_client()
+    client.post('/api/register', json={'username': 'effortful', 'password': 'WalkTest123!'})
+    tok = client.post('/api/login', json={'username': 'effortful',
+                                          'password': 'WalkTest123!'}).get_json()['access_token']
+    h = {'Authorization': f'Bearer {tok}'}
+    uid = appmod.User.query.filter_by(username='effortful').one().id
+    import datetime
+    db.session.add(appmod.DailyEffort(user_id=uid, date=datetime.date(2026, 9, 1),
+                                      level='easy'))
+    db.session.commit()
+    resp = client.delete('/api/me', json={'password': 'WalkTest123!'}, headers=h)
+    assert resp.status_code == 200, resp.get_json()
+    db.session.remove()
+    assert db.session.get(appmod.User, uid) is None
+
+
+def test_deletion_scenario_with_foreign_keys_enforced(fk_app):
+    results = run(appmod, fk_app.test_client())
+    failed = {name: detail for name, (ok, detail) in results.items() if not ok}
+    assert not failed, failed

@@ -11,8 +11,10 @@ Classification:
 
 Behavior:
   * Dry run lists both groups and changes nothing.
-  * --execute deletes ONLY the safe group, in a single all-or-nothing transaction,
-    then re-queries and reports both groups. Blocked accounts are left in place.
+  * --execute deletes ONLY the safe group, ONE TRANSACTION PER ACCOUNT (each
+    account is all-or-nothing; the run as a whole is not), then re-queries and
+    reports both groups. Blocked accounts -- team owners, and anyone who filed
+    a report or appeal -- are left in place, with the reason.
   * Aborts entirely only if the match count exceeds a sanity cap (a matching bug
     at scale would be dangerous). Touches no migrations and no app behavior.
 

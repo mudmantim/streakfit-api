@@ -26,7 +26,7 @@ Exit codes: `0` all passed, `1` at least one check failed, `2` a setup step (e.g
 
 | Module | Covers |
 |---|---|
-| `auth.py` | Register, login, `/api/me`, duplicate-username and wrong-password rejection |
+| `auth.py` | Register, login, `/api/me`, duplicate-username and wrong-password rejection, and `DELETE /api/me` for a throwaway account that holds a block (deletes itself) |
 | `teams.py` | Create, join, roster (names + creator flag), bad-code and duplicate-join rejection |
 | `mission.py` | Daily Mission completion, streak/total-missions stats, and that a refused completion is reported as an error and counts for nothing |
 | `campfire.py` | Cumulative team mission counter and derived stage |
