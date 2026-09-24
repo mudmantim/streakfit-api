@@ -384,28 +384,42 @@ def main():
         return lambda c: c.post(f'/api/admin/reports/{pid}/action',
                                 json={'action': 'dismiss', 'note': 'race'}, headers=H)
 
+    # 11a. an operator is deciding the reporter's report as they try to go:
+    #      the report is still pending when they ask, so they are refused at
+    #      once (no wait); once the decision lands, the same request succeeds.
     filer, fh = person('pfiler')
     about, _ = person('pabout')
     pid, rid = pending_report_by(filer, about)
     b1, b2, waited = race(A, dismiss(pid), delete_me(fh))
     with A.app.app_context():
         r = db.session.get(A.Report, rid)
-        check('11a decision first: the deletion waited, then succeeded',
-              waited and (_status(b1), _status(b2)) == (200, 200)
-              and r.status == 'closed' and r.reporter_user_id is None,
-              (waited, _status(b1), _status(b2), r.status))
-    filer, fh = person('pfiler')
-    about, _ = person('pabout')
-    pid, rid = pending_report_by(filer, about)
-    b1, b2, waited = race(A, delete_me(fh), dismiss(pid))
+        check('11a mid-decision: decision 200, deletion refused 409 safety_record',
+              (_status(b1), _status(b2)) == (200, 409)
+              and (b2['resp'].get_json() or {}).get('blocker_codes') == ['safety_record']
+              and r.status == 'closed', (_status(b1), _status(b2), r.status))
     with A.app.app_context():
+        again = A.app.test_client().delete('/api/me', json={'password': PASSWORD}, headers=fh)
         r = db.session.get(A.Report, rid)
-        body = b1['resp'].get_json() if 'resp' in b1 else {}
-        check('11b deletion first: refused (report pending), then the decision lands',
-              (_status(b1), _status(b2)) == (409, 200)
-              and body.get('blocker_codes') == ['safety_record']
-              and r.status == 'closed' and r.reporter_user_id == filer,
-              (_status(b1), _status(b2), r.status))
+        check('11a once decided, the same deletion succeeds',
+              again.status_code == 200 and r.reporter_user_id is None, again.status_code)
+
+    # 11b/c. a reporter files a new report from another tab while deleting
+    # (b files about a: a created the team, so a's own deletion is refused anyway)
+    a, ah, b, bh, tid = teammates()
+    b1, b2, waited = race(A, file_about(bh, a, tid), delete_me(bh))
+    with A.app.app_context():
+        check('11b filing first: the deletion waited, then was refused (their report is pending)',
+              waited and (_status(b1), _status(b2)) == (201, 409),
+              (waited, _status(b1), _status(b2)))
+    a, ah, b, bh, tid = teammates()
+    before = None
+    with A.app.app_context():
+        before = A.Report.query.count()
+    b1, b2, waited = race(A, delete_me(bh), file_about(bh, a, tid))
+    with A.app.app_context():
+        check('11c deletion first: the filing waited, then 404 (their account is gone), nothing written',
+              waited and (_status(b1), _status(b2)) == (200, 404)
+              and A.Report.query.count() == before, (waited, _status(b1), _status(b2)))
 
     print(json.dumps(results, indent=1))
     return 0 if all(v['ok'] for v in results.values()) else 1
