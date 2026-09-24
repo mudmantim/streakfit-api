@@ -1042,3 +1042,94 @@ release. `streakfit-backup.sh` has no revision defaults.
 3. Owner decision on the journal exposure (10.2).
 4. Owner approval of the push and deploy (6.8, release `81df48d`, expected
    `sw.js` `streakfit-v0923d`; rollback: redeploy `4700708`, no downgrade).
+
+---
+
+## 11. Fresh production backup — created and RESTORE-VERIFIED, 2026-09-23 21:46 EDT
+
+Owner-authorised. Nothing deployed; no production setting or data changed;
+the Neon snapshot and the journal untouched.
+
+### 11.1 How it ran, and how the credentials stayed private
+
+Claude ran `streakfit-backup.sh`, then the corrected `streakfit-rehearse.sh`
+on the new file, from a one-off launcher in the session scratchpad. The owner
+supplied both credentials only into prompts on their own desktop:
+
+- **Neon connection string** — pasted into a hidden zenity entry; held only in
+  the launcher's environment for the backup script (which keeps it out of
+  argv), then unset. Never printed, stored or logged; the assistant never saw
+  it. Direct host `ep-odd-star-ajye3lag`.
+- **Backup passphrase** — typed/pasted by the owner into gpg's own GNOME
+  pinentry: twice to encrypt, once for the backup's verification, once for the
+  restore.
+- Clipboard cleared on exit (verified empty).
+
+**Three earlier attempts failed safely** (`gpg: cancelled by user`, no file
+produced, connection string discarded). Cause, the assistant's own: GNOME's
+pinentry grabs keyboard and mouse, so the owner could not reach the password
+manager once it opened, and the launcher had cleared the clipboard right after
+the connection-string step, wiping a passphrase already copied. Fixed by a
+non-locking "copy your passphrase now" pause before any gpg prompt and
+clearing the clipboard only at the end.
+
+### 11.2 The backup
+
+| | |
+|---|---|
+| **File** | `~/backups/streakfit/streakfit-neondb-production-20260924T014554Z.dump.gpg` |
+| **SHA-256** | `34f43fb44f45a29910fc6380164ec71c91c1f1f8eb505dc04cb1663f3769bb98` |
+| Size / mode | 55,431 bytes / `600` |
+| Encryption | gpg symmetric, AES-256, `--no-symkey-cache` |
+| Backup script's check | pg_dump exit 0, gpg exit 0; re-decrypt passes gpg's integrity check; pg_restore parses it (45 table-data entries, core tables present) |
+
+### 11.3 The restore rehearsal — ALL CHECKS PASSED
+
+Corrected script (section 10.3), `SFRH_BEFORE=47f7dc9962e3`, application
+source = release `72a45d7`:
+
+| step | result |
+|---|---|
+| Checksum pinned | matches `34f43fb4…`; **unchanged** at exit |
+| Database | PostgreSQL 17.10 in RAM, bound 127.0.0.1:55434 |
+| Full restore | gpg exit 0, pg_restore exit 0, **0 errors, 0 warnings** |
+| Restored revision | **`47f7dc9962e3`** = production head; 36 tables |
+| Data present | aggregate counts only; 180 accounts, matching production's own self-check |
+| Migrations | 0 pending, 0 applied, head reached |
+| Schema vs models | **0 differences** |
+| Release app on the restored data | started; **listening on 127.0.0.1:5094 only**; 25 migrations at head; content and exercises load |
+| Cleanup | 0 containers, 0 listeners, 0 temp files, 0 password directories, no processes |
+
+App self-check FAIL/UNKNOWN for email channel, coach key and evidence key are
+expected — those are deliberately unset. Its `retention.*` and
+`delivery_worker` PASS lines read **production's recorded runs, restored with
+the data**, not activity during the rehearsal (the sweeper was unset).
+
+**Conclusion: a fresh, encrypted production backup exists, taken at the
+current production revision, proven to decrypt, restore completely and serve
+the release candidate.** The encrypted `pg_dump` is the recovery point for
+this deploy (Neon's only snapshot predates the migrations — 10.1).
+
+### 11.4 Remaining concerns
+
+1. **Retention of this file.** It holds real user data, including children's
+   age bands, guardian links and consent records. The backup script says to
+   **delete it by 2026-10-05**, or once no longer needed, because holding it
+   longer undoes the 30-day deletion promise: `shred -u` on the file. The same
+   question applies to the never-expiring Neon snapshot and to the three older
+   dumps.
+2. **The passphrase.** The rehearsal proves that what was typed decrypts the
+   file. Only the owner can confirm that the passphrase is the one saved in the
+   password manager.
+3. **Journal exposure** (10.2) — still present, unattributed, unresolved.
+4. The launcher was a session-scratch helper, not kept. Its two lessons (no
+   clipboard clearing mid-flow; a pause before screen-locking prompts) belong in
+   `streakfit-backup.sh` if this becomes routine.
+
+### 11.5 Remaining deployment blockers
+
+- **Backup: cleared.**
+- **Owner approval of the push and deploy** — release `72a45d7` (application
+  code identical to `81df48d`), fast-forward of `4700708`; expected `sw.js`
+  `streakfit-v0923d`; rollback: redeploy `4700708`, no downgrade (6.8).
+- Journal exposure: an owner decision; it does not block this code-only deploy.
