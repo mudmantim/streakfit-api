@@ -914,3 +914,131 @@ Owner summary: *"All steps passed, Rickie hides and returns correctly."*
 **Release state:** `integrate-product-completion`, clean; production still
 `4700708` as last verified; nothing pushed, merged or deployed. Remaining steps
 are the owner checks in 7.5, items 3–10.
+
+---
+
+## 10. Production pre-deployment verification and rehearsal tooling — 2026-09-23, night
+
+Read-only. Nothing pushed, merged, deployed or changed in production; no
+production data, credentials, backup or restore touched.
+
+### 10.1 Verified production facts
+
+Owner-verified (not repeated here): Render's `DATABASE_URL` host is endpoint
+**`ep-odd-star-ajye3lag`**, **direct** (no `-pooler`), in Neon project
+**`dark-sound-88083345`**, branch **`production`**.
+
+Verified by Claude, read-only, via the owner's signed-in browser (secret
+values never revealed or read) and public endpoints:
+
+| item | observed |
+|---|---|
+| **Production baseline** | **`4700708`** — `/api/build-identity` `gitSha 4700708bca3b`, `gitBranch main`, `environment production`, migrations `atHead: true`, `latest 47f7dc9962e3`, 25 applied; Render shows `4700708` **Live**, deployed manually 1 day ago |
+| Production service worker | `streakfit-v0922` |
+| **Release candidate** | **`81df48d`** on `integrate-product-completion`; clean; fast-forward of `origin/main` (`4700708`, fetched) |
+| Git remote vs Render source | both `mudmantim/streakfit-api` |
+| **Render Auto-Deploy** | **Off**; PR previews Off |
+| Render build | branch `main`, no root directory, `pip install -r requirements.txt` |
+| Render pre-deploy / start | `flask db upgrade` / `STREAKFIT_ENFORCE_DB_HEAD=1 STREAKFIT_RETENTION_SWEEPER=1 gunicorn app:app` (flags inline) |
+| Render health check / region | `/health` / Ohio |
+| Environment | 14 variables, names only (values stayed masked); neither boot flag set globally |
+| **Shared rate limiting** | **Operational.** `RATELIMIT_STORAGE_URI` is set, and `/api/verification/self` reports `ratelimit.shared_storage` **PASS — "shared backend counting (redis)"**. Phase C2 is done; sections 6.7 and 7.4 listing it as open are **superseded** |
+| Production self-check | 14 PASS, 1 UNKNOWN (`coach.memory_writes`: none since boot — expected). Evidence key `235efc374d3363a7` PASS; delivery worker and retention sweeper running |
+| **Neon recovery window** | **6 hours** (Free plan maximum) |
+| **Neon snapshot** | **1**, branch `production`, 2 days old, 32.9 MB, never expires — taken 2026-09-21, **before** the Phase B migrations. Restoring it would roll back two days of data **and** the schema. The Free plan allows only one snapshot; a fresh one requires deleting it or upgrading. **The encrypted `pg_dump` is the real recovery point.** |
+| Newest encrypted dump | `streakfit-neondb-production-20260922T142715Z.dump.gpg` (2026-09-22 10:27) — predates this release; not restore-tested since the migrations |
+
+### 10.2 Journal exposure — unconfirmed and unresolved
+
+`streakfit-backup.sh` records that runs on 2026-09-21 and 2026-09-22 left the
+unencrypted (compressed) `-Fc` dump in the user journal before
+`--log-driver=none` was added. Metadata only, no contents read: the user
+journal holds **318 `conmon` entries** between 2026-09-21 and 2026-09-23 12:00
+and retains history back to 2026-03-12, so nothing has rotated out. The
+entries carry no container name, so attributing them to the dump runs would
+require reading them — **not done**. Status: **present, unattributed,
+unresolved.** Remediation is an owner decision (it is irreversible and
+journal-wide).
+
+### 10.3 `streakfit-rehearse.sh` — corrected and validated
+
+The script lives in `~/backups/streakfit/`, outside the repository on purpose
+(custody tooling beside the encrypted artefacts), and that directory is not a
+git repository. The change is therefore recorded here instead of committed:
+
+| | SHA-256 |
+|---|---|
+| original, preserved read-only as `streakfit-rehearse.sh.orig-20260923` | `dc8303dc4bf0f010f642ba5cd778e122f2b7232b513be5de5633924b6d0c719d` |
+| corrected `streakfit-rehearse.sh` | `2fbc7ce4ff5ed9d6015b9c20f5f259b8f5270aec21ad89984ab09eaf1f5413b4` |
+
+**Changes:**
+
+1. **App bound to 127.0.0.1.** Step 7 ran `python app.py`, whose `__main__`
+   binds `0.0.0.0`; with the Wi-Fi zone allowing 1025–65535, restored
+   production data was reachable from the home network. Now `flask run --host
+   127.0.0.1 --no-reload --no-debugger`, and the script **measures** every
+   listener on the port and fails if any is not loopback.
+2. **Busy-port refusal.** It refuses to start if 55434 or 5094 is already in
+   use; otherwise its checks could have talked to another process and reported
+   it as the restored copy.
+3. **No hardcoded app secrets.** `SECRET_KEY`/`JWT_SECRET_KEY` were the literal
+   `rehearsal-only`; now 32 random bytes per run.
+4. **`RATELIMIT_STORAGE_URI` unset** with the other outbound integrations.
+5. **No outdated silent defaults.** `SFRH_BACKUP`, `SFRH_SHA` and `SFRH_BEFORE`
+   are **required** (usage printed, exit 2). The defaults were a backup file
+   that no longer exists, its checksum, `q1r2s3t4u5v6` and "12 pending". The
+   target head and the pending count are now **derived from the release's own
+   migration chain**; an unknown `SFRH_BEFORE`, a multi-head chain, or an
+   `SFRH_AFTER` that disagrees stops the run.
+6. **A latent abort fixed.** With 0 pending migrations, `grep 'Running
+   upgrade'` matched nothing and, under `set -e -o pipefail`, silently ended
+   the script after step 5 with exit 1. It had only ever run with 12 pending;
+   **today's rehearsal would have hit this.**
+7. **Cleanup always completes.** A Ctrl-C during cleanup used to abandon it
+   and leave the restored-data container running on 127.0.0.1:55434 plus its
+   password directory; an interrupt reaching `podman rm` left the container
+   stopped but not removed. Cleanup now ignores INT/TERM, runs `podman rm`
+   in its own session with a retry, and reports **✗ CONTAINER … STILL EXISTS**
+   if it survives.
+8. **Temp files removed on every exit path** (`/tmp/.sfrh_restore_err_*`,
+   `/tmp/.sfrh_app_*`); they used to survive an interrupt.
+9. **Failure output redacts `[parameters: …]`** (row values) from migration and
+   app errors.
+10. `gpg --no-symkey-cache`, matching the other custody scripts.
+
+Unchanged by design: RAM-only database, database port on 127.0.0.1, checksum
+pinning, aggregate counts only, `--log-driver=none`, `ulimit -c 0`, passphrase
+entered only at gpg's prompt.
+
+**Validated locally with SYNTHETIC data only** — empty databases built by the
+release's migrations, dumped and encrypted to a throwaway test key in the
+session scratchpad. No production connection or data:
+
+| test | result |
+|---|---|
+| no required variables | stops with usage, exit 2, nothing started |
+| fixture at `47f7dc9962e3`, `SFRH_BEFORE=47f7dc9962e3` | **ALL CHECKS PASSED**, 0 pending derived and applied, schema = models, app on **127.0.0.1:5094 only** |
+| fixture at `q1r2s3t4u5v6` | **ALL CHECKS PASSED**, **12 pending derived** and applied |
+| wrong checksum | stops before any container |
+| `SFRH_BEFORE` not in the chain | stops with a clear reason |
+| backup at head but `SFRH_BEFORE=q1r2…` | fails: revision and count mismatch, "Do NOT deploy" |
+| port 5094 occupied | stops, refuses to proceed |
+| SIGINT at 3, 5, 7.6–8.6 s (restore, migration, app, result, cleanup) | every run: 0 temp files, 0 containers, 0 listeners, 0 password directories |
+
+The app's own self-check reports FAIL/UNKNOWN for email, coach and the
+rate-limit store in a rehearsal; that is expected (they are deliberately
+disabled) and the script does not gate on it.
+
+**Not changed, noted:** `streakfit-coachnote-audit.sh` and
+`streakfit-premigration.sh` belong to the completed Phase B migration;
+the first still defaults to the deleted `…185616Z` file. Not needed for this
+release. `streakfit-backup.sh` has no revision defaults.
+
+### 10.4 Remaining before deployment
+
+1. Fresh encrypted production backup (owner runs it; credentials private).
+2. Restore rehearsal of that backup with the corrected script
+   (`SFRH_BEFORE=47f7dc9962e3`, 0 pending) — must end **ALL CHECKS PASSED**.
+3. Owner decision on the journal exposure (10.2).
+4. Owner approval of the push and deploy (6.8, release `81df48d`, expected
+   `sw.js` `streakfit-v0923d`; rollback: redeploy `4700708`, no downgrade).
