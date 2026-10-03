@@ -266,11 +266,18 @@ class Browser:
                 if not any(needle in _cmdline(pid) for pid in os.listdir("/proc") if pid.isdigit()):
                     break
                 time.sleep(0.1)
-            for _ in range(10):
-                shutil.rmtree(self.profile, ignore_errors=True)
+            # Absent for a full second, not just once: the network service
+            # can write Default/ a little later still (RC-B1 W9 found one).
+            quiet = 0
+            for _ in range(40):
+                if os.path.exists(self.profile):
+                    shutil.rmtree(self.profile, ignore_errors=True)
+                    quiet = 0
+                else:
+                    quiet += 1
+                    if quiet >= 5:
+                        break
                 time.sleep(0.2)
-                if not os.path.exists(self.profile):
-                    break
 
 
 def _cmdline(pid: str) -> bytes:
