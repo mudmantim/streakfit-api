@@ -477,7 +477,9 @@ def check_guest_gets_the_celebration(b: Browser, base: str) -> None:
           f"showed {[r['xp'] for r in seen if r['xp']]}")
     banner = b.js("(()=>{const e=document.querySelector('.guest-complete-banner');"
                   " return e ? e.innerText : '';})()") or ""
-    check("Day 1 Complete" in banner, "the guest completion banner appears at 5/5",
+    # The title changed with RC-B1 D5 ("Day 1 Complete" promised a streak a
+    # guest does not have). What this asserts is that the banner appears.
+    check("Create Account" in banner, "the guest completion banner appears at 5/5",
           f"banner was {banner[:60]!r}")
 
 
@@ -1874,6 +1876,10 @@ def check_guest_finish_and_sign_up_tell_the_truth(b: Browser, base: str) -> None
 
     text = b.js("(()=>{const g=document.querySelector('.guest-complete-banner');"
                 " return g ? (g.textContent||'').replace(/\\s+/g,' ').trim() : '';})()")
+    strip = b.js("(()=>{const e=document.querySelector('.today-streak-none');"
+                 " return e ? e.textContent : '';})()") or ""
+    check(not re.search(r"streak starts here", str(strip), re.I),
+          "the strip above it does not say a streak started either", str(strip))
     if not check(bool(text), "the guest completion banner appears after 5/5"):
         return
     promises = re.search(r"save your streak|saved? your progress|streak starts here|"
@@ -1908,6 +1914,14 @@ def check_guest_finish_and_sign_up_tell_the_truth(b: Browser, base: str) -> None
     check(state.get("cachedDone") is None and state.get("toasts") == 0,
           "and nothing else from the guest session carries over",
           json.dumps(state))
+    # An empty queue is not enough: a guest toast left on screen with its
+    # timers cleared stayed forever and blocked every later toast.
+    shown = b.js("(()=>{const t=document.getElementById('rickie-reaction');"
+                 " return !!t && !t.hidden;})()")
+    check(not shown, "no guest toast is left on screen in the new account")
+    after = tap_and_read(b, settle=1.5)
+    check(after["toast"], "and the new account's own first tap still gets a Rickie line",
+          json.dumps(after))
 
 
 def _spots_he_may_stand_in_that_are_not_clear(b: Browser, tries: int = 8):

@@ -3148,8 +3148,9 @@ function _renderTodayStrip(daily) {
     // StreakFit, by design.
     var none = document.createElement('p');
     none.className = 'today-streak-none';
+    // A guest has no streak to start: nothing in guest mode is saved (R1 D5).
     none.textContent = daily.completed_count >= 5
-        ? 'Day 1. The streak starts here.'
+        ? (isGuest ? 'Today’s five, done.' : 'Day 1. The streak starts here.')
         : 'Finish all five to start a streak.';
     slot.appendChild(none);
 }
@@ -4425,6 +4426,13 @@ function _resetAccountState() {
     if (_rickieReactionHideTimer) { clearTimeout(_rickieReactionHideTimer); _rickieReactionHideTimer = null; }
     if (_rickieReactionRemoveTimer) { clearTimeout(_rickieReactionRemoveTimer); _rickieReactionRemoveTimer = null; }
     _rickieToastQueue = [];
+    // With its timers cleared, a toast on screen would never hide, and the
+    // player would believe it was still busy and play nothing again. Leaving
+    // guest mode mid-toast did exactly that (RC-B1 W1 review); so would
+    // logging out mid-toast.
+    _rickieToastPlaying = false;
+    var toastEl = document.getElementById('rickie-reaction');
+    if (toastEl) { toastEl.hidden = true; toastEl.classList.remove('leaving', 'celebrate'); }
 }
 
 
