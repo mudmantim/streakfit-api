@@ -6088,11 +6088,10 @@ def _filter_is_usable(user, user_id, filter_key):
 #
 # Team member cap = highest plan tier held by any CURRENT member of that
 # team (TEAM_SYSTEM_BASELINE.md Section 12). Team-count cap = the joining
-# user's own tier. Neither cap check uses row locking (contrast check_in's
-# SELECT...FOR UPDATE) — a genuine race exists if two people join the same
-# near-full team at the exact same instant. Accepted, not fixed, for this
-# foundations sprint: low-traffic, low-probability, not the "no admin"-style
-# decision this project reopens without a real incident driving it.
+# user's own tier. RC-B2a (D28): joins lock the person, then the team, so the
+# member cap is checked against a count nobody can change underneath it. The
+# team-count cap is None on every plan (below); if it ever returns, create_team
+# must take _lock_user first, as join_team does.
 
 TEAM_FREE_MEMBER_CAP = 8
 TEAM_PLUS_MEMBER_CAP = 25
@@ -6591,6 +6590,13 @@ def join_team(team_id):
 @jwt_required()
 def leave_team(team_id):
     user_id = int(get_jwt_identity())
+    # Same order as join (person, then team): a leave waits for the person's
+    # in-flight completion or join instead of landing in the middle of it, so
+    # team history never shows a member_left followed by that member's own
+    # campfire log or challenge (RC-B2a review RV-FIRE-1 / teams R2).
+    if _lock_user(user_id) is None:
+        abort(404)
+    _lock_team(team_id)
 
     membership = db.session.execute(
         db.select(TeamMembership).where(TeamMembership.team_id == team_id, TeamMembership.user_id == user_id)
@@ -6615,14 +6621,19 @@ def remove_team_member(team_id, member_user_id):
     Removal is a private safety action between the creator and whoever's
     being removed, not something to broadcast to the rest of the team."""
     user_id = int(get_jwt_identity())
+    if member_user_id == user_id:
+        return jsonify({"error": "Use Leave Team to remove yourself"}), 400
 
-    team = db.session.get(Team, team_id)
+    # Both people (ascending id), then the team: the removal waits for the
+    # member's in-flight completion and for any in-flight join, so "removed"
+    # is never answered before something of theirs lands (RC-B2a review).
+    for uid in sorted((user_id, member_user_id)):
+        _lock_user(uid)
+    team = _lock_team(team_id)
     if not team:
         abort(404)
     if team.created_by_user_id != user_id:
         return jsonify({"error": "Forbidden"}), 403
-    if member_user_id == user_id:
-        return jsonify({"error": "Use Leave Team to remove yourself"}), 400
 
     membership = db.session.execute(
         db.select(TeamMembership).where(TeamMembership.team_id == team_id, TeamMembership.user_id == member_user_id)
@@ -6641,7 +6652,13 @@ def remove_team_member(team_id, member_user_id):
 def rotate_team_invite(team_id):
     user_id = int(get_jwt_identity())
 
-    team = db.session.get(Team, team_id)
+    # Person, then team -- the team lock every join takes before it reads the
+    # invite code. A join already in flight finishes first; once this commits,
+    # no join can still be holding the old code (RC-B2a review, teams R1:
+    # without it a join paused after reading the code got in AFTER the creator
+    # was told the code was dead).
+    _lock_user(user_id)
+    team = _lock_team(team_id)
     if not team:
         abort(404)
     if team.created_by_user_id != user_id:
@@ -11096,7 +11113,12 @@ def _withdraw_appeals_of(user_id):
 
 
 def _lock_moderation_subject(user_id):
-    """FOR KEY SHARE on a person's row before a write that names them.
+    """Row lock on a person before a write that names them.
+
+    NOTE (RC-B2a D38): this has always emitted FOR NO KEY UPDATE, not the FOR
+    KEY SHARE this docstring used to claim -- key_share without read. Stronger
+    than intended, never weaker: two moderation writes naming the same person
+    queue for one short transaction. Behaviour deliberately left unchanged.
 
     The other half of the FOR UPDATE in delete_user_account. Returns False if
     the person no longer exists -- which, after waiting on the lock, is how a
@@ -11762,8 +11784,12 @@ def not_found(e):
 def _database_busy(e):
     """A bounded lock wait (`_lock_user`) that ran out answers 503 in JSON."""
     db.session.rollback()
-    if getattr(getattr(e, 'orig', None), 'pgcode', None) == '55P03':      # lock_not_available
-        app.logger.warning('event=lock_timeout path=%s', request.path)
+    code = getattr(getattr(e, 'orig', None), 'pgcode', None)
+    # 55P03 lock_not_available (our lock_timeout); 40P01 deadlock_detected --
+    # PostgreSQL already rolled the victim back, so a retry is safe.
+    if code in ('55P03', '40P01'):
+        app.logger.warning('event=%s path=%s',
+                           'lock_timeout' if code == '55P03' else 'deadlock', request.path)
         return jsonify({"error": "busy", "message": "That took too long. Try again in a moment."}), 503
     app.logger.error('Unhandled database error: %s', e, exc_info=True)
     return jsonify({"error": "Internal server error"}), 500
@@ -11839,8 +11865,10 @@ def _forget_inherited_db_connections():
     try:
         with app.app_context():
             db.engine.dispose(close=False)
-    except Exception:       # never let a fork hook kill a worker at birth
-        pass
+    except Exception as exc:    # never let a fork hook kill a worker at birth...
+        # ...but never fail silently either: this is D37 coming back.
+        logging.getLogger(__name__).critical(
+            'event=fork_pool_reset_failed error=%s', type(exc).__name__)
 
 
 os.register_at_fork(after_in_child=_forget_inherited_db_connections)

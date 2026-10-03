@@ -68,6 +68,12 @@ SCENARIOS = [
     'X2_delete_then_complete',
     'X3_complete_then_delete',
     'X4_report_during_completion',
+    'Y1_rotate_during_join',
+    'Y2_leave_during_completion',
+    'Y3_hold_between_awards',
+    'Y4_teammate_reference_not_queued',
+    'Y5_completion_backstop_executed',
+    'Y6_join_backstop_executed',
 ]
 
 

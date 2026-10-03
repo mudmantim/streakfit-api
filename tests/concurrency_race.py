@@ -114,7 +114,7 @@ def _observe(observer, pid1, pid2):
             return None
         wtype, wevent, state, query, blockers = row
         detail = {'wait_event_type': wtype, 'wait_event': wevent, 'state': state,
-                  'query': (query or '')[:300], 'blockers': list(blockers or [])}
+                  'query': (query or '')[:2000], 'blockers': list(blockers or [])}
         if wtype == 'Lock':
             locks = c.execute(text(
                 "select l.locktype, l.mode, l.granted, c2.relname "
@@ -265,11 +265,22 @@ def main():
         if only and not any(name.startswith(o) for o in only):
             return
         try:
-            results[name] = fn()
+            r = fn()
+            # A hold released by its safety timeout is never a pass, whatever
+            # else the scenario saw (W10 audit: enforce, don't just record).
+            if r.get('t1_released_by_timeout'):
+                r['fixed_ok'] = False
+            results[name] = r
         except Exception:
             results[name] = {'fixed_ok': False, 'error': traceback.format_exc()[-2000:]}
 
-    LOCK_USER = r'FOR (NO KEY )?UPDATE'
+    # Exact lock strength AND table: _lock_user / _lock_team emit FOR NO KEY
+    # UPDATE OF <table>; account deletion emits plain FOR UPDATE. A pattern that
+    # accepted either could not tell them apart -- the cache-key bug this suite
+    # caught was exactly one turning into the other.
+    LOCK_USER = r'FOR NO KEY UPDATE OF "user"'
+    LOCK_TEAM = r'FOR NO KEY UPDATE OF team'
+    DELETE_LOCK = r'"user"\.id = \d+ FOR UPDATE\s*$'     # pg_stat_activity shows literals
 
     # D26 — two different acorn filters bought together with too few acorns.
     def d26():
@@ -282,7 +293,9 @@ def main():
         earned, spent = totals(uid)[1:]
         cost = scalar('select coalesce(sum(acorns_spent),0) from user_filter_unlock where user_id=:u', u=uid)
         inv = {'spent_le_total': spent <= earned, 'spent_eq_unlocks': spent == cost,
-               'granted_le_earned': cost <= earned, 'no_5xx': no_5xx(ev)}
+               'granted_le_earned': cost <= earned, 'no_5xx': no_5xx(ev),
+               'exactly_one_bought': [ev.get('t1', {}).get('status'),
+                                      ev.get('t2', {}).get('status')].count(200) == 1}
         ev.update(state={'acorns_total': earned, 'acorns_spent': spent, 'unlock_cost_sum': cost},
                   invariants=inv,
                   intended_wait=intended_wait(ev, 'user', LOCK_USER))
@@ -338,7 +351,7 @@ def main():
         count = scalar('select count(*) from team_membership where team_id=:t', t=team_id)
         inv = {'at_most_cap': count <= 8, 'exactly_one_joined': count == 8, 'no_5xx': no_5xx(ev)}
         ev.update(state={'members': count}, invariants=inv,
-                  intended_wait=intended_wait(ev, 'team', LOCK_USER))
+                  intended_wait=intended_wait(ev, 'team', LOCK_TEAM))
         ev['fixed_ok'] = all(inv.values()) and ev['intended_wait'] and ev['joined']
         return ev
 
@@ -393,7 +406,7 @@ def main():
         statuses = sorted([ev.get('t1', {}).get('status') or 0, ev.get('t2', {}).get('status') or 0])
         inv = {'deleted': gone, 'statuses_200_404': statuses == [200, 404], 'no_5xx': no_5xx(ev)}
         ev.update(state={'statuses': statuses}, invariants=inv,
-                  intended_wait=intended_wait(ev, 'user', r'FOR UPDATE'))
+                  intended_wait=intended_wait(ev, 'user', DELETE_LOCK))
         ev['fixed_ok'] = all(inv.values()) and ev['intended_wait'] and ev['joined']
         return ev
 
@@ -526,7 +539,8 @@ def main():
                         "and event_type='challenge_complete'", u=uid)
         rows = scalar('select count(*) from team_challenge_completion where user_id=:u', u=uid)
         (xp, ac, _sp), (lxp, lac) = totals(uid), ledger(uid)
-        inv = {'rewards_within_cap': awards <= cap, 'both_recorded': rows == cap + 1,
+        inv = {'rewards_within_cap': awards <= cap, 'reward_reaches_cap': awards == cap,
+               'both_recorded': rows == cap + 1,
                'xp_eq_ledger': xp == lxp, 'acorns_eq_ledger': ac == lac, 'no_5xx': no_5xx(ev)}
         ev.update(state={'rewarded': awards, 'cap': cap, 'completions': rows}, invariants=inv,
                   intended_wait=intended_wait(ev, 'user', LOCK_USER))
@@ -571,6 +585,9 @@ def main():
         with A.app.app_context():
             retry = A.app.test_client().post(f'/api/daily/{keys[0]}/complete', headers=h)
         inv = {'observed_wait_on_user': bool(seen and seen.get('waiting_relation') == 'user'),
+               # the wait must be _lock_user itself, not a later FK check
+               # (W10: with the lock removed X1 still timed out -- on the insert)
+               'wait_is_lock_user': bool(seen and re.search(LOCK_USER, seen.get('query') or '')),
                'status_503': box.get('status') == 503,
                'busy_json': (box.get('body') or {}).get('error') == 'busy',
                'nothing_written': rows == 0, 'retry_200': retry.status_code == 200,
@@ -593,7 +610,7 @@ def main():
                't1_200': ev.get('t1', {}).get('status') == 200,
                't2_404': ev.get('t2', {}).get('status') == 404, 'no_5xx': no_5xx(ev)}
         ev.update(state={'residue': res}, invariants=inv,
-                  intended_wait=intended_wait(ev, 'user', r'FOR NO KEY UPDATE'))
+                  intended_wait=intended_wait(ev, 'user', LOCK_USER))
         ev['fixed_ok'] = all(inv.values()) and ev['intended_wait'] and ev['joined']
         return ev
 
@@ -615,7 +632,7 @@ def main():
                'both_200': ev.get('t1', {}).get('status') == 200 and ev.get('t2', {}).get('status') == 200,
                'campfire_counted_once': campfire == 1, 'no_5xx': no_5xx(ev)}
         ev.update(state={'residue': res, 'campfire': campfire}, invariants=inv,
-                  intended_wait=intended_wait(ev, 'user', r'FOR UPDATE'))
+                  intended_wait=intended_wait(ev, 'user', DELETE_LOCK))
         ev['fixed_ok'] = all(inv.values()) and ev['intended_wait'] and ev['joined']
         return ev
 
@@ -641,8 +658,149 @@ def main():
                't1_200': ev.get('t1', {}).get('status') == 200,
                't2_2xx': 200 <= (ev.get('t2', {}).get('status') or 0) < 300, 'no_5xx': no_5xx(ev)}
         ev.update(state={'reports': reports, 'rows': rows}, invariants=inv,
-                  intended_wait=intended_wait(ev, 'user', r'FOR NO KEY UPDATE'))
+                  intended_wait=intended_wait(ev, 'user', LOCK_USER))
         ev['fixed_ok'] = all(inv.values()) and ev['intended_wait'] and ev['joined']
+        return ev
+
+    # ── review follow-ups (RC-B2a reviewers / W10) ───────────────────────────
+
+    class _Done:            # a "request" that is really a direct DB write
+        def __init__(self, code):
+            self.status_code = code
+
+        def get_json(self, silent=True):
+            return {}
+
+    def raw(stmt, **params):
+        return lambda c: (sql(stmt, **params), _Done(299))[1]
+
+    def held_ok(ev, rel, pattern):
+        ev['intended_wait'] = intended_wait(ev, rel, pattern)
+        ev['fixed_ok'] = all(ev['invariants'].values()) and ev['intended_wait'] and ev['joined']
+        return ev
+
+    # Y1 — creator rotates the invite while a join is in flight: the join waits
+    # on the team lock, then sees the NEW code and is refused (teams review R1).
+    def y1():
+        owner, ho = person('y1o')
+        team_id, old = team_with(owner, [])
+        uid, h = person('y1j')
+        ev = race(A, observer,
+                  lambda c: c.post(f'/api/teams/{team_id}/rotate-invite', headers=ho),
+                  lambda c: c.post(f'/api/teams/{team_id}/join', json={'code': old}, headers=h),
+                  LOCK_TEAM, when='after')
+        mem = scalar('select count(*) from team_membership where team_id=:t and user_id=:u', t=team_id, u=uid)
+        code_now = scalar('select code from team_invite_code where team_id=:t', t=team_id)
+        ev['invariants'] = {'not_joined_with_old_code': mem == 0, 'code_rotated': code_now != old,
+                            'join_refused_403': ev.get('t2', {}).get('status') == 403,
+                            'rotate_200': ev.get('t1', {}).get('status') == 200, 'no_5xx': no_5xx(ev)}
+        ev['state'] = {'memberships': mem}
+        return held_ok(ev, 'team', LOCK_TEAM)
+
+    # Y2 — a member leaves while their own mission completion is in flight:
+    # the leave waits; history shows the campfire log BEFORE member_left.
+    def y2():
+        owner, _ = person('y2o')
+        uid, h = person('y2m')
+        team_id, _code = team_with(owner, [uid])
+        keys = todays_keys(h)
+        seed_completions(uid, keys[:4])
+        ev = race(A, observer,
+                  lambda c: c.post(f'/api/daily/{keys[4]}/complete', headers=h),
+                  lambda c: c.post(f'/api/teams/{team_id}/leave', headers=h),
+                  r'UPDATE team_campfire', when='after')
+        order = [r[0] for r in sql("select moment_type from team_moment where team_id=:t and subject_user_id=:u "
+                                   "and moment_type in ('campfire_log_added','member_left') order by id",
+                                   t=team_id, u=uid)]
+        ev['invariants'] = {'log_then_left': order == ['campfire_log_added', 'member_left'],
+                            'left': scalar('select count(*) from team_membership where team_id=:t and user_id=:u',
+                                           t=team_id, u=uid) == 0,
+                            'both_200': ev.get('t1', {}).get('status') == 200 and ev.get('t2', {}).get('status') == 200,
+                            'no_5xx': no_5xx(ev)}
+        ev['state'] = {'history': order}
+        return held_ok(ev, 'user', LOCK_USER)
+
+    # Y3 — one transaction per request: T1 is held BETWEEN its awards (after
+    # the exercise and mission awards, before the mission-award row). If any
+    # award committed early the user lock would be gone and T2 would not wait
+    # (W10 mutation C was caught only by X3).
+    def y3():
+        uid, h = person('y3')
+        keys = todays_keys(h)
+        seed_completions(uid, keys[:4])
+        ev = race(A, observer,
+                  lambda c: c.post(f'/api/daily/{keys[4]}/complete', headers=h),
+                  lambda c: c.post('/api/brain-boost/answer', json={'selected_index': 0}, headers=h),
+                  r'INSERT INTO daily_mission_award')
+        (xp, ac, _sp), (lxp, lac) = totals(uid), ledger(uid)
+        ev['invariants'] = {'xp_eq_ledger': xp == lxp, 'acorns_eq_ledger': ac == lac,
+                            'mission_once': scalar("select count(*) from progress_event where user_id=:u "
+                                                   "and event_type='mission_complete'", u=uid) == 1,
+                            'no_5xx': no_5xx(ev)}
+        return held_ok(ev, 'user', LOCK_USER)
+
+    # Y4 — the lock is FOR NO KEY UPDATE so that rows merely REFERENCING the
+    # person don't queue behind their completion: a teammate blocking them
+    # (insert with an FK to them) must finish while the completion is held
+    # (W10 mutation B -- plain FOR UPDATE -- was caught only by X2).
+    def y4():
+        owner, ho = person('y4o')
+        uid, h = person('y4m')
+        _team_id, _code = team_with(owner, [uid])
+        keys = todays_keys(h)
+        ev = race(A, observer,
+                  lambda c: c.post(f'/api/daily/{keys[0]}/complete', headers=h),
+                  lambda c: c.put(f'/api/blocks/{uid}', headers=ho),
+                  LOCK_USER, when='after')
+        blocked = scalar('select count(*) from user_block where blocker_user_id=:o and blocked_user_id=:u',
+                         o=owner, u=uid)
+        ev['invariants'] = {'teammate_not_queued': ev.get('outcome') == 't2_completed',
+                            'block_204': ev.get('t2', {}).get('status') == 204, 'block_row': blocked == 1,
+                            'completion_200': ev.get('t1', {}).get('status') == 200, 'no_5xx': no_5xx(ev)}
+        ev['intended_wait'] = True          # the claim here is the ABSENCE of a wait
+        ev['fixed_ok'] = all(ev['invariants'].values()) and ev['joined']
+        return ev
+
+    # Y5 — the D29 IntegrityError backstop, actually executed: a duplicate row
+    # is committed by a writer that skips the lock while T1 is held before its
+    # insert. T1 must answer the repeat 200 and award nothing.
+    def y5():
+        uid, h = person('y5')
+        keys = todays_keys(h)
+        ev = race(A, observer,
+                  lambda c: c.post(f'/api/daily/{keys[0]}/complete', headers=h),
+                  raw('insert into daily_completion (user_id, date, exercise_key, completed_at) '
+                      'values (:u, :d, :k, now())', u=uid, d=A.date.today(), k=keys[0]),
+                  r'INSERT INTO daily_completion')
+        body = ev.get('t1', {}).get('body') or {}
+        ev['invariants'] = {'repeat_200': ev.get('t1', {}).get('status') == 200,
+                            'nothing_awarded': scalar('select count(*) from progress_event where user_id=:u',
+                                                      u=uid) == 0 and not body.get('xp_awarded'),
+                            'one_row': scalar('select count(*) from daily_completion where user_id=:u', u=uid) == 1,
+                            'writer_not_queued': ev.get('outcome') == 't2_completed', 'no_5xx': no_5xx(ev)}
+        ev['intended_wait'] = True
+        ev['fixed_ok'] = all(ev['invariants'].values()) and ev['joined']
+        return ev
+
+    # Y6 — the join IntegrityError backstop, executed the same way.
+    def y6():
+        owner, _ = person('y6o')
+        team_id, code = team_with(owner, [])
+        uid, h = person('y6j')
+        ev = race(A, observer,
+                  lambda c: c.post(f'/api/teams/{team_id}/join', json={'code': code}, headers=h),
+                  raw('insert into team_membership (team_id, user_id, joined_at) values (:t, :u, now())',
+                      t=team_id, u=uid),
+                  r'INSERT INTO team_membership')
+        ev['invariants'] = {'already_member_400': ev.get('t1', {}).get('status') == 400,
+                            'one_row': scalar('select count(*) from team_membership where team_id=:t and user_id=:u',
+                                              t=team_id, u=uid) == 1,
+                            'no_join_moment': scalar("select count(*) from team_moment where team_id=:t and "
+                                                     "subject_user_id=:u and moment_type='member_joined'",
+                                                     t=team_id, u=uid) == 0,
+                            'writer_not_queued': ev.get('outcome') == 't2_completed', 'no_5xx': no_5xx(ev)}
+        ev['intended_wait'] = True
+        ev['fixed_ok'] = all(ev['invariants'].values()) and ev['joined']
         return ev
 
     run('D26_concurrent_filter_purchases', d26)
@@ -662,6 +820,12 @@ def main():
     run('X2_delete_then_complete', x2)
     run('X3_complete_then_delete', x3)
     run('X4_report_during_completion', x4)
+    run('Y1_rotate_during_join', y1)
+    run('Y2_leave_during_completion', y2)
+    run('Y3_hold_between_awards', y3)
+    run('Y4_teammate_reference_not_queued', y4)
+    run('Y5_completion_backstop_executed', y5)
+    run('Y6_join_backstop_executed', y6)
     print(json.dumps(results, default=str))
     sys.exit(0 if all(r.get('fixed_ok') for r in results.values()) else 1)
 

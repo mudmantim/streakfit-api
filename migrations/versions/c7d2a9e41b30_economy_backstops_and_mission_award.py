@@ -14,10 +14,14 @@ forgets the lock still cannot store an impossible state.
 - user CHECK constraints: xp_total >= 0, acorns_total >= 0, and
   0 <= acorns_spent <= acorns_total (D26).
 
+Precondition (read-only, run against production immediately before deploy):
+every user row must satisfy the three checks -- see the RC-B2a release
+package for the full GO/NO-GO query.
+
 No existing data is changed. The constraints are validated against existing
 rows when they are added: if production held an impossible balance the
 upgrade would FAIL at pre-deploy (and the deploy would stop) rather than
-silently accept it -- run the read-only precondition query before deploying.
+silently accept it.
 No backfill of daily_mission_award: the bonus only ever fires on today's
 fifth new completion, so past days need no row.
 
@@ -35,6 +39,13 @@ depends_on = None
 
 
 def upgrade():
+    if op.get_bind().dialect.name == 'postgresql':
+        # ADD CONSTRAINT takes ACCESS EXCLUSIVE on "user" until COMMIT. Behind
+        # a held row lock it would wait without limit and queue every read of
+        # "user" behind it. Fail fast instead: the whole upgrade rolls back,
+        # the deploy stops, the old build keeps serving, and a retry succeeds
+        # once the holder is gone (rehearsed: reviews/migration_rollback S4b).
+        op.execute("SET LOCAL lock_timeout = '5s'")
     op.create_table(
         'daily_mission_award',
         sa.Column('user_id', sa.Integer(), nullable=False),
