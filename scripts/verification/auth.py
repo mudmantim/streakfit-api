@@ -3,6 +3,7 @@
 paths (duplicate username, wrong password) real users actually hit."""
 import os
 import sys
+import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -56,6 +57,14 @@ def check_account_deletion(api, results, scenario):
     leaver = f"qa_smoke_leaver_{scenario.run_tag}"
     status, _ = api.request("POST", "/api/register",
                             body={"username": leaver, "password": SMOKE_PASSWORD})
+    if status == 429:
+        # By now the suite has registered four accounts and tried a duplicate,
+        # and /api/register allows 5 a minute per client. On production that
+        # made this the sixth, and the deletion was never exercised (release
+        # audit 14.7). Wait the window out once; a second 429 still fails.
+        _wait_out_register_window()
+        status, _ = api.request("POST", "/api/register",
+                                body={"username": leaver, "password": SMOKE_PASSWORD})
     if not results.check("auth.delete_register_leaver", status == 201, f"status={status}"):
         return
     status, data = api.request("POST", "/api/login",
@@ -78,6 +87,14 @@ def check_account_deletion(api, results, scenario):
     status, _ = api.request("POST", "/api/login",
                             body={"username": leaver, "password": SMOKE_PASSWORD})
     results.check("auth.deleted_account_cannot_log_in", status == 401, f"status={status}")
+
+
+REGISTER_WINDOW_S = 61   # /api/register: "5 per minute", plus a second's margin
+
+
+def _wait_out_register_window():
+    print(f"        (registration limit reached; waiting {REGISTER_WINDOW_S}s for the window)")
+    time.sleep(REGISTER_WINDOW_S)
 
 
 def _build_scenario(api, results):
