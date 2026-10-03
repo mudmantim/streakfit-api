@@ -102,3 +102,27 @@ def test_a_brain_boost_after_todays_completion_does_not_announce_the_day_again(c
                     headers=auth_headers(token)).get_json()
     assert 'days_3' not in _announced(r)
     assert db.session.query(BrainBoostAnswer).count() == 1
+
+
+def test_a_request_that_straddles_midnight_judges_the_day_it_stamped(client, monkeypatch):
+    """The route stamps its row with its own `today`; the milestone check must
+    use that date, not re-read a clock that may have moved past midnight."""
+    import app as appmod
+    token = register_and_login(client, 'ms_midnight')
+    _seed('ms_midnight', 5, FIVE[:1])
+    _seed('ms_midnight', 2, FIVE[:1])
+    keys = _keys(client, token)
+    real_today = datetime.date.today()
+
+    class _Tomorrow(datetime.date):
+        calls = 0
+
+        @classmethod
+        def today(cls):
+            # First call is the route's own stamp; every later call is "after midnight".
+            cls.calls += 1
+            return real_today if cls.calls == 1 else real_today + datetime.timedelta(days=1)
+
+    monkeypatch.setattr(appmod, 'date', _Tomorrow)
+    first = _complete(client, token, keys[0])
+    assert 'days_3' in _announced(first)

@@ -5163,36 +5163,42 @@ def complete_daily_exercise(exercise_key):
     }
     response.update(_progress_response(old_level, user, events))
     response["milestones_unlocked"] = _completion_milestones(
-        user_id, user, old_level, events, awarded=bool(events), daily_activity=True
+        user_id, user, old_level, events, awarded=bool(events), daily_activity=True, today=today
     )
     response["filters_unlocked"] = _filters_newly_unlocked(user_id, user, old_level, events)
     return jsonify(response), 200
 
 
-def _days_active_crossing(user_id):
+def _days_active_crossing(user_id, today):
     """(days_active, delta) for an action that may be the day's first activity.
 
     Same definition as the Memory Book: a day is active if it has an exercise
     completion or a Brain Boost answer. The delta is 1 only when the action
-    just recorded is the first activity of today -- that is the one action
-    that can carry `days_active` over a target (R1 D10). Call after commit.
+    just recorded is the first activity of `today` -- the one action that can
+    carry `days_active` over a target (R1 D10). Call after commit, with the
+    date the route stamped on its row: re-reading the clock here would miss a
+    request that straddles midnight.
+
+    Only the first activity of a day can cross anything, so the full-history
+    scan runs only then; every other tap costs two counts.
     """
-    today = date.today()
+    rows_today = (
+        (db.session.execute(db.select(db.func.count(DailyCompletion.id)).where(
+            DailyCompletion.user_id == user_id, DailyCompletion.date == today)).scalar() or 0)
+        + (db.session.execute(db.select(db.func.count(BrainBoostAnswer.id)).where(
+            BrainBoostAnswer.user_id == user_id, BrainBoostAnswer.date == today)).scalar() or 0))
+    if rows_today != 1:
+        return None, 0
     completion_dates = set(db.session.execute(
         db.select(DailyCompletion.date).where(DailyCompletion.user_id == user_id).distinct()
     ).scalars().all())
     brain_boost_dates = set(db.session.execute(
         db.select(BrainBoostAnswer.date).where(BrainBoostAnswer.user_id == user_id).distinct()
     ).scalars().all())
-    rows_today = (
-        (db.session.execute(db.select(db.func.count(DailyCompletion.id)).where(
-            DailyCompletion.user_id == user_id, DailyCompletion.date == today)).scalar() or 0)
-        + (db.session.execute(db.select(db.func.count(BrainBoostAnswer.id)).where(
-            BrainBoostAnswer.user_id == user_id, BrainBoostAnswer.date == today)).scalar() or 0))
-    return len(completion_dates | brain_boost_dates), (1 if rows_today == 1 else 0)
+    return len(completion_dates | brain_boost_dates), 1
 
 
-def _best_streak_crossing(user_id):
+def _best_streak_crossing(user_id, today):
     """(best_streak, delta) for the action that just completed today's mission.
 
     best_streak is the longest run of full-mission days, as get_user_stats and
@@ -5200,7 +5206,6 @@ def _best_streak_crossing(user_id):
     without today, so a mission that extends the record crosses its targets
     and one that does not cannot (R1 D10).
     """
-    today = date.today()
     dates = sorted(set(db.session.execute(
         db.select(DailyCompletion.date).where(DailyCompletion.user_id == user_id)
         .group_by(DailyCompletion.date)
@@ -5220,7 +5225,8 @@ def _best_streak_crossing(user_id):
     return after, after - best([d for d in dates if d != today])
 
 
-def _completion_milestones(user_id, user, old_level, events, awarded, daily_activity=False):
+def _completion_milestones(user_id, user, old_level, events, awarded, daily_activity=False,
+                           today=None):
     """Milestones crossed by this completion, for the client to celebrate.
 
     Costs one COUNT on the hot write path, and only when something was actually
@@ -5256,12 +5262,15 @@ def _completion_milestones(user_id, user, old_level, events, awarded, daily_acti
         missions = get_user_stats(user_id)['total_missions']
         metric_values['missions_completed'] = missions
         deltas['missions_completed'] = 1
-        metric_values['best_streak'], deltas['best_streak'] = _best_streak_crossing(user_id)
+        metric_values['best_streak'], deltas['best_streak'] = \
+            _best_streak_crossing(user_id, today or date.today())
 
     # Only a daily exercise counts towards an active day; a team challenge
     # completion reuses this function but is not one in the Memory Book.
     if daily_activity:
-        metric_values['days_active'], deltas['days_active'] = _days_active_crossing(user_id)
+        days_active, days_delta = _days_active_crossing(user_id, today or date.today())
+        if days_delta:
+            metric_values['days_active'], deltas['days_active'] = days_active, days_delta
 
     return _milestones_crossed(metric_values, deltas)
 
@@ -5389,14 +5398,14 @@ def answer_brain_boost():
         new_level = xp_to_level(user.xp_total)['level']
         stats = get_user_stats(user_id)
         # An answer can be the day's first activity, so it can cross Three Days.
-        days_active, days_delta = _days_active_crossing(user_id)
+        days_active, days_delta = _days_active_crossing(user_id, today)
         response["milestones_unlocked"] = _milestones_crossed(
             {
                 'brain_boosts_answered': stats['brain_boost_answers'],
                 'xp_total': user.xp_total,
                 'acorns_total': user.acorns_total,
                 'level': new_level,
-                'days_active': days_active,
+                'days_active': days_active or 0,
             },
             {
                 'brain_boosts_answered': 1,
