@@ -4,6 +4,25 @@ Repair tranche from the E2E campaign's R1 ledger (`e2e-campaign/ledger.jsonl`),
 on top of `1613dfd` (= production `7aa1dff` + the verification-harness fix).
 **Not deployed.** Deploying, and the step below, each need owner approval.
 
+## Hard operational invariant — until D26–D31 are repaired
+
+Production must stay exactly as observed on 2026-10-03:
+
+- **one** `streakfit-api` instance (Render → Compute → Instances = 1);
+- `WEB_CONCURRENCY` = 1 (Render's default for the 0.5c-512mb Starter plan; not set by us);
+- **one synchronous Gunicorn worker** (Start Command `... gunicorn app:app`, no `--workers`);
+- **no** `--threads`, no async/gevent worker class, no extra application workers.
+
+**Any change to the plan, instance count, worker count or threading requires D26–D31
+to be repaired first.** Those defects (concurrent filter purchases, lost XP/acorn
+awards and double mission bonuses, member-cap overrun, and three 500s on duplicate
+requests) are verified on a multi-worker lab and cannot occur while requests are
+handled one at a time. Raising the plan to 1 CPU or more would raise Render's
+default `WEB_CONCURRENCY` and expose them silently.
+
+Evidence: Render settings/compute/env (read-only, 2026-10-03); independent
+reproductions in `e2e-campaign/evidence/conc2/`.
+
 ## What ships
 
 | R1 | change |
