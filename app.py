@@ -6489,6 +6489,33 @@ def _moment_display_text(moment_type, subject_username, metadata):
     return None
 
 
+def _scrub_photo_captions(photos):
+    """Remove a photo's caption from every place upload copied it.
+
+    Upload wrote the caption to the photo row, to the body of the photo's chat
+    message, and (before R1 D4) to its photo_shared moment. Removing the photo
+    or its sender's account cleared at most the first, so the words kept being
+    served from /messages and /moments. The thread keeps its "Photo removed"
+    shape and history keeps the fact that a photo was shared.
+
+    Stages only; the caller commits.
+    """
+    for photo in photos:
+        caption = photo.caption
+        photo.caption = None
+        TeamMessage.query.filter(TeamMessage.photo_id == photo.id).update(
+            {TeamMessage.body: ''}, synchronize_session=False)
+        if caption and photo.sender_user_id is not None:
+            # Rows written before the moment stopped carrying a caption. The
+            # moment has no photo id, so match the exact metadata upload wrote.
+            TeamMoment.query.filter(
+                TeamMoment.team_id == photo.team_id,
+                TeamMoment.moment_type == 'photo_shared',
+                TeamMoment.subject_user_id == photo.sender_user_id,
+                TeamMoment.moment_metadata == json.dumps({"caption": caption[:60]}),
+            ).update({TeamMoment.moment_metadata: None}, synchronize_session=False)
+
+
 @app.route('/api/teams/<int:team_id>/moments', methods=['GET'])
 @jwt_required()
 def get_team_moments(team_id):
@@ -7369,8 +7396,11 @@ def upload_team_photo(team_id):
     # the moment sitting uncommitted -- invisible over HTTP, yet still visible
     # to a pytest that shares one session, so the unit test passed while team
     # history silently recorded nothing. verify_all caught it.
-    create_team_moment(team_id, 'photo_shared', subject_user_id=user_id,
-                       metadata={"caption": caption[:60]} if caption else None)
+    #
+    # No caption in the moment. It was a third copy of the person's words that
+    # nothing read (the history line is "X shared a photo") and nothing
+    # cleared when the photo or the account went (R1 D4).
+    create_team_moment(team_id, 'photo_shared', subject_user_id=user_id)
 
     db.session.commit()
 
@@ -7498,6 +7528,7 @@ def delete_team_photo(team_id, public_id):
     photo.deleted_at = datetime.utcnow()
     photo.image_data = None          # the bytes go now, not on a sweep later
     photo.byte_size = 0
+    _scrub_photo_captions([photo])   # and the words that went with them
     db.session.commit()
 
     app.logger.info("event=team_photo_deleted team_id=%s photo=%s by_user=%s creator_action=%s",
@@ -10988,6 +11019,9 @@ def _delete_user_account_once(user_id, allow_team_owner=False, dry_run=True):
         return report
 
     try:
+        # Their captions go with their photos -- before the author link is cut,
+        # because the link is how they are found (R1 D4).
+        _scrub_photo_captions(TeamPhoto.query.filter(TeamPhoto.sender_user_id == user_id).all())
         # Preserve shared team data: keep the message/moment, drop the author link.
         TeamMessage.query.filter(TeamMessage.sender_user_id == user_id).update(
             {TeamMessage.sender_user_id: None}, synchronize_session=False)
