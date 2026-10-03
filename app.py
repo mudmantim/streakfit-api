@@ -11806,6 +11806,10 @@ def _assert_db_at_head():
         with app.app_context():
             with db.engine.connect() as conn:
                 current = MigrationContext.configure(conn).get_current_revision()
+            # This runs at import -- in gunicorn's MASTER under --preload. A
+            # connection left in the pool here is inherited by every forked
+            # worker: one socket, several processes (RC-B2a D37).
+            db.engine.dispose()
     except Exception as exc:
         log.critical('Refusing to start: could not verify database migration state '
                      '(database unreachable?): %s', exc)
@@ -11819,6 +11823,27 @@ def _assert_db_at_head():
 
 if os.environ.get('STREAKFIT_ENFORCE_DB_HEAD') == '1':
     _assert_db_at_head()
+
+
+def _forget_inherited_db_connections():
+    """In a forked child, drop the parent's pooled connections WITHOUT closing
+    them (closing would send Terminate on a socket the parent still uses).
+
+    RC-B2a D37: under `gunicorn --preload` the app is imported in the master,
+    so anything the master connected before forking -- the head check, or the
+    retention sweeper's first pass on a slow boot -- was shared with every
+    worker. Seen in the lab as `ss` listing one Postgres socket owned by two
+    gunicorn pids, and, with three workers, as psycopg2 "PGRES_TUPLES_OK and
+    no message from the libpq" 500s on plain reads. The child opens its own.
+    """
+    try:
+        with app.app_context():
+            db.engine.dispose(close=False)
+    except Exception:       # never let a fork hook kill a worker at birth
+        pass
+
+
+os.register_at_fork(after_in_child=_forget_inherited_db_connections)
 
 
 # ── Retention, independent of whether anybody is using the app ──────────────
