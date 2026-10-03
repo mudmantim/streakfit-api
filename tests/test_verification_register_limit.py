@@ -72,8 +72,8 @@ def test_a_429_that_does_not_clear_is_still_a_failure(app, monkeypatch):
     assert "auth.delete_account_with_dependent_rows" not in rows
 
 
-def test_no_wait_when_the_window_is_not_spent(app, monkeypatch):
-    """With room left in the window the check registers straight away."""
+def test_no_wait_without_a_429(app, monkeypatch):
+    """Without a 429 (limiter off here) the check never waits."""
     import app as appmod
     appmod.limiter.enabled = False
     monkeypatch.setattr(auth, "_wait_out_register_window",
