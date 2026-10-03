@@ -7878,6 +7878,15 @@ def _int_or_none(value):
 
 # --- Moderation: blocking ----------------------------------------------------
 
+def _share_a_team(user_id, other_user_id):
+    """True when both people are current members of at least one team."""
+    mine = db.select(TeamMembership.team_id).where(TeamMembership.user_id == user_id)
+    return db.session.execute(
+        db.select(TeamMembership.id).where(TeamMembership.user_id == other_user_id,
+                                           TeamMembership.team_id.in_(mine)).limit(1)
+    ).first() is not None
+
+
 @app.route('/api/blocks', methods=['GET'])
 @jwt_required()
 def list_blocks():
@@ -7918,7 +7927,12 @@ def create_block(target_user_id):
         db.select(UserBlock).where(UserBlock.blocker_user_id == user_id,
                                    UserBlock.blocked_user_id == target_user_id)
     ).scalar_one_or_none()
-    if exists is None and db.session.get(User, target_user_id) is not None:
+    # Only a current teammate can be blocked. Creating a row for any real id
+    # made GET /api/blocks an oracle: it listed the row, with the person's
+    # name, so the 204 above hid nothing. A stranger and a missing id now
+    # leave the same trace, which is none. Blocking is only offered from a
+    # team roster, so nobody the product lets you meet is out of reach.
+    if exists is None and _share_a_team(user_id, target_user_id):
         db.session.add(UserBlock(blocker_user_id=user_id, blocked_user_id=target_user_id))
         try:
             db.session.commit()
