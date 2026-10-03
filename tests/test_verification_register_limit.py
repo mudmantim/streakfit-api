@@ -19,7 +19,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(
 
 from verification import auth  # noqa: E402
 from verification._client import Results, WsgiClient  # noqa: E402
-from verification._fixtures import Scenario, new_run_tag, register_and_login_users  # noqa: E402
+from verification._fixtures import (Scenario, create_and_join_team, new_run_tag,  # noqa: E402
+                                    register_and_login_users)
 
 
 @pytest.fixture(autouse=True)
@@ -38,6 +39,7 @@ def _run_auth_module(flask_app):
     results = Results()
     scenario = Scenario(api, new_run_tag())
     scenario.users = register_and_login_users(api, results, scenario.run_tag)
+    create_and_join_team(api, results, scenario, creator_role="a", joiner_roles=("b",))
     auth.run(api, results, scenario)
     return {name: (ok, detail) for name, ok, detail in results.rows}
 
