@@ -580,7 +580,18 @@ input:focus {
     flex-direction: column;
     gap: .7rem;
     animation: settings-menu-in .16s ease;
+    /* The menu lives in the sticky header, so page scrolling cannot move it,
+       and the bottom pane nav (z-index 20) sits above the header (10). With
+       no height limit Log Out and Delete my account fell below a phone's
+       screen and under the nav on desktop (R1 D1). Stop above the nav and
+       scroll inside. 9.5rem = header + gap + nav, with room to spare. */
+    max-height: calc(100vh - 9.5rem - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
+    max-height: calc(100dvh - 9.5rem - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
+    overflow-y: auto;
+    overscroll-behavior: contain;
 }
+/* In a scrolling flex column, children would otherwise shrink rather than overflow. */
+.settings-menu > * { flex-shrink: 0; }
 
 @keyframes settings-menu-in {
     from { opacity: 0; transform: translateY(-6px); }

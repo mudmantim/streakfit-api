@@ -2974,6 +2974,64 @@ def check_moderation_operator_can_close_a_report(b: Browser, base: str, app) -> 
                     f"{c['ratio']}:1 on {c['bg']}" for c in weak))
 
 
+def check_settings_menu_reaches_every_control(b: Browser, base: str, app) -> None:
+    """Log Out and Delete my account must be reachable on a phone.
+
+    The menu was position:absolute inside the sticky header with no height
+    limit and no scrolling, and the bottom nav sits above the header. At
+    390x844 Delete started at 850px and Log Out at 919px, below the screen,
+    and scrolling the page could not move them: the header is sticky. On
+    desktop Log Out sat under the nav. A phone user had no way to sign out or
+    delete their account (E2E R1 D1, reproduced at 320, 390 and 1280).
+
+    Every control in the open menu is scrolled into view the way a finger
+    would, then must be inside the viewport AND the topmost thing at its own
+    centre. Nothing is clicked.
+    """
+    print("\nSettings menu: every control can be reached")
+    _u, token = make_user(app, "settingsreach")
+    try:
+        for (w, h, mobile) in ((390, 844, True), (320, 640, True), (844, 390, True), (1280, 800, False)):
+            b.call("Emulation.setDeviceMetricsOverride", width=w, height=h,
+                   deviceScaleFactor=2 if mobile else 1, mobile=mobile)
+            b.goto(base + "/", wait=1.0)
+            b.js(f"localStorage.setItem('streakfit_token', {json.dumps(token)})")
+            b.goto(base + "/", wait=2.5)
+            b.js("document.getElementById('settings-toggle').click()")
+            time.sleep(0.5)
+            result = b.js("""(()=>{
+                const menu = document.getElementById('settings-menu');
+                if (!menu || menu.hidden) return {open:false};
+                const out = [];
+                const els = [...menu.querySelectorAll('button, select, input, a[href]')]
+                    .filter(e => e.getClientRects().length && getComputedStyle(e).visibility !== 'hidden'
+                                 && !e.closest('[hidden]'));
+                for (const el of els) {
+                    el.scrollIntoView({block:'nearest'});
+                    const r = el.getBoundingClientRect();
+                    const cx = r.left + r.width/2, cy = r.top + r.height/2;
+                    const top = document.elementFromPoint(cx, cy);
+                    out.push({id: el.id || el.textContent.trim().slice(0,30),
+                              inView: r.top >= 0 && r.bottom <= innerHeight && r.left >= 0 && r.right <= innerWidth,
+                              onTop: !!top && (top === el || el.contains(top)),
+                              top: Math.round(r.top), bottom: Math.round(r.bottom),
+                              covering: top ? (top.id || top.className || top.tagName) : null});
+                }
+                return {open:true, controls: out};
+            })()""") or {}
+            label = f"{w}x{h}"
+            if not check(result.get("open"), f"{label}: the settings menu opens"):
+                continue
+            ids = [c["id"] for c in result["controls"]]
+            check("btn-logout" in ids and "btn-delete-account" in ids,
+                  f"{label}: Log Out and Delete my account are in the menu", str(ids))
+            blocked = [c for c in result["controls"] if not (c["inView"] and c["onTop"])]
+            check(not blocked, f"{label}: every menu control can be scrolled into view and is not covered",
+                  json.dumps(blocked)[:400])
+    finally:
+        b.call("Emulation.setDeviceMetricsOverride", width=390, height=844, deviceScaleFactor=2, mobile=True)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("base_url", nargs="?", default=None)
@@ -3073,6 +3131,7 @@ def main() -> int:
         check_rickie_is_never_left_on_content(browser, base, flask_app)
         check_appeals_are_reachable(browser, base, flask_app)
         check_appeals_stay_hidden_for_everybody_else(browser, base, flask_app)
+        check_settings_menu_reaches_every_control(browser, base, flask_app)
         check_accessibility_basics(browser, base, flask_app)
         check_page_is_clean(browser, base, flask_app)
     except Exception as exc:  # a crash must never read as a pass
