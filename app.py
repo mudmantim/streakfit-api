@@ -6577,6 +6577,48 @@ def _scrub_photo_captions(photos):
             ).update({TeamMoment.moment_metadata: None}, synchronize_session=False)
 
 
+def _removed_photo_caption_residue(execute=False):
+    """Captions left behind by photo or account removals made before D4.
+
+    The scrub in _scrub_photo_captions only runs when a removal happens, so
+    anything removed earlier kept its words in the photo row, the photo's
+    chat message body and the photo_shared moment. This finds and (with
+    execute=True) clears them. Idempotent.
+
+    Every photo_shared moment's metadata is cleared, not only removed ones:
+    it held nothing but a copy of the caption, nothing ever read it, and new
+    uploads no longer write it. Returns counts; stages only when executing,
+    the caller commits.
+    """
+    removed_ids = db.select(TeamPhoto.id).where(TeamPhoto.deleted_at.isnot(None))
+    photos = TeamPhoto.query.filter(TeamPhoto.deleted_at.isnot(None),
+                                    TeamPhoto.caption.isnot(None))
+    bodies = TeamMessage.query.filter(TeamMessage.photo_id.in_(removed_ids),
+                                      TeamMessage.body != '')
+    moments = TeamMoment.query.filter(TeamMoment.moment_type == 'photo_shared',
+                                      TeamMoment.moment_metadata.isnot(None))
+    counts = {"photo_captions": photos.count(), "message_bodies": bodies.count(),
+              "moment_captions": moments.count()}
+    if execute:
+        photos.update({TeamPhoto.caption: None}, synchronize_session=False)
+        bodies.update({TeamMessage.body: ''}, synchronize_session=False)
+        moments.update({TeamMoment.moment_metadata: None}, synchronize_session=False)
+    return counts
+
+
+@app.cli.command("photo-caption-scrub")
+@click.option('--execute', is_flag=True, default=False,
+              help='Clear what the dry run reports. Without it nothing changes.')
+def photo_caption_scrub_command(execute):
+    """Clear captions left by photo/account removals made before D4. Dry run by default."""
+    counts = _removed_photo_caption_residue(execute=execute)
+    if execute:
+        db.session.commit()
+    print(("cleared" if execute else "would clear") +
+          f" {counts['photo_captions']} photo captions, {counts['message_bodies']} message"
+          f" bodies, {counts['moment_captions']} moment captions")
+
+
 @app.route('/api/teams/<int:team_id>/moments', methods=['GET'])
 @jwt_required()
 def get_team_moments(team_id):
@@ -7584,7 +7626,11 @@ def delete_team_photo(team_id, public_id):
     if photo.sender_user_id != user_id and not is_creator:
         return jsonify({"error": "not_found"}), 404
     if photo.deleted_at is not None:
-        return jsonify({"deleted": public_id}), 200      # idempotent
+        # Idempotent -- and a repeat also clears any caption left by a removal
+        # made before captions were scrubbed (RC-B1 D4 review).
+        _scrub_photo_captions([photo])
+        db.session.commit()
+        return jsonify({"deleted": public_id}), 200
 
     photo.deleted_at = datetime.utcnow()
     photo.image_data = None          # the bytes go now, not on a sweep later

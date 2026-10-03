@@ -102,3 +102,42 @@ def test_pre_fix_moment_caption_is_scrubbed_when_the_account_goes(client, family
 
     client.delete('/api/me', json={'password': 'WalkTest123!'}, headers=auth_headers(family['kid']))
     assert _caption_rows()['team_moment'] == 0
+
+
+# ── Residue from removals made before the fix (RC-B1 D4 review) ────────────
+
+def _leave_pre_fix_residue(client, family, caption):  # noqa: F811
+    """A photo removed the way 1613dfd removed it: pixels gone, words kept."""
+    from datetime import datetime
+    photo = upload(client, family['kid'], family['team_id'], caption=caption).get_json()['photo']
+    row = TeamPhoto.query.filter_by(public_id=photo['public_id']).one()
+    row.deleted_at = datetime.utcnow()
+    row.image_data = None
+    _plant_pre_fix_moment(family['team_id'], row.sender_user_id, caption)
+    db.session.commit()
+    return photo
+
+
+def test_the_scrub_command_is_a_dry_run_until_told_otherwise(client, family):  # noqa: F811
+    _leave_pre_fix_residue(client, family, MARK)
+    out = client.application.test_cli_runner().invoke(args=['photo-caption-scrub']).output
+    assert 'would clear 1 photo captions, 1 message bodies' in out
+    assert _caption_rows() == {'team_photo': 1, 'team_message': 1, 'team_moment': 1}
+
+
+def test_the_scrub_command_clears_pre_fix_residue_and_leaves_live_photos(client, family):  # noqa: F811
+    upload(client, family['kid'], family['team_id'], caption='LIVE-CAPTION')
+    _leave_pre_fix_residue(client, family, MARK)
+    out = client.application.test_cli_runner().invoke(args=['photo-caption-scrub', '--execute']).output
+    assert out.startswith('cleared')
+    assert _caption_rows() == {'team_photo': 0, 'team_message': 0, 'team_moment': 0}
+    seen = _everything_a_teammate_can_read(client, family['parent'], family['team_id'])
+    assert MARK not in seen and 'LIVE-CAPTION' in seen
+    again = client.application.test_cli_runner().invoke(args=['photo-caption-scrub', '--execute']).output
+    assert 'cleared 0 photo captions, 0 message bodies, 0 moment captions' in again
+
+
+def test_deleting_an_already_removed_photo_again_clears_its_residue(client, family):  # noqa: F811
+    photo = _leave_pre_fix_residue(client, family, MARK)
+    assert client.delete(photo['url'], headers=auth_headers(family['kid'])).status_code == 200
+    assert _caption_rows()['team_message'] == 0 and _caption_rows()['team_photo'] == 0
