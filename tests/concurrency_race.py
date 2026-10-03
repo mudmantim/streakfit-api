@@ -430,15 +430,115 @@ def main():
         ev['fixed_ok'] = all(inv.values()) and ev['intended_wait'] and ev['joined']
         return ev
 
+    def challenge_in(team_id, creator_id):
+        import uuid
+        with A.app.app_context():
+            ch = A.TeamChallenge(public_id=uuid.uuid4().hex, team_id=team_id,
+                                 created_by_user_id=creator_id,
+                                 preset_key=A.CHALLENGE_PRESETS[0]['key'])
+            A.db.session.add(ch)
+            A.db.session.commit()
+            return ch.id, ch.public_id
+
+    # D27c — awards from two DIFFERENT routes at once (exercise + Brain Boost).
+    def d27c():
+        uid, h = person('d27c')
+        keys = todays_keys(h)
+        ev = race(A, observer,
+                  lambda c: c.post(f'/api/daily/{keys[0]}/complete', headers=h),
+                  lambda c: c.post('/api/brain-boost/answer', json={'selected_index': 0}, headers=h),
+                  r'UPDATE "user" SET .*xp_total', when='after')
+        (xp, ac, _sp), (lxp, lac) = totals(uid), ledger(uid)
+        inv = {'xp_eq_ledger': xp == lxp, 'acorns_eq_ledger': ac == lac, 'no_5xx': no_5xx(ev)}
+        ev.update(state={'xp_total': xp, 'ledger_xp': lxp, 'acorns_total': ac, 'ledger_acorns': lac},
+                  invariants=inv, intended_wait=intended_wait(ev, 'user', LOCK_USER))
+        ev['fixed_ok'] = all(inv.values()) and ev['intended_wait'] and ev['joined']
+        return ev
+
+    # D34 (suspected) — the same Brain Boost answered twice at once.
+    def d34():
+        uid, h = person('d34')
+        ev = race(A, observer,
+                  lambda c: c.post('/api/brain-boost/answer', json={'selected_index': 0}, headers=h),
+                  lambda c: c.post('/api/brain-boost/answer', json={'selected_index': 0}, headers=h),
+                  r'INSERT INTO brain_boost_answer')
+        rows = scalar('select count(*) from brain_boost_answer where user_id=:u', u=uid)
+        attempts = scalar("select count(*) from progress_event where user_id=:u "
+                          "and event_type='brain_boost_attempt'", u=uid)
+        (xp, ac, _sp), (lxp, lac) = totals(uid), ledger(uid)
+        inv = {'one_answer': rows == 1, 'attempt_awarded_once': attempts == 1,
+               'both_200': ev['t1'].get('status') == 200 and ev['t2'].get('status') == 200,
+               'xp_eq_ledger': xp == lxp, 'no_5xx': no_5xx(ev)}
+        ev.update(state={'answers': rows, 'attempt_events': attempts}, invariants=inv,
+                  intended_wait=intended_wait(ev, 'user', LOCK_USER))
+        ev['fixed_ok'] = all(inv.values()) and ev['intended_wait'] and ev['joined']
+        return ev
+
+    # D35 (suspected) — the same team challenge completed twice at once.
+    def d35():
+        owner, ho = person('d35o')
+        uid, h = person('d35m')
+        team_id, _code = team_with(owner, [uid])
+        _cid, pub = challenge_in(team_id, owner)
+        url = f'/api/teams/{team_id}/challenges/{pub}/complete'
+        ev = race(A, observer, lambda c: c.post(url, headers=h), lambda c: c.post(url, headers=h),
+                  r'INSERT INTO team_challenge_completion')
+        rows = scalar('select count(*) from team_challenge_completion where user_id=:u', u=uid)
+        awards = scalar("select count(*) from progress_event where user_id=:u "
+                        "and event_type='challenge_complete'", u=uid)
+        inv = {'one_completion': rows == 1, 'awarded_once': awards == 1,
+               'both_200': ev['t1'].get('status') == 200 and ev['t2'].get('status') == 200,
+               'no_5xx': no_5xx(ev)}
+        ev.update(state={'completions': rows, 'award_events': awards}, invariants=inv,
+                  intended_wait=intended_wait(ev, 'user', LOCK_USER))
+        ev['fixed_ok'] = all(inv.values()) and ev['intended_wait'] and ev['joined']
+        return ev
+
+    # D36 (suspected) — the daily challenge reward cap, two different challenges at once.
+    def d36():
+        owner, _ho = person('d36o')
+        uid, h = person('d36m')
+        team_id, _code = team_with(owner, [uid])
+        cap = A.CHALLENGE_REWARDED_PER_DAY
+        for _ in range(cap - 1):                     # already rewarded cap-1 times today
+            cid, _pub = challenge_in(team_id, owner)
+            sql('insert into team_challenge_completion (challenge_id, user_id, completed_at) '
+                'values (:c, :u, now())', c=cid, u=uid)
+            sql("insert into progress_event (user_id, event_type, xp_delta, acorn_delta, created_at) "
+                "values (:u, 'challenge_complete', :x, :a, now())",
+                u=uid, x=A.CHALLENGE_COMPLETE_XP, a=A.CHALLENGE_COMPLETE_ACORNS)
+            sql('update "user" set xp_total = xp_total + :x, acorns_total = acorns_total + :a '
+                'where id = :u', u=uid, x=A.CHALLENGE_COMPLETE_XP, a=A.CHALLENGE_COMPLETE_ACORNS)
+        _c1, p1 = challenge_in(team_id, owner)
+        _c2, p2 = challenge_in(team_id, owner)
+        ev = race(A, observer,
+                  lambda c: c.post(f'/api/teams/{team_id}/challenges/{p1}/complete', headers=h),
+                  lambda c: c.post(f'/api/teams/{team_id}/challenges/{p2}/complete', headers=h),
+                  r'INSERT INTO team_challenge_completion')
+        awards = scalar("select count(*) from progress_event where user_id=:u "
+                        "and event_type='challenge_complete'", u=uid)
+        rows = scalar('select count(*) from team_challenge_completion where user_id=:u', u=uid)
+        (xp, ac, _sp), (lxp, lac) = totals(uid), ledger(uid)
+        inv = {'rewards_within_cap': awards <= cap, 'both_recorded': rows == cap + 1,
+               'xp_eq_ledger': xp == lxp, 'no_5xx': no_5xx(ev)}
+        ev.update(state={'rewarded': awards, 'cap': cap, 'completions': rows}, invariants=inv,
+                  intended_wait=intended_wait(ev, 'user', LOCK_USER))
+        ev['fixed_ok'] = all(inv.values()) and ev['intended_wait'] and ev['joined']
+        return ev
+
     run('D26_concurrent_filter_purchases', d26)
     run('D27a_parallel_awards_lose_updates', d27a)
     run('D27b_mission_bonus_paid_twice', d27b)
+    run('D27c_awards_across_routes', d27c)
     run('D28_member_cap', d28)
     run('D29_same_exercise_twice', d29)
     run('D30_same_user_double_join', d30)
     run('D31_double_delete', d31)
     run('D32a_campfire_crossing_small_flame', lambda: d32(99, 'd32a'))
     run('D32b_campfire_first_log', lambda: d32(0, 'd32b'))
+    run('D34_brain_boost_answered_twice', d34)
+    run('D35_same_challenge_twice', d35)
+    run('D36_challenge_daily_reward_cap', d36)
     print(json.dumps(results, default=str))
     sys.exit(0 if all(r.get('fixed_ok') for r in results.values()) else 1)
 

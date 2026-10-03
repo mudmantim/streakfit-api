@@ -54,12 +54,16 @@ SCENARIOS = [
     'D26_concurrent_filter_purchases',
     'D27a_parallel_awards_lose_updates',
     'D27b_mission_bonus_paid_twice',
+    'D27c_awards_across_routes',
     'D28_member_cap',
     'D29_same_exercise_twice',
     'D30_same_user_double_join',
     'D31_double_delete',
     'D32a_campfire_crossing_small_flame',
     'D32b_campfire_first_log',
+    'D34_brain_boost_answered_twice',
+    'D35_same_challenge_twice',
+    'D36_challenge_daily_reward_cap',
 ]
 
 
