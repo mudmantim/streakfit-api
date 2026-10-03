@@ -1825,6 +1825,68 @@ def check_guest_promise_is_true(b: Browser, base: str) -> None:
           f"guestCompleted.size = {survived} after reload — the banner understates it")
 
 
+def check_guest_finish_and_sign_up_tell_the_truth(b: Browser, base: str) -> None:
+    """Finishing as a guest, then signing up, must not promise or carry anything.
+
+    The top guest banner was corrected to "Nothing here is saved", but the
+    banner shown after a guest's 5/5 still said "Create a free account to save
+    your streak and come back tomorrow for Day 2". Nothing carries over: the
+    new account starts at 0/5 with a different mission and is not told (E2E
+    R1 D5). And leaving guest mode reset three guest variables but not the
+    rest of the session, so the new account was greeted from the guest pool
+    ("Guest or not, Rickie's glad you showed up.") (R1 D25).
+
+    check_guest_promise_is_true covers the top banner only, which is how the
+    completion banner kept its false sentence while the suite stayed green.
+    """
+    print("\nGuest finish and sign-up")
+    b.goto(base + "/", wait=1.5)
+    b.reset_storage()
+    b.goto(base + "/", wait=2.0)
+    b.js("handleGuestMode()")
+    time.sleep(2.5)
+    for _ in range(5):
+        tap_and_read(b, settle=0.9)
+    time.sleep(1.0)
+
+    text = b.js("(()=>{const g=document.querySelector('.guest-complete-banner');"
+                " return g ? (g.textContent||'').replace(/\\s+/g,' ').trim() : '';})()")
+    if not check(bool(text), "the guest completion banner appears after 5/5"):
+        return
+    promises = re.search(r"save your streak|saved? your progress|streak starts here|"
+                         r"come back tomorrow for day 2", str(text), re.I)
+    check(not promises, "the completion banner does not promise to keep anything", str(text))
+    check(bool(re.search(r"not saved|isn.t saved|doesn.t save|nothing .{0,30}saved",
+                         str(text), re.I)),
+          "and it says plainly that nothing from guest mode is saved", str(text))
+
+    guest_lines = b.js("RICKIE_LINES.guest") or []
+    b.js("(()=>{const btn=[...document.querySelectorAll('.guest-complete-banner button')]"
+         ".find(x=>x.textContent.trim()==='Create Account'); if(btn) btn.click();})()")
+    time.sleep(1.0)
+    username = f"uicheck_guestup_{int(time.time() * 1000) % 1000000}"
+    b.js(f"(()=>{{document.getElementById('reg-username').value={json.dumps(username)};"
+         " document.getElementById('reg-password').value='GuestSignup123!';"
+         " document.getElementById('register-form').requestSubmit();})()")
+    time.sleep(4.0)
+    state = b.js("""(()=>({
+        guest: isGuest,
+        user: currentUser ? (currentUser.username || '') : '',
+        greeting: (document.getElementById('today-greeting')||{}).textContent || '',
+        cachedDone: _cachedDoneLine,
+        toasts: (_rickieToastQueue || []).length,
+    }))()""") or {}
+    if not check(state.get("user") == username and state.get("guest") is False,
+                 "signing up from the banner lands in the new account", json.dumps(state)):
+        return
+    greeting = str(state.get("greeting") or "")
+    from_guest = [g for g in guest_lines if g and greeting.startswith(g.rstrip(".!?"))]
+    check(not from_guest, "the new account is not greeted as a guest", greeting)
+    check(state.get("cachedDone") is None and state.get("toasts") == 0,
+          "and nothing else from the guest session carries over",
+          json.dumps(state))
+
+
 def _spots_he_may_stand_in_that_are_not_clear(b: Browser, tries: int = 8):
     """Place Rickie where the engine says is clear, then measure the page.
 
@@ -3112,6 +3174,7 @@ def main() -> int:
         check_first_mission_celebration(browser, base, flask_app)
         check_guest_gets_the_celebration(browser, base)
         check_guest_promise_is_true(browser, base)
+        check_guest_finish_and_sign_up_tell_the_truth(browser, base)
         check_a_completion_that_did_not_save_says_so(browser, base, flask_app)
         check_celebration_stays_clear_of_the_nav(browser, base, flask_app)
         check_team_witness(browser, base, flask_app)

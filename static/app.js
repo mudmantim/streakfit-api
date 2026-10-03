@@ -4233,19 +4233,26 @@ function handleGuestMode() {
 // Leaving guest mode with intent. handleExitGuest drops you on the LOGIN tab,
 // which is the wrong one for somebody who has just decided to start.
 function handleGuestSignup() {
-    isGuest = false;
-    guestCompleted = new Set();
-    guestCompleteFired = false;
+    _leaveGuestSession();
     setGuestUI(false);
     clearErrors();
     showTab('register');
     showView('auth');
 }
 
+// Leaving guest mode clears everything the guest session personalised, not
+// just the three guest flags: the guest-pool greeting, the cached done line
+// and queued Rickie toasts all used to follow the person into their new
+// account (R1 D25). The one thing kept is an invite code they arrived with,
+// which is about where they are going, not about the guest session.
+function _leaveGuestSession() {
+    var invite = _pendingJoinCode;
+    _resetAccountState();
+    _pendingJoinCode = invite;
+}
+
 function handleExitGuest() {
-    isGuest = false;
-    guestCompleted = new Set();
-    guestCompleteFired = false;
+    _leaveGuestSession();
     setGuestUI(false);
     clearErrors();
     showTab('login');
@@ -4992,11 +4999,14 @@ function renderGuestCompleteBanner() {
 
     var title = document.createElement('p');
     title.className = 'complete-title';
-    title.textContent = 'Day 1 Complete';
+    // Guest mode keeps nothing, and signing up carries nothing across, so
+    // this banner must not promise a streak (R1 D5). Same truth as the top
+    // guest banner: "Nothing here is saved."
+    title.textContent = 'All five done';
 
     var sub = document.createElement('p');
     sub.className = 'complete-sub';
-    sub.textContent = 'Your streak starts here.';
+    sub.textContent = 'That was a look around.';
 
     textDiv.appendChild(title);
     textDiv.appendChild(sub);
@@ -5005,7 +5015,7 @@ function renderGuestCompleteBanner() {
 
     var desc = document.createElement('p');
     desc.className = 'guest-banner-desc';
-    desc.textContent = 'Create a free account to save your streak and come back tomorrow for Day 2.';
+    desc.textContent = 'Nothing from guest mode is saved. Create a free account and your streak starts with your first mission there.';
 
     var actions = document.createElement('div');
     actions.className = 'guest-banner-actions';
