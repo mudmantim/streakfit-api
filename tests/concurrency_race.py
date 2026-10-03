@@ -69,6 +69,8 @@ def install(engine):
         p = getattr(_probe, 'cfg', None)
         if not p or p['fired'] or p['when'] != when:
             return
+        if len(p.setdefault('seen', [])) < 400:      # diagnostics for probe_never_reached
+            p['seen'].append(statement[-120:])
         if re.search(p['pattern'], statement, re.I | re.S):
             p['fired'] = True
             p['statement'] = statement[:300]
@@ -145,7 +147,7 @@ def race(A, observer, first, second, pattern, when='before'):
     if not probe['holding'].wait(SAFETY_S):
         probe['go'].set()
         t1.join(SAFETY_S)
-        out.update(outcome='probe_never_reached', t1=b1)
+        out.update(outcome='probe_never_reached', t1=b1, t1_statements=probe.get('seen', []))
         return out
     out['probe']['statement'] = probe.get('statement')
     pid1 = _pids.get('race-T1')
@@ -185,7 +187,8 @@ def intended_wait(ev, relation, statement_pattern):
 
 
 def no_5xx(ev):
-    return all(b.get('status', 500) < 500 and 'exc' not in b for b in (ev['t1'], ev['t2']))
+    return all(b.get('status', 500) < 500 and 'exc' not in b
+               for b in (ev.get('t1', {}), ev.get('t2', {})))
 
 
 # ── scenario fixtures (direct rows: no rate limits, no API noise) ─────────────
@@ -256,7 +259,11 @@ def main():
     def totals(uid):
         return sql('select xp_total, acorns_total, acorns_spent from "user" where id = :u', u=uid)[0]
 
+    only = [x for x in os.environ.get('STREAKFIT_RACE_ONLY', '').split(',') if x]
+
     def run(name, fn):
+        if only and not any(name.startswith(o) for o in only):
+            return
         try:
             results[name] = fn()
         except Exception:
@@ -272,7 +279,7 @@ def main():
                   lambda c: c.post('/api/photo-filters/frosty/unlock', headers=h),
                   lambda c: c.post('/api/photo-filters/golden_hour/unlock', headers=h),
                   r'INSERT INTO user_filter_unlock')
-        total, earned, spent = 0, *totals(uid)[1:]
+        earned, spent = totals(uid)[1:]
         cost = scalar('select coalesce(sum(acorns_spent),0) from user_filter_unlock where user_id=:u', u=uid)
         inv = {'spent_le_total': spent <= earned, 'spent_eq_unlocks': spent == cost,
                'granted_le_earned': cost <= earned, 'no_5xx': no_5xx(ev)}
@@ -331,7 +338,7 @@ def main():
         count = scalar('select count(*) from team_membership where team_id=:t', t=team_id)
         inv = {'at_most_cap': count <= 8, 'exactly_one_joined': count == 8, 'no_5xx': no_5xx(ev)}
         ev.update(state={'members': count}, invariants=inv,
-                  intended_wait=intended_wait(ev, 'team', r'FOR UPDATE'))
+                  intended_wait=intended_wait(ev, 'team', LOCK_USER))
         ev['fixed_ok'] = all(inv.values()) and ev['intended_wait'] and ev['joined']
         return ev
 
@@ -348,7 +355,7 @@ def main():
         (xp, ac, _sp), (lxp, lac) = totals(uid), ledger(uid)
         inv = {'one_row': rows == 1, 'awarded_once': awards == 1,
                'both_200': ev['t1'].get('status') == 200 and ev['t2'].get('status') == 200,
-               'xp_eq_ledger': xp == lxp, 'no_5xx': no_5xx(ev)}
+               'xp_eq_ledger': xp == lxp, 'acorns_eq_ledger': ac == lac, 'no_5xx': no_5xx(ev)}
         ev.update(state={'rows': rows, 'award_events': awards}, invariants=inv,
                   intended_wait=intended_wait(ev, 'user', LOCK_USER))
         ev['fixed_ok'] = all(inv.values()) and ev['intended_wait'] and ev['joined']
@@ -366,7 +373,7 @@ def main():
         mem = scalar('select count(*) from team_membership where team_id=:t and user_id=:u', t=team_id, u=uid)
         mom = scalar("select count(*) from team_moment where team_id=:t and subject_user_id=:u "
                      "and moment_type='member_joined'", t=team_id, u=uid)
-        statuses = sorted([ev['t1'].get('status'), ev['t2'].get('status')])
+        statuses = sorted([ev.get('t1', {}).get('status') or 0, ev.get('t2', {}).get('status') or 0])
         inv = {'one_membership': mem == 1, 'one_moment': mom == 1,
                'statuses_200_400': statuses == [200, 400], 'no_5xx': no_5xx(ev)}
         ev.update(state={'memberships': mem, 'joined_moments': mom, 'statuses': statuses},
@@ -383,7 +390,7 @@ def main():
                   lambda c: c.delete('/api/me', json=body, headers=h),
                   r'FOR UPDATE', when='after')
         gone = scalar('select count(*) from "user" where id=:u', u=uid) == 0
-        statuses = sorted([ev['t1'].get('status'), ev['t2'].get('status')])
+        statuses = sorted([ev.get('t1', {}).get('status') or 0, ev.get('t2', {}).get('status') or 0])
         inv = {'deleted': gone, 'statuses_200_404': statuses == [200, 404], 'no_5xx': no_5xx(ev)}
         ev.update(state={'statuses': statuses}, invariants=inv,
                   intended_wait=intended_wait(ev, 'user', r'FOR UPDATE'))
@@ -468,7 +475,7 @@ def main():
         (xp, ac, _sp), (lxp, lac) = totals(uid), ledger(uid)
         inv = {'one_answer': rows == 1, 'attempt_awarded_once': attempts == 1,
                'both_200': ev['t1'].get('status') == 200 and ev['t2'].get('status') == 200,
-               'xp_eq_ledger': xp == lxp, 'no_5xx': no_5xx(ev)}
+               'xp_eq_ledger': xp == lxp, 'acorns_eq_ledger': ac == lac, 'no_5xx': no_5xx(ev)}
         ev.update(state={'answers': rows, 'attempt_events': attempts}, invariants=inv,
                   intended_wait=intended_wait(ev, 'user', LOCK_USER))
         ev['fixed_ok'] = all(inv.values()) and ev['intended_wait'] and ev['joined']
@@ -520,9 +527,121 @@ def main():
         rows = scalar('select count(*) from team_challenge_completion where user_id=:u', u=uid)
         (xp, ac, _sp), (lxp, lac) = totals(uid), ledger(uid)
         inv = {'rewards_within_cap': awards <= cap, 'both_recorded': rows == cap + 1,
-               'xp_eq_ledger': xp == lxp, 'no_5xx': no_5xx(ev)}
+               'xp_eq_ledger': xp == lxp, 'acorns_eq_ledger': ac == lac, 'no_5xx': no_5xx(ev)}
         ev.update(state={'rewarded': awards, 'cap': cap, 'completions': rows}, invariants=inv,
                   intended_wait=intended_wait(ev, 'user', LOCK_USER))
+        ev['fixed_ok'] = all(inv.values()) and ev['intended_wait'] and ev['joined']
+        return ev
+
+    # ── fresh interleavings across routes (post-repair attack) ───────────────
+
+    def residue(uid):
+        return {t: scalar(f'select count(*) from {t} where user_id=:u', u=uid)
+                for t in ('daily_completion', 'progress_event', 'daily_mission_award',
+                          'team_membership')}
+
+    # X1 — a lock holder that never lets go: the request waits on the user row
+    # (observed in pg_stat_activity, blocked by the holder's pid), then answers
+    # the JSON 503 from lock_timeout, writes nothing, and a retry succeeds.
+    # The 503 is the product behaviour under test; the observed wait is what
+    # proves the request reached the lock rather than failing earlier.
+    def x1():
+        uid, h = person('x1')
+        keys = todays_keys(h)
+        holder_engine = create_engine(os.environ['DATABASE_URL'])
+        hc = holder_engine.connect()
+        tx = hc.begin()
+        holder = hc.execute(text('select pg_backend_pid()')).scalar()
+        hc.execute(text('select id from "user" where id=:u for update'), {'u': uid})
+        t, box = _thread(A, 'race-X1', lambda c: c.post(f'/api/daily/{keys[0]}/complete', headers=h))
+        seen, deadline = None, time.monotonic() + SAFETY_S
+        while time.monotonic() < deadline and t.is_alive():
+            pid = _pids.get('race-X1')
+            if pid:
+                w = _observe(observer, holder, pid)
+                if w and w['wait_event_type'] == 'Lock' and holder in w['blockers']:
+                    seen = w
+                    break
+            time.sleep(POLL_S)
+        t.join(SAFETY_S)
+        tx.rollback()
+        hc.close()
+        holder_engine.dispose()
+        rows = scalar('select count(*) from daily_completion where user_id=:u', u=uid)
+        with A.app.app_context():
+            retry = A.app.test_client().post(f'/api/daily/{keys[0]}/complete', headers=h)
+        inv = {'observed_wait_on_user': bool(seen and seen.get('waiting_relation') == 'user'),
+               'status_503': box.get('status') == 503,
+               'busy_json': (box.get('body') or {}).get('error') == 'busy',
+               'nothing_written': rows == 0, 'retry_200': retry.status_code == 200,
+               'joined': not t.is_alive()}
+        return {'t2_wait': seen, 't1': box, 'state': {'rows_during': rows, 'retry': retry.status_code},
+                'invariants': inv, 'outcome': 'lock_timeout_503' if inv['status_503'] else 'other',
+                'fixed_ok': all(inv.values())}
+
+    # X2 — deletion holds the row; a completion for the same person arrives.
+    def x2():
+        uid, h = person('x2')
+        keys = todays_keys(h)
+        ev = race(A, observer,
+                  lambda c: c.delete('/api/me', json={'password': PW}, headers=h),
+                  lambda c: c.post(f'/api/daily/{keys[0]}/complete', headers=h),
+                  r'FOR UPDATE', when='after')
+        res = residue(uid)
+        gone = scalar('select count(*) from "user" where id=:u', u=uid) == 0
+        inv = {'deleted': gone, 'no_residue': not any(res.values()),
+               't1_200': ev.get('t1', {}).get('status') == 200,
+               't2_404': ev.get('t2', {}).get('status') == 404, 'no_5xx': no_5xx(ev)}
+        ev.update(state={'residue': res}, invariants=inv,
+                  intended_wait=intended_wait(ev, 'user', r'FOR NO KEY UPDATE'))
+        ev['fixed_ok'] = all(inv.values()) and ev['intended_wait'] and ev['joined']
+        return ev
+
+    # X3 — a completion holds the row (mid-mission, in a team); deletion arrives.
+    def x3():
+        uid, h = person('x3')
+        owner, _ = person('x3o')
+        team_id, _code = team_with(owner, [uid])
+        keys = todays_keys(h)
+        seed_completions(uid, keys[:4])
+        ev = race(A, observer,
+                  lambda c: c.post(f'/api/daily/{keys[4]}/complete', headers=h),
+                  lambda c: c.delete('/api/me', json={'password': PW}, headers=h),
+                  r'UPDATE team_campfire', when='after')
+        res = residue(uid)
+        gone = scalar('select count(*) from "user" where id=:u', u=uid) == 0
+        campfire = scalar('select total_team_missions from team_campfire where team_id=:t', t=team_id)
+        inv = {'deleted': gone, 'no_residue': not any(res.values()),
+               'both_200': ev.get('t1', {}).get('status') == 200 and ev.get('t2', {}).get('status') == 200,
+               'campfire_counted_once': campfire == 1, 'no_5xx': no_5xx(ev)}
+        ev.update(state={'residue': res, 'campfire': campfire}, invariants=inv,
+                  intended_wait=intended_wait(ev, 'user', r'FOR UPDATE'))
+        ev['fixed_ok'] = all(inv.values()) and ev['intended_wait'] and ev['joined']
+        return ev
+
+    # X4 — a person is mid-completion when a teammate files a report on them:
+    # the report's moderation lock waits on the same row, then lands; nothing
+    # lost on either side.
+    def x4():
+        reporter, hr = person('x4r')
+        subject, hs = person('x4s')
+        team_id, _code = team_with(reporter, [subject])
+        keys = todays_keys(hs)
+        ev = race(A, observer,
+                  lambda c: c.post(f'/api/daily/{keys[0]}/complete', headers=hs),
+                  lambda c: c.post('/api/reports', headers=hr, json={
+                      'category': 'spam', 'subject_type': 'user',
+                      'reported_user_id': subject, 'team_id': team_id}),
+                  r'INSERT INTO daily_completion')
+        reports = scalar('select count(*) from report where reported_user_id=:u', u=subject)
+        rows = scalar('select count(*) from daily_completion where user_id=:u', u=subject)
+        (xp, ac, _sp), (lxp, lac) = totals(subject), ledger(subject)
+        inv = {'report_filed': reports == 1, 'completion_kept': rows == 1,
+               'xp_eq_ledger': xp == lxp, 'acorns_eq_ledger': ac == lac,
+               't1_200': ev.get('t1', {}).get('status') == 200,
+               't2_2xx': 200 <= (ev.get('t2', {}).get('status') or 0) < 300, 'no_5xx': no_5xx(ev)}
+        ev.update(state={'reports': reports, 'rows': rows}, invariants=inv,
+                  intended_wait=intended_wait(ev, 'user', r'FOR NO KEY UPDATE'))
         ev['fixed_ok'] = all(inv.values()) and ev['intended_wait'] and ev['joined']
         return ev
 
@@ -539,6 +658,10 @@ def main():
     run('D34_brain_boost_answered_twice', d34)
     run('D35_same_challenge_twice', d35)
     run('D36_challenge_daily_reward_cap', d36)
+    run('X1_lock_timeout_503', x1)
+    run('X2_delete_then_complete', x2)
+    run('X3_complete_then_delete', x3)
+    run('X4_report_during_completion', x4)
     print(json.dumps(results, default=str))
     sys.exit(0 if all(r.get('fixed_ok') for r in results.values()) else 1)
 

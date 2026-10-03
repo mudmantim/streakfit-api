@@ -21,7 +21,7 @@ from datetime import datetime, date, timedelta
 from typing import Any
 from flask import Flask, request, jsonify, abort, make_response
 from flask_sqlalchemy import SQLAlchemy
-from sqlalchemy.exc import DBAPIError, IntegrityError
+from sqlalchemy.exc import DBAPIError, IntegrityError, OperationalError
 from flask_migrate import Migrate
 from werkzeug.middleware.proxy_fix import ProxyFix
 from werkzeug.security import generate_password_hash, check_password_hash
@@ -1649,6 +1649,16 @@ class User(db.Model):
     age_band = db.Column(db.String(8), nullable=True)
     challenges = db.relationship('Challenge', backref='owner', lazy=True)
 
+    # The economy's floor and ceiling, held by the database itself, so no code
+    # path (present or future, locked or not) can store an impossible balance.
+    # RC-B2a D26/D27: concurrent requests used to overwrite each other here.
+    __table_args__ = (
+        db.CheckConstraint('xp_total >= 0', name='ck_user_xp_nonnegative'),
+        db.CheckConstraint('acorns_total >= 0', name='ck_user_acorns_nonnegative'),
+        db.CheckConstraint('acorns_spent >= 0 AND acorns_spent <= acorns_total',
+                           name='ck_user_acorns_spent_within_earned'),
+    )
+
 class GuardianLink(db.Model):
     """A guardian's authority over a child account. Deliberately its own row.
 
@@ -1793,6 +1803,21 @@ class DailyCompletion(db.Model):
         db.UniqueConstraint('user_id', 'date', 'exercise_key', name='uq_daily_completion'),
         db.Index('ix_daily_completion_user_date', 'user_id', 'date'),
     )
+
+class DailyMissionAward(db.Model):
+    """One row per (person, mission day) whose mission bonus has been paid.
+
+    The bonus is decided by "this completion made today's count five", which
+    two concurrent completions could both observe (RC-B2a D27b: mission and
+    perfect bonuses paid twice). The completion route takes the user lock, so
+    this cannot race; the primary key is the backstop that makes a second
+    payment impossible even for a path that forgets the lock.
+    """
+    __tablename__ = 'daily_mission_award'
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), primary_key=True)
+    mission_date = db.Column(db.Date, primary_key=True)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+
 
 class BrainBoostAnswer(db.Model):
     __tablename__ = 'brain_boost_answer'
@@ -2594,6 +2619,66 @@ def xp_to_level(xp_total):
     }
 
 
+# SQLAlchemy 2.0's statement cache key leaves out with_for_update's key_share
+# flag, so `select(User)...with_for_update()` and the same select with
+# key_share=True share ONE compiled entry: whichever runs first decides the
+# lock strength for both. Found by the RC-B2a race harness -- account
+# deletion's FOR UPDATE came back as FOR NO KEY UPDATE once _lock_user had
+# run in the process. `of` IS in the cache key, so every key_share lock goes
+# through here and names its table, and plain FOR UPDATE locks never use `of`:
+# the two can no longer share an entry. (tests/test_lock_strength_cache.py)
+def _for_no_key_update(stmt, model):
+    return stmt.with_for_update(key_share=True, of=model)
+
+
+def _lock_user(user_id):
+    """Lock the acting person's row for the rest of this request's transaction.
+
+    Every request that changes a person's economy or memberships calls this
+    FIRST, before reading anything it will decide on, so two requests for the
+    same person run one after the other however many workers or instances
+    serve them (RC-B2a D26-D30, D35, D36).
+
+    FOR NO KEY UPDATE, not FOR UPDATE: it does not block foreign-key checks
+    (rows that merely reference the person, e.g. a teammate's report naming
+    them). It does conflict with account deletion's FOR UPDATE and with
+    _lock_moderation_subject, which -- despite its docstring -- also emits FOR
+    NO KEY UPDATE (key_share without read); those queue for one short
+    transaction. Global lock order: users (ascending id) before teams
+    (ascending id) before anything else.
+
+    The row is re-read under the lock (populate_existing), so nothing decided
+    on comes from a copy loaded before the lock was held. A bounded lock wait
+    turns a stuck holder into a JSON 503, never a hung request.
+    """
+    if db.engine.dialect.name == 'postgresql':
+        db.session.execute(db.text("SET LOCAL lock_timeout = '5s'"))
+    return db.session.execute(
+        _for_no_key_update(db.select(User).where(User.id == user_id), User)
+        .execution_options(populate_existing=True)
+    ).scalar_one_or_none()
+
+
+def _lock_team(team_id):
+    """Lock a team's row (after the user lock). Joins for one team run one at
+    a time, so the member cap is checked against a count no one else can change
+    underneath it (RC-B2a D28)."""
+    return db.session.execute(
+        _for_no_key_update(db.select(Team).where(Team.id == team_id), Team)
+        .execution_options(populate_existing=True)
+    ).scalar_one_or_none()
+
+
+def _claim_mission_award(user_id, mission_date):
+    """True the first time a person's mission on `mission_date` is paid."""
+    try:
+        with db.session.begin_nested():
+            db.session.add(DailyMissionAward(user_id=user_id, mission_date=mission_date))
+        return True
+    except IntegrityError:
+        return False
+
+
 def award_progress(user, event_type, xp, acorns, team_id=None):
     """Record an XP/Acorn award: writes a ProgressEvent, increments the
     user's lifetime counters, and reports whether this award crossed a
@@ -2610,7 +2695,10 @@ def award_progress(user, event_type, xp, acorns, team_id=None):
     ))
     user.xp_total += xp
     user.acorns_total += acorns
-    db.session.commit()
+    # Stages only. It used to commit, which split one request into several
+    # transactions and released any lock the caller held after the first award
+    # (RC-B2a D27). The caller holds the user lock (`_lock_user`) and commits once.
+    db.session.flush()
 
     new_level_info = xp_to_level(user.xp_total)
     new_level = new_level_info['level']
@@ -4344,6 +4432,10 @@ def delete_my_account():
         # Something that blocks appeared between the plan and the lock -- a
         # report filed about them a moment ago. Same answer as above.
         return _account_deletion_refusal(report)
+    if not report.get("found", True):
+        # A second deletion of the same account waited for the first and then
+        # found nobody left: the account is gone, as asked (RC-B2a D31).
+        return jsonify({"error": "User not found"}), 404
     if not report.get("executed"):
         return jsonify({"error": "account_deletion_failed"}), 500
 
@@ -5022,7 +5114,10 @@ def _progress_response(old_level, user, events):
 @jwt_required()
 def complete_daily_exercise(exercise_key):
     user_id = int(get_jwt_identity())
-    user = db.session.get(User, user_id)
+    # One transaction for the whole request, under the user lock (RC-B2a D27,
+    # D29): completions, awards, the mission bonus and campfire logs commit
+    # together, once, at the end.
+    user = _lock_user(user_id)
     if user is None:
         abort(404)
 
@@ -5059,7 +5154,16 @@ def complete_daily_exercise(exercise_key):
             date=today,
             exercise_key=exercise_key
         ))
-        db.session.commit()
+        try:
+            db.session.flush()
+        except IntegrityError:
+            # Backstop only: under the user lock a duplicate cannot get here.
+            # Answer exactly as for a repeat tap -- 200, nothing awarded.
+            db.session.rollback()
+            user = _lock_user(user_id)
+            if user is None:
+                abort(404)
+            return _repeat_completion_response(user, exercise_key, today, old_level)
 
         completed_count = db.session.execute(
             db.select(db.func.count(DailyCompletion.id)).where(
@@ -5089,7 +5193,9 @@ def complete_daily_exercise(exercise_key):
             events.append(award_progress(user, 'repeat_exercise', REPEAT_EXERCISE_XP, 0))
 
         team_campfire_updates = []
-        if completed_count == 5:
+        # The bonus is claimed, not inferred: two requests could both see five
+        # (RC-B2a D27b); only one can own the (person, day) award row.
+        if completed_count == 5 and _claim_mission_award(user_id, today):
             events.append(award_progress(user, 'mission_complete', MISSION_COMPLETE_XP, MISSION_COMPLETE_ACORNS))
             events.append(award_progress(user, 'perfect_mission', PERFECT_MISSION_XP, PERFECT_MISSION_ACORNS))
 
@@ -5103,21 +5209,32 @@ def complete_daily_exercise(exercise_key):
             # (TEAM_SYSTEM_BASELINE Section 3) -- no "which team" picker.
             # Every team here is a real row with a real campfire; there is
             # no special or system team to skip.
+            # Teams in ascending id: the global lock order (users, then teams).
             memberships = db.session.execute(
                 db.select(TeamMembership).where(TeamMembership.user_id == user_id)
+                .order_by(TeamMembership.team_id)
             ).scalars().all()
             for m in memberships:
-                campfire = db.session.execute(
-                    db.select(TeamCampfire).where(TeamCampfire.team_id == m.team_id)
+                # Increment IN the database and read back the value THIS request
+                # produced. Two teammates finishing together used to read the same
+                # total and both write it back: one log lost, and the log moment,
+                # the stage moment and Rickie's message all emitted twice
+                # (RC-B2a D32). Every side effect below keys off `total`, which is
+                # unique to this request, so each one happens exactly once.
+                total = db.session.execute(
+                    db.update(TeamCampfire)
+                    .where(TeamCampfire.team_id == m.team_id)
+                    .values(total_team_missions=TeamCampfire.total_team_missions + 1)
+                    .returning(TeamCampfire.total_team_missions)
+                    .execution_options(synchronize_session=False)
                 ).scalar_one_or_none()
-                if not campfire:
+                if total is None:
                     continue
-                stage_before = _campfire_stage(campfire.total_team_missions)
-                campfire.total_team_missions += 1
-                stage_after = _campfire_stage(campfire.total_team_missions)
+                stage_before = _campfire_stage(total - 1)
+                stage_after = _campfire_stage(total)
                 team_campfire_updates.append({
                     "team_id": m.team_id,
-                    "total_team_missions": campfire.total_team_missions,
+                    "total_team_missions": total,
                     "stage": stage_after,
                 })
 
@@ -5130,22 +5247,20 @@ def complete_daily_exercise(exercise_key):
                 # is needed, same reasoning as the campfire increment itself.
                 create_team_moment(
                     m.team_id, 'campfire_log_added', subject_user_id=user_id,
-                    metadata={"total_team_missions": campfire.total_team_missions}
+                    metadata={"total_team_missions": total}
                 )
                 # R2.6 Rickie Team Reactions MVP: only the team's very first
                 # log gets a Rickie message -- every log after that is a
                 # moment (raw ledger) but not a chat post, or Rickie would
                 # spam the thread on every single mission completion.
-                if campfire.total_team_missions == 1:
+                if total == 1:
                     create_rickie_team_message(m.team_id, 'first_log')
                 if stage_after != stage_before:
                     create_team_moment(
                         m.team_id, 'campfire_stage_reached', subject_user_id=None,
-                        metadata={"stage": stage_after, "total_team_missions": campfire.total_team_missions}
+                        metadata={"stage": stage_after, "total_team_missions": total}
                     )
                     create_rickie_team_message(m.team_id, 'campfire_stage_reached')
-            if team_campfire_updates:
-                db.session.commit()
     else:
         completed_count = db.session.execute(
             db.select(db.func.count(DailyCompletion.id)).where(
@@ -5166,6 +5281,29 @@ def complete_daily_exercise(exercise_key):
         user_id, user, old_level, events, awarded=bool(events), daily_activity=True, today=today
     )
     response["filters_unlocked"] = _filters_newly_unlocked(user_id, user, old_level, events)
+    db.session.commit()
+    return jsonify(response), 200
+
+
+def _repeat_completion_response(user, exercise_key, today, old_level):
+    """What a repeat tap on an already-completed exercise answers: 200,
+    nothing awarded. Used by the duplicate backstop."""
+    completed_count = db.session.execute(
+        db.select(db.func.count(DailyCompletion.id)).where(
+            DailyCompletion.user_id == user.id,
+            DailyCompletion.date == today
+        )
+    ).scalar()
+    response = {
+        "message": "Exercise completed",
+        "exercise_key": exercise_key,
+        "completed_count": completed_count,
+        "team_campfire_updates": [],
+    }
+    response.update(_progress_response(old_level, user, []))
+    response["milestones_unlocked"] = []
+    response["filters_unlocked"] = []
+    db.session.commit()
     return jsonify(response), 200
 
 
@@ -5322,7 +5460,9 @@ def answer_brain_boost():
         return jsonify({"error": "selected_index_required"}), 400
 
     user_id = int(get_jwt_identity())
-    user = db.session.get(User, user_id)
+    # Under the user lock, one transaction: the answer and its awards commit
+    # together, serialized with every other award for this person (RC-B2a D27c).
+    user = _lock_user(user_id)
     if user is None:
         abort(404)
 
@@ -5360,9 +5500,12 @@ def answer_brain_boost():
         db.session.add(BrainBoostAnswer(
             user_id=user_id, date=today, correct=is_correct, points_earned=points
         ))
-        db.session.commit()
+        db.session.flush()
     except Exception:
         db.session.rollback()
+        user = _lock_user(user_id)
+        if user is None:
+            abort(404)
         existing = db.session.execute(
             db.select(BrainBoostAnswer).where(
                 BrainBoostAnswer.user_id == user_id,
@@ -5418,6 +5561,7 @@ def answer_brain_boost():
     else:
         response["milestones_unlocked"] = []
     response["filters_unlocked"] = _filters_newly_unlocked(user_id, user, old_level, events)
+    db.session.commit()
     return jsonify(response), 200
 
 
@@ -6378,13 +6522,18 @@ def join_team(team_id):
         return jsonify({"error": "Invite code is required"}), 400
 
     user_id = int(get_jwt_identity())
-    user = db.session.get(User, user_id)
+    # Global lock order: the person, then the team. Same-person joins run one at
+    # a time (RC-B2a D30); joins for one team run one at a time, so the member
+    # cap is checked against a count nobody can change underneath it (D28).
+    user = _lock_user(user_id)
+    if user is None:            # deleted while the token was still valid
+        abort(404)
 
     suspended = _require_social_privileges(user_id)
     if suspended:
         return suspended
 
-    team = db.session.get(Team, team_id)
+    team = _lock_team(team_id)
     if not team:
         abort(404)
 
@@ -6428,7 +6577,12 @@ def join_team(team_id):
     db.session.add(TeamMembership(team_id=team_id, user_id=user_id))
     create_team_moment(team_id, 'member_joined', subject_user_id=user_id)
     create_rickie_team_message(team_id, 'member_joined')
-    db.session.commit()
+    try:
+        db.session.commit()
+    except IntegrityError:
+        # Backstop only: under the user lock a duplicate cannot get here.
+        db.session.rollback()
+        return jsonify({"error": "Already a member of this team"}), 400
 
     return jsonify({"message": "Joined team", "team_id": team_id}), 200
 
@@ -7266,6 +7420,11 @@ def complete_team_challenge(team_id, public_id):
     done too many, would be punishing a person for moving.
     """
     user_id = int(get_jwt_identity())
+    # The user lock first (global order: users, then teams), so the
+    # already-completed check and the daily reward cap are decided on counts no
+    # concurrent request of this person can change (RC-B2a D35, D36).
+    if _lock_user(user_id) is None:
+        abort(404)
 
     membership = db.session.execute(
         db.select(TeamMembership).where(
@@ -7303,7 +7462,7 @@ def complete_team_challenge(team_id, public_id):
     if already:
         return jsonify({"already_completed": True, "xp_awarded": 0, "acorns_awarded": 0}), 200
 
-    user = db.session.get(User, user_id)
+    user = db.session.get(User, user_id)     # already locked and re-read above
     old_level = xp_to_level(user.xp_total)['level']
 
     # Counted BEFORE the new row is staged: a query autoflushes the pending
@@ -7317,6 +7476,12 @@ def complete_team_challenge(team_id, public_id):
     ).scalar() or 0
 
     db.session.add(TeamChallengeCompletion(challenge_id=challenge.id, user_id=user_id))
+    try:
+        db.session.flush()
+    except IntegrityError:
+        # Backstop only: under the user lock a duplicate cannot get here.
+        db.session.rollback()
+        return jsonify({"already_completed": True, "xp_awarded": 0, "acorns_awarded": 0}), 200
 
     events = []
     if rewarded_today < CHALLENGE_REWARDED_PER_DAY:
@@ -7327,8 +7492,6 @@ def complete_team_challenge(team_id, public_id):
     create_team_moment(team_id, 'challenge_completed', subject_user_id=user_id,
                        metadata={"title": preset.get('title')})
     create_rickie_team_message(team_id, 'challenge_completed')
-    db.session.commit()
-
     response = {
         "completed": True,
         "challenge_title": preset.get('title'),
@@ -7340,6 +7503,7 @@ def complete_team_challenge(team_id, public_id):
     response["milestones_unlocked"] = _completion_milestones(
         user_id, user, old_level, events, awarded=bool(events))
     response["filters_unlocked"] = _filters_newly_unlocked(user_id, user, old_level, events)
+    db.session.commit()
     return jsonify(response), 200
 
 
@@ -7372,7 +7536,9 @@ def unlock_photo_filter(filter_key):
     no way to buy acorns -- the only source of acorns is showing up.
     """
     user_id = int(get_jwt_identity())
-    user = db.session.get(User, user_id)
+    # Under the user lock: the balance check and the spend are one decision no
+    # concurrent purchase or award for this person can split (RC-B2a D26).
+    user = _lock_user(user_id)
     if user is None:
         return jsonify({"error": "User not found"}), 404
 
@@ -10765,6 +10931,7 @@ def _forget_coach_memory(user_id):
 # Private, user-owned rows — deleted outright when the account is deleted.
 _USER_PRIVATE_DELETES = [
     ("challenge",          Challenge,        "user_id"),
+    ("daily_mission_award", DailyMissionAward, "user_id"),
     ("daily_completion",   DailyCompletion,  "user_id"),
     ("brain_boost_answer", BrainBoostAnswer, "user_id"),
     ("progress_event",     ProgressEvent,    "user_id"),
@@ -10939,7 +11106,7 @@ def _lock_moderation_subject(user_id):
     if user_id is None:
         return False
     return db.session.execute(
-        db.select(User.id).where(User.id == user_id).with_for_update(key_share=True)
+        _for_no_key_update(db.select(User.id).where(User.id == user_id), User)
     ).scalar_one_or_none() is not None
 
 
@@ -11590,6 +11757,17 @@ def forbidden(e):
 @app.errorhandler(404)
 def not_found(e):
     return jsonify({"error": "Not found"}), 404
+
+@app.errorhandler(OperationalError)
+def _database_busy(e):
+    """A bounded lock wait (`_lock_user`) that ran out answers 503 in JSON."""
+    db.session.rollback()
+    if getattr(getattr(e, 'orig', None), 'pgcode', None) == '55P03':      # lock_not_available
+        app.logger.warning('event=lock_timeout path=%s', request.path)
+        return jsonify({"error": "busy", "message": "That took too long. Try again in a moment."}), 503
+    app.logger.error('Unhandled database error: %s', e, exc_info=True)
+    return jsonify({"error": "Internal server error"}), 500
+
 
 @app.errorhandler(500)
 def internal_error(e):

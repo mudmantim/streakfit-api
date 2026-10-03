@@ -64,6 +64,10 @@ SCENARIOS = [
     'D34_brain_boost_answered_twice',
     'D35_same_challenge_twice',
     'D36_challenge_daily_reward_cap',
+    'X1_lock_timeout_503',
+    'X2_delete_then_complete',
+    'X3_complete_then_delete',
+    'X4_report_during_completion',
 ]
 
 
