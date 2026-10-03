@@ -253,9 +253,32 @@ class Browser:
         # (tmpfs) on the dev machine: 150 of these — 6.3GB — had accumulated
         # in one day of runs, and a full-suite run died on a SQLite "disk I/O
         # error" when it filled. Removed only after Chrome has exited.
+        #
+        # Waiting for the main process was not enough: its zygote and GPU
+        # children exit a moment later and wrote `Default/` back after the
+        # rmtree, leaving an empty-looking profile per browser (E2E R1: 14 left
+        # behind by agents in one round). So wait until no process still names
+        # this profile, remove it, and make sure it stays removed.
         if self._owns_profile:
             import shutil
-            shutil.rmtree(self.profile, ignore_errors=True)
+            needle = self.profile.encode()
+            for _ in range(50):
+                if not any(needle in _cmdline(pid) for pid in os.listdir("/proc") if pid.isdigit()):
+                    break
+                time.sleep(0.1)
+            for _ in range(10):
+                shutil.rmtree(self.profile, ignore_errors=True)
+                time.sleep(0.2)
+                if not os.path.exists(self.profile):
+                    break
+
+
+def _cmdline(pid: str) -> bytes:
+    try:
+        with open(f"/proc/{pid}/cmdline", "rb") as f:
+            return f.read()
+    except OSError:
+        return b""
 
 
 def _which(binary: str) -> bool:
