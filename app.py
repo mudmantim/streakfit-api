@@ -217,11 +217,51 @@ _anthropic_api_key = os.environ.get('ANTHROPIC_API_KEY')
 db = SQLAlchemy(app)
 migrate = Migrate(app, db)
 jwt = JWTManager(app)
+# ── Bounded Redis I/O (D7) ─────────────────────────────────────────────────
+#
+# redis-py's defaults are socket_timeout=None and socket_connect_timeout=None.
+# Production runs ONE sync worker, so a backend that accepts a connection and
+# never answers -- or a host that never answers a SYN -- held that worker on a
+# rate-limit call until gunicorn killed it after 30 s, every 30 s, for as long
+# as the outage lasted. /health waited too: the 15 s health probe runs on every
+# request. Measured on 6541cae with real Valkey: a paused backend gave 10 worker
+# kills in two minutes; an unreachable host took the whole site down.
+#
+# 0.5 s for both. In-region Key Value answers in milliseconds, so this is two
+# orders of magnitude of headroom, and it survives one lost data segment (the
+# Linux minimum retransmit is 200 ms). The cost of the bound is paid only during
+# an outage: a request then waits at most a few bounded calls (~0.5-1.5 s, login
+# being the worst) instead of 30 s, and the existing outage policy below takes
+# over. retry_on_timeout stays False (explicitly): a retry would multiply the
+# bound. The read timeout also bounds the TLS handshake for rediss://.
+#
+# Residual, documented rather than fixed here: DNS resolution is NOT bounded by
+# either option, a hostname with k addresses multiplies the connect bound by k,
+# and a backend slower than ~0.4 s per command stays "healthy" while slowing the
+# one worker down. See docs/operations/rate-limit-backend-outage.md.
+_REDIS_SOCKET_TIMEOUT_S = 0.5
+_REDIS_CONNECT_TIMEOUT_S = 0.5
+_REDIS_SCHEMES = ("redis://", "rediss://", "redis+unix://")
+
+
+def _limiter_storage_options(uri):
+    """Connection options for the limiter's storage: bounded for Redis, none
+    for anything else (memory:// ignores options but has no use for them)."""
+    if uri.startswith(_REDIS_SCHEMES):
+        return {"socket_connect_timeout": _REDIS_CONNECT_TIMEOUT_S,
+                "socket_timeout": _REDIS_SOCKET_TIMEOUT_S,
+                "retry_on_timeout": False}
+    return {}
+
+
+_RATELIMIT_STORAGE_URI = os.environ.get("RATELIMIT_STORAGE_URI", "memory://")
+
 limiter = Limiter(
     get_remote_address,
     app=app,
     default_limits=[],
-    storage_uri=os.environ.get("RATELIMIT_STORAGE_URI", "memory://"),
+    storage_uri=_RATELIMIT_STORAGE_URI,
+    storage_options=_limiter_storage_options(_RATELIMIT_STORAGE_URI),
     # NOT `swallow_errors`. See _degrade_limiter_when_shared_storage_is_down.
     #
     # Swallowing storage errors keeps the app up and silently permits
@@ -567,7 +607,17 @@ def _ratelimit_backend_check():
     says so.
     """
     storage = limiter.storage
-    if not storage.check():          # cheap negative first: down is down
+    # Cheap negative first: down is down. NOT `storage.check()`: limits wraps
+    # its PING in a bare `except:`, which also swallowed gunicorn's SystemExit
+    # when it aborted a worker stuck on this very call (D7). `except Exception`
+    # lets the abort through; the ping is bounded by the socket timeouts.
+    if hasattr(storage, "get_connection"):
+        try:
+            if not storage.get_connection().ping():
+                return False
+        except Exception:
+            return False
+    elif not storage.check():
         return False
     # Any exception propagates; the caller reports it as DEGRADED by type.
     return bool(storage.incr(_RATELIMIT_PROBE_KEY, _RATELIMIT_PROBE_EXPIRY_S))
@@ -3655,6 +3705,46 @@ def verification_self():
                                "survive a restart. It is a floor, not shared "
                                "rate limiting.",
                 critical=True))
+
+    # BOUNDED I/O (D7). Reads the options the live connection pool was built
+    # with -- never the URI -- because redis-py lets query parameters such as
+    # ?socket_timeout=9 silently override the constructor's. An unbounded
+    # backend call can hold the only sync worker until gunicorn kills it.
+    try:
+        pool = getattr(getattr(limiter.storage, "storage", None), "connection_pool", None)
+        if pool is None:
+            bstate, bobs = "PASS", "no network backend (in-process storage)"
+        else:
+            kw = pool.connection_kwargs
+            read, conn = kw.get("socket_timeout"), kw.get("socket_connect_timeout")
+            bounded = (read is not None and conn is not None
+                       and 0 < read <= 1.0 and 0 < conn <= 1.0
+                       and not kw.get("retry_on_timeout"))
+            bstate = "PASS" if bounded else "FAIL"
+            bobs = (f"socket_timeout={read} socket_connect_timeout={conn} "
+                    f"retry_on_timeout={bool(kw.get('retry_on_timeout'))}")
+        checks.append(_self_check(
+            "ratelimit.bounded_io", "A stuck rate-limit backend cannot freeze the app",
+            "Every call to the shared rate-limit backend gives up within a "
+            "second, so a hung or unreachable backend degrades rate limiting "
+            "instead of holding the only worker.",
+            "Read the connect and read timeouts the limiter's live connection "
+            "pool was built with (not the configured URI, which can override "
+            "them), and require both to be set and at most 1 s, with no retry.",
+            bstate, "VERIFIED" if bstate == "PASS" else "OBSERVED", bobs,
+            failure_reason=None if bstate == "PASS" else
+            "A hung or unreachable rate-limit backend would hold requests "
+            "until the worker is killed, taking unrelated pages down with it.",
+            limitations="Does not bound DNS resolution, and does not detect a "
+                        "backend that is slow but under the timeout.",
+            critical=True))
+    except Exception as exc:
+        checks.append(_self_check(
+            "ratelimit.bounded_io", "A stuck rate-limit backend cannot freeze the app",
+            "Every call to the shared rate-limit backend gives up within a second.",
+            "Read the limiter's live connection-pool timeouts.",
+            "UNKNOWN", "UNKNOWN", f"{type(exc).__name__}",
+            failure_reason="The limiter's connection settings could not be read."))
 
     now = datetime.utcnow().isoformat() + "Z"
     return jsonify({
