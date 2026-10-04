@@ -412,6 +412,10 @@ def test_flask_limiters_own_fallback_counts_as_degraded(client, monkeypatch):
     (lookup refuses, login strict) and fail the self-check."""
     monkeypatch.setattr(appmod.limiter, "enabled", True)
     monkeypatch.setattr(appmod.limiter, "_storage_dead", True)
+    # Flask-Limiter re-checks its storage at the start of a request (with a
+    # backoff whose state earlier tests advance) and clears the flag when the
+    # check passes; keep the storage failing so the state holds.
+    monkeypatch.setattr(appmod.limiter.storage, "check", lambda: False)
     assert appmod._rate_limit_degraded() is True
     r = client.get("/api/verification/self")
     p = {c["id"]: c for c in r.get_json()["checks"]}["ratelimit.outage_policy"]

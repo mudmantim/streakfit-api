@@ -1,7 +1,10 @@
 # Rate limiting: what happens when the shared backend goes away
 
-**Status:** **implemented** — `in_memory_fallback_enabled=True` in `app.py`,
-regression-gated by `tests/test_ratelimit_storage_outage.py`.
+**Status:** **superseded in part (2026-10-04, D7 round 2).** The outage
+*policy* below ("Option B": stand the limiter down) has been replaced; read
+[the last section](#one-authority-through-a-redis-failure-d7-round-2-2026-10-04)
+first. The history above it is kept because the measurements still explain
+why the code looks the way it does.
 **Date:** 2026-09-21. **Measured against:** the deployed stack (Python 3.12.7,
 Flask-Limiter 3.5.0, `limits` 5.8.0) driving a real **Valkey 8** container —
 the engine Render Key Value runs — stopped and restarted under a running app.
@@ -80,7 +83,7 @@ counting, in this worker's memory, until the shared backend answers again.
 Measured after the fix, same timeline: `/api/health` **200 throughout**,
 `/api/login` normal, recovery clean.
 
-## Behaviour during an outage, in order
+## Behaviour during an outage, in order (Option B — REPLACED, see the last section)
 
 1. **First seconds (stale cache).** Flask-Limiter's fallback absorbs the
    storage error. Requests are limited from in-process counters using the
@@ -166,10 +169,8 @@ See [deployment-sequence.md](deployment-sequence.md).
 
 ## Open
 
-- `limits` (the library Flask-Limiter delegates storage to, and therefore the
-  component whose behaviour this document describes) is **not pinned** in
-  `requirements.txt`. Tracked under the transitive-lockfile item in
-  [reproducibility.md](reproducibility.md); this is one more reason to close it.
+- ~~`limits` is not pinned~~ — pinned at **5.8.0** in D7 round 2, because the
+  gate subclasses its `Storage` and drives its `RedisStorage` directly.
 
 ## A backend that hangs instead of refusing (D7, 2026-10-04)
 
@@ -188,17 +189,10 @@ answers a SYN, was a different and far worse failure. redis-py's defaults are
 
 **What changed:**
 - **Bounded options.** `storage_options` passes `socket_connect_timeout=0.5`, `socket_timeout=0.5`, `retry_on_timeout=False` and an explicit zero-retry policy for `redis://`, `rediss://` and `redis+unix://`. 0.5 s is two orders of magnitude above in-region latency and survives one lost segment. **What is bounded is each socket wait** (connect and every read): a backend that STOPS answering costs a request a few waits, not 30 s. A peer that keeps trickling bytes is not bounded.
-- **A blip does not open the limiter.** One failed probe only arms a 2 s re-probe; the limiter stands down only after **two consecutive** failures. Until then it stays enabled and Flask-Limiter's in-memory fallback limits every route by its own limits. Without this rule, bounded I/O turned a single 1.5 s pause into 15 s of unlimited routes (measured: 78 registrations against 5/min). With it, the same pause behaves exactly as before (5, then 429).
-- **The self-check reports a known outage from the cached probe** instead of probing again, so during an outage, when its own limit is stood down, it cannot be used to hold the one worker.
+- *(Round 1 also added a two-failure stand-down and a cached self-check
+  verdict. Both were removed in round 2 with the policy they served.)*
 - **Own probe.** The app's probe pings itself under `except Exception`. The `limits` check wrapped PING in a bare `except:`, which swallowed gunicorn's SystemExit when it aborted a worker stuck on that call.
 - **New check.** `ratelimit.bounded_io` reads the **effective** timeouts and retry count from the live connection pool. A URI query such as `?socket_timeout=9` or `?retry_on_timeout=true` silently overrides the constructor's options, and the check FAILs if that happens. It passes as not-applicable only for `memory://`; a network backend whose settings cannot be read FAILs.
-
-**Not changed, so be clear about it:** the outage *policy* above still applies. Once the probe has seen the backend unhealthy twice in a row (~2 s apart, at most ~17 s into an outage), the limiter stands down:
-- login keeps its strict per-process cap;
-- invite lookup refuses with 503;
-- every other limited route is unlimited until the backend returns.
-
-Bounded I/O makes a hung backend reach that state in under a second, where before it froze the service. Whether "everything else unlimited" should become "everything else limited per process" (Flask-Limiter's in-memory fallback, without the global stand-down) is a separate owner decision. A reviewed prerequisite is that login's after-request deduction currently returns 500 in write-refused modes (OOM, READONLY) whenever the limiter is not stood down.
 
 **Residual risks (bounded I/O does not cover them):**
 - A peer that trickles bytes slowly is not bounded: each read succeeds within the timeout, so a command can take arbitrarily long. This needs a misbehaving peer, not an outage.
@@ -207,3 +201,76 @@ Bounded I/O makes a hung backend reach that state in under a second, where befor
 - A backend slower than ~0.4 s per command stays "healthy" and slows the one worker. Login can pay several calls, ~2.4 s.
 - Flask-Limiter's own recovery check still pings through `limits`' bare `except:`. It is now bounded to 0.5 s, so a worker abort there is no longer reachable in practice.
 - A pooled connection that the network drops silently costs one 0.5 s timeout and one spurious fallback.
+
+## One authority through a Redis failure (D7 round 2, 2026-10-04)
+
+**Owner decision, 2026-10-04:** replace Option B. Its stand-down made every route except login and invite lookup **unlimited** during an outage. Measured on 6541cae: 12 of 12 registrations against 5/minute; in the lab matrix below, 27.
+
+### Policy (binding)
+
+1. A Redis failure **never disables rate limiting**. Every route keeps its own limits, enforced from this process's memory. With the required topology (one instance, one sync worker) that in-process count is the authority.
+2. **Login** goes to the strict cap (3 attempts/min per IP) on the **first** failure, on top of its ordinary limits.
+3. **Invite lookup** returns 503 on the **first** failure.
+4. No allowance is split across a transition, in either direction, however often Redis flaps.
+5. One probe in flight at a time. Bounded I/O: 0.5 s per socket wait, zero retries.
+
+### How (`_RateLimitGate`, app.py)
+
+A `redis://`, `rediss://` or `redis+unix://` URI is served through the gate: the Limiter is given `streakfit+redis://…` and the gate wraps `limits`' own `RedisStorage`. Every count is kept twice, in Redis and in a process-local mirror (`_LocalWindows`), on every hit.
+
+| state | every hit | transitions |
+|---|---|---|
+| HEALTHY | mirror + Redis. The answer is **max(redis, mirror)**. If Redis is behind (it was away, or lost data), it is brought up to the mirror's count within the mirror's window. | **Any** exception from any Redis call → DEGRADED, immediately. |
+| DEGRADED | Mirror only; requests never touch Redis. | At most one probe every 5 s, single-flight, made by whichever limited request arrives first: one counted write. Success: `successes += 1`. Failure: `successes = 0`. **3 consecutive successes → HEALTHY.** A probe that overran its bounds (DNS) spaces the next by 9× its duration, capped at 120 s. A success from a probe that began before a failure seen elsewhere is discarded. |
+
+**Why switching cannot hand out an allowance:**
+- At healthy → degraded, the mirror already holds every hit, so the count carries on. Flask-Limiter's own fallback started from **zero**, which is why round 1 was weaker.
+- At degraded → healthy, `max()` still includes the outage's hits.
+
+Security therefore does not depend on *when* the switch happens, and the recovery parameters are availability choices:
+
+- **Probe cost.** A probe is one bounded call: ≤0.5 s of the only worker every 5 s, so ≤10% under saturating traffic, and one request in five seconds waits. At a 2 s interval it would be 25%.
+- **Flapping.** Redis must stay writable for ≥10 s (≥15 s after the last failure seen) before traffic goes back to it. Shorter on/off cycles keep every limit on the in-process authority for the whole episode.
+- **Cost of a long tail.** While degraded, lookup refuses and login is strict, so recovery is not slower than it needs to be: 15–20 s after Redis is stable.
+
+The gate **never raises**, so Flask-Limiter's fallback and its after-request `deduct_when` error path are never engaged. If anything ever did escape, the fallback counts from zero; the app then treats itself as degraded and `ratelimit.outage_policy` FAILs.
+
+### Monitoring
+
+| check | healthy | degraded |
+|---|---|---|
+| `ratelimit.shared_storage` | PASS, "shared backend is the authority (mirrored in process)". A counted write through the gate. | FAIL, "in-process authority for Ns after <Error>; recovery k/3 qualifying probes". **No I/O.** |
+| `ratelimit.outage_policy` (new) | PASS: limiter enabled and gated | PASS (the policy is in force). FAIL if the limiter is disabled, a network backend is not gated, or Flask-Limiter's fallback is engaged. |
+| `ratelimit.bounded_io` | effective timeouts and retries, from the live pool | unchanged |
+
+Verification suite v11 asserts that `outage_policy` is PASS.
+
+### Measured: real Valkey 8, gunicorn `--preload`, 1 sync worker, PostgreSQL
+
+Harness: `e2e-campaign/evidence/d7/d7r2_matrix.py`. Each mode runs as follows, all inside one minute of the first counted hit:
+- a healthy warm-up;
+- the fault for 22 s;
+- recovery under continued attack for 22 s;
+- a `/health` poller throughout.
+
+"Accepted" means the limiter let it through.
+
+Candidate: every route at or under its **own** limit in **all 12 modes**:
+- healthy, refused (restart empty), hung, black-holed, DNS failure, slow, OOM, read-only replica, paused writes, 1.5 s blip, flapping 2/2 s, flapping 1/12 s;
+- after the fault, login ≤ 3 and lookup 0 (503);
+- 0 worker kills, worst request 0.73 s, `/health` ≤ 0.58 s;
+- every runtime fault recovered to PASS within the run.
+
+The full per-route table and the 6541cae / b045172 comparison are in `e2e-campaign/evidence/d7/round2/`.
+
+### What this is not (residual risks)
+
+- **The mirror is per process.** A worker restart **during** an outage loses the counts Redis never saw. Bounded I/O is what keeps gunicorn from causing those restarts, except for the DNS and trickle cases below. With more than one worker or instance, each would keep its own mirror. **One worker is a requirement**, not a tuning choice.
+- **DNS is not bounded.** With a dead resolver, glibc measured 20 s (one nameserver plus a search domain) to 40 s (two nameservers). Probes then hold the worker ~10% of the time with the proportional backoff. A request on the HEALTHY path that has to resolve a new connection can still exceed gunicorn's 30 s and get the worker killed.
+  - Render's internal Key Value hostnames rely on the search list.
+  - An optional mitigation that is infrastructure, not code: `RES_OPTIONS="timeout:1 attempts:1"` on the service measured 40 s → 4 s. **Owner decision.**
+- **A peer that trickles bytes** is not bounded (needs a misbehaving peer, not an outage).
+- **A backend slower than ~0.45 s per reply** never degrades and slows every limited request; login can pay ~5 round trips.
+- **The connect timeout (0.5 s) is shorter than Linux's initial SYN retransmit (1 s).** One lost SYN while opening a new connection is a false failure: ≥15 s degraded (lookup 503, strict login), with no security cost. The pool keeps one long-lived connection, so this is rare. Raising it to 1.0 s doubles a black-holed probe's cost. **Owner decision; not changed.**
+- **Mirror memory grows with distinct keys**, about 216 B each. Keys live as long as their window (up to a day for coach). It is the same order as Flask-Limiter's own fallback would hold.
+- **Eviction policies** (`allkeys-lru`) can drop Redis keys silently. With one worker, `max()` with the mirror covers it.
