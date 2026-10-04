@@ -433,3 +433,44 @@ def test_a_real_request_path_coach_sweep_does_not_clear_a_thread_failure(loop, c
     assert rows(RETENTION_COACH)[-1].outcome == 'ok'
     c = checks(client)['retention.recent']
     assert c['status'] == 'FAIL', c
+
+
+# ── Final review gaps (rules that had no test) ──────────────────────────────
+
+@pytest.mark.parametrize('kind,check_id', [
+    (getattr(appmod, 'RUN_NOTICE_GENERATION', 'notice_gen'), 'moderation.notice_generation'),
+    (RETENTION_COACH, 'retention.recent'),
+    (RETENTION_MODERATION, 'retention.moderation'),
+])
+def test_a_manual_failure_after_an_unattended_success_is_still_a_failure(client, monkeypatch, kind, check_id):
+    monkeypatch.setattr(appmod, '_WORKER_STARTED_AT', None)
+    _run(kind, 'thread', 'ok', minutes_ago=30)
+    _run(kind, 'manual', 'failed', minutes_ago=1)
+    assert checks(client)[check_id]['status'] == 'FAIL'
+
+
+def test_a_recorded_generation_failure_stays_fail_while_a_new_worker_starts(client, monkeypatch):
+    from datetime import datetime
+    monkeypatch.setattr(appmod, '_WORKER_STARTED_AT', datetime.utcnow())
+    _run(getattr(appmod, 'RUN_NOTICE_GENERATION', 'notice_gen'), 'thread', 'failed', minutes_ago=300)
+    assert checks(client)['moderation.notice_generation']['status'] == 'FAIL'
+
+
+def test_a_stale_generation_while_a_new_worker_starts_is_unknown_and_says_why(client, monkeypatch):
+    from datetime import datetime
+    monkeypatch.setattr(appmod, '_WORKER_STARTED_AT', datetime.utcnow())
+    _run(getattr(appmod, 'RUN_NOTICE_GENERATION', 'notice_gen'), 'thread', 'ok', minutes_ago=300)
+    c = checks(client)['moderation.notice_generation']
+    assert c['status'] == 'UNKNOWN' and 'has not reported yet' in c['observed']
+
+
+def test_equal_timestamps_resolve_to_the_newer_row(client, monkeypatch):
+    from datetime import datetime
+    monkeypatch.setattr(appmod, '_WORKER_STARTED_AT', None)
+    t = datetime.utcnow()
+    for outcome in ('ok', 'failed'):          # failure inserted second, same instant
+        db.session.add(RetentionRun(ran_at=t, deleted=0, source='thread',
+                                    kind=RETENTION_MODERATION, outcome=outcome,
+                                    error_type=None if outcome == 'ok' else 'X'))
+    db.session.commit()
+    assert checks(client)['retention.moderation']['status'] == 'FAIL'
