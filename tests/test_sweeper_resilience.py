@@ -310,3 +310,71 @@ def test_a_failure_record_never_carries_the_exception_text(loop, client):
     for row in delivery_rows():
         assert 'injected' not in (row.error_type or '')
     assert 'injected' not in str(client.get('/api/verification/self').get_json())
+
+
+# ── MONITORING: interleavings (D42 adversarial review, MAJOR 1 / MINOR 2-3) ──
+#
+# The resilience tests above never let anything else write between two
+# unattended failures. Real life does: an operator sees FAIL and runs the
+# command by hand; a user's coach request piggy-backs a sweep.
+
+def _run(kind, source, outcome, minutes_ago=0):
+    from datetime import datetime, timedelta
+    db.session.add(RetentionRun(
+        ran_at=datetime.utcnow() - timedelta(minutes=minutes_ago), deleted=0,
+        source=source, kind=kind, outcome=outcome,
+        error_type=None if outcome == 'ok' else 'OperationalError'))
+    db.session.commit()
+
+
+@pytest.mark.parametrize('kind,check_id,other_source', [
+    (appmod.RUN_NOTICE_GENERATION, 'moderation.notice_generation', 'manual'),
+    (RETENTION_COACH, 'retention.recent', 'manual'),
+    (RETENTION_COACH, 'retention.recent', 'request'),
+    (RETENTION_MODERATION, 'retention.moderation', 'manual'),
+])
+def test_an_attended_success_never_clears_an_unattended_failure(client, monkeypatch, kind, check_id, other_source):
+    monkeypatch.setattr(appmod, '_WORKER_STARTED_AT', None)
+    _run(kind, 'thread', 'ok', minutes_ago=120)
+    _run(kind, 'thread', 'failed', minutes_ago=10)
+    _run(kind, other_source, 'ok', minutes_ago=1)       # "it's red, I ran it by hand"
+    c = checks(client)[check_id]
+    assert c['status'] == 'FAIL', c
+    assert 'does not clear' in c['observed']
+
+
+def test_a_hand_run_of_the_real_command_does_not_turn_a_generation_failure_green(client, monkeypatch):
+    monkeypatch.setattr(appmod, '_WORKER_STARTED_AT', None)
+    monkeypatch.setattr(appmod, '_notification_channel', lambda name=None: Works())
+    _run(appmod.RUN_NOTICE_GENERATION, 'thread', 'failed', minutes_ago=10)
+    result = appmod.app.test_cli_runner().invoke(args=['moderation-notify'])
+    assert result.exit_code == 0, result.output
+    c = checks(client)
+    assert c['moderation.notice_generation']['status'] == 'FAIL'
+    assert c['moderation.notices_delivered']['status'] != 'PASS'
+
+
+def test_the_next_unattended_success_does_clear_it(client, monkeypatch):
+    monkeypatch.setattr(appmod, '_WORKER_STARTED_AT', None)
+    _run(appmod.RUN_NOTICE_GENERATION, 'thread', 'failed', minutes_ago=70)
+    _run(appmod.RUN_NOTICE_GENERATION, 'manual', 'ok', minutes_ago=30)
+    _run(appmod.RUN_NOTICE_GENERATION, 'thread', 'ok', minutes_ago=5)
+    assert checks(client)['moderation.notice_generation']['status'] == 'PASS'
+
+
+def test_a_failed_delivery_pass_is_fail_even_while_the_worker_is_starting(client, monkeypatch):
+    from datetime import datetime
+    monkeypatch.setattr(appmod, '_notification_channel', lambda name=None: Works())
+    monkeypatch.setattr(appmod, '_WORKER_STARTED_AT', datetime.utcnow())
+    with appmod.app.app_context():
+        appmod._record_notification_failure('thread', RuntimeError('x'))
+    assert checks(client)['moderation.delivery_worker']['status'] == 'FAIL'
+
+
+def test_the_generation_check_survives_a_failure_in_the_delivery_checks(client, monkeypatch):
+    def boom(*a, **kw):
+        raise RuntimeError('capability unreadable')
+    monkeypatch.setattr(appmod, '_delivery_capability', boom)
+    _run(appmod.RUN_NOTICE_GENERATION, 'thread', 'ok', minutes_ago=5)
+    c = checks(client)
+    assert c['moderation.notice_generation']['status'] == 'PASS'

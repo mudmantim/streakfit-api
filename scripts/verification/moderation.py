@@ -264,7 +264,8 @@ def run(api, results, scenario):
 
     # A check may say PASS, FAIL or UNKNOWN. What it must never do is report a
     # promise as kept without having looked -- UNKNOWN exists for that.
-    for name in ("retention.moderation", "moderation.notices_delivered"):
+    for name in ("retention.moderation", "moderation.notice_generation",
+                 "moderation.notices_delivered"):
         c = by_id.get(name) or {}
         results.check(f"moderation.check_state_is_legible::{name}",
                       c.get("status") in ("PASS", "FAIL", "UNKNOWN"),

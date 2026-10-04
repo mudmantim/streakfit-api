@@ -3107,13 +3107,14 @@ def verification_self():
         # hand-typed prune, or one that happened to piggy-back on a user's
         # request, says somebody swept once, not that anything sweeps on its
         # own. An idle service serves no requests and sweeps nothing.
-        any_run = _last_retention_run(RETENTION_COACH)
-        last = _last_retention_run(RETENTION_COACH, unattended_only=True)
-        if any_run is not None and any_run.outcome != 'ok':
-            state, evidence = "FAIL", "OBSERVED"
-            observed = (f"last attempt {any_run.ran_at.isoformat()} via "
-                        f"{any_run.source} FAILED ({any_run.error_type})")
-        elif last is None:
+        # A daily cron plus an hourly in-process sweep; 48h means both have
+        # been silent for two cycles, which is a real signal rather than a blip.
+        verdict = _run_verdict(
+            RETENTION_COACH, RETENTION_STALE_AFTER_HOURS,
+            lambda last, age_h: (f"last unattended sweep {age_h:.1f}h ago via "
+                                 f"{last.source}, {last.deleted} deleted"))
+        if verdict is None:
+            any_run = _last_retention_run(RETENTION_COACH)
             state, evidence = "UNKNOWN", "UNKNOWN"
             observed = "no unattended sweep has ever been recorded"
             if any_run is not None:
@@ -3121,14 +3122,7 @@ def verification_self():
                              f"somebody swept once, not that anything sweeps "
                              f"on its own)")
         else:
-            age_h = (datetime.utcnow() - last.ran_at).total_seconds() / 3600
-            # A daily cron plus an hourly in-process sweep; 48h means both have
-            # been silent for two cycles, which is a real signal rather than a
-            # blip.
-            state = "PASS" if age_h <= RETENTION_STALE_AFTER_HOURS else "FAIL"
-            evidence = "VERIFIED" if state == "PASS" else "OBSERVED"
-            observed = (f"last unattended sweep {age_h:.1f}h ago via "
-                        f"{last.source}, {last.deleted} deleted")
+            state, evidence, observed = verdict
         checks.append(_self_check(
             "retention.recent", "Conversation retention is running",
             f"Expired conversation turns are being deleted on schedule "
@@ -3159,13 +3153,12 @@ def verification_self():
         # moderation-prune` used to satisfy this for 48 hours with no
         # scheduler existing anywhere -- and because the command recorded
         # itself as 'cron', nothing could tell the difference afterwards.
-        any_run = _last_retention_run(RETENTION_MODERATION)
-        last = _last_retention_run(RETENTION_MODERATION, unattended_only=True)
-        if any_run is not None and any_run.outcome != 'ok':
-            state, evidence = "FAIL", "OBSERVED"
-            observed = (f"last attempt {any_run.ran_at.isoformat()} via "
-                        f"{any_run.source} FAILED ({any_run.error_type})")
-        elif last is None:
+        verdict = _run_verdict(
+            RETENTION_MODERATION, RETENTION_STALE_AFTER_HOURS,
+            lambda last, age_h: (f"last unattended sweep {age_h:.1f}h ago via "
+                                 f"{last.source} ({last.detail or 'no counts'})"))
+        if verdict is None:
+            any_run = _last_retention_run(RETENTION_MODERATION)
             state, evidence = "UNKNOWN", "UNKNOWN"
             observed = "no unattended moderation sweep has ever been recorded"
             if any_run is not None:
@@ -3173,11 +3166,7 @@ def verification_self():
                              f"somebody swept once, not that anything sweeps "
                              f"on its own)")
         else:
-            age_h = (datetime.utcnow() - last.ran_at).total_seconds() / 3600
-            state = "PASS" if age_h <= RETENTION_STALE_AFTER_HOURS else "FAIL"
-            evidence = "VERIFIED" if state == "PASS" else "OBSERVED"
-            observed = (f"last unattended sweep {age_h:.1f}h ago via "
-                        f"{last.source} ({last.detail or 'no counts'})")
+            state, evidence, observed = verdict
         checks.append(_self_check(
             "retention.moderation", "Moderation evidence retention is running",
             f"Reported photos, messages and captions are being deleted on "
@@ -3281,6 +3270,53 @@ def verification_self():
             failure_reason="The evidence records could not be read.",
             critical=False))
 
+    # GENERATION, in its own try so a failure reading it cannot remove it from
+    # the payload (D42 review). A worker that delivers an empty queue every
+    # hour while the step that FILLS the queue fails every hour is the most
+    # convincing false green this section can produce: the thread is alive,
+    # delivery is "operational", and a child_safety report never becomes a
+    # notice. Judged by its own records only.
+    generation_ok = False
+    try:
+        g_starting, g_started_ago = _worker_start_state(datetime.utcnow())
+        verdict = _run_verdict(
+            RUN_NOTICE_GENERATION, DELIVERY_STALE_AFTER_HOURS,
+            lambda last, age_h: (f"last unattended generation {age_h:.1f}h ago "
+                                 f"via {last.source} "
+                                 f"({last.detail or 'no counts'})"))
+        if verdict is None:
+            gstate = "UNKNOWN" if g_starting else "FAIL"
+            glevel = "UNKNOWN" if g_starting else "OBSERVED"
+            gobs = ("no unattended notice-generation pass has ever been "
+                    f"recorded (worker in this process started: {g_started_ago})")
+        else:
+            gstate, glevel, gobs = verdict
+            if gstate == "FAIL" and g_starting and "FAILED" not in gobs:
+                # Stale but just restarted: the new worker has not reported.
+                gstate, glevel = "UNKNOWN", "UNKNOWN"
+        generation_ok = gstate == "PASS"
+        checks.append(_self_check(
+            "moderation.notice_generation", "Review obligations become notices",
+            "Every filed report, approaching deadline, overdue report and "
+            "appeal is turned into a notice without anybody typing a command.",
+            "Read the most recent UNATTENDED notice-generation run: its outcome "
+            "and its age. A delivery pass, or a manual run, never satisfies "
+            "this.",
+            gstate, glevel, gobs,
+            failure_reason=None if generation_ok else
+            "Reports may be filed with nothing generating the notices that "
+            "would alert a reviewer.",
+            limitations="Says the step ran and committed, not that every "
+                        "obligation it found was correct."))
+    except Exception as exc:
+        checks.append(_self_check(
+            "moderation.notice_generation", "Review obligations become notices",
+            "Review obligations are turned into notices without anybody "
+            "typing a command.",
+            "Read the most recent notice-generation run.",
+            "UNKNOWN", "UNKNOWN", f"{type(exc).__name__}",
+            failure_reason="The notice-generation records could not be read."))
+
     # Generation is not delivery, and delivery is three separate facts.
     # Collapsing them reproduced as PASS on an empty database with no provider
     # configured and no worker running: "no urgent notice is waiting" read as
@@ -3317,11 +3353,7 @@ def verification_self():
         # still reports FAIL immediately.
         run = _last_notification_run(unattended_only=True)
         now = datetime.utcnow()
-        starting = (_WORKER_STARTED_AT is not None and
-                    (now - _WORKER_STARTED_AT).total_seconds()
-                    < _RETENTION_FIRST_PASS_SETTLE_S + _WORKER_FIRST_PASS_GRACE_S)
-        started_ago = (f"{(now - _WORKER_STARTED_AT).total_seconds():.0f}s"
-                       if _WORKER_STARTED_AT else "never")
+        starting, started_ago = _worker_start_state(now)
         if run is None and starting:
             wstate, wlevel = "UNKNOWN", "UNKNOWN"
             wobs = (f"a worker started {started_ago} ago in this process and "
@@ -3336,7 +3368,10 @@ def verification_self():
                        "would wait for somebody to run a command by hand.")
         else:
             age_h = (now - run.ran_at).total_seconds() / 3600
-            wstate = "PASS" if worker_fresh else ("UNKNOWN" if starting else "FAIL")
+            # A pass that FAILED is a report, not silence: FAIL even while a
+            # just-started worker has not reported (D42 review).
+            wstate = "PASS" if worker_fresh else (
+                "UNKNOWN" if starting and run.outcome == 'ok' else "FAIL")
             wlevel = "VERIFIED" if wstate == "PASS" else (
                 "UNKNOWN" if wstate == "UNKNOWN" else "OBSERVED")
             if run.outcome != 'ok':
@@ -3362,46 +3397,7 @@ def verification_self():
                         "start time is this PROCESS's -- it says a worker is "
                         "alive here, not that one is alive everywhere."))
 
-        # 3. GENERATION. A worker that delivers an empty queue every hour while
-        # the step that FILLS the queue fails every hour is the most
-        # convincing false green this section can produce (D42 review): the
-        # thread is alive, delivery is "operational", and a child_safety report
-        # never becomes a notice. Judged by its own records only.
-        gen_any = _last_retention_run(RUN_NOTICE_GENERATION)
-        gen_last = _last_retention_run(RUN_NOTICE_GENERATION, unattended_only=True)
-        if gen_any is not None and gen_any.outcome != 'ok':
-            gstate, glevel = "FAIL", "OBSERVED"
-            gobs = (f"last attempt {gen_any.ran_at.isoformat()} via "
-                    f"{gen_any.source} FAILED ({gen_any.error_type})")
-        elif gen_last is None:
-            gstate = "UNKNOWN" if starting else "FAIL"
-            glevel = "UNKNOWN" if starting else "OBSERVED"
-            gobs = ("no unattended notice-generation pass has ever been "
-                    f"recorded (worker in this process started: {started_ago})")
-        else:
-            gage_h = (now - gen_last.ran_at).total_seconds() / 3600
-            fresh = gage_h <= DELIVERY_STALE_AFTER_HOURS
-            gstate = "PASS" if fresh else ("UNKNOWN" if starting else "FAIL")
-            glevel = "VERIFIED" if gstate == "PASS" else (
-                "UNKNOWN" if gstate == "UNKNOWN" else "OBSERVED")
-            gobs = (f"last unattended generation {gage_h:.1f}h ago via "
-                    f"{gen_last.source} ({gen_last.detail or 'no counts'})")
-        generation_ok = gstate == "PASS"
-        checks.append(_self_check(
-            "moderation.notice_generation", "Review obligations become notices",
-            "Every filed report, approaching deadline, overdue report and "
-            "appeal is turned into a notice without anybody typing a command.",
-            "Read the most recent notice-generation run: its outcome, and the "
-            "age of the most recent UNATTENDED one. A delivery pass never "
-            "satisfies this.",
-            gstate, glevel, gobs,
-            failure_reason=None if generation_ok else
-            "Reports may be filed with nothing generating the notices that "
-            "would alert a reviewer.",
-            limitations="Says the step ran and committed, not that every "
-                        "obligation it found was correct."))
-
-        # 4. OUTSTANDING WORK -- and it refuses to claim health it cannot see.
+        # 3. OUTSTANDING WORK -- and it refuses to claim health it cannot see.
         stuck = _undelivered_urgent_notices()
         failing = _persistently_failing_notices()
         if stuck:
@@ -9961,6 +9957,48 @@ def _last_retention_run(kind, unattended_only=False):
         q = q.where(RetentionRun.source.in_(UNATTENDED_SOURCES))
     return db.session.execute(
         q.order_by(RetentionRun.ran_at.desc()).limit(1)).scalars().first()
+
+
+def _run_verdict(kind, stale_hours, describe):
+    """(state, evidence, observed) for a run-backed promise, or None when no
+    unattended run has ever been recorded (the caller decides what that means).
+
+    The rule, shared so the checks cannot drift apart (D42 review):
+      * the latest UNATTENDED run's outcome decides failure. A manual or
+        request-piggybacked success after it must never clear it -- that is
+        exactly the operator move ("it's red, I'll run it by hand") the check
+        exists to see through;
+      * a failure from ANY source is still a failure;
+      * freshness comes from the latest unattended run, which by then is 'ok'.
+    """
+    any_run = _last_retention_run(kind)
+    last = _last_retention_run(kind, unattended_only=True)
+    if last is not None and last.outcome != 'ok':
+        observed = (f"last unattended attempt {last.ran_at.isoformat()} via "
+                    f"{last.source} FAILED ({last.error_type})")
+        if any_run is not None and any_run.id != last.id:
+            observed += (f"; a later {any_run.source} run does not clear an "
+                         f"unattended failure")
+        return "FAIL", "OBSERVED", observed
+    if any_run is not None and any_run.outcome != 'ok':
+        return "FAIL", "OBSERVED", (f"last attempt {any_run.ran_at.isoformat()} "
+                                    f"via {any_run.source} FAILED "
+                                    f"({any_run.error_type})")
+    if last is None:
+        return None
+    age_h = (datetime.utcnow() - last.ran_at).total_seconds() / 3600
+    state = "PASS" if age_h <= stale_hours else "FAIL"
+    return state, ("VERIFIED" if state == "PASS" else "OBSERVED"), describe(last, age_h)
+
+
+def _worker_start_state(now):
+    """(starting, started_ago) for THIS process's in-process worker."""
+    starting = (_WORKER_STARTED_AT is not None and
+                (now - _WORKER_STARTED_AT).total_seconds()
+                < _RETENTION_FIRST_PASS_SETTLE_S + _WORKER_FIRST_PASS_GRACE_S)
+    started_ago = (f"{(now - _WORKER_STARTED_AT).total_seconds():.0f}s"
+                   if _WORKER_STARTED_AT else "never")
+    return starting, started_ago
 
 
 def _last_notification_run(unattended_only=False):
