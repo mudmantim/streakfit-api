@@ -1,4 +1,5 @@
 import os
+import math
 import hashlib
 import hmac
 import json
@@ -324,7 +325,9 @@ def _limiter_storage_options(uri):
 #   * Probe cost. Each probe is one bounded call: at most 0.5 s of the only
 #     worker (connect timeout for an unreachable host, read timeout for a frozen
 #     one). Every 5 s that is <= 10% of one worker under saturating traffic,
-#     and one request in five seconds waits. Every 2 s would be 25%.
+#     and one request in five seconds waits. Every 2 s would be 25%. A probe
+#     that overruns its bounds (DNS is not bounded) spaces the next one by
+#     9x its duration, keeping the share near 10% (capped at 120 s apart).
 #   * Flapping. A backend must stay writable for 10 s before traffic goes back
 #     to it, so on/off cycles shorter than that (the round-1 review's were
 #     2-5 s) keep every limit on the one in-process authority for the whole
@@ -417,6 +420,13 @@ class _RateLimitGate(Storage):
     PREFIX = "streakfit+"
     PROBE_INTERVAL_S = 5.0
     QUALIFY_SUCCESSES = 3
+    # A probe that took longer than its socket bounds -- DNS resolution is not
+    # bounded by them (measured: a dead resolver holds getaddrinfo 20-40 s) --
+    # pushes the next one out in proportion, so probing never holds more than
+    # ~1/(1+PROBE_BACKOFF_FACTOR) of the worker. A bounded 0.5 s probe is
+    # unaffected (0.5 x 9 < 5 s).
+    PROBE_BACKOFF_FACTOR = 9
+    PROBE_BACKOFF_MAX_S = 120.0
 
     def __init__(self, uri=None, wrap_exceptions=False, **options):
         super().__init__(uri, wrap_exceptions=False, **options)
@@ -435,6 +445,7 @@ class _RateLimitGate(Storage):
         self.degrade_count = 0
         self.recover_count = 0
         self.probe_count = 0
+        self.failure_epoch = 0          # bumped by every failure
 
     @property
     def base_exceptions(self):
@@ -447,6 +458,7 @@ class _RateLimitGate(Storage):
             self.last_failure = type(exc).__name__
             self.last_failure_at = datetime.utcnow()
             self.successes = 0
+            self.failure_epoch += 1
             self.next_probe_at = self.clock() + self.PROBE_INTERVAL_S
             entered = not self.degraded
             if entered:
@@ -468,22 +480,30 @@ class _RateLimitGate(Storage):
             with self._state:
                 if not self.degraded or self.clock() < self.next_probe_at:
                     return
-                # Claim the slot BEFORE the I/O, so the interval is measured
-                # from probe start and a slow probe cannot be followed at once
-                # by another.
-                self.next_probe_at = self.clock() + self.PROBE_INTERVAL_S
+                # Claim the slot BEFORE the I/O so no other request probes
+                # meanwhile. Afterwards the next slot is moved to at least
+                # PROBE_INTERVAL_S after the probe ENDED (by _failed, or by
+                # _space_after below), stretched for a slow probe.
+                started = self.clock()
+                epoch = self.failure_epoch
+                self.next_probe_at = started + self.PROBE_INTERVAL_S
                 self.probe_count += 1
             try:
                 ok = self.redis.incr(_RATELIMIT_PROBE_KEY,
                                      _RATELIMIT_PROBE_EXPIRY_S) >= 1
             except Exception as exc:
                 self._failed(exc)
+                self._space_after(started)
                 return
             if not ok:
                 self._failed(RuntimeError("probe write not counted"))
+                self._space_after(started)
                 return
+            self._space_after(started)
             with self._state:
-                if not self.degraded:
+                # A success from a probe that started before a failure seen
+                # elsewhere says nothing about the backend since that failure.
+                if not self.degraded or self.failure_epoch != epoch:
                     return
                 self.successes += 1
                 if self.successes < self.QUALIFY_SUCCESSES:
@@ -497,6 +517,14 @@ class _RateLimitGate(Storage):
                 "shared limiting resumed", self.QUALIFY_SUCCESSES)
         finally:
             self._probing.release()
+
+    def _space_after(self, started):
+        ended = self.clock()
+        gap = min(self.PROBE_BACKOFF_MAX_S,
+                  max(self.PROBE_INTERVAL_S,
+                      self.PROBE_BACKOFF_FACTOR * (ended - started)))
+        with self._state:
+            self.next_probe_at = max(self.next_probe_at, ended + gap)
 
     def _use_redis(self):
         if not self.degraded:
@@ -512,8 +540,9 @@ class _RateLimitGate(Storage):
         if self.degraded:
             return False
         try:
-            return self.redis.incr(_RATELIMIT_PROBE_KEY,
-                                   _RATELIMIT_PROBE_EXPIRY_S) >= 1
+            if self.redis.incr(_RATELIMIT_PROBE_KEY, _RATELIMIT_PROBE_EXPIRY_S) >= 1:
+                return True
+            raise RuntimeError("probe write not counted")
         except Exception as exc:
             self._failed(exc)
             return False
@@ -536,8 +565,14 @@ class _RateLimitGate(Storage):
                 shared = self.redis.incr(key, expiry, amount)
                 if shared < local:
                     # Redis is missing hits this process counted (while it was
-                    # away, or it lost them): bring it up to the true count.
+                    # away, or it lost them): bring it up to the true count,
+                    # in the mirror's window -- the key may be newer than the
+                    # window those hits belong to, and keeping its own expiry
+                    # would block for up to one extra window.
                     shared = self.redis.incr(key, expiry, local - shared)
+                    left = math.ceil(self.local.get_expiry(key) - time.time())
+                    self.redis.get_connection().expire(
+                        self.redis.prefixed_key(key), max(1, left))
                 return max(shared, local)
             except Exception as exc:
                 self._failed(exc)
@@ -618,6 +653,11 @@ def _rate_limit_degraded():
     self-check already reports. Treating it as degraded would fail invite
     lookup closed on every deployment that has not provisioned Redis.
     """
+    if getattr(limiter, "_storage_dead", False):
+        # Flask-Limiter's own fallback engaged: something escaped the gate
+        # (it should never), and that fallback counts from zero. Treat it as
+        # the outage it is.
+        return True
     gate = _ratelimit_gate()
     if gate is not None:
         return gate.degraded
@@ -4021,6 +4061,10 @@ def verification_self():
     gate = _ratelimit_gate()
     if not limiter.enabled:
         pstate, pobs = "FAIL", "rate limiting is switched off in this process"
+    elif getattr(limiter, "_storage_dead", False):
+        pstate = "FAIL"
+        pobs = ("Flask-Limiter's own fallback is engaged: limits are counting "
+                "from zero in this process")
     elif gate is not None:
         pstate = "PASS"
         pobs = (f"limiter enabled; {gate.describe()}; on failure: every limit "

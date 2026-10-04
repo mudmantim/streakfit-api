@@ -26,6 +26,7 @@ class StubRedis:
         self.fail = None
         self.calls = []
         self.gate_event = None       # set to an Event to make calls block
+        self.ttls = {}
 
     def _io(self, op):
         self.calls.append(op)
@@ -54,6 +55,19 @@ class StubRedis:
     def reset(self):
         self._io(("reset",))
         self.data.clear()
+
+    def prefixed_key(self, key):
+        return f"LIMITS:{key}"
+
+    def get_connection(self, readonly=False):
+        stub = self
+
+        class Conn:
+            def expire(self, name, seconds):
+                stub._io(("expire", name, seconds))
+                stub.ttls[name] = seconds
+                return True
+        return Conn()
 
 
 class Clock:
@@ -286,6 +300,122 @@ def test_the_interval_is_claimed_before_the_probe_runs(gate):
     gate.redis.fail = redis.TimeoutError("slow")
     gate.incr("k", 60)
     assert gate.next_probe_at >= t0 + 2 * INTERVAL - 1e-9
+
+
+def test_a_probe_that_overruns_its_bounds_spaces_the_next_one(gate):
+    """DNS is not bounded by the socket timeouts: a probe stuck 8 s in the
+    resolver must not be followed by another 5 s later (62% of the worker,
+    measured by review), but ~72 s later (10%)."""
+    _degrade(gate)
+    gate.clock.t += INTERVAL
+
+    class StuckResolver(StubRedis):
+        def incr(self, key, expiry, amount=1):
+            self._io(("incr", key, amount))
+            gate.clock.t += 8
+            raise redis.ConnectionError("Temporary failure in name resolution")
+    gate.redis = StuckResolver()
+    end_of_probe = gate.clock.t + 8
+    gate.incr("k", 60)
+    assert gate.next_probe_at >= end_of_probe + 9 * 8 - 1e-9
+    held, span = 8, gate.next_probe_at - (end_of_probe - 8)
+    assert held / span <= 0.11
+
+
+def test_a_bounded_probe_keeps_the_ordinary_interval(gate):
+    _degrade(gate)
+    gate.clock.t += INTERVAL
+
+    class Timeout(StubRedis):
+        def incr(self, key, expiry, amount=1):
+            self._io(("incr", key, amount))
+            gate.clock.t += 0.5
+            raise redis.TimeoutError("timed out")
+    gate.redis = Timeout()
+    start = gate.clock.t
+    gate.incr("k", 60)
+    assert abs(gate.next_probe_at - (start + 0.5 + INTERVAL)) < 1e-9
+
+
+def test_catching_up_keeps_the_hits_in_their_own_window(gate):
+    """Review m-1: the catch-up landed in a NEW Redis key whose TTL started at
+    the push, blocking for up to one extra window (measured ~55 s on a 60 s
+    limit, up to a day on 10/day). The key now expires with the mirror's
+    window."""
+    for _ in range(3):
+        gate.incr("k", 60)
+    gate.clock.t += 40                       # 20 s left in the mirror window
+    gate.redis.data.clear()                  # Redis lost the key
+    assert gate.incr("k", 60) == 4
+    assert gate.redis.ttls["LIMITS:k"] in (20, 21)
+
+
+def test_a_probe_that_began_before_a_failure_does_not_count(gate):
+    """Review n-1 (needs a second thread): a success from a probe in flight
+    while a request saw a failure must not advance qualification."""
+    _degrade(gate)
+    gate.redis.fail = None
+    gate.clock.t += INTERVAL
+    blocker = threading.Event()
+    gate.redis.gate_event = blocker
+    probe = threading.Thread(target=gate.incr, args=("k", 60))
+    probe.start()
+    deadline = time.monotonic() + 2
+    while not _probes(gate) and time.monotonic() < deadline:
+        time.sleep(0.005)
+    gate._failed(redis.ConnectionError("seen elsewhere"))
+    blocker.set()
+    probe.join(5)
+    assert gate.successes == 0 and gate.degraded
+
+
+def test_a_successful_probe_also_waits_a_full_interval_from_its_end(gate):
+    _degrade(gate)
+    gate.redis.fail = None
+    gate.clock.t += INTERVAL
+
+    class Slowish(StubRedis):
+        def incr(self, key, expiry, amount=1):
+            r = super().incr(key, expiry, amount)
+            gate.clock.t += 0.4
+            return r
+    gate.redis = Slowish()
+    start = gate.clock.t
+    gate.incr("k", 60)
+    assert gate.successes == 1
+    assert gate.next_probe_at >= start + 0.4 + INTERVAL - 1e-9
+
+
+def test_the_mirror_windows_run_on_the_gates_clock(gate):
+    """The mirror must not use the wall clock: a wall-clock step would end
+    windows early. Driven through the gate's own (fake) clock."""
+    _degrade(gate)
+    gate.incr("k", 60)
+    gate.clock.t += 59
+    assert gate.get("k") == 1                # still live after 59 s
+    gate.clock.t += 2
+    assert gate.local.get("k") == 0
+
+
+def test_a_write_that_does_not_count_fails_the_self_check_probe_and_degrades(gate):
+    class Zero(StubRedis):
+        def incr(self, key, expiry, amount=1):
+            self._io(("incr", key, amount))
+            return 0
+    gate.redis = Zero()
+    assert gate.probe_now() is False and gate.degraded
+
+
+def test_flask_limiters_own_fallback_counts_as_degraded(client, monkeypatch):
+    """Review m-2: if anything ever escaped the gate, Flask-Limiter would
+    switch to a fallback that counts from zero. That must read as an outage
+    (lookup refuses, login strict) and fail the self-check."""
+    monkeypatch.setattr(appmod.limiter, "enabled", True)
+    monkeypatch.setattr(appmod.limiter, "_storage_dead", True)
+    assert appmod._rate_limit_degraded() is True
+    r = client.get("/api/verification/self")
+    p = {c["id"]: c for c in r.get_json()["checks"]}["ratelimit.outage_policy"]
+    assert p["status"] == "FAIL" and "from zero" in p["observed"]
 
 
 # ── Self-check, clear and reset ─────────────────────────────────────────────
