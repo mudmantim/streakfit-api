@@ -216,7 +216,10 @@ def test_the_coach_limits_are_what_we_think_they_are(app):
         f"the reply budget is {appmod.COACH_MAX_TOKENS}, not the 768 this was pinned at"
     )
     assert "max_tokens=COACH_MAX_TOKENS" in src
-    assert "len(message) > 500" in src
+    # The message cap moved into the request parser (D53) as a named value.
+    assert appmod._COACH_MESSAGE_MAX_CHARS == 500
+    assert "len(message) > _COACH_MESSAGE_MAX_CHARS" in inspect.getsource(appmod._coach_parse_request)
+    assert "_coach_parse_request()" in src
     # The tool loop is a bounded backstop, not an open loop.
     assert "for _ in range(3)" in src
 

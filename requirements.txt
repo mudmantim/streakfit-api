@@ -42,3 +42,9 @@ pytest==9.1.1
 # environment by an operator. With no key the application captures no photo
 # evidence at all rather than storing anything in the clear.
 cryptography==50.0.1
+# Pinned (D48): Ask Rickie's total deadline is an httpcore network backend
+# injected into httpx's transport (app.py _coach_http_client). A change in
+# either library's internals must be a deliberate upgrade, re-proven by
+# tests/test_coach_hardening.py, not a side effect of a fresh install.
+httpx==0.28.1
+httpcore==1.0.9

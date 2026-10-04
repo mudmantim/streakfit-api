@@ -223,7 +223,10 @@ def test_an_absurd_or_malformed_budget_lands_somewhere_safe():
         "-5": appmod.COACH_MAX_TOKENS_FLOOR,
         "abc": appmod.COACH_MAX_TOKENS_DEFAULT,      # unparseable -> default
         "": appmod.COACH_MAX_TOKENS_DEFAULT,
-        "1500": 1500,                                # a legitimate override
+        "1000": 1000,                                # a legitimate override
+        # D48: 1500 used to be legitimate; a non-streamed reply that long cannot
+        # finish inside the 20 s provider budget, so it is clamped now.
+        "1500": appmod.COACH_MAX_TOKENS_CEILING,
     }
     for raw, expected in cases.items():
         env = dict(os.environ, SECRET_KEY="x", JWT_SECRET_KEY="x",

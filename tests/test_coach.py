@@ -102,7 +102,7 @@ def _install_fake_anthropic(monkeypatch, response=None, responses=None):
             return response if response is not None else _FakeResponse()
 
     class _FakeAnthropic:
-        def __init__(self, api_key=None):
+        def __init__(self, api_key=None, **kwargs):
             self.messages = _FakeMessages()
 
     monkeypatch.setattr(appmod, "_anthropic_api_key", "test-key-not-real")
