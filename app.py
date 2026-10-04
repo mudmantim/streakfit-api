@@ -2439,6 +2439,12 @@ class VerificationRun(db.Model):
 RETENTION_COACH = 'coach'
 RETENTION_MODERATION = 'moderation'
 RETENTION_KINDS = (RETENTION_COACH, RETENTION_MODERATION)
+# Not a retention promise, but the same kind of evidence, so it shares the table
+# (kind is a free string column; no migration). One row per notice-generation
+# pass, ok or failed. Without it a generation step that failed every hour was
+# invisible behind a delivery pass that kept succeeding on an empty queue
+# (RC-B2a review of D42). Never in RETENTION_KINDS: no retention check may read it.
+RUN_NOTICE_GENERATION = 'notice_gen'
 
 # WHO ran a job, and the distinction monitoring turns on.
 #
@@ -3333,8 +3339,12 @@ def verification_self():
             wstate = "PASS" if worker_fresh else ("UNKNOWN" if starting else "FAIL")
             wlevel = "VERIFIED" if wstate == "PASS" else (
                 "UNKNOWN" if wstate == "UNKNOWN" else "OBSERVED")
-            wobs = (f"last unattended pass {age_h:.1f}h ago via {run.source}, "
-                    f"{run.delivered} delivered, {run.failed} failed")
+            if run.outcome != 'ok':
+                wobs = (f"last unattended pass {age_h:.1f}h ago via {run.source} "
+                        f"FAILED ({run.error_type or 'unknown error'})")
+            else:
+                wobs = (f"last unattended pass {age_h:.1f}h ago via {run.source}, "
+                        f"{run.delivered} delivered, {run.failed} failed")
             if wstate == "UNKNOWN":
                 wobs += (f"; a worker started {started_ago} ago in this "
                          f"process and has not reported yet")
@@ -3352,7 +3362,46 @@ def verification_self():
                         "start time is this PROCESS's -- it says a worker is "
                         "alive here, not that one is alive everywhere."))
 
-        # 3. OUTSTANDING WORK -- and it refuses to claim health it cannot see.
+        # 3. GENERATION. A worker that delivers an empty queue every hour while
+        # the step that FILLS the queue fails every hour is the most
+        # convincing false green this section can produce (D42 review): the
+        # thread is alive, delivery is "operational", and a child_safety report
+        # never becomes a notice. Judged by its own records only.
+        gen_any = _last_retention_run(RUN_NOTICE_GENERATION)
+        gen_last = _last_retention_run(RUN_NOTICE_GENERATION, unattended_only=True)
+        if gen_any is not None and gen_any.outcome != 'ok':
+            gstate, glevel = "FAIL", "OBSERVED"
+            gobs = (f"last attempt {gen_any.ran_at.isoformat()} via "
+                    f"{gen_any.source} FAILED ({gen_any.error_type})")
+        elif gen_last is None:
+            gstate = "UNKNOWN" if starting else "FAIL"
+            glevel = "UNKNOWN" if starting else "OBSERVED"
+            gobs = ("no unattended notice-generation pass has ever been "
+                    f"recorded (worker in this process started: {started_ago})")
+        else:
+            gage_h = (now - gen_last.ran_at).total_seconds() / 3600
+            fresh = gage_h <= DELIVERY_STALE_AFTER_HOURS
+            gstate = "PASS" if fresh else ("UNKNOWN" if starting else "FAIL")
+            glevel = "VERIFIED" if gstate == "PASS" else (
+                "UNKNOWN" if gstate == "UNKNOWN" else "OBSERVED")
+            gobs = (f"last unattended generation {gage_h:.1f}h ago via "
+                    f"{gen_last.source} ({gen_last.detail or 'no counts'})")
+        generation_ok = gstate == "PASS"
+        checks.append(_self_check(
+            "moderation.notice_generation", "Review obligations become notices",
+            "Every filed report, approaching deadline, overdue report and "
+            "appeal is turned into a notice without anybody typing a command.",
+            "Read the most recent notice-generation run: its outcome, and the "
+            "age of the most recent UNATTENDED one. A delivery pass never "
+            "satisfies this.",
+            gstate, glevel, gobs,
+            failure_reason=None if generation_ok else
+            "Reports may be filed with nothing generating the notices that "
+            "would alert a reviewer.",
+            limitations="Says the step ran and committed, not that every "
+                        "obligation it found was correct."))
+
+        # 4. OUTSTANDING WORK -- and it refuses to claim health it cannot see.
         stuck = _undelivered_urgent_notices()
         failing = _persistently_failing_notices()
         if stuck:
@@ -3369,6 +3418,14 @@ def verification_self():
                         f"empty queue is not evidence that alerts work")
             reason = ("Delivery is not operational, so the absence of stuck "
                       "alerts says nothing.")
+        elif not generation_ok:
+            # Nor when nothing could have FILLED it (D42 review).
+            state, evidence = "UNKNOWN", "UNKNOWN"
+            observed = ("no urgent notice is waiting, but notice generation is "
+                        "not healthy — an empty queue is not evidence that "
+                        "reports are being noticed")
+            reason = ("Notice generation is not operational, so the absence of "
+                      "stuck alerts says nothing.")
         else:
             state, evidence = "PASS", "VERIFIED"
             observed = "no urgent notice is waiting, and delivery is operational"
@@ -9939,8 +9996,11 @@ def _delivery_capability(now=None):
     configured = channel is not None and channel.certifies_delivery
     config_problem = _channel_configuration_problem()
     run = _last_notification_run(unattended_only=True)
+    # A pass that FAILED proves the worker is alive, not that delivery works.
+    # Counting it as fresh would turn a worker that survives its own failures
+    # (D42) into a permanent green.
     worker_fresh = bool(
-        run is not None
+        run is not None and run.outcome == 'ok'
         and (now - run.ran_at) <= timedelta(hours=DELIVERY_STALE_AFTER_HOURS))
     if config_problem:
         # A channel was CHOSEN and could not be built. Distinct from "nothing
@@ -9953,6 +10013,9 @@ def _delivery_capability(now=None):
         why = "no channel configured and no unattended delivery pass recorded"
     elif not configured:
         why = "a worker is running but no channel is configured"
+    elif run is not None and run.outcome != 'ok':
+        why = (f"the last unattended delivery pass FAILED "
+               f"({run.error_type or 'unknown error'})")
     elif not worker_fresh:
         why = ("a channel is configured but no unattended delivery pass has "
                "run recently")
@@ -10734,6 +10797,24 @@ def _record_notification_run(source, counts, channel, now):
         app.logger.warning('could not record notification run')
 
 
+def _record_notification_failure(source, exc):
+    """Record that a delivery PASS failed, in its own transaction.
+
+    The delivery twin of `_record_retention_failure`: the exception TYPE only,
+    committed alone, and itself unable to raise -- a monitoring write must never
+    become the reason the worker stops.
+    """
+    try:
+        db.session.rollback()
+        db.session.add(NotificationRun(
+            ran_at=datetime.utcnow(), source=source, outcome='failed',
+            error_type=type(exc).__name__[:64]))
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+        app.logger.error('could not record notification failure')
+
+
 def _persistently_failing_notices(now=None):
     """Undelivered notices that have failed enough times to stop being noise."""
     return db.session.execute(
@@ -10789,8 +10870,18 @@ def moderation_notify_command(scheduled, mark_delivered):
     says so. That is the true state of the system rather than a failure of
     this command.
     """
-    created = _generate_moderation_notices()
-    db.session.commit()
+    try:
+        created = _generate_moderation_notices()
+        # Same evidence as the thread writes, labelled by how it was invoked,
+        # so a scheduler-only deployment is judged by its generation as well.
+        _record_retention_run(RUN_NOTICE_GENERATION,
+                              SOURCE_CRON if scheduled else SOURCE_MANUAL,
+                              detail=_notice_generation_detail(created))
+        db.session.commit()
+    except Exception as exc:
+        _record_retention_failure(RUN_NOTICE_GENERATION,
+                                  SOURCE_CRON if scheduled else SOURCE_MANUAL, exc)
+        raise
 
     # Attempt real delivery if a channel is configured. With none configured
     # this does nothing at all and every notice stays undelivered, which is the
@@ -11897,6 +11988,99 @@ _RETENTION_FIRST_PASS_SETTLE_S = int(
     os.environ.get('STREAKFIT_RETENTION_SETTLE_S', '20'))
 
 
+def _run_sweeper_step(name, work, record_failure):
+    """Run one hourly step so that NOTHING in it can end the worker thread.
+
+    D42: three of the old handlers called `db.session.rollback()` after their
+    `with app.app_context():` had closed, which raised RuntimeError and killed
+    the thread for good -- silently, because the warning line came after it.
+    Teardown already removes (rolls back) the session, so no rollback is needed
+    out here at all.
+
+    Every layer is guarded: the step, the failure record, the log line. Only
+    `Exception`: the loop must still be stoppable by a BaseException (tests
+    rely on that), and nothing in a pass legitimately raises one.
+
+    Surviving is not the same as succeeding. The step's own failure record is
+    what monitoring reads; this function only guarantees there is a next pass.
+    """
+    try:
+        with app.app_context():
+            work()
+        return True
+    except Exception as exc:
+        try:
+            # Type only, never the text: a database error can carry row
+            # contents back in its message.
+            app.logger.warning('%s failed: %s', name, type(exc).__name__)
+        except Exception:
+            pass
+        try:
+            with app.app_context():
+                record_failure(exc)
+        except Exception as rec_exc:
+            try:
+                app.logger.error('could not record %s failure: %s', name,
+                                 type(rec_exc).__name__)
+            except Exception:
+                pass
+        return False
+
+
+def _sweeper_coach_step():
+    deleted = _sweep_expired_coach_turns(force=True, source=SOURCE_THREAD)
+    db.session.commit()
+    if deleted:
+        app.logger.info('event=retention_sweep deleted=%d', deleted)
+
+
+def _sweeper_moderation_step():
+    result = _sweep_moderation_evidence()
+    # Recorded in the SAME transaction as the deletions, and recorded even when
+    # nothing expired: "it ran and there was nothing to do" is the answer
+    # monitoring needs most often, and it is the one a silent sweep cannot give.
+    _record_retention_run(
+        RETENTION_MODERATION, SOURCE_THREAD,
+        deleted=result['text_evidence_purged'] + result['photo_evidence_purged'],
+        detail=_moderation_sweep_detail(result))
+    db.session.commit()
+    if result['text_evidence_purged'] or result['photo_evidence_purged']:
+        app.logger.info(
+            'event=moderation_evidence_sweep text=%d photos=%d held=%d',
+            result['text_evidence_purged'], result['photo_evidence_purged'],
+            result['held_by_legal_hold'])
+
+
+def _notice_generation_detail(made):
+    """Counts only, fixed shape, no identifiers. Read by an HTTP endpoint."""
+    return (f"urgent={made['urgent_filed']} filed={made['report_filed']} "
+            f"approaching={made['deadline_approaching']} "
+            f"overdue={made['overdue']} appeals={made['appeal_filed']}")
+
+
+def _sweeper_notice_step():
+    made = _generate_moderation_notices()
+    # In the same transaction as the notices it describes: a pass that raises
+    # rolls back both, and its failure is recorded separately.
+    _record_retention_run(RUN_NOTICE_GENERATION, SOURCE_THREAD,
+                          detail=_notice_generation_detail(made))
+    db.session.commit()
+    if any(made.values()):
+        app.logger.info(
+            'event=moderation_notices urgent=%d filed=%d '
+            'approaching=%d overdue=%d appeals=%d',
+            made['urgent_filed'], made['report_filed'],
+            made['deadline_approaching'], made['overdue'], made['appeal_filed'])
+
+
+def _sweeper_delivery_step():
+    sent = _deliver_pending_notices(source=SOURCE_THREAD)
+    if sent['delivered'] or sent['failed']:
+        app.logger.info(
+            'event=moderation_delivery delivered=%d failed=%d contended=%d',
+            sent['delivered'], sent['failed'], sent['contended'])
+
+
 def _retention_sweeper_loop():
     # SETTLE, THEN WORK, THEN SLEEP -- in that order, deliberately.
     #
@@ -11917,92 +12101,30 @@ def _retention_sweeper_loop():
     # of them.
     time.sleep(min(_RETENTION_FIRST_PASS_SETTLE_S, _RETENTION_THREAD_INTERVAL_S))
     while True:
-        try:
-            with app.app_context():
-                deleted = _sweep_expired_coach_turns(force=True, source='thread')
-                db.session.commit()
-                if deleted:
-                    app.logger.info('event=retention_sweep deleted=%d', deleted)
-        except Exception as exc:
-            # Type only, never the text: this is deleting conversation rows and
-            # a database error can carry one back in its message.
-            db.session.rollback()
-            app.logger.warning('retention sweep failed: %s', type(exc).__name__)
-
-        # Moderation evidence is swept in the SAME thread but its OWN try, so
-        # that a failure in one retention promise cannot cancel the other. The
-        # coach sweep and the evidence sweep answer to different commitments
-        # and neither is allowed to be the reason the other stopped running.
-        try:
-            with app.app_context():
-                result = _sweep_moderation_evidence()
-                # Recorded in the SAME transaction as the deletions, and
-                # recorded even when nothing expired: "it ran and there was
-                # nothing to do" is the answer monitoring needs most often,
-                # and it is the one a silent sweep cannot give.
-                _record_retention_run(
-                    RETENTION_MODERATION, 'thread',
-                    deleted=result['text_evidence_purged']
-                    + result['photo_evidence_purged'],
-                    detail=_moderation_sweep_detail(result))
-                db.session.commit()
-                if result['text_evidence_purged'] or result['photo_evidence_purged']:
-                    app.logger.info(
-                        'event=moderation_evidence_sweep text=%d photos=%d held=%d',
-                        result['text_evidence_purged'],
-                        result['photo_evidence_purged'],
-                        result['held_by_legal_hold'])
-        except Exception as exc:
-            # Rolls back the deletions and the success row together, then
-            # records the failure separately. A partial sweep therefore leaves
-            # a 'failed' row and no deletions, never a row claiming success.
-            with app.app_context():
-                _record_retention_failure(RETENTION_MODERATION, 'thread', exc)
-            app.logger.warning('moderation evidence sweep failed: %s',
-                               type(exc).__name__)
-
+        # Four steps, each through `_run_sweeper_step`: its own app context,
+        # its own failure record, and nothing it does -- the step, the record,
+        # the logging, even entering or leaving a context -- can end this
+        # thread (D42). Each answers to a different promise, so none may be
+        # the reason another stopped.
+        _run_sweeper_step('retention sweep', _sweeper_coach_step,
+                          lambda exc: _record_retention_failure(
+                              RETENTION_COACH, SOURCE_THREAD, exc))
+        _run_sweeper_step('moderation evidence sweep', _sweeper_moderation_step,
+                          lambda exc: _record_retention_failure(
+                              RETENTION_MODERATION, SOURCE_THREAD, exc))
         # Noticing an overdue report is independent of purging expired
-        # evidence, and a third try for the same reason as the second: the
-        # owner finding out a child_safety report is sitting unreviewed must
-        # not depend on the retention sweep having succeeded.
-        try:
-            with app.app_context():
-                made = _generate_moderation_notices()
-                db.session.commit()
-                if any(made.values()):
-                    app.logger.info(
-                        'event=moderation_notices urgent=%d filed=%d '
-                        'approaching=%d overdue=%d appeals=%d',
-                        made['urgent_filed'], made['report_filed'],
-                        made['deadline_approaching'], made['overdue'],
-                        made['appeal_filed'])
-        except Exception as exc:
-            db.session.rollback()
-            app.logger.warning('moderation notice generation failed: %s',
-                               type(exc).__name__)
-
-        # DELIVERY, in its own try for the same reason as the others.
-        #
-        # This is the step that was missing entirely: notices were generated
-        # hourly and delivered only when somebody typed `flask
-        # moderation-notify`, so the whole system depended on a human being
-        # at a terminal. An alert nobody is awake to trigger is not an alert.
-        #
-        # Records the pass even when it sends nothing, and even when no
-        # channel is configured, so monitoring can tell an idle worker from
-        # an absent one.
-        try:
-            with app.app_context():
-                sent = _deliver_pending_notices(source=SOURCE_THREAD)
-                if sent['delivered'] or sent['failed']:
-                    app.logger.info(
-                        'event=moderation_delivery delivered=%d failed=%d '
-                        'contended=%d',
-                        sent['delivered'], sent['failed'], sent['contended'])
-        except Exception as exc:
-            db.session.rollback()
-            app.logger.warning('moderation delivery failed: %s',
-                               type(exc).__name__)
+        # evidence: the owner finding out a child_safety report is sitting
+        # unreviewed must not depend on the retention sweep having succeeded.
+        _run_sweeper_step('moderation notice generation', _sweeper_notice_step,
+                          lambda exc: _record_retention_failure(
+                              RUN_NOTICE_GENERATION, SOURCE_THREAD, exc))
+        # DELIVERY. Records the pass even when it sends nothing, and even when
+        # no channel is configured, so monitoring can tell an idle worker from
+        # an absent one -- and now records a FAILED pass as failed, so a worker
+        # that merely survives is not mistaken for one that delivers.
+        _run_sweeper_step('moderation delivery', _sweeper_delivery_step,
+                          lambda exc: _record_notification_failure(
+                              SOURCE_THREAD, exc))
 
         # Sleep LAST. See the note at the top of this loop.
         time.sleep(_RETENTION_THREAD_INTERVAL_S)

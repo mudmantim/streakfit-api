@@ -147,7 +147,9 @@ def test_the_first_pass_is_not_gated_behind_a_full_interval():
     assert src.index('_RETENTION_FIRST_PASS_SETTLE_S') < loop, \
         "the settle delay must come before the loop"
     body = src[loop:]
-    assert body.rindex('time.sleep') > body.index('_deliver_pending_notices'), \
+    # Delivery runs through `_sweeper_delivery_step` since D42 (each step is
+    # guarded by `_run_sweeper_step`); the ordering claim is unchanged.
+    assert body.rindex('time.sleep') > body.index('_sweeper_delivery_step'), \
         "the interval sleep must come AFTER the delivery pass, not before it"
     assert '_RETENTION_THREAD_INTERVAL_S' in body, \
         "the loop must sleep the configured interval between passes"

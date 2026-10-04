@@ -215,6 +215,9 @@ def test_R2_console_can_never_mark_anything_delivered(client, monkeypatch):
 
 def test_R2_everything_working_finally_passes(client, monkeypatch):
     monkeypatch.setattr(appmod, '_notification_channel', lambda name=None: Works())
+    # "Everything" includes the step that FILLS the queue (D42 review): an
+    # empty queue behind a delivery pass alone is not evidence alerts work.
+    appmod._sweeper_notice_step()
     _deliver_pending_notices(Works(), source=SOURCE_THREAD)
 
     assert state(client, 'moderation.delivery_configured') == 'PASS'

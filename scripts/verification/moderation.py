@@ -247,7 +247,7 @@ def run(api, results, scenario):
 
     for name in ("retention.recent", "retention.moderation",
                  "moderation.delivery_configured", "moderation.delivery_worker",
-                 "moderation.notices_delivered"):
+                 "moderation.notice_generation", "moderation.notices_delivered"):
         results.check(f"moderation.check_present::{name}", name in by_id,
                       f"{name} is not among {sorted(by_id)}")
 
@@ -281,8 +281,10 @@ def run(api, results, scenario):
     configured = by_id.get("moderation.delivery_configured") or {}
     worker = by_id.get("moderation.delivery_worker") or {}
     delivered = by_id.get("moderation.notices_delivered") or {}
+    generation = by_id.get("moderation.notice_generation") or {}
     for name, c in (("moderation.delivery_configured", configured),
-                    ("moderation.delivery_worker", worker)):
+                    ("moderation.delivery_worker", worker),
+                    ("moderation.notice_generation", generation)):
         results.check(f"moderation.check_state_is_legible::{name}",
                       c.get("status") in ("PASS", "FAIL", "UNKNOWN"),
                       f"status={c.get('status')!r}")
@@ -295,6 +297,16 @@ def run(api, results, scenario):
         or (configured.get("status") == "PASS" and worker.get("status") == "PASS"),
         f"notices_delivered=PASS while configured="
         f"{configured.get('status')!r} worker={worker.get('status')!r}",
+    )
+
+    # D42: a worker that survives its failures can keep delivering an empty
+    # queue while the step that FILLS it fails every hour. An empty queue is
+    # only evidence when generation is also healthy.
+    results.check(
+        "moderation.delivery_health_requires_generation",
+        delivered.get("status") != "PASS" or generation.get("status") == "PASS",
+        f"notices_delivered=PASS while notice_generation="
+        f"{generation.get('status')!r}",
     )
 
     # Configuration is not execution. A provider set up perfectly with nothing
