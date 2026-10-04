@@ -328,7 +328,7 @@ def _run(kind, source, outcome, minutes_ago=0):
 
 
 @pytest.mark.parametrize('kind,check_id,other_source', [
-    (appmod.RUN_NOTICE_GENERATION, 'moderation.notice_generation', 'manual'),
+    (getattr(appmod, 'RUN_NOTICE_GENERATION', 'notice_gen'), 'moderation.notice_generation', 'manual'),
     (RETENTION_COACH, 'retention.recent', 'manual'),
     (RETENTION_COACH, 'retention.recent', 'request'),
     (RETENTION_MODERATION, 'retention.moderation', 'manual'),
@@ -378,3 +378,58 @@ def test_the_generation_check_survives_a_failure_in_the_delivery_checks(client, 
     _run(appmod.RUN_NOTICE_GENERATION, 'thread', 'ok', minutes_ago=5)
     c = checks(client)
     assert c['moderation.notice_generation']['status'] == 'PASS'
+
+
+# ── Review gaps (D42 thread-resilience review) ──────────────────────────────
+
+@pytest.mark.parametrize('nth', range(1, 5))
+def test_a_teardown_failing_after_a_successful_step_never_ends_the_thread(loop, monkeypatch, nth):
+    """No step fails, so every context reaches its normal teardown; the nth
+    one fails there. (The earlier family reaches teardown only for failure
+    handlers, because every step raises first.)"""
+    real_ctx = appmod.app.app_context
+    count = {'n': 0}
+
+    @contextmanager
+    def faulty():
+        count['n'] += 1
+        mine = count['n']
+        with real_ctx():
+            yield
+        if mine == nth:
+            raise RuntimeError(f'context {mine} failed on teardown')
+
+    monkeypatch.setattr(appmod.app, 'app_context', faulty)
+    r = loop(2)
+    assert survived(r, 2), r['exc']
+    assert ran_every_step_on(r, 2)
+
+
+@pytest.mark.parametrize('recorder,args', [
+    ('_record_retention_failure', (RETENTION_COACH, 'thread')),
+    ('_record_notification_failure', ('thread',)),
+])
+def test_the_failure_recorders_themselves_cannot_raise(app, monkeypatch, recorder, args):
+    """The outer guard protects the thread, but `flask moderation-notify`
+    calls the recorder directly: a recorder that raised with the database down
+    would replace the original exception there."""
+    def down(*a, **kw):
+        raise RuntimeError('database is down')
+    monkeypatch.setattr(db.session, 'commit', down)
+    getattr(appmod, recorder)(*args, RuntimeError('the original failure'))   # must not raise
+
+
+def test_a_real_request_path_coach_sweep_does_not_clear_a_thread_failure(loop, client, monkeypatch):
+    """The production shape: the thread's coach step fails, then a user's
+    request piggy-backs a REAL sweep in the worker process."""
+    loop(1, faults={'_sweep_expired_coach_turns': {1}})
+    assert rows(RETENTION_COACH)[-1].outcome == 'failed'
+    monkeypatch.undo()   # the real step functions again (the loop's patches)
+    monkeypatch.setattr(appmod, '_WORKER_STARTED_AT', None)
+    monkeypatch.setattr(appmod, '_coach_sweep_last', None)
+    appmod._sweep_expired_coach_turns()          # source='request', as the coach route does
+    db.session.commit()
+    assert rows(RETENTION_COACH)[-1].source == 'request'
+    assert rows(RETENTION_COACH)[-1].outcome == 'ok'
+    c = checks(client)['retention.recent']
+    assert c['status'] == 'FAIL', c
