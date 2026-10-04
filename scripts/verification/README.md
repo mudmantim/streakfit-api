@@ -33,6 +33,7 @@ Exit codes: `0` all passed, `1` at least one check failed, `2` a setup step (e.g
 | `moments.py` | Team Moments history (`team_created`, `member_joined`, `campfire_log_added`, ordering) |
 | `chat.py` | Team Chat post/read, empty/over-length rejection, emoji reactions as plain messages |
 | `rickie.py` | Rickie's team reactions (welcome, first-log) — fixed templates, `sender_user_id` null |
+| `coach.py` | Ask Rickie's boundaries (D48/D53), all refusals so no AI call is ever made: login required, a non-object body is a 400, an over-long insight and unstorable text are refused, and the provider deadline is reported in force by the self-check |
 | `photos.py` | Private team photos: filter catalog and lock state, upload, who can read the bytes (member 200 / non-member 403 / anonymous 401), non-JPEG and locked-filter rejection, the thread entry and history moment. Deletes what it uploads. |
 | `security.py` | Invite rotation, remove member, leave team, unauthorized access — mutates membership |
 | `moderation.py` | Blocking and reporting end to end, the operator boundary (queue and appeals reject a non-operator), the appeals UI being reachable in the served markup, and the honesty of the monitoring: retention answered separately per promise, delivery split into configuration / observed execution / outstanding work, no check greener than the capability it depends on, and no identifiers in a payload served without a credential |
@@ -66,7 +67,6 @@ Every module calls `api.request(method, path, token, body)` and never touches th
 These subsystems exist in the app but don't have a verification module yet — the next ones to add, not silent gaps discovered later:
 
 - **`brainboost.py`** — question delivery, answer submission, scoring
-- **`coach.py`** — Rickie's 1:1 Coach chat (distinct from `rickie.py`'s team reactions)
 - **`notifications.py`** — the daily-reminder permission ask and completion notification
 - **`pwa.py`** — install prompt, manifest, service worker cache versioning
 
