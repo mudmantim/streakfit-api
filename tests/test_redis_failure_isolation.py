@@ -205,7 +205,7 @@ def test_the_redis_client_is_built_with_bounded_io(scheme):
     # from the real pool the limiter built.
     res = run_scenario_opts(f'{scheme}://127.0.0.1:1/0')
     assert res == {'socket_timeout': 0.5, 'socket_connect_timeout': 0.5,
-                   'retry_on_timeout': False}, res
+                   'retry_on_timeout': False, 'retries': 0}, res
 
 
 def test_a_uri_that_overrides_the_timeouts_is_reported(hung):
@@ -228,8 +228,9 @@ import json, os, sys
 sys.path.insert(0, os.environ['REPO'])
 import app as A
 kw = A.limiter.storage.storage.connection_pool.connection_kwargs
-print('RESULT ' + json.dumps({k: kw.get(k) for k in
-      ('socket_timeout', 'socket_connect_timeout', 'retry_on_timeout')}))
+out = {k: kw.get(k) for k in ('socket_timeout', 'socket_connect_timeout', 'retry_on_timeout')}
+out['retries'] = getattr(kw.get('retry'), '_retries', None)
+print('RESULT ' + json.dumps(out))
 '''
 
 
@@ -273,3 +274,67 @@ def test_the_app_probe_does_not_swallow_a_worker_abort(monkeypatch):
     monkeypatch.setattr(type(appmod.limiter), 'storage', property(lambda self: Storage()))
     with pytest.raises(SystemExit):
         appmod._ratelimit_backend_check()
+
+
+def test_a_uri_that_enables_retries_is_reported(hung):
+    """A retry multiplies every bound; redis-py accepts retry options from the
+    URI query, so the self-check checks the effective retry policy too."""
+    res = run_scenario(f'redis://127.0.0.1:{hung.port}/0?retry_on_timeout=true')
+    assert res['self_checks']['ratelimit.bounded_io'] == 'FAIL', res
+
+
+# ── The outage policy must not be opened by a blip (D7 review, M1) ──────────
+#
+# With bounded I/O a single slow probe (> 0.5 s) used to stand the limiter down
+# for 15 s -- every route but login and lookup unlimited (measured: 78
+# registrations against 5/min after one 1.5 s pause). One failure must only arm
+# a quick re-probe; two consecutive failures stand it down.
+
+def _fresh_state(monkeypatch, outcomes):
+    import app as appmod
+    monkeypatch.setenv('RATELIMIT_STORAGE_URI', 'redis://127.0.0.1:1/0')
+    monkeypatch.setattr(appmod, '_shared_rl_state',
+                        {'checked_at': None, 'healthy': True, 'failures': 0})
+    calls = []
+
+    def probe():
+        calls.append(1)
+        return outcomes[min(len(calls), len(outcomes)) - 1]
+    monkeypatch.setattr(appmod, '_ratelimit_backend_check', probe)
+    return appmod, calls
+
+
+def _age(appmod, seconds):
+    from datetime import datetime, timedelta
+    appmod._shared_rl_state['checked_at'] = datetime.utcnow() - timedelta(seconds=seconds)
+
+
+def test_one_failed_probe_does_not_stand_the_limiter_down(app, monkeypatch):
+    appmod, calls = _fresh_state(monkeypatch, [False, True])
+    assert appmod._shared_storage_healthy() is True          # first failure: still limited
+    assert appmod._shared_storage_healthy() is True and len(calls) == 1   # cached
+    _age(appmod, 2.5)                                          # quick re-probe is due
+    assert appmod._shared_storage_healthy() is True and len(calls) == 2   # blip over
+    assert appmod._shared_rl_state['failures'] == 0
+
+
+def test_two_consecutive_failures_do_stand_it_down_and_a_success_restores_it(app, monkeypatch):
+    appmod, calls = _fresh_state(monkeypatch, [False, False, True])
+    assert appmod._shared_storage_healthy() is True
+    _age(appmod, 2.5)
+    assert appmod._shared_storage_healthy() is False         # second consecutive failure
+    _age(appmod, 3)
+    assert appmod._shared_storage_healthy() is False and len(calls) == 2   # 15 s TTL now
+    _age(appmod, 16)
+    assert appmod._shared_storage_healthy() is True and appmod._shared_rl_state['failures'] == 0
+
+
+def test_the_self_check_reports_a_known_outage_without_probing_again(client, monkeypatch):
+    """During an outage the self-check's own limit is stood down, so probing on
+    every call would let an anonymous caller hold the one worker (D7 review m1)."""
+    from datetime import datetime
+    appmod, calls = _fresh_state(monkeypatch, [True])
+    appmod._shared_rl_state.update(checked_at=datetime.utcnow(), healthy=False, failures=2)
+    c = {x['id']: x for x in client.get('/api/verification/self').get_json()['checks']}
+    assert calls == []
+    assert c['ratelimit.shared_storage']['status'] == 'FAIL'

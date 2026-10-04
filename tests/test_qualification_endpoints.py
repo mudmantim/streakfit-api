@@ -184,6 +184,11 @@ def test_a_configured_backend_is_exercised_not_believed(client, monkeypatch):
 
     monkeypatch.setenv("STREAKFIT_ENV", "production")
     monkeypatch.setenv("RATELIMIT_STORAGE_URI", "redis://localhost:6379")
+    # A clean probe state: since D7 the self-check reports a CACHED outage
+    # instead of re-probing during one, so a verdict left by another test
+    # must not leak in.
+    monkeypatch.setattr(appmod, "_shared_rl_state",
+                        {"checked_at": None, "healthy": True, "failures": 0})
 
     def unreachable():
         raise ConnectionError("no redis here")

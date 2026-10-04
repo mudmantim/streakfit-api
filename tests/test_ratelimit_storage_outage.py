@@ -81,6 +81,17 @@ def prime_stale_healthy():
 
 import os
 PRIME = os.environ.get('STREAKFIT_PROBE_PRIME') == '1'
+SETTLED = os.environ.get('STREAKFIT_PROBE_SETTLED') == '1'
+if SETTLED:
+    # "Later in the same outage" (D7): one probe has already failed and its
+    # quick re-probe is due, so the next probe is the SECOND consecutive
+    # failure -- the point at which the limiter stands down and the per-route
+    # degraded policies take over. One failure alone no longer does that.
+    import datetime as _dt
+    with A._shared_rl_lock:
+        A._shared_rl_state.update(
+            checked_at=datetime.utcnow() - _dt.timedelta(seconds=3),
+            healthy=True, failures=1)
 
 
 def prime():
@@ -133,6 +144,7 @@ def _run(storage_uri, tmp_path, prime):
         RATELIMIT_STORAGE_URI=storage_uri,
         DATABASE_URL=f"sqlite:///{tmp_path}/outage.db",
         STREAKFIT_PROBE_PRIME="1" if prime else "0",
+        STREAKFIT_PROBE_SETTLED="0" if prime else "1",
     )
     env.pop("STREAKFIT_ENV", None)
     proc = subprocess.run(

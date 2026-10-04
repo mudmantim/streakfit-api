@@ -229,16 +229,18 @@ jwt = JWTManager(app)
 #
 # 0.5 s for both. In-region Key Value answers in milliseconds, so this is two
 # orders of magnitude of headroom, and it survives one lost data segment (the
-# Linux minimum retransmit is 200 ms). The cost of the bound is paid only during
-# an outage: a request then waits at most a few bounded calls (~0.5-1.5 s, login
-# being the worst) instead of 30 s, and the existing outage policy below takes
-# over. retry_on_timeout stays False (explicitly): a retry would multiply the
-# bound. The read timeout also bounds the TLS handshake for rediss://.
+# Linux minimum retransmit is 200 ms). WHAT IS BOUNDED: each socket wait (connect,
+# and every recv) gives up after 0.5 s. That bounds a backend that STOPS
+# answering -- hung or unreachable -- to a few waits per request (~0.5-1.5 s,
+# login being the worst) instead of 30 s. It does NOT bound a peer that keeps
+# trickling bytes slowly; each recv then succeeds and the command can take
+# arbitrarily long. Retries are pinned to zero: a retry would multiply the bound.
 #
 # Residual, documented rather than fixed here: DNS resolution is NOT bounded by
 # either option, a hostname with k addresses multiplies the connect bound by k,
-# and a backend slower than ~0.4 s per command stays "healthy" while slowing the
-# one worker down. See docs/operations/rate-limit-backend-outage.md.
+# a trickling peer (above) is not bounded, and a backend slower than ~0.4 s per
+# command stays "healthy" while slowing the one worker down. See
+# docs/operations/rate-limit-backend-outage.md.
 _REDIS_SOCKET_TIMEOUT_S = 0.5
 _REDIS_CONNECT_TIMEOUT_S = 0.5
 _REDIS_SCHEMES = ("redis://", "rediss://", "redis+unix://")
@@ -246,11 +248,20 @@ _REDIS_SCHEMES = ("redis://", "rediss://", "redis+unix://")
 
 def _limiter_storage_options(uri):
     """Connection options for the limiter's storage: bounded for Redis, none
-    for anything else (memory:// ignores options but has no use for them)."""
+    for anything else (memory:// ignores options but has no use for them).
+
+    The retry policy is pinned to ZERO retries explicitly rather than left to
+    redis-py's default, which a library upgrade can change (and a retry would
+    multiply every bound). valkey:// / redis+sentinel:// / redis+cluster:// get
+    no options here; ratelimit.bounded_io then reports them as unverified
+    rather than passing them."""
     if uri.startswith(_REDIS_SCHEMES):
+        from redis.backoff import NoBackoff
+        from redis.retry import Retry
         return {"socket_connect_timeout": _REDIS_CONNECT_TIMEOUT_S,
                 "socket_timeout": _REDIS_SOCKET_TIMEOUT_S,
-                "retry_on_timeout": False}
+                "retry_on_timeout": False,
+                "retry": Retry(NoBackoff(), 0)}
     return {}
 
 
@@ -330,7 +341,16 @@ limiter = Limiter(
 # Mudman Command reads that as FAIL.
 
 _SHARED_RL_PROBE_TTL = timedelta(seconds=15)
-_shared_rl_state = {"checked_at": None, "healthy": True}
+# D7 review (M1): with bounded I/O, ONE slow probe -- a blip over 0.5 s -- used
+# to be enough to stand the limiter down for 15 s, during which every route but
+# login and invite lookup was unlimited (measured: 78 registrations against a
+# 5/min limit after a single 1.5 s pause). So one failure only arms a quick
+# re-probe; the limiter stands down after TWO consecutive failures. Meanwhile
+# it stays enabled, and Flask-Limiter's in-memory fallback keeps every route
+# limited by its own limits.
+_SHARED_RL_REPROBE_TTL = timedelta(seconds=2)
+_SHARED_RL_FAILURES_TO_DEGRADE = 2
+_shared_rl_state = {"checked_at": None, "healthy": True, "failures": 0}
 _shared_rl_lock = threading.Lock()
 
 
@@ -358,15 +378,36 @@ def _shared_storage_healthy():
     now = datetime.utcnow()
     with _shared_rl_lock:
         last = _shared_rl_state["checked_at"]
-        if last is not None and now - last < _SHARED_RL_PROBE_TTL:
+        pending = (_shared_rl_state["healthy"]
+                   and _shared_rl_state.get("failures", 0) > 0)
+        ttl = _SHARED_RL_REPROBE_TTL if pending else _SHARED_RL_PROBE_TTL
+        if last is not None and now - last < ttl:
             return _shared_rl_state["healthy"]
     try:
-        healthy = bool(_ratelimit_backend_check())
+        ok = bool(_ratelimit_backend_check())
     except Exception:
-        healthy = False
+        ok = False
     with _shared_rl_lock:
-        _shared_rl_state.update(checked_at=now, healthy=healthy)
+        failures = 0 if ok else _shared_rl_state.get("failures", 0) + 1
+        healthy = ok or failures < _SHARED_RL_FAILURES_TO_DEGRADE
+        _shared_rl_state.update(checked_at=now, healthy=healthy, failures=failures)
     return healthy
+
+
+def _cached_unhealthy_age_s():
+    """Seconds since the cached probe found the backend unhealthy, or None.
+
+    The self-check reports this instead of probing again while an outage is
+    already known: during an outage its own rate limit is stood down, so an
+    unauthenticated caller could otherwise hold the one worker for a bounded
+    probe on every call (D7 review, m1).
+    """
+    with _shared_rl_lock:
+        last = _shared_rl_state["checked_at"]
+        if (last is not None and not _shared_rl_state["healthy"]
+                and datetime.utcnow() - last < _SHARED_RL_PROBE_TTL):
+            return (datetime.utcnow() - last).total_seconds()
+    return None
 
 
 def _degrade_limiter_when_shared_storage_is_down():
@@ -3658,6 +3699,10 @@ def verification_self():
             # Both times the green came from checking something adjacent to
             # the thing that mattered, and both times it was found by running
             # the failure path rather than the happy one.
+            cached_age = _cached_unhealthy_age_s()
+            if cached_age is not None:
+                raise ConnectionError(
+                    f"backend unavailable (cached probe, {cached_age:.0f}s old)")
             if not _ratelimit_backend_check():
                 raise ConnectionError("backend reported itself unavailable")
             checks.append(_self_check(
@@ -3712,22 +3757,32 @@ def verification_self():
     # backend call can hold the only sync worker until gunicorn kills it.
     try:
         pool = getattr(getattr(limiter.storage, "storage", None), "connection_pool", None)
-        if pool is None:
+        if _RATELIMIT_STORAGE_URI.startswith("memory:"):
             bstate, bobs = "PASS", "no network backend (in-process storage)"
+        elif pool is None:
+            # A network backend whose settings cannot be read (cluster,
+            # sentinel, another scheme, a renamed library attribute) is not
+            # evidence of bounded I/O.
+            bstate = "FAIL"
+            bobs = (f"network backend ({_RATELIMIT_STORAGE_URI.split(':')[0]}) "
+                    f"whose connection settings could not be read")
         else:
             kw = pool.connection_kwargs
             read, conn = kw.get("socket_timeout"), kw.get("socket_connect_timeout")
+            retries = getattr(kw.get("retry"), "_retries", None)
             bounded = (read is not None and conn is not None
                        and 0 < read <= 1.0 and 0 < conn <= 1.0
-                       and not kw.get("retry_on_timeout"))
+                       and not kw.get("retry_on_timeout") and retries == 0)
             bstate = "PASS" if bounded else "FAIL"
             bobs = (f"socket_timeout={read} socket_connect_timeout={conn} "
-                    f"retry_on_timeout={bool(kw.get('retry_on_timeout'))}")
+                    f"retry_on_timeout={bool(kw.get('retry_on_timeout'))} "
+                    f"retries={retries}")
         checks.append(_self_check(
             "ratelimit.bounded_io", "A stuck rate-limit backend cannot freeze the app",
-            "Every call to the shared rate-limit backend gives up within a "
-            "second, so a hung or unreachable backend degrades rate limiting "
-            "instead of holding the only worker.",
+            "Every socket wait on the shared rate-limit backend (connect and "
+            "each read) gives up within a second, with no retries, so a "
+            "backend that stops answering degrades rate limiting instead of "
+            "holding the only worker.",
             "Read the connect and read timeouts the limiter's live connection "
             "pool was built with (not the configured URI, which can override "
             "them), and require both to be set and at most 1 s, with no retry.",
@@ -3735,8 +3790,10 @@ def verification_self():
             failure_reason=None if bstate == "PASS" else
             "A hung or unreachable rate-limit backend would hold requests "
             "until the worker is killed, taking unrelated pages down with it.",
-            limitations="Does not bound DNS resolution, and does not detect a "
-                        "backend that is slow but under the timeout.",
+            limitations="Bounds each socket wait, not a whole command: a peer "
+                        "that keeps trickling bytes is not bounded. Does not "
+                        "bound DNS resolution, and does not detect a backend "
+                        "that is slow but under the timeout.",
             critical=True))
     except Exception as exc:
         checks.append(_self_check(
