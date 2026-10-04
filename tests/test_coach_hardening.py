@@ -535,8 +535,9 @@ def test_a_slowly_draining_peer_cannot_stretch_a_write_past_the_deadline():
     try:
         deadline = time.monotonic() + BUDGET_S
         t0 = time.monotonic()
+        import httpx
         with appmod._coach_http_client(deadline) as c:
-            with pytest.raises(Exception):
+            with pytest.raises(httpx.TransportError):
                 c.post(srv.url + "/v1/messages", content=b"x" * (16 * 1024 * 1024))
         assert time.monotonic() - t0 < BUDGET_S + SLACK_S
     finally:
