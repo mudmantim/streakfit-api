@@ -31,6 +31,7 @@ from flask_jwt_extended import (JWTManager, create_access_token, jwt_required,
                                get_jwt_identity, verify_jwt_in_request)
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
+from limits.storage import MemoryStorage, RedisStorage, Storage
 import anthropic as _anthropic_lib
 
 # The verification suite (scripts.verify_all / scripts.verification) is admin-only
@@ -223,18 +224,25 @@ jwt = JWTManager(app)
 # Production runs ONE sync worker, so a backend that accepts a connection and
 # never answers -- or a host that never answers a SYN -- held that worker on a
 # rate-limit call until gunicorn killed it after 30 s, every 30 s, for as long
-# as the outage lasted. /health waited too: the 15 s health probe runs on every
-# request. Measured on 6541cae with real Valkey: a paused backend gave 10 worker
-# kills in two minutes; an unreachable host took the whole site down.
+# as the outage lasted. /health waited too: the old 15 s health probe ran on
+# every request. Measured on 6541cae with real Valkey: a paused backend gave 10
+# worker kills in two minutes; an unreachable host took the whole site down.
 #
 # 0.5 s for both. In-region Key Value answers in milliseconds, so this is two
 # orders of magnitude of headroom, and it survives one lost data segment (the
-# Linux minimum retransmit is 200 ms). WHAT IS BOUNDED: each socket wait (connect,
-# and every recv) gives up after 0.5 s. That bounds a backend that STOPS
-# answering -- hung or unreachable -- to a few waits per request (~0.5-1.5 s,
-# login being the worst) instead of 30 s. It does NOT bound a peer that keeps
-# trickling bytes slowly; each recv then succeeds and the command can take
-# arbitrarily long. Retries are pinned to zero: a retry would multiply the bound.
+# Linux minimum retransmit is 200 ms). WHAT IS BOUNDED: each socket wait
+# (connect, and every recv) gives up after 0.5 s. Because the first failure
+# moves every limit onto this process's memory (below), a backend that STOPS
+# answering costs one bounded wait when it fails and one bounded probe every
+# _RateLimitGate.PROBE_INTERVAL_S after that -- never a wait per request. It
+# does NOT bound a peer that keeps trickling bytes slowly; each recv then
+# succeeds and the command can take arbitrarily long. Retries are pinned to
+# zero: a retry would multiply the bound.
+#
+# The cost of a FALSE failure is now availability, not security: a backend
+# that misses 0.5 s once puts the app on its degraded policy (invite lookup
+# 503, login on the strict cap) for at least the qualification window, while
+# every limit stays enforced. That is why the bound is not tighter.
 #
 # Residual, documented rather than fixed here: DNS resolution is NOT bounded by
 # either option, a hostname with k addresses multiplies the connect bound by k,
@@ -265,174 +273,365 @@ def _limiter_storage_options(uri):
     return {}
 
 
+# ── One rate-limit authority, whatever Redis is doing (D7, owner policy) ────
+#
+# Replaces "Option B", which stood the WHOLE limiter down while Redis was
+# unhealthy (`limiter.enabled = False`): every route but login and invite
+# lookup was then unlimited. Measured on 6541cae with Redis refused: 12 of 12
+# registrations against a 5/minute limit. The owner's policy since 2026-10-04:
+#
+#   * Redis failing never disables rate limiting. Every route keeps its own
+#     limits, enforced from this process's memory.
+#   * Login drops to the strict degraded cap on the FIRST failure.
+#   * Invite lookup refuses (503) on the FIRST failure.
+#   * No allowance may be split across a transition, in either direction.
+#
+# HOW. Every count is kept twice: in Redis and in a process-local mirror
+# (`_LocalWindows`), on every hit, healthy or not. The answer is the MAX of
+# the two while Redis is in use, and the mirror alone while it is not.
+#
+#   healthy -> degraded   the mirror already holds every hit this process has
+#                         counted, so the allowance carries on from the true
+#                         count. (Flask-Limiter's own fallback starts from ZERO
+#                         when it engages -- a fresh allowance per failure.)
+#   degraded -> healthy   Redis lacks the hits counted while it was away, but
+#                         MAX(redis, mirror) still includes them, and the first
+#                         hit on a key pushes Redis up to the mirror's count.
+#
+# With the required topology -- one instance, one sync worker -- the mirror IS
+# the global count, so no sequence of transitions, however fast, hands out a
+# fresh allowance. That is the property the state machine below cannot break,
+# because it does not depend on WHEN the switch happens.
+#
+# STATE MACHINE (per process; starts HEALTHY):
+#
+#   HEALTHY   every hit: mirror + Redis, answer = max. Any exception from any
+#             Redis call  ->  DEGRADED (immediately; there is no second chance,
+#             because the first failure is when login and lookup must tighten).
+#   DEGRADED  every hit: mirror only; Redis is not touched by requests. At most
+#             one probe every PROBE_INTERVAL_S, single-flight, made by whichever
+#             limited request arrives first after the interval: one write (the
+#             same incr-with-expiry a rate-limit hit performs) on a probe key.
+#               probe fails     -> successes = 0, stay DEGRADED
+#               probe succeeds  -> successes += 1
+#               successes == QUALIFY_SUCCESSES  ->  HEALTHY
+#
+# Recovery therefore needs QUALIFY_SUCCESSES consecutive good probes spaced at
+# least PROBE_INTERVAL_S apart: >= 10 s of continuously working writes, and
+# >= 15 s after the last failure seen. Why these numbers, given that security
+# does not depend on them (above):
+#
+#   * Probe cost. Each probe is one bounded call: at most 0.5 s of the only
+#     worker (connect timeout for an unreachable host, read timeout for a frozen
+#     one). Every 5 s that is <= 10% of one worker under saturating traffic,
+#     and one request in five seconds waits. Every 2 s would be 25%.
+#   * Flapping. A backend must stay writable for 10 s before traffic goes back
+#     to it, so on/off cycles shorter than that (the round-1 review's were
+#     2-5 s) keep every limit on the one in-process authority for the whole
+#     episode instead of switching on each cycle.
+#   * Cost of staying degraded too long. While degraded, invite lookup refuses
+#     and login is on the strict cap, so recovery is not made slower than it
+#     needs to be: back within 15-20 s of the backend being stable again.
+#
+# WHAT THIS IS NOT. The mirror lives in this worker's memory: a worker restart
+# DURING an outage loses the counts Redis never saw (bounded I/O is what keeps
+# gunicorn from causing those restarts), and with more than one worker or
+# instance each would keep its own mirror. One worker is a production
+# requirement for exactly that reason; the self-check says DEGRADED whenever
+# this is the authority, and Mudman Command reads that as FAIL.
+
+_ratelimit_log = logging.getLogger("streakfit.ratelimit")
+
+# One key, re-used, with a short expiry. It is a probe, not a counter.
+_RATELIMIT_PROBE_KEY = 'streakfit:ratelimit-selfcheck'
+_RATELIMIT_PROBE_EXPIRY_S = 60
+
+
+class _LocalWindows:
+    """Fixed-window counters in this process. No threads, no wall clock.
+
+    `limits`' own MemoryStorage starts a timer thread to expire keys, on
+    every hit after a fork; this is the mirror on every hit, so it expires
+    keys itself, amortised over hits, on the monotonic clock (a wall-clock
+    step must not end a window early).
+    """
+    SWEEP_EVERY = 1024
+
+    def __init__(self, clock=time.monotonic):
+        self.clock = clock
+        self._windows = {}          # key -> [count, monotonic deadline]
+        self._lock = threading.Lock()
+        self._ops = 0
+
+    def incr(self, key, expiry, amount=1):
+        now = self.clock()
+        with self._lock:
+            window = self._windows.get(key)
+            if window is None or window[1] <= now:
+                window = self._windows[key] = [0, now + expiry]
+            window[0] += amount
+            self._ops += 1
+            if self._ops >= self.SWEEP_EVERY:
+                self._ops = 0
+                for k in [k for k, w in self._windows.items() if w[1] <= now]:
+                    del self._windows[k]
+            return window[0]
+
+    def get(self, key):
+        now = self.clock()
+        with self._lock:
+            window = self._windows.get(key)
+            return window[0] if window is not None and window[1] > now else 0
+
+    def get_expiry(self, key):
+        """Wall-clock reset time, as `limits` reports it."""
+        now = self.clock()
+        with self._lock:
+            window = self._windows.get(key)
+            left = window[1] - now if window is not None and window[1] > now else 0
+        return time.time() + left
+
+    def clear(self, key):
+        with self._lock:
+            self._windows.pop(key, None)
+
+    def reset(self):
+        with self._lock:
+            self._windows.clear()
+
+    def __len__(self):
+        return len(self._windows)
+
+
+class _RateLimitGate(Storage):
+    """The limiter's only storage when a Redis backend is configured.
+
+    Registered for `streakfit+redis://` (and rediss, redis+unix); the
+    Limiter is given that scheme, and this strips the prefix and talks to
+    the real URI through `limits`' own RedisStorage. It NEVER raises a
+    storage error: Flask-Limiter's fallback (which starts from zero, and
+    whose deferred `deduct_when` hit raised a 500 after the view had run)
+    is never engaged. See the section comment above for the state machine.
+    """
+    STORAGE_SCHEME = ["streakfit+redis", "streakfit+rediss", "streakfit+redis+unix"]
+    PREFIX = "streakfit+"
+    PROBE_INTERVAL_S = 5.0
+    QUALIFY_SUCCESSES = 3
+
+    def __init__(self, uri=None, wrap_exceptions=False, **options):
+        super().__init__(uri, wrap_exceptions=False, **options)
+        self.redis = RedisStorage(uri[len(self.PREFIX):], **options)
+        self.clock = time.monotonic
+        self.local = _LocalWindows(clock=lambda: self.clock())
+        self._state = threading.RLock()
+        self._probing = threading.Lock()
+        self.degraded = False
+        self.successes = 0
+        self.next_probe_at = 0.0
+        self.degraded_since = None      # wall clock, for people
+        self.last_failure = None        # exception type name
+        self.last_failure_at = None
+        self.recovered_at = None
+        self.degrade_count = 0
+        self.recover_count = 0
+        self.probe_count = 0
+
+    @property
+    def base_exceptions(self):
+        return ()                      # nothing escapes; see _failed
+
+    # -- the state machine ------------------------------------------------
+
+    def _failed(self, exc):
+        with self._state:
+            self.last_failure = type(exc).__name__
+            self.last_failure_at = datetime.utcnow()
+            self.successes = 0
+            self.next_probe_at = self.clock() + self.PROBE_INTERVAL_S
+            entered = not self.degraded
+            if entered:
+                self.degraded = True
+                self.degraded_since = self.last_failure_at
+                self.degrade_count += 1
+        if entered:
+            _ratelimit_log.warning(
+                "rate-limit backend failed (%s): every limit now enforced from "
+                "this process; invite lookup refusing, login on the strict cap",
+                self.last_failure)
+
+    def _maybe_probe(self):
+        if self.clock() < self.next_probe_at:
+            return
+        if not self._probing.acquire(blocking=False):
+            return                     # single-flight: one probe in flight
+        try:
+            with self._state:
+                if not self.degraded or self.clock() < self.next_probe_at:
+                    return
+                # Claim the slot BEFORE the I/O, so the interval is measured
+                # from probe start and a slow probe cannot be followed at once
+                # by another.
+                self.next_probe_at = self.clock() + self.PROBE_INTERVAL_S
+                self.probe_count += 1
+            try:
+                ok = self.redis.incr(_RATELIMIT_PROBE_KEY,
+                                     _RATELIMIT_PROBE_EXPIRY_S) >= 1
+            except Exception as exc:
+                self._failed(exc)
+                return
+            if not ok:
+                self._failed(RuntimeError("probe write not counted"))
+                return
+            with self._state:
+                if not self.degraded:
+                    return
+                self.successes += 1
+                if self.successes < self.QUALIFY_SUCCESSES:
+                    return
+                self.degraded = False
+                self.successes = 0
+                self.recovered_at = datetime.utcnow()
+                self.recover_count += 1
+            _ratelimit_log.warning(
+                "rate-limit backend qualified after %d consecutive probes: "
+                "shared limiting resumed", self.QUALIFY_SUCCESSES)
+        finally:
+            self._probing.release()
+
+    def _use_redis(self):
+        if not self.degraded:
+            return True
+        self._maybe_probe()
+        return not self.degraded
+
+    def probe_now(self):
+        """For the self-check. Healthy: one counted write through the gate
+        (a failure degrades exactly as a request's would). Degraded: no I/O --
+        the answer is already known, and an unauthenticated caller must not be
+        able to make the only worker wait on a backend that is down."""
+        if self.degraded:
+            return False
+        try:
+            return self.redis.incr(_RATELIMIT_PROBE_KEY,
+                                   _RATELIMIT_PROBE_EXPIRY_S) >= 1
+        except Exception as exc:
+            self._failed(exc)
+            return False
+
+    def describe(self):
+        with self._state:
+            if not self.degraded:
+                return "shared backend is the authority (mirrored in process)"
+            age = (datetime.utcnow() - self.degraded_since).total_seconds()
+            return (f"in-process authority for {age:.0f}s after "
+                    f"{self.last_failure}; recovery {self.successes}/"
+                    f"{self.QUALIFY_SUCCESSES} qualifying probes")
+
+    # -- the limits Storage API --------------------------------------------
+
+    def incr(self, key, expiry, amount=1):
+        local = self.local.incr(key, expiry, amount)
+        if self._use_redis():
+            try:
+                shared = self.redis.incr(key, expiry, amount)
+                if shared < local:
+                    # Redis is missing hits this process counted (while it was
+                    # away, or it lost them): bring it up to the true count.
+                    shared = self.redis.incr(key, expiry, local - shared)
+                return max(shared, local)
+            except Exception as exc:
+                self._failed(exc)
+        return local
+
+    def get(self, key):
+        local = self.local.get(key)
+        if self._use_redis():
+            try:
+                return max(self.redis.get(key), local)
+            except Exception as exc:
+                self._failed(exc)
+        return local
+
+    def get_expiry(self, key):
+        local = self.local.get_expiry(key)
+        if self._use_redis():
+            try:
+                return max(self.redis.get_expiry(key), local)
+            except Exception as exc:
+                self._failed(exc)
+        return local
+
+    def check(self):
+        return not self.degraded
+
+    def reset(self):
+        self.local.reset()
+        if not self.degraded:
+            try:
+                self.redis.reset()
+            except Exception as exc:
+                self._failed(exc)
+        return None
+
+    def clear(self, key):
+        self.local.clear(key)
+        if not self.degraded:
+            try:
+                self.redis.clear(key)
+            except Exception as exc:
+                self._failed(exc)
+
+
+def _limiter_storage_uri(uri):
+    """Redis URIs are served through the gate; anything else as configured."""
+    return _RateLimitGate.PREFIX + uri if uri.startswith(_REDIS_SCHEMES) else uri
+
+
 _RATELIMIT_STORAGE_URI = os.environ.get("RATELIMIT_STORAGE_URI", "memory://")
 
 limiter = Limiter(
     get_remote_address,
     app=app,
     default_limits=[],
-    storage_uri=_RATELIMIT_STORAGE_URI,
+    storage_uri=_limiter_storage_uri(_RATELIMIT_STORAGE_URI),
     storage_options=_limiter_storage_options(_RATELIMIT_STORAGE_URI),
-    # NOT `swallow_errors`. See _degrade_limiter_when_shared_storage_is_down.
+    # NOT `swallow_errors`: swallowing storage errors serves the request
+    # UNLIMITED, which is the one outcome this control exists to prevent.
     #
-    # Swallowing storage errors keeps the app up and silently permits
-    # unlimited login guessing and unlimited invite-code enumeration, which is
-    # the one outcome this control exists to prevent. The availability problem
-    # it solved is real — measured, every login returned 500 with the backend
-    # refused — but it is solved below, per route, instead of globally.
-    #
-    # `in_memory_fallback_enabled` is how the availability half is solved
-    # WITHOUT swallowing. The difference is the whole point: `swallow_errors`
-    # drops the limit and lets the request through unlimited; this keeps
-    # limiting, in this worker's memory, until the shared backend answers
-    # again. Degraded, not off.
-    #
-    # It is here rather than relying on _degrade_limiter_when_shared_storage_is_down
-    # alone because that hook cannot cover the case that actually occurs.
-    # Measured on the deployed stack (Python 3.12.7, Flask-Limiter 3.5.0,
-    # limits 5.8.0) by stopping the backend under a running app:
-    #
-    #     t+0.8s   backend killed   /api/health 500  /api/login 500
-    #     t+12.8s                   /api/health 500  /api/login 500
-    #     t+16.1s                   /api/health 200  /api/login 401
-    #
-    # Fifteen seconds of 500s on every throttled route — the full
-    # _SHARED_RL_PROBE_TTL, because the hook kept serving the "healthy" it had
-    # cached moments before the backend died, so it left `limiter.enabled`
-    # True and the limit raised. Two things made that worse than the duration
-    # suggests: /api/health is what Render polls for liveness, so a backend
-    # blip becomes a failing health check on the web service; and
-    # /api/verification/self — the endpoint whose job is to report "shared
-    # storage unreachable" — was taken out by the exact condition it exists to
-    # report.
-    #
-    # The hook is still worth having: it stands the limiter down for whole
-    # stretches of an outage rather than paying a failed connection per
-    # request. This just means a storage failure is never a 500 in the first
-    # place, including inside the TTL window the hook cannot see into.
+    # For Redis the gate above never raises, so this fallback is never
+    # engaged. It stays on for any other network scheme (valkey://, sentinel,
+    # cluster), where it is better than a 500 -- but it starts counting from
+    # zero, which ratelimit.outage_policy reports as a FAIL.
     in_memory_fallback_enabled=True,
 )
 
 
-# ── Degrading safely when shared rate-limit storage goes away ──────────────
-#
-# Option B, chosen by the owner over failing open or failing closed globally.
-#
-# The two sensitive endpoints cost very different things when blocked:
-#
-#   /api/teams/lookup/<code>  blocking it stops somebody JOINING A TEAM during
-#                             an outage. Annoying; harms nobody. And it is the
-#                             route with a measured 321 probes/second
-#                             enumeration oracle behind it, which in a product
-#                             where an invite is how an adult reaches a child
-#                             is a child-safety control.
-#
-#   /api/login                blocking it locks out every user, including the
-#                             people whose streaks depend on showing up today.
-#
-# So they get different policies, and everything else — the daily mission,
-# Brain Boost, team reads, existing authenticated sessions — carries on
-# untouched. A rate limiter must not be able to take the product down.
-#
-# WHAT THIS IS NOT. The login fallback is a PER-PROCESS counter. With N
-# workers an attacker gets N times the stated allowance, and it resets when a
-# worker restarts. It is a floor, not a replacement, and nothing here reports
-# it as equivalent to shared limiting — the self-check says DEGRADED and
-# Mudman Command reads that as FAIL.
-
-_SHARED_RL_PROBE_TTL = timedelta(seconds=15)
-# D7 review (M1): with bounded I/O, ONE slow probe -- a blip over 0.5 s -- used
-# to be enough to stand the limiter down for 15 s, during which every route but
-# login and invite lookup was unlimited (measured: 78 registrations against a
-# 5/min limit after a single 1.5 s pause). So one failure only arms a quick
-# re-probe; the limiter stands down after TWO consecutive failures. Meanwhile
-# it stays enabled, and Flask-Limiter's in-memory fallback keeps every route
-# limited by its own limits.
-_SHARED_RL_REPROBE_TTL = timedelta(seconds=2)
-_SHARED_RL_FAILURES_TO_DEGRADE = 2
-_shared_rl_state = {"checked_at": None, "healthy": True, "failures": 0}
-_shared_rl_lock = threading.Lock()
+def _ratelimit_gate():
+    storage = limiter.storage
+    return storage if isinstance(storage, _RateLimitGate) else None
 
 
-def _shared_storage_configured():
-    """Is a SHARED backend configured at all?
+def _rate_limit_degraded():
+    """Is this process enforcing limits without the shared backend?
 
-    `memory://` is not an outage, it is a known configuration weakness that
-    the self-check already reports. Treating it as degraded would fail invite
-    lookup closed on every deployment that has not provisioned Redis yet —
-    including production today — so it deliberately does not.
+    memory:// is not an outage: it is a known configuration weakness that the
+    self-check already reports. Treating it as degraded would fail invite
+    lookup closed on every deployment that has not provisioned Redis.
     """
-    return not os.environ.get(
-        "RATELIMIT_STORAGE_URI", "memory://").startswith("memory:")
-
-
-def _shared_storage_healthy():
-    """Cached health of the shared backend.
-
-    Probed at most once every 15 seconds. Probing per request would put a
-    round trip in front of every call and, when the backend is down, a
-    connection timeout in front of every call.
-    """
-    if not _shared_storage_configured():
-        return True
-    now = datetime.utcnow()
-    with _shared_rl_lock:
-        last = _shared_rl_state["checked_at"]
-        pending = (_shared_rl_state["healthy"]
-                   and _shared_rl_state.get("failures", 0) > 0)
-        ttl = _SHARED_RL_REPROBE_TTL if pending else _SHARED_RL_PROBE_TTL
-        if last is not None and now - last < ttl:
-            return _shared_rl_state["healthy"]
-    try:
-        ok = bool(_ratelimit_backend_check())
-    except Exception:
-        ok = False
-    with _shared_rl_lock:
-        failures = 0 if ok else _shared_rl_state.get("failures", 0) + 1
-        healthy = ok or failures < _SHARED_RL_FAILURES_TO_DEGRADE
-        _shared_rl_state.update(checked_at=now, healthy=healthy, failures=failures)
-    return healthy
-
-
-def _cached_unhealthy_age_s():
-    """Seconds since the cached probe found the backend unhealthy, or None.
-
-    The self-check reports this instead of probing again while an outage is
-    already known: during an outage its own rate limit is stood down, so an
-    unauthenticated caller could otherwise hold the one worker for a bounded
-    probe on every call (D7 review, m1).
-    """
-    with _shared_rl_lock:
-        last = _shared_rl_state["checked_at"]
-        if (last is not None and not _shared_rl_state["healthy"]
-                and datetime.utcnow() - last < _SHARED_RL_PROBE_TTL):
-            return (datetime.utcnow() - last).total_seconds()
-    return None
-
-
-def _degrade_limiter_when_shared_storage_is_down():
-    """Turn the shared limiter off rather than let it raise.
-
-    Registered FIRST, ahead of Flask-Limiter's own before_request hook, which
-    matters: without `swallow_errors` a storage error inside that hook is a
-    500, and by the time this ran afterwards the request would already have
-    failed. Flask runs these in registration order and the limiter's was
-    registered at construction, so this one is inserted at the front.
-    """
-    if not _shared_storage_configured():
-        return
-    limiter.enabled = _shared_storage_healthy()
-
-
-app.before_request_funcs.setdefault(None, []).insert(
-    0, _degrade_limiter_when_shared_storage_is_down)
+    gate = _ratelimit_gate()
+    if gate is not None:
+        return gate.degraded
+    if isinstance(limiter.storage, MemoryStorage):
+        return False
+    return bool(getattr(limiter, "_storage_dead", False))
 
 
 class _ProcessLocalWindow:
     """A fixed-window counter in this worker's memory. Deliberately small.
 
-    Exists only for the degraded path. It is not shared, it does not survive a
-    restart, and it is never used while the shared backend is answering.
+    Exists only for the degraded login cap. It is not shared, it does not
+    survive a restart, and it is never consulted while the shared backend is
+    the authority.
     """
 
     def __init__(self):
@@ -453,22 +652,27 @@ class _ProcessLocalWindow:
 
 
 _degraded_login_window = _ProcessLocalWindow()
-# Tighter than the healthy limit, because it is multiplied by the worker count.
+# Tighter than the healthy limit (5 failed per minute), on top of it: while
+# degraded every login attempt counts, failed or not.
 _DEGRADED_LOGIN_LIMIT = 3
 _DEGRADED_LOGIN_WINDOW_SECONDS = 60
 
 
 def sensitive_when_degraded(policy):
-    """Protect a route when shared rate-limit storage is unavailable.
+    """Protect a route while rate limiting runs without the shared backend.
 
     `policy="refuse"`  — 503. For routes whose loss costs nobody anything.
     `policy="strict"`  — a much tighter per-process cap. For routes that must
                          keep working.
+
+    Takes effect on the FIRST backend failure: Flask-Limiter's before-request
+    hit runs before this wrapper, and a failing hit is what degrades the gate.
+    The route's ordinary limits keep applying underneath, from the mirror.
     """
     def decorate(view):
         @wraps(view)
         def wrapper(*args, **kwargs):
-            if _shared_storage_configured() and not _shared_storage_healthy():
+            if _rate_limit_degraded():
                 if policy == "refuse":
                     return jsonify({
                         "error": "temporarily_unavailable",
@@ -610,11 +814,6 @@ def can(user, capability, record=False):
     return allowed, reason
 
 
-# One key, re-used, with a short expiry. It is a probe, not a counter.
-_RATELIMIT_PROBE_KEY = 'streakfit:ratelimit-selfcheck'
-_RATELIMIT_PROBE_EXPIRY_S = 60
-
-
 def _ratelimit_backend_check():
     """Ask the limiter's storage whether it can actually COUNT.
 
@@ -648,6 +847,12 @@ def _ratelimit_backend_check():
     says so.
     """
     storage = limiter.storage
+    gate = _ratelimit_gate()
+    if gate is not None:
+        # Through the gate, so the self-check and the requests share one state
+        # machine: a failure here degrades exactly as a request's would, and
+        # while degraded the answer comes from the gate without any I/O.
+        return gate.probe_now()
     # Cheap negative first: down is down. NOT `storage.check()`: limits wraps
     # its PING in a bare `except:`, which also swallowed gunicorn's SystemExit
     # when it aborted a worker stuck on this very call (D7). `except Exception`
@@ -3699,10 +3904,10 @@ def verification_self():
             # Both times the green came from checking something adjacent to
             # the thing that mattered, and both times it was found by running
             # the failure path rather than the happy one.
-            cached_age = _cached_unhealthy_age_s()
-            if cached_age is not None:
-                raise ConnectionError(
-                    f"backend unavailable (cached probe, {cached_age:.0f}s old)")
+            #
+            # Through the gate (D7): while it is degraded this reports its
+            # state without touching the backend, so the check cannot be used
+            # to make the only worker wait on a backend that is down.
             if not _ratelimit_backend_check():
                 raise ConnectionError("backend reported itself unavailable")
             checks.append(_self_check(
@@ -3714,7 +3919,8 @@ def verification_self():
                 "and read the result, so a backend that answers a ping but "
                 "cannot record a count is not mistaken for a working one.",
                 "PASS", "VERIFIED",
-                f"shared backend counting ({storage_uri.split(':')[0]})",
+                f"shared backend counting ({storage_uri.split(':')[0]})"
+                + (f"; {_ratelimit_gate().describe()}" if _ratelimit_gate() else ""),
                 duration_ms=int((datetime.utcnow() - started_rl).total_seconds() * 1000),
                 critical=True))
         except Exception as exc:
@@ -3728,8 +3934,9 @@ def verification_self():
                 "cannot record a count is not mistaken for a working one.",
                 "FAIL", "VERIFIED",
                 f"DEGRADED — backend configured but could not record a count "
-                f"({type(exc).__name__}); invite lookup is refusing and login "
-                f"is on a per-process cap",
+                f"({_ratelimit_gate().describe() if _ratelimit_gate() and _ratelimit_gate().degraded else type(exc).__name__}); "
+                f"every limit is enforced from this process, invite lookup is "
+                f"refusing and login is on the strict per-process cap",
                 # FAIL, not UNKNOWN. This was UNKNOWN until the behaviour was
                 # measured: with `swallow_errors=True` an unreachable backend
                 # means requests proceed UNLIMITED, so the control is not
@@ -3743,12 +3950,13 @@ def verification_self():
                                "not record a count — it is unreachable, or "
                                "reachable and refusing writes (a full "
                                "memory-capped plan does exactly this). The "
-                               "application is still serving: "
+                               "application is still serving and every rate "
+                               "limit is still enforced, from this process's "
+                               "own counts (carried over, never reset): "
                                "invite-code lookup refuses with 503 and login "
-                               "falls back to a tighter PER-PROCESS cap, which "
-                               "is multiplied by the worker count and does not "
-                               "survive a restart. It is a floor, not shared "
-                               "rate limiting.",
+                               "is on a tighter per-process cap. Those counts "
+                               "are per worker and do not survive a restart, "
+                               "so this is not shared rate limiting.",
                 critical=True))
 
     # BOUNDED I/O (D7). Reads the options the live connection pool was built
@@ -3756,7 +3964,8 @@ def verification_self():
     # ?socket_timeout=9 silently override the constructor's. An unbounded
     # backend call can hold the only sync worker until gunicorn kills it.
     try:
-        pool = getattr(getattr(limiter.storage, "storage", None), "connection_pool", None)
+        backend = getattr(limiter.storage, "redis", limiter.storage)   # the gate's client
+        pool = getattr(getattr(backend, "storage", None), "connection_pool", None)
         if _RATELIMIT_STORAGE_URI.startswith("memory:"):
             bstate, bobs = "PASS", "no network backend (in-process storage)"
         elif pool is None:
@@ -3802,6 +4011,43 @@ def verification_self():
             "Read the limiter's live connection-pool timeouts.",
             "UNKNOWN", "UNKNOWN", f"{type(exc).__name__}",
             failure_reason="The limiter's connection settings could not be read."))
+
+    # OUTAGE POLICY (D7). The owner's rule is that a backend failure may move
+    # rate limiting onto this process, never switch it off. Two ways that
+    # could quietly stop being true: the limiter disabled (Option B did exactly
+    # that during every outage), or a network backend not served through the
+    # gate, whose failure Flask-Limiter answers with a fallback that starts
+    # counting from zero -- a fresh allowance per failure.
+    gate = _ratelimit_gate()
+    if not limiter.enabled:
+        pstate, pobs = "FAIL", "rate limiting is switched off in this process"
+    elif gate is not None:
+        pstate = "PASS"
+        pobs = (f"limiter enabled; {gate.describe()}; on failure: every limit "
+                f"from the in-process mirror, lookup 503, login strict; "
+                f"recovery after {gate.QUALIFY_SUCCESSES} consecutive probes "
+                f"{gate.PROBE_INTERVAL_S:g}s apart")
+    elif isinstance(limiter.storage, MemoryStorage):
+        pstate, pobs = "PASS", "limiter enabled; in-process storage (no backend to lose)"
+    else:
+        pstate = "FAIL"
+        pobs = (f"network backend ({_RATELIMIT_STORAGE_URI.split(':')[0]}) not "
+                f"served through the gate: a failure would restart every count "
+                f"from zero")
+    checks.append(_self_check(
+        "ratelimit.outage_policy", "A rate-limit backend failure never turns limiting off",
+        "If the shared rate-limit backend fails, every limit must keep being "
+        "enforced from this process's own counts, invite lookup must refuse "
+        "and login must tighten -- never an unlimited window.",
+        "Read whether the limiter is enabled and whether its storage is the "
+        "gate that keeps one in-process authority across failures.",
+        pstate, "VERIFIED" if pstate == "PASS" else "OBSERVED", pobs,
+        failure_reason=None if pstate == "PASS" else
+        "During a backend failure some or all rate limits would not hold.",
+        limitations="Reports that the policy is in force, not that the backend "
+                    "is healthy (ratelimit.shared_storage does that). The "
+                    "in-process counts are per worker: one worker is required.",
+        critical=True))
 
     now = datetime.utcnow().isoformat() + "Z"
     return jsonify({

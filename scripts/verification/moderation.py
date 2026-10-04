@@ -262,6 +262,18 @@ def run(api, results, scenario):
                   bounded.get("status") == "PASS",
                   f"status={bounded.get('status')!r} observed={bounded.get('observed')!r}")
 
+    # D7 round 2: a backend failure may move rate limiting onto the process,
+    # never switch it off (6541cae switched the whole limiter off). Asserts
+    # the VERDICT, like bounded I/O: it is a property of the build, true on
+    # any healthy service whether or not the backend is up right now.
+    policy = by_id.get("ratelimit.outage_policy") or {}
+    results.check("ratelimit.outage_policy_present", bool(policy),
+                  f"ratelimit.outage_policy is not among {sorted(by_id)}")
+    results.check("ratelimit.outage_never_disables_limiting",
+                  policy.get("status") == "PASS"
+                  and "limiter enabled" in (policy.get("observed") or ""),
+                  f"status={policy.get('status')!r} observed={policy.get('observed')!r}")
+
     # The two promises must be answered SEPARATELY. One check covering both is
     # how a moderation sweep ends up vouching for conversation retention.
     coach = by_id.get("retention.recent") or {}

@@ -184,11 +184,6 @@ def test_a_configured_backend_is_exercised_not_believed(client, monkeypatch):
 
     monkeypatch.setenv("STREAKFIT_ENV", "production")
     monkeypatch.setenv("RATELIMIT_STORAGE_URI", "redis://localhost:6379")
-    # A clean probe state: since D7 the self-check reports a CACHED outage
-    # instead of re-probing during one, so a verdict left by another test
-    # must not leak in.
-    monkeypatch.setattr(appmod, "_shared_rl_state",
-                        {"checked_at": None, "healthy": True, "failures": 0})
 
     def unreachable():
         raise ConnectionError("no redis here")
@@ -228,10 +223,11 @@ def test_an_unreachable_backend_is_reported_as_degraded_not_merely_unknown(clien
     """This assertion used to read "NO rate limiting is being applied", which
     was true when errors were swallowed globally and is not true any more.
 
-    Under Option B an unreachable backend means invite lookup refuses and
-    login falls back to a tighter per-process cap, so the report must describe
-    a DEGRADED control rather than an absent one — while still refusing to
-    call the per-process floor equivalent to shared limiting."""
+    Since D7 round 2 an unreachable backend means every limit is enforced
+    from process memory, invite lookup refuses and login is on a tighter
+    per-process cap, so the report must describe a DEGRADED control rather
+    than an absent one — while still refusing to call per-process counts
+    equivalent to shared limiting."""
     import app as appmod
     monkeypatch.setenv("STREAKFIT_ENV", "production")
     monkeypatch.setenv("RATELIMIT_STORAGE_URI", "redis://localhost:6379")
@@ -243,5 +239,5 @@ def test_an_unreachable_backend_is_reported_as_degraded_not_merely_unknown(clien
     c = _check(client, "ratelimit.shared_storage")
     assert c["status"] == "FAIL"
     assert "DEGRADED" in c["observed"]
-    assert "PER-PROCESS" in c["failureReason"]
-    assert "floor, not shared" in c["failureReason"]
+    assert "per worker" in c["failureReason"]
+    assert "not shared rate limiting" in c["failureReason"]

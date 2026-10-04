@@ -28,10 +28,15 @@ Why it mattered more than fifteen seconds suggests:
 And the free Render Key Value tier loses everything on restart, so this is not
 a rare event on that plan; it is the documented behaviour.
 
-THE FIX is `in_memory_fallback_enabled=True` on the Limiter, NOT
+THE FIX was `in_memory_fallback_enabled=True` on the Limiter, NOT
 `swallow_errors`. The distinction is the entire point and these tests hold the
 line on it: swallow_errors drops the limit and serves the request unlimited;
 the fallback keeps limiting in this worker's memory. Degraded, not off.
+
+Since D7 round 2 a Redis backend is served through `_RateLimitGate`, which
+never raises and keeps its own in-process mirror of every count, so
+Flask-Limiter's fallback (which restarted every count from zero) is no longer
+what absorbs the outage for Redis. It stays on for other network schemes.
 
 These tests point the app at a closed port rather than stopping a container,
 so they need no service and run anywhere. A refused connection is the same
@@ -62,43 +67,13 @@ with A.app.app_context():
     A.db.create_all()
 
 
-def prime_stale_healthy():
-    # Reproduce the actual failure condition: a cached "healthy" verdict that
-    # is no longer true.
-    #
-    # This is the whole defect. Pointing the app at a dead backend from the
-    # start does NOT reproduce it -- the first request probes, finds the
-    # backend down, and _degrade_limiter_when_shared_storage_is_down stands
-    # the limiter down before anything can raise. The 500s happened to an app
-    # whose backend had been answering a moment ago, where the cache still
-    # says so and the storage no longer agrees. So the cache is set the way a
-    # just-succeeded probe would leave it, against a backend that is in fact
-    # refused.
-    with A._shared_rl_lock:
-        A._shared_rl_state.update(checked_at=datetime.utcnow(), healthy=True)
-    A.limiter.enabled = True
-
-
-import os
-PRIME = os.environ.get('STREAKFIT_PROBE_PRIME') == '1'
-SETTLED = os.environ.get('STREAKFIT_PROBE_SETTLED') == '1'
-if SETTLED:
-    # "Later in the same outage" (D7): one probe has already failed and its
-    # quick re-probe is due, so the next probe is the SECOND consecutive
-    # failure -- the point at which the limiter stands down and the per-route
-    # degraded policies take over. One failure alone no longer does that.
-    import datetime as _dt
-    with A._shared_rl_lock:
-        A._shared_rl_state.update(
-            checked_at=datetime.utcnow() - _dt.timedelta(seconds=3),
-            healthy=True, failures=1)
-
-
 def prime():
-    # Only the stale-cache phase primes. The settled phase lets the degrade
-    # hook do its job, which is what produces the tighter per-route cap.
-    if PRIME:
-        prime_stale_healthy()
+    # Nothing to prime any more (D7 round 2). The defect lived in a cached
+    # "healthy" verdict that outlived the backend; the gate has no cache --
+    # it starts HEALTHY, which is exactly "the backend answered a moment
+    # ago", and the first request against the dead backend is the one that
+    # fails over, in-request.
+    pass
 
 
 out = {}
@@ -143,8 +118,6 @@ def _run(storage_uri, tmp_path, prime):
         RENDER="true",                       # look like production
         RATELIMIT_STORAGE_URI=storage_uri,
         DATABASE_URL=f"sqlite:///{tmp_path}/outage.db",
-        STREAKFIT_PROBE_PRIME="1" if prime else "0",
-        STREAKFIT_PROBE_SETTLED="0" if prime else "1",
     )
     env.pop("STREAKFIT_ENV", None)
     proc = subprocess.run(
@@ -158,19 +131,18 @@ def _run(storage_uri, tmp_path, prime):
 
 @pytest.fixture(scope="module")
 def dead(tmp_path_factory):
-    """The first seconds of an outage: the cached probe still says healthy.
+    """The first seconds of an outage: the app last saw a healthy backend.
 
-    This is the window the 500s lived in, and the one
-    _degrade_limiter_when_shared_storage_is_down cannot see into.
+    This is the window the 500s lived in (6541cae: fifteen seconds of them).
     """
     return _run(DEAD_BACKEND, tmp_path_factory.mktemp("dead"), prime=True)
 
 
 @pytest.fixture(scope="module")
 def settled(tmp_path_factory):
-    """Later in the same outage: the probe has expired and re-run, so the
-    degrade hook has stood the limiter down and the per-route degraded
-    policies are in charge."""
+    """The same outage, run separately: since D7 round 2 there is no later
+    phase with different rules -- the degraded policy holds from the first
+    failure (test_ratelimit_outage_policy.py measures that black-box)."""
     return _run(DEAD_BACKEND, tmp_path_factory.mktemp("settled"), prime=False)
 
 

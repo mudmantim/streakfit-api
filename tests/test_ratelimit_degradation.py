@@ -1,201 +1,243 @@
-"""What happens when shared rate-limit storage goes away (Option B).
+"""What happens when shared rate-limit storage goes away (D7 round 2).
 
-The owner chose this over the two simpler policies, and the reason is that
-the two sensitive endpoints cost very different things when blocked:
+Owner policy since 2026-10-04, replacing "Option B" (which switched the whole
+limiter off while the backend was unhealthy):
 
-  /api/teams/lookup/<code>  blocking it stops somebody JOINING A TEAM for a
-                            few minutes. It is also the route with a measured
-                            321 probes/second enumeration oracle, and in a
-                            product where an invite is how an adult reaches a
-                            child, that is a child-safety control.
+  * every route keeps its own limits, from this process's memory;
+  * /api/teams/lookup/<code> refuses on the FIRST failure -- blocking it stops
+    somebody JOINING A TEAM for a few minutes, and it is the route with a
+    measured 321 probes/second enumeration oracle, in a product where an
+    invite is how an adult reaches a child;
+  * /api/login tightens on the FIRST failure -- blocking it would lock out
+    every user, including the people whose streaks depend on today.
 
-  /api/login                blocking it locks out every user, including the
-                            people whose streaks depend on showing up today.
+These run in-process against the real routes, with the live limiter's storage
+swapped for a real `_RateLimitGate` whose backend is a stub that can be made
+to fail. The black-box version, against a fake Redis on a socket and run
+unchanged against older commits, is test_ratelimit_outage_policy.py.
 
-So: invite lookup refuses, login tightens, everything else carries on.
-
-WHAT THIS IS NOT, and the tests say so out loud: the login fallback is a
-PER-PROCESS counter. With N workers an attacker gets N times the allowance
-and it resets when a worker restarts. It is a floor, not shared limiting, and
-test_the_fallback_is_not_shared_between_workers exists to stop anybody
-reading it as equivalent.
+WHAT THIS IS NOT, and the tests say so out loud: the degraded counts are PER
+PROCESS. With N workers an attacker would get N times the allowance, and they
+reset when a worker restarts. One worker is a production requirement for that
+reason, and test_the_fallback_is_not_shared_between_workers exists to stop
+anybody reading it as equivalent to shared limiting.
 """
 import pytest
+import redis
+from limits.strategies import FixedWindowRateLimiter
 
+import app as appmod
 from conftest import auth_headers, register_and_login
+from test_ratelimit_gate import Clock, StubRedis
 
 
-@pytest.fixture(autouse=True)
-def _limiter_on():
-    import app as appmod
-    appmod.limiter.reset()
-    appmod.limiter.enabled = True
-    appmod._shared_rl_state.update(checked_at=None, healthy=True)
+@pytest.fixture
+def gate(monkeypatch):
+    """The live limiter, backed by a gate over a stub backend."""
+    g = appmod._RateLimitGate(
+        "streakfit+redis://127.0.0.1:1",
+        **appmod._limiter_storage_options("redis://127.0.0.1:1"))
+    g.redis = StubRedis()
+    g.clock = Clock()
+    monkeypatch.setattr(appmod.limiter, "_storage", g)
+    monkeypatch.setattr(appmod.limiter, "_limiter", FixedWindowRateLimiter(g))
+    monkeypatch.setattr(appmod.limiter, "enabled", True)
     appmod._degraded_login_window._hits.clear()
-    yield
-    appmod.limiter.enabled = False
-    appmod.limiter.reset()
-    appmod._shared_rl_state.update(checked_at=None, healthy=True)
+    yield g
+    appmod._degraded_login_window._hits.clear()
 
 
-def _degrade(monkeypatch, healthy=False):
-    """Configure a shared backend and control whether it answers."""
-    import app as appmod
-    monkeypatch.setenv("RATELIMIT_STORAGE_URI", "redis://localhost:6379")
-    monkeypatch.setattr(appmod, "_ratelimit_backend_check", lambda: healthy)
-    appmod._shared_rl_state.update(checked_at=None, healthy=True)
+def _fail(g):
+    """The backend goes away. Nothing is degraded until a request finds out."""
+    g.redis.fail = redis.ConnectionError("refused")
+
+
+def _team(client):
+    token = register_and_login(client, "deg_joiner", "TestPass123!")
+    other = register_and_login(client, "deg_owner", "TestPass123!")
+    team = client.post("/api/teams", json={"name": "T"},
+                       headers=auth_headers(other)).get_json()["team"]
+    return token, team["invite_code"]
 
 
 # ── Backend failure ─────────────────────────────────────────────────────────
 
-def test_ordinary_routes_keep_working_when_the_backend_is_down(client, monkeypatch):
+def test_ordinary_routes_keep_working_when_the_backend_is_down(client, gate):
     """A rate limiter must not be able to take the product down.
 
-    Measured before this change: with the backend refused, every limited route
-    returned 500. The daily mission is the product.
+    Measured before the first fix: with the backend refused, every limited
+    route returned 500. The daily mission is the product.
     """
-    _degrade(monkeypatch)
     token = register_and_login(client, "degraded_mover", "TestPass123!")
+    _fail(gate)
     r = client.get("/api/daily", headers=auth_headers(token))
     assert r.status_code == 200, r.get_json()
     assert len(r.get_json()["exercises"]) == 5
 
 
-def test_an_existing_session_still_works_when_the_backend_is_down(client, monkeypatch):
+def test_an_existing_session_still_works_when_the_backend_is_down(client, gate):
     token = register_and_login(client, "degraded_session", "TestPass123!")
-    _degrade(monkeypatch)
+    _fail(gate)
     assert client.get("/api/me", headers=auth_headers(token)).status_code == 200
 
 
-def test_invite_lookup_refuses_while_the_backend_is_down(client, monkeypatch):
-    """Fail closed. Nobody is harmed by not joining a team for five minutes."""
-    token = register_and_login(client, "degraded_joiner", "TestPass123!")
-    other = register_and_login(client, "degraded_owner", "TestPass123!")
-    team = client.post("/api/teams", json={"name": "T"},
-                       headers=auth_headers(other)).get_json()["team"]
-
-    _degrade(monkeypatch)
-    r = client.get(f"/api/teams/lookup/{team['invite_code']}",
-                   headers=auth_headers(token))
+def test_invite_lookup_refuses_on_the_first_failure(client, gate):
+    """Fail closed, and not one lookup later. Nobody is harmed by not joining
+    a team for a few minutes."""
+    token, code = _team(client)
+    assert client.get(f"/api/teams/lookup/{code}",
+                      headers=auth_headers(token)).status_code == 200
+    _fail(gate)
+    r = client.get(f"/api/teams/lookup/{code}", headers=auth_headers(token))
     assert r.status_code == 503, r.get_json()
     # And it says something a person can act on, not a status code.
     assert "try again" in r.get_json()["message"].lower()
 
 
-def test_login_keeps_working_but_tightens_while_the_backend_is_down(client, monkeypatch):
-    """The whole point of Option B over failing closed globally."""
+def test_login_keeps_working_but_tightens_on_the_first_failure(client, gate):
     client.post("/api/register",
                 json={"username": "degraded_login", "password": "TestPass123!"})
-    _degrade(monkeypatch)
-
+    _fail(gate)
     ok = client.post("/api/login",
                      json={"username": "degraded_login", "password": "TestPass123!"})
     assert ok.status_code == 200, "a real user was locked out during an outage"
-
     codes = [client.post("/api/login",
                          json={"username": "degraded_login", "password": "wrong"}
                          ).status_code for _ in range(6)]
-    assert 429 in codes, f"guessing was unlimited during the outage: {codes}"
-    assert codes.index(429) <= 3, codes
+    # The successful login above used one of the three degraded attempts.
+    assert codes.count(401) == appmod._DEGRADED_LOGIN_LIMIT - 1, codes
+    assert set(codes) == {401, 429}, codes
 
 
-def test_guessing_is_never_unrestricted_merely_because_redis_is_down(client, monkeypatch):
-    """The owner's third criterion, stated as its own test."""
-    _degrade(monkeypatch)
+def test_guessing_is_never_unrestricted_merely_because_redis_is_down(client, gate):
+    """The owner's security invariant, stated as its own test."""
+    _fail(gate)
     codes = [client.post("/api/login",
                          json={"username": "ghost", "password": "wrong"}
                          ).status_code for _ in range(12)]
-    assert codes.count(429) >= 8, codes
+    assert codes.count(401) == appmod._DEGRADED_LOGIN_LIMIT, codes
+
+
+def test_every_other_limit_still_holds_from_process_memory(client, gate):
+    """Option B served these UNLIMITED (12 of 12 registrations against 5 per
+    minute, measured). Now each keeps its own limit."""
+    _fail(gate)
+    codes = [client.post("/api/register",
+                         json={"username": f"deg_reg_{i}", "password": "TestPass123!"}
+                         ).status_code for i in range(8)]
+    assert codes.count(201) == 5 and codes[5:] == [429] * 3, codes
+    assert gate.degraded and appmod.limiter.enabled is True
+
+
+def test_the_allowance_carries_over_into_the_outage(client, gate):
+    """Counts made while the backend was healthy are still counted after it
+    fails. Flask-Limiter's own fallback restarted them from zero."""
+    codes = [client.post("/api/register",
+                         json={"username": f"carry_{i}", "password": "TestPass123!"}
+                         ).status_code for i in range(3)]
+    _fail(gate)
+    codes += [client.post("/api/register",
+                          json={"username": f"carry_b{i}", "password": "TestPass123!"}
+                          ).status_code for i in range(5)]
+    assert codes.count(201) == 5, codes
+
+
+def test_flask_limiters_zero_based_fallback_is_never_engaged(client, gate):
+    _fail(gate)
+    for i in range(3):
+        client.post("/api/register",
+                    json={"username": f"nofb_{i}", "password": "TestPass123!"})
+    assert appmod.limiter._storage_dead is False
 
 
 # ── Recovery ────────────────────────────────────────────────────────────────
 
-def test_the_shared_limiter_resumes_when_the_backend_comes_back(client, monkeypatch):
-    import app as appmod
-    _degrade(monkeypatch)
-    token = register_and_login(client, "recovery_user", "TestPass123!")
-    other = register_and_login(client, "recovery_owner", "TestPass123!")
-    team = client.post("/api/teams", json={"name": "R"},
-                       headers=auth_headers(other)).get_json()["team"]
-    assert client.get(f"/api/teams/lookup/{team['invite_code']}",
+def test_the_shared_limiter_resumes_only_after_qualifying(client, gate):
+    token, code = _team(client)
+    _fail(gate)
+    assert client.get(f"/api/teams/lookup/{code}",
                       headers=auth_headers(token)).status_code == 503
 
-    # Backend returns. The cached probe must expire rather than latch.
-    monkeypatch.setattr(appmod, "_ratelimit_backend_check", lambda: True)
-    appmod._shared_rl_state.update(checked_at=None, healthy=False)
+    gate.redis.fail = None                     # the backend is back
+    statuses = []
+    for _ in range(gate.QUALIFY_SUCCESSES):
+        gate.clock.t += gate.PROBE_INTERVAL_S
+        statuses.append(client.get(f"/api/teams/lookup/{code}",
+                                   headers=auth_headers(token)).status_code)
+    # Still refusing until the last qualifying probe; that request is served.
+    assert statuses == [503] * (gate.QUALIFY_SUCCESSES - 1) + [200], statuses
+    assert not gate.degraded
 
-    assert client.get(f"/api/teams/lookup/{team['invite_code']}",
-                      headers=auth_headers(token)).status_code == 200
 
-
-def test_health_is_not_probed_on_every_request(client, monkeypatch):
-    """A probe per request puts a round trip — and, when it is down, a
-    connection timeout — in front of every call."""
-    import app as appmod
-    calls = {"n": 0}
-
-    def counted():
-        calls["n"] += 1
-        return False
-
-    monkeypatch.setenv("RATELIMIT_STORAGE_URI", "redis://localhost:6379")
-    monkeypatch.setattr(appmod, "_ratelimit_backend_check", counted)
-    appmod._shared_rl_state.update(checked_at=None, healthy=True)
-
+def test_while_degraded_requests_reach_the_backend_only_as_the_paced_probe(client, gate):
+    """Option B probed the backend from a hook in front of EVERY request.
+    Now /api/health (itself throttled) and everything else are answered from
+    memory; the only backend call is one probe per interval."""
+    _fail(gate)
+    client.post("/api/register", json={"username": "h1", "password": "TestPass123!"})
+    calls = len(gate.redis.calls)
+    gate.clock.t += 10 * gate.PROBE_INTERVAL_S
     for _ in range(8):
-        client.get("/api/health")
-    assert calls["n"] == 1, f"probed {calls['n']} times for 8 requests"
+        assert client.get("/api/health").status_code == 200
+        client.get("/api/brain-boost/today")
+    new = gate.redis.calls[calls:]
+    assert new == [("incr", appmod._RATELIMIT_PROBE_KEY, 1)], new
 
 
 # ── The honesty tests ───────────────────────────────────────────────────────
 
-def test_the_fallback_is_not_shared_between_workers(client, monkeypatch):
+def test_the_fallback_is_not_shared_between_workers():
     """Says the quiet part out loud, so nobody reads the floor as the ceiling.
 
     Each worker holds its own counter, so N workers give an attacker N times
     the allowance. This asserts that weakness exists rather than pretending
-    it does not — if the fallback ever does become shared, this test should
+    it does not -- if the fallback ever does become shared, this test should
     fail and be rewritten.
     """
-    import app as appmod
     worker_a = appmod._ProcessLocalWindow()
     worker_b = appmod._ProcessLocalWindow()
     key = "login:1.2.3.4"
     for _ in range(appmod._DEGRADED_LOGIN_LIMIT):
         assert worker_a.over(key, appmod._DEGRADED_LOGIN_LIMIT, 60) is False
     assert worker_a.over(key, appmod._DEGRADED_LOGIN_LIMIT, 60) is True
-    # A second worker knows nothing about the first.
     assert worker_b.over(key, appmod._DEGRADED_LOGIN_LIMIT, 60) is False
+    mirror_a, mirror_b = appmod._LocalWindows(), appmod._LocalWindows()
+    mirror_a.incr("register:1.2.3.4", 60)
+    assert mirror_b.get("register:1.2.3.4") == 0
 
 
 def test_memory_storage_is_not_treated_as_an_outage(client, monkeypatch):
-    """Production runs memory:// today.
-
-    Treating "no shared backend configured" as degraded would fail invite
-    lookup closed on every deployment that has not provisioned Redis — which
-    is currently all of them.
-    """
-    monkeypatch.delenv("RATELIMIT_STORAGE_URI", raising=False)
-    token = register_and_login(client, "memory_joiner", "TestPass123!")
-    other = register_and_login(client, "memory_owner", "TestPass123!")
-    team = client.post("/api/teams", json={"name": "M"},
-                       headers=auth_headers(other)).get_json()["team"]
-    assert client.get(f"/api/teams/lookup/{team['invite_code']}",
+    """Treating "no shared backend configured" as degraded would fail invite
+    lookup closed on every deployment that has not provisioned Redis."""
+    monkeypatch.setattr(appmod.limiter, "enabled", True)
+    appmod.limiter.reset()
+    assert appmod._rate_limit_degraded() is False
+    token, code = _team(client)
+    assert client.get(f"/api/teams/lookup/{code}",
                       headers=auth_headers(token)).status_code == 200
+    appmod.limiter.reset()
 
 
-def test_the_self_check_calls_the_degradation_what_it_is(client, monkeypatch):
-    import app as appmod
+def test_the_self_check_calls_the_degradation_what_it_is(client, gate, monkeypatch):
     monkeypatch.setenv("STREAKFIT_ENV", "production")
     monkeypatch.setenv("RATELIMIT_STORAGE_URI", "redis://localhost:6379")
+    _fail(gate)
+    client.post("/api/register", json={"username": "sc1", "password": "TestPass123!"})
+    calls = len(gate.redis.calls)
 
-    def down():
-        raise ConnectionError("refused")
-    monkeypatch.setattr(appmod, "_ratelimit_backend_check", down)
-
-    checks = client.get("/api/verification/self").get_json()["checks"]
-    c = next(x for x in checks if x["id"] == "ratelimit.shared_storage")
+    checks = {c["id"]: c for c in client.get("/api/verification/self").get_json()["checks"]}
+    c = checks["ratelimit.shared_storage"]
     assert c["status"] == "FAIL"
-    assert "DEGRADED" in c["observed"]
-    assert "PER-PROCESS" in c["failureReason"]
-    assert "floor, not shared" in c["failureReason"]
+    assert "DEGRADED" in c["observed"] and "in-process authority" in c["observed"]
+    assert "every limit is enforced from this process" in c["observed"]
+    assert "not shared rate limiting" in c["failureReason"]
+    assert len(gate.redis.calls) == calls          # reported, not probed
+    assert checks["ratelimit.outage_policy"]["status"] == "PASS"
+
+
+def test_the_self_check_passes_a_healthy_gate_by_writing_through_it(client, gate, monkeypatch):
+    monkeypatch.setenv("RATELIMIT_STORAGE_URI", "redis://localhost:6379")
+    checks = {c["id"]: c for c in client.get("/api/verification/self").get_json()["checks"]}
+    assert checks["ratelimit.shared_storage"]["status"] == "PASS"
+    assert "shared backend is the authority" in checks["ratelimit.shared_storage"]["observed"]
+    assert ("incr", appmod._RATELIMIT_PROBE_KEY, 1) in gate.redis.calls
