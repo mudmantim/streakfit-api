@@ -106,6 +106,19 @@ def test_healthy_answer_is_the_larger_of_the_two_counts(gate):
     assert gate.get("k") == 8
 
 
+def test_the_answer_never_drops_below_the_mirror_even_if_the_backend_resets_mid_hit(gate):
+    """The catch-up write can land in a key that expired a moment earlier and
+    so count less than the mirror; the mirror's count still wins."""
+    class Forgetful(StubRedis):
+        def incr(self, key, expiry, amount=1):
+            self._io(("incr", key, amount))
+            return amount                 # every write lands in a fresh window
+    gate.redis = Forgetful()
+    gate.incr("k", 60)
+    gate.incr("k", 60)
+    assert gate.incr("k", 60) == 3
+
+
 def test_a_backend_that_lost_counts_is_brought_back_up_to_the_true_count(gate):
     for _ in range(4):
         gate.incr("k", 60)
@@ -254,6 +267,11 @@ def test_probes_are_single_flight(gate):
     assert gate.incr("j", 60) == 1
     assert time.monotonic() - t < 0.5
     assert len(_probes(gate)) == 1
+    # Even once the NEXT interval is due, a probe still in flight blocks
+    # another: a probe is bounded by the socket timeouts, but DNS is not.
+    gate.clock.t += 2 * INTERVAL
+    assert gate.incr("j", 60) == 2
+    assert len(_probes(gate)) == 1
     blocker.set()
     inside.join(5)
     assert gate.successes == 1
@@ -328,6 +346,8 @@ def test_local_windows_sweep_expired_keys():
     for i in range(_LocalWindows.SWEEP_EVERY):
         w.incr(f"new{i % 10}", 60)
     assert len(w) == 10
+    # The sweep ran part-way through; live windows kept every count.
+    assert w.get("new0") == len(range(0, _LocalWindows.SWEEP_EVERY, 10))
 
 
 def test_local_expiry_is_reported_on_the_wall_clock():
