@@ -283,9 +283,9 @@ def run(api, results, scenario):
     worker = by_id.get("moderation.delivery_worker") or {}
     delivered = by_id.get("moderation.notices_delivered") or {}
     generation = by_id.get("moderation.notice_generation") or {}
+    # (notice_generation's legibility is checked above, with failure_says_why.)
     for name, c in (("moderation.delivery_configured", configured),
-                    ("moderation.delivery_worker", worker),
-                    ("moderation.notice_generation", generation)):
+                    ("moderation.delivery_worker", worker)):
         results.check(f"moderation.check_state_is_legible::{name}",
                       c.get("status") in ("PASS", "FAIL", "UNKNOWN"),
                       f"status={c.get('status')!r}")
