@@ -187,11 +187,13 @@ answers a SYN, was a different and far worse failure. redis-py's defaults are
 | refused / DNS failure / OOM | fast, reported FAIL | unchanged: fast, reported FAIL |
 
 **What changed:**
-- **Bounded options.** `storage_options` passes `socket_connect_timeout=0.5`, `socket_timeout=0.5` and `retry_on_timeout=False` for `redis://`, `rediss://` and `redis+unix://`. 0.5 s is two orders of magnitude above in-region latency and survives one lost segment. The read timeout also bounds the TLS handshake.
+- **Bounded options.** `storage_options` passes `socket_connect_timeout=0.5`, `socket_timeout=0.5`, `retry_on_timeout=False` and an explicit zero-retry policy for `redis://`, `rediss://` and `redis+unix://`. 0.5 s is two orders of magnitude above in-region latency and survives one lost segment. **What is bounded is each socket wait** (connect and every read): a backend that STOPS answering costs a request a few waits, not 30 s. A peer that keeps trickling bytes is not bounded.
+- **A blip does not open the limiter.** One failed probe only arms a 2 s re-probe; the limiter stands down only after **two consecutive** failures. Until then it stays enabled and Flask-Limiter's in-memory fallback limits every route by its own limits. Without this rule, bounded I/O turned a single 1.5 s pause into 15 s of unlimited routes (measured: 78 registrations against 5/min). With it, the same pause behaves exactly as before (5, then 429).
+- **The self-check reports a known outage from the cached probe** instead of probing again, so during an outage, when its own limit is stood down, it cannot be used to hold the one worker.
 - **Own probe.** The app's probe pings itself under `except Exception`. The `limits` check wrapped PING in a bare `except:`, which swallowed gunicorn's SystemExit when it aborted a worker stuck on that call.
-- **New check.** `ratelimit.bounded_io` reads the **effective** timeouts from the live connection pool. A URI query such as `?socket_timeout=9` silently overrides the constructor's options, and the check FAILs if that happens.
+- **New check.** `ratelimit.bounded_io` reads the **effective** timeouts and retry count from the live connection pool. A URI query such as `?socket_timeout=9` or `?retry_on_timeout=true` silently overrides the constructor's options, and the check FAILs if that happens. It passes as not-applicable only for `memory://`; a network backend whose settings cannot be read FAILs.
 
-**Not changed, so be clear about it:** the outage *policy* above still applies. Once the probe sees the backend unhealthy (within ~15 s), the limiter stands down:
+**Not changed, so be clear about it:** the outage *policy* above still applies. Once the probe has seen the backend unhealthy twice in a row (~2 s apart, at most ~17 s into an outage), the limiter stands down:
 - login keeps its strict per-process cap;
 - invite lookup refuses with 503;
 - every other limited route is unlimited until the backend returns.
@@ -199,6 +201,7 @@ answers a SYN, was a different and far worse failure. redis-py's defaults are
 Bounded I/O makes a hung backend reach that state in under a second, where before it froze the service. Whether "everything else unlimited" should become "everything else limited per process" (Flask-Limiter's in-memory fallback, without the global stand-down) is a separate owner decision. A reviewed prerequisite is that login's after-request deduction currently returns 500 in write-refused modes (OOM, READONLY) whenever the limiter is not stood down.
 
 **Residual risks (bounded I/O does not cover them):**
+- A peer that trickles bytes slowly is not bounded: each read succeeds within the timeout, so a command can take arbitrarily long. This needs a misbehaving peer, not an outage.
 - DNS resolution is not bounded by either timeout.
 - A hostname with k addresses multiplies the connect bound by k.
 - A backend slower than ~0.4 s per command stays "healthy" and slows the one worker. Login can pay several calls, ~2.4 s.
