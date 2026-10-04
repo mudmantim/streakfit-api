@@ -251,6 +251,17 @@ def run(api, results, scenario):
         results.check(f"moderation.check_present::{name}", name in by_id,
                       f"{name} is not among {sorted(by_id)}")
 
+    # D7: a hung or unreachable rate-limit backend must not be able to freeze
+    # the one worker. Unlike the shape checks around it this one asserts the
+    # VERDICT: bounded I/O is a property of the build and its configuration,
+    # true on any healthy service, and a FAIL means production can freeze.
+    bounded = by_id.get("ratelimit.bounded_io") or {}
+    results.check("ratelimit.bounded_io_present", bool(bounded),
+                  f"ratelimit.bounded_io is not among {sorted(by_id)}")
+    results.check("ratelimit.backend_calls_are_bounded",
+                  bounded.get("status") == "PASS",
+                  f"status={bounded.get('status')!r} observed={bounded.get('observed')!r}")
+
     # The two promises must be answered SEPARATELY. One check covering both is
     # how a moderation sweep ends up vouching for conversation retention.
     coach = by_id.get("retention.recent") or {}

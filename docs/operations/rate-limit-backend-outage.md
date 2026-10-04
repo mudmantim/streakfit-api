@@ -170,3 +170,37 @@ See [deployment-sequence.md](deployment-sequence.md).
   component whose behaviour this document describes) is **not pinned** in
   `requirements.txt`. Tracked under the transitive-lockfile item in
   [reproducibility.md](reproducibility.md); this is one more reason to close it.
+
+## A backend that hangs instead of refusing (D7, 2026-10-04)
+
+Everything above concerns a backend that **refuses** connections, which fails
+fast. A backend that **accepts and never answers**, or a host that never
+answers a SYN, was a different and far worse failure. redis-py's defaults are
+`socket_timeout=None` and `socket_connect_timeout=None`, and production runs
+**one sync worker**, so a stuck call held the whole application:
+
+| real Valkey, gunicorn `--preload`, 1 worker | 6541cae (before) | with bounded I/O |
+|---|---|---|
+| hung (`podman pause`) | limited requests 30–31 s, then worker killed; `/health` queued 45–90 s; 10 worker kills in 2 min | worst request 1.1 s (login); `/health` ≤ 0.51 s; 0 kills |
+| unreachable host (SYN unanswered) | every request including `/health` ≥ 30 s, abandoned connections queue → total outage; 23 kills | worst 0.71 s (self-check); `/health` ≤ 0.51 s; 0 kills |
+| slow (`CLIENT PAUSE 2500`) | +2–2.5 s per Redis call, reported PASS | treated as unavailable: ≤ 1.2 s, reported FAIL |
+| refused / DNS failure / OOM | fast, reported FAIL | unchanged: fast, reported FAIL |
+
+**What changed:**
+- **Bounded options.** `storage_options` passes `socket_connect_timeout=0.5`, `socket_timeout=0.5` and `retry_on_timeout=False` for `redis://`, `rediss://` and `redis+unix://`. 0.5 s is two orders of magnitude above in-region latency and survives one lost segment. The read timeout also bounds the TLS handshake.
+- **Own probe.** The app's probe pings itself under `except Exception`. The `limits` check wrapped PING in a bare `except:`, which swallowed gunicorn's SystemExit when it aborted a worker stuck on that call.
+- **New check.** `ratelimit.bounded_io` reads the **effective** timeouts from the live connection pool. A URI query such as `?socket_timeout=9` silently overrides the constructor's options, and the check FAILs if that happens.
+
+**Not changed, so be clear about it:** the outage *policy* above still applies. Once the probe sees the backend unhealthy (within ~15 s), the limiter stands down:
+- login keeps its strict per-process cap;
+- invite lookup refuses with 503;
+- every other limited route is unlimited until the backend returns.
+
+Bounded I/O makes a hung backend reach that state in under a second, where before it froze the service. Whether "everything else unlimited" should become "everything else limited per process" (Flask-Limiter's in-memory fallback, without the global stand-down) is a separate owner decision. A reviewed prerequisite is that login's after-request deduction currently returns 500 in write-refused modes (OOM, READONLY) whenever the limiter is not stood down.
+
+**Residual risks (bounded I/O does not cover them):**
+- DNS resolution is not bounded by either timeout.
+- A hostname with k addresses multiplies the connect bound by k.
+- A backend slower than ~0.4 s per command stays "healthy" and slows the one worker. Login can pay several calls, ~2.4 s.
+- Flask-Limiter's own recovery check still pings through `limits`' bare `except:`. It is now bounded to 0.5 s, so a worker abort there is no longer reachable in practice.
+- A pooled connection that the network drops silently costs one 0.5 s timeout and one spurious fallback.
