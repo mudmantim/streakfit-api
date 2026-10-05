@@ -12286,7 +12286,8 @@ _COACH_BREAKER_STRIKES = 2
 # it too fails slowly, one stall is evidence enough and the breaker reopens at
 # once -- needing two fresh strikes doubled the whole-site freeze on every
 # cycle of an outage (measured: two back-to-back 20 s stalls per ~105 s
-# cycle). A success closes it fully. A fast failure proves nothing either way.
+# cycle). A successful trial closes it fully. A fast failure proves nothing
+# either way. (While CLOSED, a success does not clear strikes.)
 # Bounded, so long after a trip the two-strike rule applies again.
 _COACH_BREAKER_HALF_OPEN_S = 60.0
 _COACH_BREAKER: dict[str, Any] = {"tripped_at": None, "strikes": []}
@@ -12310,10 +12311,12 @@ def _coach_breaker_half_open():
 
 
 def _coach_breaker_success():
-    """The provider answered: whatever was building up is cleared."""
-    was = _COACH_BREAKER["tripped_at"] is not None
-    _coach_breaker_reset()
-    if was:
+    """The provider answered. After a trip (a half-open trial) that closes the
+    breaker fully. While closed it changes nothing: strikes expire only with
+    their window, because a provider failing every other question still
+    freezes the only worker for 20 s each time and must still trip it."""
+    if _COACH_BREAKER["tripped_at"] is not None:
+        _coach_breaker_reset()
         app.logger.info("event=coach_breaker_closed")
 
 
@@ -12623,6 +12626,8 @@ def coach():
     # work below counts against the same budget gunicorn is counting.
     started = time.monotonic()
     deadline = started + _COACH_PROVIDER_BUDGET_S
+    # Belongs to this request only (Flask can reuse an outer app context).
+    g.pop("_coach_reached_provider", None)
 
     parsed = _coach_parse_request()
     if not isinstance(parsed[0], str):

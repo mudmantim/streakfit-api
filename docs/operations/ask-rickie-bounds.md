@@ -54,7 +54,7 @@ Passing `transport=` makes httpx ignore proxy environment variables. None are co
 
 **A strike** is a model call that itself ran for at least half the budget (10 s) and then failed in any way: a timeout, a lost connection, or a 5xx/529 that arrived late. How long the call held the worker decides, not what kind of error it was.
 
-**Two strikes within 60 s trip it** (a provider answer in between clears them). One is not enough: a non-streamed reply sends nothing until it is complete, so a single timeout cannot tell a stalled provider from one unusually long answer, and one person's long answer must not lock everybody out. Two slow failures can come from the same person. That needs a provider slow enough that a ≤ 1024-token reply cannot finish in 20 s, which is itself a brownout signal.
+**Two strikes within 60 s trip it.** A provider answer in between does not clear them: a provider failing every other question still freezes the worker each time. One is not enough: a non-streamed reply sends nothing until it is complete, so a single timeout cannot tell a stalled provider from one unusually long answer, and one person's long answer must not lock everybody out. Two slow failures can come from the same person. That needs a provider slow enough that a ≤ 1024-token reply cannot finish in 20 s, which is itself a brownout signal.
 
 **It never counts:**
 - fast errors of any kind (4xx, 5xx, 429, 529, a reset, an oversized or compressed body): they cost the worker nothing;
@@ -85,12 +85,12 @@ Two limits, two jobs:
 | 400 (shape, size, unstorable text) | 0 | spent | **not spent** | no |
 | 503 breaker open | 0 | spent | **not spent** | no |
 | 503 context over budget / no API key | 0 | spent | not spent | no |
-| 503 timeout / provider 429 / 5xx | 1 per model call (≤ 3 per question) | spent | spent | no |
+| 503 timeout / provider 429 / 5xx / connection refused | 1 per model call attempted (≤ 3 per question) | spent | spent | no |
 | 503 tool round cut short (deadline or ceiling) | 1–2 | spent | spent | no (the preamble is not saved) |
 | 503 provider answered with no text at all (was 200 `{"reply": ""}`) | 1–3 | spent | spent | no |
 | 200 | 1–3 | spent | spent | yes |
 | 401 / 413 | 0 | not spent | not spent | no |
-| 429 (a limit already used up) | 0 | — | not spent | no |
+| 429 (a limit already used up) | 0 | spent (the minute limit is checked first) | not spent | no |
 
 **Why a failed provider call still spends a question:**
 - the provider did work, and may bill a generation that timed out;
@@ -107,6 +107,9 @@ The client never retries automatically. A 429 shows "You've reached today's ques
 - **Bodies that bypass the size check.** Chunked bodies still bypass the 256 KB hook on every route (ledger D64). That is outside this change, and no longer reaches the prompt.
 - **The person's own name** (display name ≤ 40, or a short username, both collapsed to one line) still appears in the system prompt.
 - **The provider's own reply text is not validated.** A reply containing NUL or a lone surrogate still returns 200 but is not saved. This is provider-controlled and pre-existing.
+- **Half-open lockout per slow failure.** In the 60 s after an open window, a single slow failure reopens the breaker for 60 s. That needs a provider too slow to finish a ≤ 1024-token reply in 20 s. Each attempt costs the asker a daily question, so one account can hold Rickie closed for at most about 10 minutes a day, and only while the provider is genuinely slow.
+- **Daily question spent after the response.** If the worker died after reaching the provider (a gunicorn kill, OOM), the question would be free. With the 20 s budget under gunicorn's 30 s timeout, a request cannot reach that.
+- **test-then-hit is not atomic.** With more than one worker or thread, a user at 9/10 sending concurrent questions could exceed the daily cap by up to 2. That is impossible on one sync worker. It must be revisited with D26–D31 before any scaling.
 - **Sustained brownout.** Each cycle of a provider outage still costs one 20 s whole-site freeze (two for the first trip).
   - Measured, 240 s, 4 users asking every 15 s between them: **30.9% unavailable** (47.8% before half-open; 136% and never draining on 32581c9).
   - A provider that heals was answering again 15 s later in the measured run. Recovery is checked by the first question after each 60 s window.
