@@ -738,8 +738,12 @@ def test_a_huge_tool_round_cannot_exceed_the_assembled_ceiling(client, monkeypat
     monkeypatch.setattr(appmod._anthropic_lib, "Anthropic", _Client)
     monkeypatch.setattr(appmod, "_weather_tool_result", lambda city: ("Sunny.", False))
     token = register_and_login(client, "rv_toolbig")
-    _ask(client, token, "weather?")
+    resp, _ = _ask(client, token, "weather?")
     assert len(calls) == 1, f"{len(calls)} calls; the second carried the 200k block"
+    # Stopped mid tool round: the preamble is not an answer, and is not saved.
+    assert resp.status_code == 503
+    user = appmod.User.query.filter_by(username="rv_toolbig").first()
+    assert appmod.CoachTurn.query.filter_by(user_id=user.id).count() == 0
 
 
 def test_a_compressed_response_is_refused_not_inflated(client, provider):

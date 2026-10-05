@@ -52,7 +52,7 @@ Passing `transport=` makes httpx ignore proxy environment variables. None are co
 
 **A strike** is a model call that itself ran for at least half the budget (10 s) and then failed in any way: a timeout, a lost connection, or a 5xx/529 that arrived late. How long the call held the worker decides, not what kind of error it was.
 
-**Two strikes within 60 s trip it.** One is not enough: a non-streamed reply sends nothing until it is complete, so a single timeout cannot tell a stalled provider from one unusually long answer, and one person's long answer must not lock everybody out.
+**Two strikes within 60 s trip it.** One is not enough: a non-streamed reply sends nothing until it is complete, so a single timeout cannot tell a stalled provider from one unusually long answer, and one person's long answer must not lock everybody out. Two slow failures can come from the same person. That needs a provider slow enough that a ≤ 1024-token reply cannot finish in 20 s, which is itself a brownout signal.
 
 **It never counts:**
 - fast errors of any kind (4xx, 5xx, 429, 529, a reset, an oversized or compressed body): they cost the worker nothing;
@@ -71,6 +71,7 @@ Passing `transport=` makes httpx ignore proxy environment variables. None are co
 | 400 (shape, size, unstorable text) | 0 | yes | no |
 | 503 breaker open / context over budget | 0 | yes | no |
 | 503 timeout / provider error | 1 per model call (≤ 3 per question) | yes | no |
+| 503 tool round cut short (deadline or ceiling) | 1–2 | yes | no (the preamble is not saved as an answer) |
 | 200 | 1–3 | yes | yes |
 
 The rate limits (3/min, 10/day) are decorators and count on entry, as before. A 413 from the body-size hook does not count. The client never retries automatically.

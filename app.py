@@ -12657,10 +12657,12 @@ def coach():
         # turn is a single call; a weather question adds one round. The cap (initial
         # call + up to 2 tool rounds) is a hard backstop against any runaway.
         response = None
+        stopped_early = False
         for _ in range(3):
             call_left = _coach_remaining(deadline)
             if response is not None and call_left < _COACH_MIN_CALL_S:
                 app.logger.warning("event=coach_deadline user_id=%s stage=tool_round", user_id)
+                stopped_early = True
                 break
             # A tool round appends the provider's own content; keep the
             # assembled ceiling true for every call, not just the first.
@@ -12668,6 +12670,7 @@ def coach():
                     and _coach_context_chars(system, messages) > _COACH_CONTEXT_MAX_CHARS):
                 app.logger.warning("event=coach_context_over_budget user_id=%s stage=tool_round",
                                    user_id)
+                stopped_early = True
                 break
             calls += 1
             call_started = time.monotonic()
@@ -12708,7 +12711,10 @@ def coach():
                 break
             messages.append({'role': 'user', 'content': tool_results})
 
-        reply = next((b.text for b in response.content if b.type == 'text'), '')
+        # Cut short mid tool round, the only text is a preamble ("Let me check
+        # the weather!"): not an answer, and not something to save as one.
+        reply = '' if stopped_early else next(
+            (b.text for b in response.content if b.type == 'text'), '')
         if not reply:
             app.logger.warning("event=coach_call_failed user_id=%s error=NoReplyText", user_id)
             return jsonify({"error": "coach_unavailable"}), 503
