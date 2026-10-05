@@ -230,19 +230,34 @@ def test_long_after_a_trip_a_single_slow_failure_is_only_a_strike_again(client, 
         srv.close()
 
 
-def test_a_success_between_two_slow_failures_means_no_trip(client, monkeypatch):
-    """A reply in between proves the provider is answering."""
+def test_a_partial_brownout_still_trips_it(client, monkeypatch):
+    """Stall, answer, stall: a provider failing every other question still
+    freezes the only worker for 20 s each time, so an answer in between must
+    NOT wipe the strikes while the breaker is closed (only a successful
+    half-open trial closes it)."""
     srv = _hostile(monkeypatch, "hang")
     try:
-        token = register_and_login(client, "h_between")
+        token = register_and_login(client, "h_partial")
         _ask(client, token)                                   # strike 1
+        appmod._coach_breaker_success()                       # an answer in between
         assert len(appmod._COACH_BREAKER["strikes"]) == 1
-        appmod._coach_breaker_success()
-        assert appmod._COACH_BREAKER["strikes"] == []
-        _ask(client, token)                                   # strike 1 again, not 2
-        assert not appmod._coach_breaker_open()
+        _ask(client, token)                                   # strike 2: trips
+        assert appmod._coach_breaker_open()
     finally:
         srv.close()
+
+
+def test_the_daily_question_flag_belongs_to_one_request(client, monkeypatch, limits_on):
+    """Flask can reuse an outer app context between test-client requests; a
+    flag left over from a question that reached the provider must not make a
+    later refusal spend a daily question."""
+    _fake_ok(monkeypatch)
+    token = register_and_login(client, "q_flag")
+    assert _ask(client, token).status_code == 200
+    _open_breaker()
+    assert _ask(client, token).status_code == 503
+    assert _ask(client, token, ["bad"]).status_code == 400
+    assert day_used() == 1
 
 
 def test_the_self_check_names_the_half_open_state(client):
