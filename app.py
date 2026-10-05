@@ -12277,7 +12277,7 @@ _COACH_BREAKER_S = 60.0
 # provider from one unusually long answer -- and one person's long answer
 # must not lock everybody out. A real stall repeats; the second one trips it.
 _COACH_BREAKER_STRIKES = 2
-_COACH_BREAKER = {"tripped_at": None, "strikes": []}
+_COACH_BREAKER: dict[str, Any] = {"tripped_at": None, "strikes": []}
 
 
 def _coach_breaker_reset():
