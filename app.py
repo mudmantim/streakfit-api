@@ -12311,11 +12311,11 @@ def _coach_breaker_half_open():
 
 
 def _coach_breaker_success():
-    """The provider answered. After a trip (a half-open trial) that closes the
-    breaker fully. While closed it changes nothing: strikes expire only with
+    """The provider answered. During the half-open period (a trial after a
+    trip) that closes the breaker fully. While closed it changes nothing: strikes expire only with
     their window, because a provider failing every other question still
     freezes the only worker for 20 s each time and must still trip it."""
-    if _COACH_BREAKER["tripped_at"] is not None:
+    if _coach_breaker_half_open():
         _coach_breaker_reset()
         app.logger.info("event=coach_breaker_closed")
 
