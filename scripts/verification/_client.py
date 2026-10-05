@@ -20,8 +20,11 @@ class ApiClient:
         self.base_url = base_url.rstrip("/")
 
     def request(self, method, path, token=None, body=None, raw_body=None,
-                content_type=None, text=False):
+                content_type=None, text=False, chunked=False):
         """`raw_body` + `content_type` send bytes as-is (multipart photo upload).
+        `chunked=True` sends `raw_body` with Transfer-Encoding: chunked and no
+        Content-Length (urllib does this for an iterable body) -- the framing
+        the body-size boundary must hold for (D64).
         Without them the call is JSON, exactly as every existing module uses it.
 
         `text=True` returns the decoded response body as a string instead of
@@ -36,6 +39,8 @@ class ApiClient:
             headers["Authorization"] = "Bearer " + token
         if raw_body is not None:
             data = raw_body
+            if chunked:
+                data = iter([raw_body[i:i + 65536] for i in range(0, len(raw_body), 65536)])
         else:
             data = json.dumps(body).encode() if body is not None else None
         req = urllib.request.Request(url, data=data, headers=headers, method=method)
@@ -77,10 +82,20 @@ class WsgiClient:
         self.base_url = "wsgi://in-process"
 
     def request(self, method, path, token=None, body=None, raw_body=None,
-                content_type=None, text=False):
+                content_type=None, text=False, chunked=False):
         headers = {}
         if token:
             headers["Authorization"] = "Bearer " + token
+        if chunked:
+            # What gunicorn hands the app for a chunked request: no
+            # Content-Length, and a server-terminated stream.
+            import io as _io
+            response = self._test_client.open(
+                path, method=method, input_stream=_io.BytesIO(raw_body or b""),
+                content_type=content_type or "application/json",
+                headers={**headers, "Transfer-Encoding": "chunked"},
+                environ_overrides={"wsgi.input_terminated": True})
+            return response.status_code, (response.get_json(silent=True) or {})
         if text:
             response = self._test_client.open(path, method=method, json=body,
                                               headers=headers)
