@@ -21,7 +21,7 @@ import urllib.parse
 import urllib.request
 from datetime import datetime, date, timedelta
 from typing import Any
-from flask import Flask, request, jsonify, abort, make_response, g, has_request_context
+from flask import Flask, Request, request, jsonify, abort, make_response, g, has_request_context
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy.exc import DBAPIError, IntegrityError, OperationalError
 from flask_migrate import Migrate
@@ -119,6 +119,37 @@ DEFAULT_MAX_BODY_BYTES = 256 * 1024          # 256 KB — every route except pho
 PHOTO_MAX_UPLOAD_BYTES = 2 * 1024 * 1024     # 2 MB — a composited, resized JPEG is ~200 KB
 app.config['MAX_CONTENT_LENGTH'] = PHOTO_MAX_UPLOAD_BYTES
 
+
+def _route_body_limit(endpoint):
+    """The largest body a route accepts. One place, so the stream bound and
+    the hook below can never disagree. An unmatched route gets the default."""
+    return PHOTO_MAX_UPLOAD_BYTES if endpoint == 'upload_team_photo' else DEFAULT_MAX_BODY_BYTES
+
+
+class _BoundedRequest(Request):
+    """Bounds a body of UNKNOWN length by its route's limit (D64).
+
+    A chunked upload has no Content-Length, so the header check in
+    `_enforce_route_body_limit` cannot see it. Werkzeug does bound such a
+    stream -- gunicorn sets wsgi.input_terminated, and the stream is wrapped in
+    a LimitedStream of `max_content_length` -- but Flask 3.0 makes that the one
+    global (photo-sized) value, and the bounded stream returns its first N
+    bytes SILENTLY instead of refusing. So a 3 MB chunked body of valid JSON
+    plus padding was read as its first 2 MB and processed: a user registered,
+    a message posted, a model call made.
+
+    Here the bound is the route's own limit, plus one byte: reading limit + 1
+    bytes is what PROVES a body is too big, because the stream gives no other
+    sign. (Flask 3.1 can set this per request; this subclass can go then.)
+    """
+
+    @property
+    def max_content_length(self):
+        return _route_body_limit(self.endpoint) + 1
+
+
+app.request_class = _BoundedRequest
+
 # Fixed dummy hash so login runs a password comparison even when the username
 # doesn't exist — equalizes response time so it can't reveal valid usernames.
 _DUMMY_PW_HASH = generate_password_hash('unused-timing-equalizer', method='pbkdf2:sha256')
@@ -206,19 +237,34 @@ def _security_headers(resp):
 
 @app.before_request
 def _enforce_route_body_limit():
-    """Put every route back to the original 256 KB ceiling except photo upload.
+    """Put every route back to the original 256 KB ceiling except photo upload,
+    for bodies of known AND unknown length, before anything else runs.
 
     MAX_CONTENT_LENGTH had to be raised to the largest body any route accepts,
     because Werkzeug applies it globally before a view runs and Flask 3.0 has no
     per-request override. Without this, raising the limit for one upload route
     would have quietly raised it for the entire JSON API.
+
+    Known length: refused from the header, nothing read. Unknown length
+    (chunked; D64): read now, through Werkzeug's own bounded stream, at most
+    limit + 1 bytes (see _BoundedRequest), and refused if more than the limit
+    arrived. The view then parses the cached bytes. A request no route matched
+    is not read at all: no view will run and nothing parses it.
+
+    Registered BEFORE the Limiter is constructed, so it runs before Flask-
+    Limiter's own hook: an oversized body is refused before authentication,
+    rate limiting or any database work, as with Content-Length. Keep it so.
     """
-    if request.content_length is None:
+    limit = _route_body_limit(request.endpoint)
+    if request.content_length is not None:
+        if request.content_length > limit:
+            return jsonify({"error": "payload_too_large"}), 413
         return None
-    limit = (PHOTO_MAX_UPLOAD_BYTES if request.endpoint == 'upload_team_photo'
-             else DEFAULT_MAX_BODY_BYTES)
-    if request.content_length > limit:
-        return jsonify({"error": "payload_too_large"}), 413
+    if request.routing_exception is not None:
+        return None
+    if "wsgi.input_terminated" in request.environ:
+        if len(request.get_data(cache=True)) > limit:
+            return jsonify({"error": "payload_too_large"}), 413
     return None
 
 
@@ -12852,6 +12898,13 @@ def expired_token_callback(jwt_header, jwt_payload):
 
 
 # --- Error Handlers ---
+
+@app.errorhandler(413)
+def payload_too_large(e):
+    """Werkzeug raises its own 413 where the body hook cannot see -- for
+    instance more than 1000 multipart parts. JSON, like every other error."""
+    return jsonify({"error": "payload_too_large"}), 413
+
 
 @app.errorhandler(429)
 def ratelimit_exceeded(e):

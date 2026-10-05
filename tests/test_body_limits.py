@@ -19,7 +19,7 @@ import pytest
 
 import app as appmod
 from conftest import register_and_login, auth_headers
-from test_team_photos import VALID_JPEG, family  # noqa: F401 (fixture)
+from test_team_photos import VALID_JPEG
 
 L = 256 * 1024
 PHOTO = 2 * 1024 * 1024
@@ -44,6 +44,19 @@ def multipart(file_bytes, boundary="d64boundary"):
             f"filename=\"p.jpg\"\r\nContent-Type: image/jpeg\r\n\r\n").encode()
     return head + file_bytes + f"\r\n--{boundary}--\r\n".encode(), \
         f"multipart/form-data; boundary={boundary}"
+
+
+@pytest.fixture()
+def family(client):
+    """A parent who owns a team, a kid in it, and an outsider who is not."""
+    parent = register_and_login(client, "body_parent")
+    team = client.post("/api/teams", json={"name": "Body Family"},
+                       headers=auth_headers(parent)).get_json()["team"]
+    kid = register_and_login(client, "body_kid")
+    client.post(f"/api/teams/{team['id']}/join", json={"code": team["invite_code"]},
+                headers=auth_headers(kid))
+    outsider = register_and_login(client, "body_outsider")
+    return {"parent": parent, "kid": kid, "outsider": outsider, "team_id": team["id"]}
 
 
 def _user(name):
@@ -110,10 +123,14 @@ def test_an_oversized_chunked_body_never_reaches_the_model(client, monkeypatch):
     assert calls == []
 
 
-def test_an_unknown_route_with_a_huge_chunked_body_is_a_json_413(client):
-    resp = chunked(client, "/api/no-such-route", b" " * (L + 1))
-    assert resp.status_code == 413
-    assert resp.get_json() == {"error": "payload_too_large"}
+def test_an_unknown_route_does_not_read_a_chunked_body_at_all(client):
+    """No view will run and nothing parses it: 404 without consuming it."""
+    stream = io.BytesIO(b" " * (L + 1))
+    resp = client.open("/api/no-such-route", method="POST", input_stream=stream,
+                       content_type="application/json", headers={"Transfer-Encoding": "chunked"},
+                       environ_overrides={"wsgi.input_terminated": True})
+    assert resp.status_code == 404
+    assert stream.tell() == 0
 
 
 def test_the_size_refusal_comes_before_authentication(client):
