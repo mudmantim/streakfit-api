@@ -281,7 +281,7 @@ def _enforce_route_body_limit():
             # them through. It is the client's malformed request: 400, not a
             # 500 with a traceback. Type only, never the bytes.
             app.logger.info("event=request_body_unreadable error=%s", type(exc).__name__)
-            return jsonify({"error": "bad_request"}), 400
+            return jsonify({"error": "Bad request"}), 400     # same body as the 400 handler
         if len(body) > limit:
             return jsonify({"error": "payload_too_large"}), 413
     return None

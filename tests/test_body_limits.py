@@ -297,10 +297,14 @@ def test_no_bodiless_method_view_reads_a_body():
             continue
         m = re.search(r"methods=\[([^\]]*)\]", decs)
         methods = m.group(1) if m else "'GET'"
-        if any(x in methods for x in ("POST", "PUT", "PATCH", "DELETE")):
+        # Any view a GET/HEAD/OPTIONS can reach -- mixed-method views included.
+        if not any(x in methods for x in ("GET", "HEAD", "OPTIONS")):
             continue
         body = ast.get_source_segment(src, node) or ""
         if any(k in body for k in ("get_json", "request.form", "request.files", "get_data",
                                    "request.data", "request.values", "request.stream")):
             offenders.append(node.name)
     assert offenders == [], offenders
+    # Routes registered any other way would escape this scan.
+    assert "add_url_rule(" not in src and "Blueprint(" not in src, (
+        "routes registered outside @app.route: extend this guard first")
