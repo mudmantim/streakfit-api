@@ -20,9 +20,9 @@ An over-limit body is **refused with JSON 413 `{"error":"payload_too_large"}` be
 - **Any 413 Werkzeug raises itself** (e.g. more than 1000 multipart parts) is JSON too (`errorhandler(413)`).
 - **Ordering:** the hook is registered before the Limiter is constructed, so it runs before Flask-Limiter's own before_request hook. Do not move the Limiter above it.
 
-**Before (885c303):** a chunked body of any size was read as its first 2 MiB and processed whenever that prefix was valid.
+**Before (885c303):** a chunked body of any size was read as its first 2 MiB and processed whenever that prefix was valid. Measured: users registered, team messages posted, profile writes, analytics rows, and an Ask Rickie model call.
 
-A photo upload of exactly 2 MiB got an HTML 413 under both framings; it is now accepted, matching the documented "more than the limit" rule. Measured: users registered, team messages posted, profile writes, analytics rows, and an Ask Rickie model call. Exactly 2 MiB on the photo route got an HTML 413.
+A photo upload of exactly 2 MiB got an HTML 413 under both framings; it is now accepted, matching the documented "more than the limit" rule.
 
 **Cost:**
 - A chunked POST/PUT/PATCH/DELETE to a known route is now read (≤ limit + 1 bytes) before authentication and before rate limiting.

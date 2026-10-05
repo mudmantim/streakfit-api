@@ -118,6 +118,9 @@ app.logger.setLevel(logging.INFO)
 # quietly raise it for the JSON API.
 DEFAULT_MAX_BODY_BYTES = 256 * 1024          # 256 KB — every route except photo upload
 PHOTO_MAX_UPLOAD_BYTES = 2 * 1024 * 1024     # 2 MB — a composited, resized JPEG is ~200 KB
+# NOTE: request parsing no longer reads this value -- _BoundedRequest below
+# replaces it with the route's own limit (D64). It is kept as the documented
+# ceiling and for anything that reads the config; change the constants above.
 app.config['MAX_CONTENT_LENGTH'] = PHOTO_MAX_UPLOAD_BYTES
 
 
