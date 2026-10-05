@@ -817,3 +817,13 @@ def test_no_socket_wait_starts_once_the_time_is_gone():
         stream.read(10, timeout=30)
     with pytest.raises(httpcore.ConnectTimeout):
         stream.start_tls(None, "example.invalid", timeout=30)
+
+
+def test_the_self_check_fails_if_the_deadline_backend_is_missing(client, monkeypatch):
+    """The check must observe the transport, not trust that it is there."""
+    import httpx
+    monkeypatch.setattr(appmod, "_coach_http_client", lambda deadline: httpx.Client())
+    checks = {c["id"]: c for c in client.get("/api/verification/self").get_json()["checks"]}
+    c = checks["coach.provider_bounds"]
+    assert c["status"] == "FAIL"
+    assert "deadline backend MISSING" in c["observed"]
