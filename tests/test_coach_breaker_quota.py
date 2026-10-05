@@ -158,7 +158,7 @@ def test_someone_out_of_daily_questions_is_refused_before_anything_else(client, 
     token = register_and_login(client, "q_spent")
     store = appmod.limiter.storage
     local = getattr(store, "local", store)
-    for i in range(10):
+    for _ in range(10):
         assert _ask(client, token).status_code == 200
         for k in [k for k in local.storage if k.endswith("/3/1/minute")]:
             local.storage.pop(k)
