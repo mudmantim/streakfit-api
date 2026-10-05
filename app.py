@@ -4104,7 +4104,15 @@ def verification_self():
     # D48: Ask Rickie's model call has a total deadline that ends well inside
     # gunicorn's 30 s worker timeout, so a stalled provider cannot hold the
     # only worker until it is killed. Reads the live constants, not a doc.
-    budget_ok = 0 < _COACH_PROVIDER_BUDGET_S <= 25
+    # Observe, not assume: build the client a question would get and look at
+    # what is actually underneath it.
+    try:
+        probe = _coach_http_client(time.monotonic() + 1)
+        installed = isinstance(probe._transport._pool._network_backend, _DeadlineBackend)
+        probe.close()
+    except Exception:
+        installed = False
+    budget_ok = installed and 0 < _COACH_PROVIDER_BUDGET_S <= 25
     breaker = ("open, %ds left" % max(0, int(_COACH_BREAKER["tripped_at"] + _COACH_BREAKER_S
                                              - time.monotonic()))
                if _coach_breaker_open() else "closed")
@@ -4116,11 +4124,13 @@ def verification_self():
         "Read the budget, connect limit, retry count, response size limit and "
         "breaker state this process is running with.",
         "PASS" if budget_ok else "FAIL", "VERIFIED" if budget_ok else "OBSERVED",
+        f"deadline backend {'installed' if installed else 'MISSING'}; "
         f"total {_COACH_PROVIDER_BUDGET_S:g}s per question (connect <= "
         f"{_COACH_CONNECT_TIMEOUT_S:g}s), 0 retries, response <= "
         f"{_COACH_MAX_RESPONSE_BYTES // (1024 * 1024)} MiB; breaker {breaker}",
         failure_reason=None if budget_ok else
-        "The budget does not end inside gunicorn's 30 s timeout.",
+        "The deadline backend is not installed, or the budget does not end "
+        "inside gunicorn's 30 s timeout.",
         limitations="Does not bound DNS resolution. An open breaker means "
                     "Rickie is answering 503 by design after a provider stall.",
         critical=False))
@@ -9987,10 +9997,15 @@ def _safe_display_name(user):
     # getattr, not attribute access: the context builder is also called with
     # duck-typed stand-ins in tests, and a name lookup is not worth breaking
     # Rickie's whole context over.
-    chosen = (getattr(user, "display_name", None) or "").strip()
+    # Whitespace is collapsed to single spaces on the way into the prompt
+    # (D53). Registration accepts any 2-80 character username, newlines
+    # included, and this name lands in the SYSTEM prompt: "a\n## OPERATOR:"
+    # used to arrive as its own forged system line. display_name is
+    # collapsed when it is saved; collapsing here as well covers both.
+    chosen = " ".join((getattr(user, "display_name", None) or "").split())
     if chosen:
         return chosen
-    username = (getattr(user, "username", None) or "").strip()
+    username = " ".join((getattr(user, "username", None) or "").split())
     if not username or len(username) > 20 or _UNSAFE_NAME.search(username):
         return None
     return username
@@ -12243,22 +12258,31 @@ _COACH_MAX_RESPONSE_BYTES = 4 * 1024 * 1024
 
 # Circuit breaker. A bounded stall is still a whole-site stall with one
 # worker: twenty seconds per question, so a provider brownout with a few
-# people asking would keep the site down continuously. After a model call that
-# had plenty of time of its own (half the budget) and still timed out or could
-# not connect, Rickie answers 503 at once, without calling out, for
-# _COACH_BREAKER_S. It deliberately does NOT trip on:
-#   - a fast error (4xx/5xx/429/529): it cost the worker nothing, and one
-#     user's bad request must not lock everybody out of Rickie;
+# people asking would keep the site down continuously. A model call that
+# itself ran for at least half the budget and then failed in any way
+# (timeout, lost connection, a late 5xx/529) is a STRIKE; two strikes inside
+# _COACH_BREAKER_S trip it, and
+# Rickie then answers 503 at once, without calling out, for _COACH_BREAKER_S.
+# It deliberately does NOT count:
+#   - a fast error of any kind (4xx/5xx/429/529, a reset, an oversized
+#     body): it cost the worker nothing, and one user's bad request must not
+#     lock everybody out of Rickie;
 #   - running out of the SHARED budget late in a long turn (a weather round
 #     plus a long reply): that is the question's cost, not the provider's.
 # In-process state is global with one worker, the same reasoning as D7's
 # mirror; a worker restart closes it, costing at most one more bounded call.
 _COACH_BREAKER_S = 60.0
-_COACH_BREAKER = {"tripped_at": None}
+# Two slow failures within the window, not one: a non-streamed reply sends
+# nothing until it is complete, so a single timeout cannot tell a stalled
+# provider from one unusually long answer -- and one person's long answer
+# must not lock everybody out. A real stall repeats; the second one trips it.
+_COACH_BREAKER_STRIKES = 2
+_COACH_BREAKER = {"tripped_at": None, "strikes": []}
 
 
 def _coach_breaker_reset():
     _COACH_BREAKER["tripped_at"] = None
+    _COACH_BREAKER["strikes"] = []
 
 
 def _coach_breaker_open():
@@ -12266,10 +12290,19 @@ def _coach_breaker_open():
     return tripped is not None and time.monotonic() < tripped + _COACH_BREAKER_S
 
 
-def _coach_breaker_trip(reason):
-    _COACH_BREAKER["tripped_at"] = time.monotonic()
-    app.logger.warning("event=coach_breaker_tripped reason=%s open_s=%g",
-                       reason, _COACH_BREAKER_S)
+def _coach_breaker_strike(reason):
+    """Record one slow failure; trip once there are enough inside the window."""
+    now = time.monotonic()
+    strikes = [t for t in _COACH_BREAKER["strikes"] if now - t < _COACH_BREAKER_S] + [now]
+    _COACH_BREAKER["strikes"] = strikes
+    if len(strikes) >= _COACH_BREAKER_STRIKES:
+        _COACH_BREAKER["tripped_at"] = now
+        _COACH_BREAKER["strikes"] = []
+        app.logger.warning("event=coach_breaker_tripped reason=%s open_s=%g",
+                           reason, _COACH_BREAKER_S)
+    else:
+        app.logger.warning("event=coach_breaker_strike reason=%s strikes=%d",
+                           reason, len(strikes))
 
 
 def _coach_remaining(deadline):
@@ -12280,7 +12313,7 @@ class _DeadlineStream(_httpcore.NetworkStream):
     """A socket stream whose every wait is clamped to the deadline."""
 
     def __init__(self, inner, deadline):
-        self._inner, self._deadline, self._received = inner, deadline, 0
+        self._inner, self._deadline = inner, deadline
 
     def _left(self, timeout, exc):
         left = self._deadline - time.monotonic()
@@ -12289,11 +12322,7 @@ class _DeadlineStream(_httpcore.NetworkStream):
         return left if timeout is None else min(timeout, left)
 
     def read(self, max_bytes, timeout=None):
-        data = self._inner.read(max_bytes, self._left(timeout, _httpcore.ReadTimeout))
-        self._received += len(data)
-        if self._received > _COACH_MAX_RESPONSE_BYTES:
-            raise _httpcore.ReadError("response exceeds the Ask Rickie size limit")
-        return data
+        return self._inner.read(max_bytes, self._left(timeout, _httpcore.ReadTimeout))
 
     def write(self, buffer, timeout=None):
         # httpcore's own write loops send() under ONE timeout, so a peer that
@@ -12359,6 +12388,46 @@ class _DeadlineBackend(_httpcore.NetworkBackend):
         self._inner.sleep(seconds)
 
 
+class _CappedBody(_httpx.SyncByteStream):
+    """One response body, refused past _COACH_MAX_RESPONSE_BYTES."""
+
+    def __init__(self, inner):
+        self._inner = inner
+
+    def __iter__(self):
+        received = 0
+        for chunk in self._inner:
+            received += len(chunk)
+            if received > _COACH_MAX_RESPONSE_BYTES:
+                raise _httpx.ReadError("response exceeds the Ask Rickie size limit")
+            yield chunk
+
+    def close(self):
+        self._inner.close()
+
+
+class _BoundedTransport(_httpx.HTTPTransport):
+    """Uncompressed responses only, each capped in size.
+
+    httpx decompresses whatever Content-Encoding a server sends, asked for or
+    not, so a byte count on the wire is no bound on memory: 1,830 bytes of
+    stacked gzip became 1 GiB (measured). Ask for identity, refuse anything
+    else, and count each body -- per exchange, not per connection, so a
+    keep-alive tool loop does not add replies together.
+    """
+
+    def handle_request(self, request):
+        request.headers["Accept-Encoding"] = "identity"
+        response = super().handle_request(request)
+        encoding = response.headers.get("Content-Encoding", "identity").strip().lower()
+        if encoding not in ("", "identity"):
+            response.close()
+            raise _httpx.RemoteProtocolError(
+                "compressed response refused", request=request)
+        response.stream = _CappedBody(response.stream)
+        return response
+
+
 _COACH_SSL_CONTEXT = None
 
 
@@ -12372,7 +12441,7 @@ def _coach_http_client(deadline):
     global _COACH_SSL_CONTEXT
     if _COACH_SSL_CONTEXT is None:  # built lazily, in the worker, once
         _COACH_SSL_CONTEXT = _httpx.create_ssl_context()
-    transport = _httpx.HTTPTransport()
+    transport = _BoundedTransport()
     transport._pool = _httpcore.ConnectionPool(
         ssl_context=_COACH_SSL_CONTEXT, network_backend=_DeadlineBackend(deadline))
     left = max(0.001, deadline - time.monotonic())
@@ -12453,17 +12522,27 @@ def _coach_parse_request():
     return message, ctx_type, insight_text.strip()
 
 
+# The insight kinds the app offers "tell me more" on (static/app.js). A riddle
+# carries its answer and an aside is Rickie's own line: neither is something
+# to hand him as "the insight the user wants to know more about".
+_COACH_TELL_MORE_TYPES = ("fact", "movement", "experiment")
+
+
 def _coach_insight_for(user_id, client_text):
     """The person's own insight that `client_text` names: today's or
-    yesterday's (an app left open across midnight), else today's. The client's
-    words only choose between them; they never reach the prompt."""
+    yesterday's (an app left open across midnight); if neither matches,
+    today's, when it is one the app offers "tell me more" on; otherwise None
+    (no insight block). The client's words only choose; they never reach the
+    prompt."""
     today = date.today()
     mine = [get_daily_insight(d.isoformat(), user_id) for d in (today, today - timedelta(days=1))]
+    mine = [i for i in mine if i.get("type") in _COACH_TELL_MORE_TYPES]
     for item in mine:
         if item["text"].strip() == client_text:
             return item
     app.logger.info("event=coach_insight_unmatched user_id=%s", user_id)
-    return mine[0]
+    today_item = get_daily_insight(today.isoformat(), user_id)
+    return today_item if today_item.get("type") in _COACH_TELL_MORE_TYPES else None
 
 
 def _coach_context_chars(volatile, messages):
@@ -12533,6 +12612,9 @@ def coach():
 
     if ctx_type == 'insight' and insight_text and user_id is not None:
         item = _coach_insight_for(user_id, insight_text)
+    else:
+        item = None
+    if item is not None:
         system += (
             f"\n\nToday's Insight (category: {item['category']}): \"{item['text']}\"\n"
             "The user wants to know more about this insight. "
@@ -12567,6 +12649,7 @@ def coach():
     g._coach_deadline = deadline      # the weather lookups share the budget
     calls = 0
     call_left = None
+    call_started = None
     try:
         client = _anthropic_lib.Anthropic(
             api_key=_anthropic_api_key, max_retries=0, http_client=http_client)
@@ -12579,7 +12662,15 @@ def coach():
             if response is not None and call_left < _COACH_MIN_CALL_S:
                 app.logger.warning("event=coach_deadline user_id=%s stage=tool_round", user_id)
                 break
+            # A tool round appends the provider's own content; keep the
+            # assembled ceiling true for every call, not just the first.
+            if (response is not None
+                    and _coach_context_chars(system, messages) > _COACH_CONTEXT_MAX_CHARS):
+                app.logger.warning("event=coach_context_over_budget user_id=%s stage=tool_round",
+                                   user_id)
+                break
             calls += 1
+            call_started = time.monotonic()
             response = client.messages.create(
                 model=COACH_MODEL,
                 max_tokens=COACH_MAX_TOKENS,
@@ -12652,12 +12743,16 @@ def coach():
         #
         # Type only, and never the exception text: an SDK error can echo the
         # request body back, and the request body is the person's message.
-        slow = isinstance(exc, _anthropic_lib.APIConnectionError)   # incl. APITimeoutError
+        # Any provider error -- a timeout, a dropped connection, or a 5xx/529
+        # that arrived late -- is a strike if THAT call held the worker for
+        # half the budget. How long it took decides, not what kind it was.
+        slow = isinstance(exc, _anthropic_lib.APIError)
         app.logger.warning("event=coach_call_failed user_id=%s error=%s calls=%d ms=%d",
                            user_id, type(exc).__name__, calls,
                            int((time.monotonic() - started) * 1000))
-        if slow and call_left is not None and call_left >= _COACH_PROVIDER_BUDGET_S / 2:
-            _coach_breaker_trip(type(exc).__name__)
+        if (slow and call_started is not None
+                and time.monotonic() - call_started >= _COACH_PROVIDER_BUDGET_S / 2):
+            _coach_breaker_strike(type(exc).__name__)
         return jsonify({"error": "coach_unavailable"}), 503
     finally:
         g.pop("_coach_deadline", None)
