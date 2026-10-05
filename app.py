@@ -4113,9 +4113,13 @@ def verification_self():
     except Exception:
         installed = False
     budget_ok = installed and 0 < _COACH_PROVIDER_BUDGET_S <= 25
-    breaker = ("open, %ds left" % max(0, int(_COACH_BREAKER["tripped_at"] + _COACH_BREAKER_S
-                                             - time.monotonic()))
-               if _coach_breaker_open() else "closed")
+    if _coach_breaker_open():
+        breaker = "open, %ds left" % max(0, int(_COACH_BREAKER["tripped_at"] + _COACH_BREAKER_S
+                                               - time.monotonic()))
+    elif _coach_breaker_half_open():
+        breaker = "half-open (the next slow failure reopens it)"
+    else:
+        breaker = "closed"
     checks.append(_self_check(
         "coach.provider_bounds", "A stalled AI provider cannot freeze the app",
         "Every Ask Rickie question -- each model call and weather lookup in it "
@@ -12277,6 +12281,14 @@ _COACH_BREAKER_S = 60.0
 # provider from one unusually long answer -- and one person's long answer
 # must not lock everybody out. A real stall repeats; the second one trips it.
 _COACH_BREAKER_STRIKES = 2
+# Half-open: for this long after an open window ends, the provider has only
+# just been failing, so the first question through is the recovery check. If
+# it too fails slowly, one stall is evidence enough and the breaker reopens at
+# once -- needing two fresh strikes doubled the whole-site freeze on every
+# cycle of an outage (measured: two back-to-back 20 s stalls per ~105 s
+# cycle). A success closes it fully. A fast failure proves nothing either way.
+# Bounded, so long after a trip the two-strike rule applies again.
+_COACH_BREAKER_HALF_OPEN_S = 60.0
 _COACH_BREAKER: dict[str, Any] = {"tripped_at": None, "strikes": []}
 
 
@@ -12290,9 +12302,31 @@ def _coach_breaker_open():
     return tripped is not None and time.monotonic() < tripped + _COACH_BREAKER_S
 
 
-def _coach_breaker_strike(reason):
-    """Record one slow failure; trip once there are enough inside the window."""
+def _coach_breaker_half_open():
+    tripped = _COACH_BREAKER["tripped_at"]
     now = time.monotonic()
+    return (tripped is not None
+            and tripped + _COACH_BREAKER_S <= now < tripped + _COACH_BREAKER_S + _COACH_BREAKER_HALF_OPEN_S)
+
+
+def _coach_breaker_success():
+    """The provider answered: whatever was building up is cleared."""
+    was = _COACH_BREAKER["tripped_at"] is not None
+    _coach_breaker_reset()
+    if was:
+        app.logger.info("event=coach_breaker_closed")
+
+
+def _coach_breaker_strike(reason):
+    """Record one slow failure; trip once there are enough inside the window,
+    or at once if this was the recovery check after an open window."""
+    now = time.monotonic()
+    if _coach_breaker_half_open():
+        _COACH_BREAKER["tripped_at"] = now
+        _COACH_BREAKER["strikes"] = []
+        app.logger.warning("event=coach_breaker_tripped reason=%s open_s=%g state=half_open",
+                           reason, _COACH_BREAKER_S)
+        return
     strikes = [t for t in _COACH_BREAKER["strikes"] if now - t < _COACH_BREAKER_S] + [now]
     _COACH_BREAKER["strikes"] = strikes
     if len(strikes) >= _COACH_BREAKER_STRIKES:
@@ -12565,9 +12599,24 @@ def _coach_fit_context(volatile, messages):
     return _coach_context_chars(volatile, messages) <= _COACH_CONTEXT_MAX_CHARS
 
 
+def _coach_reached_provider(response):
+    """Did this request reach the model? Only then is a daily question spent."""
+    return bool(g.get("_coach_reached_provider"))
+
+
+# Two limits, two jobs. "3 per minute" is the request throttle: every request
+# that reaches the route spends it on entry, refused or not, so nothing here
+# can be hammered. "10 per day" is the AI-question allowance: it is CHECKED on
+# entry (someone with none left is refused before anything else) but SPENT
+# only by a question that reached the model -- success, timeout or provider
+# error alike, since the provider did work and its limits are shared. A
+# request refused before the model (malformed, oversized, or the provider
+# circuit already open) costs nobody a question for the day. Same limiter,
+# same storage (the D7 gate): `deduct_when` tests with get() first and hits
+# with incr() after the response, both through the gate.
 @app.route('/api/coach', methods=['POST'])
 @jwt_required()
-@limiter.limit("10 per day", key_func=user_or_ip_key)
+@limiter.limit("10 per day", key_func=user_or_ip_key, deduct_when=_coach_reached_provider)
 @limiter.limit("3 per minute", key_func=user_or_ip_key)
 def coach():
     # The deadline starts here, not at the first model call, so the database
@@ -12679,6 +12728,7 @@ def coach():
                 break
             calls += 1
             call_started = time.monotonic()
+            g._coach_reached_provider = True      # spends a daily question (below)
             response = client.messages.create(
                 model=COACH_MODEL,
                 max_tokens=COACH_MAX_TOKENS,
@@ -12725,6 +12775,7 @@ def coach():
             return jsonify({"error": "coach_unavailable"}), 503
         app.logger.info("event=coach_call_ok user_id=%s calls=%d ms=%d",
                         user_id, calls, int((time.monotonic() - started) * 1000))
+        _coach_breaker_success()
         # Persist the human-facing exchange and fold any explicit facts into Coach
         # Notes. Wrapped so a memory hiccup can never take the reply down.
         if user_id is not None:
