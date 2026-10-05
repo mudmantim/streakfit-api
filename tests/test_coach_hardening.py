@@ -111,7 +111,11 @@ class HostileProvider:
                             b'"content":[{"type":"tool_use","id":"t1","name":"get_weather",'
                             b'"input":{"city":"Springfield"}}],"stop_reason":"tool_use",'
                             b'"stop_sequence":null,"usage":{"input_tokens":1,"output_tokens":1}}')
+                    # Connection: close -- the server hangs up after each reply,
+                    # and without saying so the client may try to reuse the dead
+                    # socket and fail the second call fast (a flake under load).
                     c.sendall(b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
+                              b"Connection: close\r\n"
                               b"Content-Length: %d\r\n\r\n" % len(body) + body)
                 else:
                     while time.monotonic() < end and not self._stop:
