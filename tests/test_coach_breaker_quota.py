@@ -264,3 +264,21 @@ def test_the_self_check_names_the_half_open_state(client):
     _past_window()
     c = {c["id"]: c for c in client.get("/api/verification/self").get_json()["checks"]}
     assert "breaker half-open" in c["coach.provider_bounds"]["observed"]
+
+
+def test_an_old_trip_does_not_let_an_ordinary_success_wipe_strikes(client, monkeypatch):
+    """A trip whose half-open period passed with no successful trial leaves
+    its timestamp behind; a later success while closed must still not clear
+    accumulated strikes (it would cost one extra 20 s stall per trip)."""
+    srv = _hostile(monkeypatch, "hang")
+    try:
+        token = register_and_login(client, "h_stale")
+        appmod._COACH_BREAKER["tripped_at"] = (time.monotonic() - appmod._COACH_BREAKER_S
+                                               - appmod._COACH_BREAKER_HALF_OPEN_S - 100)
+        _ask(client, token)                                   # strike 1 (closed again)
+        appmod._coach_breaker_success()                       # an ordinary answer
+        assert len(appmod._COACH_BREAKER["strikes"]) == 1
+        _ask(client, token)                                   # strike 2: trips
+        assert appmod._coach_breaker_open()
+    finally:
+        srv.close()
