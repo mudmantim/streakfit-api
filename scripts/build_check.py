@@ -432,13 +432,16 @@ def check_shell_version_coherence() -> None:
     # Render the document the way the `/` route does and assert versioning.
     env = dict(os.environ, DATABASE_URL="sqlite:///:memory:", SECRET_KEY="x",
                JWT_SECRET_KEY="x", ADMIN_SECRET="x")
+    # Render through the REAL `/` route (the Flask test client), not the helper,
+    # so this gate fails if the route is ever disconnected from the versioning.
     probe = subprocess.run(
         [sys.executable, "-c",
-         "import app; print(app._render_index_html())"],
+         "import app; r=app.app.test_client().get('/'); "
+         "import sys; sys.stdout.write(r.get_data(as_text=True))"],
         cwd=str(ROOT), env=env, capture_output=True, text=True, timeout=60)
     checks_run += 1
     if probe.returncode != 0:
-        fail("could not render index.html via app._render_index_html():\n    "
+        fail("could not render `/` via the Flask test client:\n    "
              + "\n    ".join((probe.stderr or "").strip().splitlines()[-4:]))
         return
     html = probe.stdout

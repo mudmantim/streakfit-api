@@ -154,9 +154,10 @@ def test_you_is_decided_client_side_and_never_becomes_a_server_field():
 # ── Shipping the fix at all ────────────────────────────────────────────────
 
 def test_the_service_worker_cache_was_bumped():
-    """app.js, index.html and style.css all changed, and all are precached.
-    Without a bump a returning browser serves the old bundle and none of the
-    above reaches the person."""
+    """The service-worker cache name must carry a bumped version. Since D49 the
+    executable/style assets are content-versioned in the HTML (so coherence no
+    longer relies on this bump), but the bump still prunes old cache entries on
+    activate — so a stale version token must not linger here."""
     assert "streakfit-v0818" not in SW, (
         "the service-worker cache version was not bumped, so cached clients "
         "keep the old bundle")
