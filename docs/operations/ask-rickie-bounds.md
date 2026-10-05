@@ -54,32 +54,50 @@ Passing `transport=` makes httpx ignore proxy environment variables. None are co
 
 **A strike** is a model call that itself ran for at least half the budget (10 s) and then failed in any way: a timeout, a lost connection, or a 5xx/529 that arrived late. How long the call held the worker decides, not what kind of error it was.
 
-**Two strikes within 60 s trip it.** One is not enough: a non-streamed reply sends nothing until it is complete, so a single timeout cannot tell a stalled provider from one unusually long answer, and one person's long answer must not lock everybody out. Two slow failures can come from the same person. That needs a provider slow enough that a ≤ 1024-token reply cannot finish in 20 s, which is itself a brownout signal.
+**Two strikes within 60 s trip it** (a provider answer in between clears them). One is not enough: a non-streamed reply sends nothing until it is complete, so a single timeout cannot tell a stalled provider from one unusually long answer, and one person's long answer must not lock everybody out. Two slow failures can come from the same person. That needs a provider slow enough that a ≤ 1024-token reply cannot finish in 20 s, which is itself a brownout signal.
 
 **It never counts:**
 - fast errors of any kind (4xx, 5xx, 429, 529, a reset, an oversized or compressed body): they cost the worker nothing;
 - running out of the shared budget late in a long weather turn.
 
+**Half-open.** For 60 s after an open window ends, the first question through is the recovery check:
+- if it fails slowly, the breaker reopens at once;
+- if it succeeds, the breaker closes fully;
+- a fast failure proves nothing.
+
+Without this, every cycle of an outage needed two fresh 20 s stalls. After those 60 s the two-strike rule applies again.
+
 **Its state** is per process. That is global with one worker, the same reasoning as D7's mirror. A worker restart closes it.
 
 **While it is open**, Rickie answers 503 and the client shows "Rickie stepped away".
 
-**Cost of the trade-off.** A real stall costs two 20 s whole-site freezes before the breaker opens, not one.
+**Cost of the trade-off.** The first trip of an outage costs two 20 s whole-site freezes; each later cycle costs one.
+Recovery is noticed by the first question after each 60 s window.
 
 ## Semantics of failure
 
-| case | provider calls | rate-limit hit | turn saved |
-|---|---|---|---|
-| 400 (shape, size, unstorable text) | 0 | yes | no |
-| 503 breaker open / context over budget | 0 | yes | no |
-| 503 timeout / provider error | 1 per model call (≤ 3 per question) | yes | no |
-| 503 tool round cut short (deadline or ceiling) | 1–2 | yes | no (the preamble is not saved as an answer) |
-| 503 provider answered with no text at all (was 200 `{"reply": ""}`) | 1–3 | yes | no |
-| 200 | 1–3 | yes | yes |
+Two limits, two jobs:
+- **3 per minute** is the request throttle. It is spent on entry by every authenticated request that reaches the route, refused or not, so nothing can be hammered.
+- **10 per day** is the AI-question allowance. It is *checked* on entry, so someone with none left is refused before anything else. It is *spent* only by a question that reached the model (Flask-Limiter `deduct_when`, through the same D7 gate).
 
-The rate limits (3/min, 10/day) are decorators and count on entry, as before. A 413 from the body-size hook does not count. The client never retries automatically.
+| case | provider calls | minute limit | daily question | turn saved |
+|---|---|---|---|---|
+| 400 (shape, size, unstorable text) | 0 | spent | **not spent** | no |
+| 503 breaker open | 0 | spent | **not spent** | no |
+| 503 context over budget / no API key | 0 | spent | not spent | no |
+| 503 timeout / provider 429 / 5xx | 1 per model call (≤ 3 per question) | spent | spent | no |
+| 503 tool round cut short (deadline or ceiling) | 1–2 | spent | spent | no (the preamble is not saved) |
+| 503 provider answered with no text at all (was 200 `{"reply": ""}`) | 1–3 | spent | spent | no |
+| 200 | 1–3 | spent | spent | yes |
+| 401 / 413 | 0 | not spent | not spent | no |
+| 429 (a limit already used up) | 0 | — | not spent | no |
 
-**A breaker-open 503 still uses the person's daily allowance.** One person retrying through an outage spends their questions on instant 503s. On the 4th try in a minute they see the existing "You've reached today's question limit" copy, which is wrong for the per-minute limit (ledger D65).
+**Why a failed provider call still spends a question:**
+- the provider did work, and may bill a generation that timed out;
+- the provider's rate limits are shared by everyone on this key;
+- the question occupied the only worker.
+
+The client never retries automatically. A 429 shows "You've reached today's question limit" even for the per-minute limit (ledger D65).
 
 ## Residual risks
 
@@ -89,7 +107,11 @@ The rate limits (3/min, 10/day) are decorators and count on entry, as before. A 
 - **Bodies that bypass the size check.** Chunked bodies still bypass the 256 KB hook on every route (ledger D64). That is outside this change, and no longer reaches the prompt.
 - **The person's own name** (display name ≤ 40, or a short username, both collapsed to one line) still appears in the system prompt.
 - **The provider's own reply text is not validated.** A reply containing NUL or a lone surrogate still returns 200 but is not saved. This is provider-controlled and pre-existing.
-- **Sustained brownout.** With the breaker at 60 s, each window can cost about 2×20 s of whole-site freeze. Derived (not load-tested): roughly a third to two-thirds of the time unavailable during a long provider outage with steady Rickie traffic. Better than N×30 s with worker kills, but not free. A shorter budget or a longer breaker window trades Rickie's success rate for site availability. Streaming responses would let a stall be told from a long answer by the first byte; that is a larger change and not done here.
+- **Sustained brownout.** Each cycle of a provider outage still costs one 20 s whole-site freeze (two for the first trip).
+  - Measured, 240 s, 4 users asking every 15 s between them: **30.9% unavailable** (47.8% before half-open; 136% and never draining on 32581c9).
+  - A provider that heals was answering again 15 s later in the measured run. Recovery is checked by the first question after each 60 s window.
+  - A shorter budget or a longer window trades Rickie's success rate for site availability.
+  - Streaming responses would let a stall be told from a long answer by the first byte; that is a larger change and not done here.
 
 ## Rollback
 
