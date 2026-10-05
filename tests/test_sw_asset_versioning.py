@@ -90,8 +90,8 @@ def test_images_and_icons_are_also_versioned_no_stale_visual_shell():
     """Closes the same class for non-executable local assets (rickie.svg, icons)
     referenced by the document."""
     html = _get("/").get_data(as_text=True)
-    for ref in re.findall(r'(?:src|href)="(/static/[^"?]+\.(?:svg|png))"', html):
-        assert False, f"unversioned local asset reference remains: {ref}"
+    unversioned = re.findall(r'(?:src|href)="(/static/[^"?]+\.(?:svg|png))"', html)
+    assert not unversioned, f"unversioned local asset references remain: {unversioned}"
 
 
 def test_manifest_link_is_left_alone():

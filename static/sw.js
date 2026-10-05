@@ -1,8 +1,10 @@
-const CACHE = 'streakfit-v1003c';
+const CACHE = 'streakfit-v1004';
+// Executable/style assets (app.js, rickie-roam.js, style.css) are intentionally
+// NOT precached here: the document now requests them with a content-hash query
+// (`?v=...`, see app.py), so they are cache-first at runtime under version-tied
+// URLs and can never be served stale against newer HTML (D49). Only the stable,
+// unversioned icons are precached.
 const STATIC = [
-  '/static/style.css',
-  '/static/app.js',
-  '/static/rickie-roam.js',
   '/static/icons/icon.svg',
   '/static/icons/icon-180.png',
   '/static/icons/icon-192.png',

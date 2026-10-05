@@ -3133,9 +3133,68 @@ def award_progress(user, event_type, xp, acorns, team_id=None):
 
 # --- Frontend ---
 
+# ── Version-coherent app shell (D49) ────────────────────────────────────────
+# The service worker serves /static/* cache-first, and `/` is network-fresh, so
+# a bare asset URL (`/static/app.js`) lets NEW html pair with the PREVIOUS
+# release's cached JS/CSS -- permanently if a human forgets to bump the SW cache
+# name. The cure is to tie each asset URL to its CONTENT: `/static/app.js?v=<hash>`.
+# New html then references a URL that is a cache MISS, so the worker fetches it
+# fresh. Coherence no longer depends on a cache bump or on worker timing, and it
+# holds even for a browser still controlled by the previously deployed worker
+# (its bare-path cache misses every `?v=` URL). Hashes are computed once from the
+# shipped bytes (self-contained: no git/env, never None; per-file so an unchanged
+# asset keeps its URL). Only local .js/.css/.svg/.png refs are stamped; the
+# declarative manifest link is left alone.
+_ASSET_VERSION_CACHE: dict[str, str] = {}
+_VERSIONABLE_ASSET = re.compile(
+    r'((?:src|href)=")(/static/[^"?]+\.(?:js|css|svg|png))(")')
+
+
+def _asset_version(static_path):
+    """Content hash (16 hex = 64 bits; no truncation hazard) for a /static ref,
+    cached. Returns '' if the file is missing so the ref is left bare rather
+    than pointing at a hash of nothing."""
+    v = _ASSET_VERSION_CACHE.get(static_path)
+    if v is not None:
+        return v
+    rel = static_path[len('/static/'):]
+    disk = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'static', rel)
+    try:
+        with open(disk, 'rb') as fh:
+            v = hashlib.sha256(fh.read()).hexdigest()[:16]
+    except OSError:
+        v = ''
+    _ASSET_VERSION_CACHE[static_path] = v
+    return v
+
+
+def _render_index_html():
+    """index.html with every local executable/style/image asset URL stamped with
+    its content hash. Computed once (static bytes do not change at runtime)."""
+    cached = _ASSET_VERSION_CACHE.get('__rendered_index__')
+    if cached is not None:
+        return cached
+    disk = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'static', 'index.html')
+    with open(disk, encoding='utf-8') as fh:
+        html = fh.read()
+
+    def stamp(m):
+        v = _asset_version(m.group(2))
+        return m.group(0) if not v else f'{m.group(1)}{m.group(2)}?v={v}{m.group(3)}'
+
+    html = _VERSIONABLE_ASSET.sub(stamp, html)
+    _ASSET_VERSION_CACHE['__rendered_index__'] = html
+    return html
+
+
 @app.route('/')
 def frontend():
-    return app.send_static_file('index.html')
+    resp = app.make_response(_render_index_html())
+    resp.headers['Content-Type'] = 'text/html; charset=utf-8'
+    # Stay revalidated so new asset URLs reach clients at once; the SW already
+    # treats `/` as network-only (make_response drops Flask's auto headers).
+    resp.headers['Cache-Control'] = 'no-cache'
+    return resp
 
 
 @app.route('/sw.js')

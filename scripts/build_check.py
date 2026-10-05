@@ -416,10 +416,46 @@ def check_api_routes_are_reachable() -> None:
         warn(f"allowlisted routes no longer exist in app.py: {', '.join(stale)}")
 
 
+def check_shell_version_coherence() -> None:
+    """D49: the served `/` document must reference its executable/style assets by
+    content-versioned URLs, and the service worker must key its cache on the full
+    URL (no ignoreSearch). Together these stop new HTML from pairing with a
+    previous release's cached JS/CSS."""
+    global checks_run
+    sw = (STATIC / "sw.js").read_text(encoding="utf-8")
+
+    checks_run += 1
+    if "ignoreSearch" in sw:
+        fail("sw.js uses ignoreSearch — the ?v= content version would be ignored and "
+             "D49 (stale-asset) returns")
+
+    # Render the document the way the `/` route does and assert versioning.
+    env = dict(os.environ, DATABASE_URL="sqlite:///:memory:", SECRET_KEY="x",
+               JWT_SECRET_KEY="x", ADMIN_SECRET="x")
+    probe = subprocess.run(
+        [sys.executable, "-c",
+         "import app; print(app._render_index_html())"],
+        cwd=str(ROOT), env=env, capture_output=True, text=True, timeout=60)
+    checks_run += 1
+    if probe.returncode != 0:
+        fail("could not render index.html via app._render_index_html():\n    "
+             + "\n    ".join((probe.stderr or "").strip().splitlines()[-4:]))
+        return
+    html = probe.stdout
+    for name in ("app.js", "rickie-roam.js", "style.css"):
+        checks_run += 1
+        if re.search(r'(?:src|href)="/static/' + re.escape(name) + r'"', html):
+            fail(f"served document references /static/{name} WITHOUT a ?v= content "
+                 "version — new HTML could run with the old cached asset (D49)")
+        elif not re.search(r'/static/' + re.escape(name) + r'\?v=[0-9a-f]{16,}', html):
+            fail(f"served document does not content-version /static/{name}")
+
+
 def main() -> int:
     for check in (
         check_asset_references,
         check_service_worker,
+        check_shell_version_coherence,
         check_js_syntax,
         check_api_client_guard,
         check_json_files,
