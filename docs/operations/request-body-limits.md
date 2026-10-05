@@ -4,7 +4,8 @@
 | route | limit | enforced for |
 |---|---|---|
 | `POST /api/teams/<id>/photos` (multipart) | 2 MiB (2,097,152 bytes) | known and unknown length |
-| every other route, including unmatched ones | 256 KiB (262,144 bytes) | known and unknown length |
+| every other route | 256 KiB (262,144 bytes) | known and unknown length |
+| unmatched routes (404/405/redirect) | 256 KiB by Content-Length; an unknown-length body is not read at all | known length |
 
 An over-limit body is **refused with JSON 413 `{"error":"payload_too_large"}` before any view code, authentication, rate limiting, database work or provider call**. It is never truncated and processed.
 
@@ -14,14 +15,20 @@ An over-limit body is **refused with JSON 413 `{"error":"payload_too_large"}` be
   - Werkzeug wraps the input in its own `LimitedStream` of `request.max_content_length`. In Flask 3.0 that is the single global `MAX_CONTENT_LENGTH`, so `_BoundedRequest` (`app.request_class`) makes it the route's limit + 1.
   - The hook reads the body once (`get_data(cache=True)`, at most limit + 1 bytes) and refuses it if more than the limit arrived. The +1 is necessary: the bounded stream returns its prefix silently, so reading one byte past the limit is the only proof a body is too big.
   - The view then parses the cached bytes (JSON, urlencoded and multipart alike).
-- **Unmatched routes (404/405/redirect):** an unknown-length body is not read at all.
+- **Unmatched routes (404/405/redirect), and GET/HEAD/OPTIONS:** an unknown-length body is not read at all. No view for those methods reads a body; `test_no_bodiless_method_view_reads_a_body` keeps that true, because such a view would get the body silently truncated (D64 again).
+- **A body the server cannot frame** (for example a malformed chunk trailer, which gunicorn reports with an exception that is not an OSError) is a JSON 400, not a 500 with a traceback.
 - **Any 413 Werkzeug raises itself** (e.g. more than 1000 multipart parts) is JSON too (`errorhandler(413)`).
 - **Ordering:** the hook is registered before the Limiter is constructed, so it runs before Flask-Limiter's own before_request hook. Do not move the Limiter above it.
 
-**Before (885c303):** a chunked body of any size was read as its first 2 MiB and processed whenever that prefix was valid. Measured: users registered, team messages posted, profile writes, analytics rows, and an Ask Rickie model call. Exactly 2 MiB on the photo route got an HTML 413.
+**Before (885c303):** a chunked body of any size was read as its first 2 MiB and processed whenever that prefix was valid.
+
+A photo upload of exactly 2 MiB got an HTML 413 under both framings; it is now accepted, matching the documented "more than the limit" rule. Measured: users registered, team messages posted, profile writes, analytics rows, and an Ask Rickie model call. Exactly 2 MiB on the photo route got an HTML 413.
 
 **Cost:**
-- A chunked request to a known route is now read (≤ limit + 1 bytes) before authentication. A slow chunked sender therefore holds the worker on 401/403/429 paths that previously answered without reading.
+- A chunked POST/PUT/PATCH/DELETE to a known route is now read (≤ limit + 1 bytes) before authentication and before rate limiting.
+  - A slow chunked sender therefore holds the worker on 401/403/429 paths that previously answered without reading.
+  - Per-IP rate limits do not cap slow-body attempts, because the read comes first. This is part of D67; the refusal-before-anything ordering is the reason.
+- Every Verification Suite run sends one chunked 256 KiB + 1 request to unauthenticated PATCH /api/me. It has no side effect.
 - A chunked photo upload holds up to 2 MiB as cached bytes in addition to Werkzeug's spooled file (about +4.6 MB worker high-water mark, measured). Browsers send FormData with Content-Length, so this applies only to non-browser clients.
 
 Verification Suite module `body_limits.py` checks this end to end over the network.

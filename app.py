@@ -25,6 +25,7 @@ from flask import Flask, Request, request, jsonify, abort, make_response, g, has
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy.exc import DBAPIError, IntegrityError, OperationalError
 from flask_migrate import Migrate
+from werkzeug.exceptions import HTTPException
 from werkzeug.middleware.proxy_fix import ProxyFix
 from werkzeug.security import generate_password_hash, check_password_hash
 
@@ -262,8 +263,23 @@ def _enforce_route_body_limit():
         return None
     if request.routing_exception is not None:
         return None
+    # No GET/HEAD/OPTIONS view reads a body (a test enforces it), so reading
+    # one here would only hand a slow sender the worker (D67).
+    if request.method in ("GET", "HEAD", "OPTIONS"):
+        return None
     if "wsgi.input_terminated" in request.environ:
-        if len(request.get_data(cache=True)) > limit:
+        try:
+            body = request.get_data(cache=True)
+        except HTTPException:
+            raise
+        except Exception as exc:
+            # A body the server cannot frame -- gunicorn's own parser errors
+            # for a malformed chunk trailer are not OSErrors, so Werkzeug lets
+            # them through. It is the client's malformed request: 400, not a
+            # 500 with a traceback. Type only, never the bytes.
+            app.logger.info("event=request_body_unreadable error=%s", type(exc).__name__)
+            return jsonify({"error": "bad_request"}), 400
+        if len(body) > limit:
             return jsonify({"error": "payload_too_large"}), 413
     return None
 
