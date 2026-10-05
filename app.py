@@ -12441,7 +12441,9 @@ def _coach_http_client(deadline):
     global _COACH_SSL_CONTEXT
     if _COACH_SSL_CONTEXT is None:  # built lazily, in the worker, once
         _COACH_SSL_CONTEXT = _httpx.create_ssl_context()
-    transport = _BoundedTransport()
+    # verify= the cached context: HTTPTransport would otherwise build (and
+    # this code discard) a fresh certifi context, ~20 ms, on every call.
+    transport = _BoundedTransport(verify=_COACH_SSL_CONTEXT)
     transport._pool = _httpcore.ConnectionPool(
         ssl_context=_COACH_SSL_CONTEXT, network_backend=_DeadlineBackend(deadline))
     left = max(0.001, deadline - time.monotonic())
@@ -12645,12 +12647,15 @@ def coach():
     # here: the only write above, expiring old turns, commits itself.
     db.session.commit()
 
-    http_client = _coach_http_client(deadline)
     g._coach_deadline = deadline      # the weather lookups share the budget
     calls = 0
     call_left = None
     call_started = None
+    http_client = None
     try:
+        # Inside the try: if even the client cannot be built (a broken
+        # certificate bundle), the answer is still Rickie's JSON 503.
+        http_client = _coach_http_client(deadline)
         client = _anthropic_lib.Anthropic(
             api_key=_anthropic_api_key, max_retries=0, http_client=http_client)
         # Bounded tool-use loop. Rickie has exactly one tool (weather). Almost every
@@ -12762,7 +12767,8 @@ def coach():
         return jsonify({"error": "coach_unavailable"}), 503
     finally:
         g.pop("_coach_deadline", None)
-        http_client.close()
+        if http_client is not None:
+            http_client.close()
 
 
 @app.route('/api/coach/memory', methods=['DELETE'])

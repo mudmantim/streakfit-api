@@ -827,3 +827,25 @@ def test_the_self_check_fails_if_the_deadline_backend_is_missing(client, monkeyp
     c = checks["coach.provider_bounds"]
     assert c["status"] == "FAIL"
     assert "deadline backend MISSING" in c["observed"]
+
+
+def test_a_client_that_cannot_be_built_is_still_a_json_503(client, monkeypatch):
+    monkeypatch.setattr(appmod, "_anthropic_api_key", "sk-ant-lab-dummy-not-real")
+
+    def broken(deadline):
+        raise OSError("certificate bundle missing")
+
+    monkeypatch.setattr(appmod, "_coach_http_client", broken)
+    token = register_and_login(client, "rv_noclient")
+    resp, _ = _ask(client, token)
+    assert resp.status_code == 503 and resp.get_json() == {"error": "coach_unavailable"}
+
+
+def test_building_the_bounded_client_is_cheap():
+    """It runs on every question and every self-check; a fresh certifi
+    context each time cost ~20 ms."""
+    appmod._coach_http_client(time.monotonic() + 1).close()   # warm the cached context
+    t0 = time.perf_counter()
+    for _ in range(20):
+        appmod._coach_http_client(time.monotonic() + 1).close()
+    assert (time.perf_counter() - t0) / 20 < 0.005

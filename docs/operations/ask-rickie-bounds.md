@@ -46,6 +46,8 @@ The deadline is therefore enforced in an **httpcore network backend** (`_Deadlin
 
 It is injected by replacing `httpx.HTTPTransport._pool`, the one private name touched. `httpx==0.28.1` and `httpcore==1.0.9` are pinned. `tests/test_coach_hardening.py` drives a real hostile socket server, so an upgrade that bypasses the backend turns those tests red.
 
+The weather lookups use the same bounded client inside a question. Unlike the old urllib path, it does not follow redirects; open-meteo does not redirect today.
+
 Passing `transport=` makes httpx ignore proxy environment variables. None are configured in production. If a proxy is ever needed, it must be added to the transport deliberately.
 
 ## The breaker
@@ -72,6 +74,7 @@ Passing `transport=` makes httpx ignore proxy environment variables. None are co
 | 503 breaker open / context over budget | 0 | yes | no |
 | 503 timeout / provider error | 1 per model call (≤ 3 per question) | yes | no |
 | 503 tool round cut short (deadline or ceiling) | 1–2 | yes | no (the preamble is not saved as an answer) |
+| 503 provider answered with no text at all (was 200 `{"reply": ""}`) | 1–3 | yes | no |
 | 200 | 1–3 | yes | yes |
 
 The rate limits (3/min, 10/day) are decorators and count on entry, as before. A 413 from the body-size hook does not count. The client never retries automatically.
