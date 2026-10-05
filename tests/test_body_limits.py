@@ -230,3 +230,77 @@ def test_an_oversized_chunked_body_is_not_counted_by_the_rate_limiter(client):
     finally:
         appmod.limiter.reset()
         appmod.limiter.enabled = False
+
+
+# ── from the candidate review ─────────────────────────────────────────────────
+
+class _ExplodingStream(io.BytesIO):
+    """A stream whose read fails the way gunicorn's chunked parser does on a
+    malformed trailer (its InvalidHeader is not an OSError). Seekable, because
+    the test client seeks its input; every READ raises `error`."""
+
+    def __init__(self, error=None):
+        super().__init__(b"x")
+        self.error = error or ValueError("Invalid HTTP Header: 'no colon here'")
+
+    def read(self, *a):
+        raise self.error
+
+    readinto = read
+    readline = read
+
+
+def test_a_body_that_cannot_be_read_is_a_json_400_not_a_500(client):
+    resp = client.open("/api/register", method="POST", input_stream=_ExplodingStream(),
+                       content_type="application/json", headers={"Transfer-Encoding": "chunked"},
+                       environ_overrides={"wsgi.input_terminated": True})
+    assert resp.status_code == 400
+    assert resp.headers["Content-Type"].startswith("application/json")
+
+
+def test_a_body_parser_error_that_is_not_an_oserror_is_a_400_too(client):
+    class _ParserError(Exception):
+        pass
+
+    resp = client.open("/api/register", method="POST",
+                       input_stream=_ExplodingStream(_ParserError("LimitRequestHeaders")),
+                       content_type="application/json", headers={"Transfer-Encoding": "chunked"},
+                       environ_overrides={"wsgi.input_terminated": True})
+    assert resp.status_code == 400
+
+
+@pytest.mark.parametrize("method", ["GET", "HEAD", "OPTIONS"])
+def test_a_body_sent_with_a_bodiless_method_is_not_read(client, method):
+    """No GET/HEAD/OPTIONS view reads a body, so reading one before routing
+    only gives a slow sender the worker (D67)."""
+    stream = io.BytesIO(b" " * (L + 1))
+    resp = client.open("/health", method=method, input_stream=stream,
+                       content_type="application/json", headers={"Transfer-Encoding": "chunked"},
+                       environ_overrides={"wsgi.input_terminated": True})
+    assert resp.status_code in (200, 204)
+    assert stream.tell() == 0
+
+
+def test_no_bodiless_method_view_reads_a_body():
+    """The rule above is only safe while it is true: a GET view that parsed a
+    body would get it silently truncated at the limit, which is D64 again."""
+    import ast
+    import re
+    from pathlib import Path
+    src = (Path(appmod.__file__)).read_text(encoding="utf-8")
+    offenders = []
+    for node in ast.walk(ast.parse(src)):
+        if not isinstance(node, ast.FunctionDef):
+            continue
+        decs = " ".join(ast.get_source_segment(src, d) or "" for d in node.decorator_list)
+        if "app.route" not in decs:
+            continue
+        m = re.search(r"methods=\[([^\]]*)\]", decs)
+        methods = m.group(1) if m else "'GET'"
+        if any(x in methods for x in ("POST", "PUT", "PATCH", "DELETE")):
+            continue
+        body = ast.get_source_segment(src, node) or ""
+        if any(k in body for k in ("get_json", "request.form", "request.files", "get_data",
+                                   "request.data", "request.values", "request.stream")):
+            offenders.append(node.name)
+    assert offenders == [], offenders
