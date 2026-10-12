@@ -162,3 +162,11 @@ def test_routes_that_load_the_caller_read_the_row_once(client):
         assert len(seen) == 1
     finally:
         event.remove(appmod.db.engine, 'before_cursor_execute', spy)
+
+
+@pytest.mark.parametrize('route,body', [
+    ('/api/register', '{"username":"sur_reg","password":"Lantern-\\ud800-meadow"}'),
+    ('/api/login', '{"username":"sur_login","password":"Lantern-\\ud800-meadow"}'),
+])
+def test_a_lone_surrogate_in_credentials_is_a_400_not_a_500(client, route, body):
+    assert client.post(route, data=body, content_type='application/json').status_code == 400
