@@ -136,9 +136,9 @@ def test_deletion_log_lines_carry_no_user_id(fk_app, caplog):
                              headers={'Authorization': f'Bearer {tok}'})
     assert resp.status_code == 200
     lines = [r.getMessage() for r in caplog.records if 'account_' in r.getMessage()]
-    assert any('event=account_deleted' in l for l in lines)
-    assert any('event=account_self_deleted' in l for l in lines)
-    assert not any('user_id' in l or str(uid) in l.split('photos=')[0] for l in lines), lines
+    assert any('event=account_deleted' in line for line in lines)
+    assert any('event=account_self_deleted' in line for line in lines)
+    assert not any('user_id' in line or str(uid) in line.split('photos=')[0] for line in lines), lines
 
 
 def test_a_team_owner_cannot_use_deletion_to_learn_about_a_report(fk_app):
