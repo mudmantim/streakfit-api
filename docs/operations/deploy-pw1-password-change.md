@@ -61,26 +61,42 @@ prerequisites aren't met, and it causes an outage.
 
 ### A. Zero-downtime rollback: deploy the compatibility build (preferred)
 
-**What it is:** branch `rollback/pw1-compat`, commit `f50ac70` (local; not
-yet pushed). That is production `1d7b2f2` plus:
+**What it is:** branch `rollback/pw1-compat`, commit **`7a7fee3`** (local;
+not yet pushed). That is production `1d7b2f2` plus:
 
-- the PW-1 migration file, byte-identical;
-- the two new columns declared on the model and never used.
+- the PW-1 migration file, byte-identical, so its Alembic head is
+  `e8b3c1f0a7d2`;
+- the two columns declared on the model;
+- **PW-1's session security, verbatim:**
+  - every token is stamped with the account's `token_version` (`tv`);
+  - every authenticated route refuses a token whose version has moved
+    (`401 session_ended`);
+  - a deleted account's token still gets its 404;
+- PW-1's password verification (NFKC, raw, and for non-ASCII input NFC/NFD),
+  so passwords set under PW-1 and before it both sign in;
+- malformed (unencodable) credentials answered 400.
 
-Its Alembic head is `e8b3c1f0a7d2`, so **its own `STREAKFIT_ENFORCE_DB_HEAD`
-check passes against the PW-1 database as it stands**:
+It does **not** have `POST /api/me/password`, and no code in it writes
+`token_version`. So nothing in it can revoke a session, and nothing can
+un-revoke one.
+
+**Its own `STREAKFIT_ENFORCE_DB_HEAD` check passes against the PW-1 database
+as it stands:**
 
 - nothing is disabled;
 - nothing is downgraded;
-- no request ever meets a missing column.
+- no request meets a missing column.
+
+*History:* the first compatibility build (`f50ac70`) ignored `tv`, so
+sessions revoked by a PW-1 change worked again for up to an hour while it
+served. That was rejected at the security gate; `1a286d6` fixed it.
 
 **Prerequisites, all before PW-1 is released:**
 
 1. `rollback/pw1-compat` is pushed, and **both CI jobs are green on it**.
    Record its full SHA next to the PW-1 release SHA.
 2. Production's database is at `e8b3c1f0a7d2`, and **no later migration has
-   been deployed**. The compatibility build refuses any other head (see
-   failure conditions).
+   been deployed**. The compatibility build refuses any other head.
 3. Render Auto-Deploy is Off (manual deploys by SHA).
 
 **Procedure:**
@@ -101,38 +117,46 @@ check passes against the PW-1 database as it stands**:
    way.
 
 **Rehearsed on disposable PostgreSQL 17.10, 2026-10-12**
-(`scripts/rehearse_pw1_rollback.py`; the head check is on at every boot):
+(`scripts/rehearse_pw1_rollback.py`):
 
-| Step | Observed |
+- the head check is on at every boot;
+- the script checks its own expectations and exits 1 on any failure;
+- **0 failures**.
+
+| Phase | Observed |
 |---|---|
-| PW-1 → compat | Pre-Deploy ran no upgrade. Boot check passed. Sign-in with the changed password 200; old password 401; `/api/daily` 200; `/api/me/password` 404. A new registration got `token_version 0` from the default. Versions written under PW-1 unchanged |
-| `verify_all` v15 against the compat build, serving with the head check on | **214/214**, 0 Tracebacks, 0 5xx |
-| compat → PW-1 again | No upgrade; boot check passed. `token_version` values exactly as left. PW-1 tokens still valid |
+| PW-1 | Two people changed their password, one to a full-width password. Their second devices got 401 |
+| PW-1 → compat | Pre-Deploy: no upgrade. Boot check passed. **Revoked sessions refused on all 44 authenticated routes** (URL-map walk, `401 session_ended`), including `DELETE /api/me` and `/api/daily`. New passwords sign in (the full-width one typed either way); old ones 401. PW-1 tokens keep working. Compat tokens carry `tv = 1`. `/api/me/password` 404. Versions untouched |
+| compat → PW-1 | No upgrade; boot check passed. **Compat sessions still valid (no forced sign-out).** The revoked tablet still refused. A new change revokes the compat session |
+| Failure conditions | The compat build refuses to start on a downgraded head and on a newer head |
 
-**Limitations (observed, not assumed):**
+**Also run against the compatibility build:**
 
-- **Revoked sessions come back while the compatibility build serves.** It
-  ignores `tv`, so a token that a password change had revoked works again
-  until it expires (at most 1 hour after it was issued). Someone who changed
-  their password *because* a device was lost is exposed for that hour.
-- **One sign-out after rolling forward.** Tokens the compatibility build
-  issued carry no `tv`, which reads as 0. For anyone who had changed their
-  password (`token_version` ≥ 1), those tokens are refused
-  (`session_ended`) after rolling forward, so they sign in once.
-- Under the compatibility build:
-  - registration is back to 8 characters, with no blocklist;
-  - sign-in doesn't normalise Unicode (only the exact stored form works);
-  - **a password set under PW-1 is stored in NFKC**, so a non-ASCII password
-    typed in a non-NFKC form (rare, e.g. full-width input) may not sign in
-    until roll-forward.
-- Pages loaded on PW-1 show "Change password", which gets 404 → "Couldn't
-  change the password just now."
+- the full test suite;
+- the PostgreSQL CI steps;
+- `verify_all` v15 while serving with the head check on.
+
+Results are in the release record.
+
+**Limitations:**
+
+- **No password change** while it serves. Pages loaded on PW-1 show the form,
+  which gets 404 → "Couldn't change the password just now."
+- **Registration uses production `1d7b2f2`'s rules** (8+ characters, no
+  blocklist) while it serves. This is an owner decision: the compatibility
+  build could carry PW-1's registration policy too, at the cost of being
+  further from the known-good build.
+- **No one-time NFKC rehash** at sign-in (verification still accepts every
+  form). PW-1 does the rehash after roll-forward.
+- **Old cached pages** show "Session expired" instead of the
+  password-change wording on a `session_ended` 401. Same effect: the
+  sign-in screen.
 
 **Failure conditions and recovery:**
 
 | Condition | What happens | Recovery |
 |---|---|---|
-| The database isn't at `e8b3c1f0a7d2` (someone downgraded, or a later migration was deployed) | The compatibility build **refuses to start** (`Refusing to start: database is at Alembic revision …`). Rehearsed for both a downgraded and a newer head. Render keeps serving the previous instance when a new one fails to boot (verify on staging before relying on it) | Don't force it. Deploy a build whose head matches the database, or use B |
+| The database isn't at `e8b3c1f0a7d2` (someone downgraded, or a later migration was deployed) | The compatibility build **refuses to start** (`Refusing to start: database is at Alembic revision …`). Rehearsed for both. Render keeps serving the previous instance when a new one fails to boot (verify on staging before relying on it) | Don't force it. Deploy a build whose head matches the database, or use B |
 | CI hasn't run on the compatibility SHA | Unknown build quality | Push it and wait for green **before** the PW-1 release (prerequisite 1) |
 | Sign-in fails after the deploy although `/health` is 200 | Not expected (rehearsed); treat it as an incident | Redeploy PW-1 (same head, no migration), then investigate |
 
