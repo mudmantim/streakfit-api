@@ -74,8 +74,10 @@ Milestone **PW-1**: password change plus token version. One release.
   - delete with the new password.
 
   Bump the suite version.
-- [ ] Runbook entry. Rollback: redeploy the previous build (it ignores `tv`
-      and the columns), then downgrade if wanted.
+- [ ] Runbook entry. Rollback: **downgrade first** (with the lock timeout),
+      **then** redeploy the previous build. The old build runs with
+      `STREAKFIT_ENFORCE_DB_HEAD=1` and won't boot against the newer head.
+      Corrected 2026-10-12; see `pw1-implementation-plan.md` §6.
 
 Milestone **PW-2**: recovery codes. Separate release, after PW-1.
 
