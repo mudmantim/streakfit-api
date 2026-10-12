@@ -11,7 +11,7 @@ import pytest
 
 import app as appmod
 from app import DailyCompletion, User, db
-from conftest import auth_headers, register_and_login
+from conftest import auth_headers, register_and_login, mission_json
 
 
 def _daily_keys(client, token):
@@ -20,7 +20,7 @@ def _daily_keys(client, token):
 
 
 def _complete(client, token, key):
-    return client.post(f'/api/daily/{key}/complete', headers=auth_headers(token)).get_json()
+    return client.post(f'/api/daily/{key}/complete', json=mission_json(), headers=auth_headers(token)).get_json()
 
 
 def _seed_prior_day(username, keys, days_ago=3):
@@ -549,17 +549,24 @@ def test_tier_hopping_no_longer_farms_the_discovery_bonus(client):
     assert me['current_streak'] == 1
 
 
-def test_extra_movement_beyond_the_mission_still_counts_and_still_pays(client):
-    """Closing the exploit must not turn into punishing someone for moving
-    more. The sixth exercise of a day pays the repeat rate — which is what a
-    sixth exercise is — rather than nothing."""
+def test_a_tier_change_after_the_mission_keeps_todays_five_and_pays_nothing_twice(client):
+    """Step 1 (D59/D68): today's five are stored, and a new tier starts with
+    the next mission day. This used to be the one way to reach a "sixth
+    exercise of the day" (switching tier after finishing swapped in a fresh
+    list, paid at the repeat rate). With the five frozen there is no sixth:
+    the list stays the same five, and tapping one again is an idempotent
+    "already saved" that pays nothing -- it never re-pays the mission."""
     token = register_and_login(client, 'tier_extra')
-    for key in _daily_keys(client, token):
+    keys = _daily_keys(client, token)
+    for key in keys:
         _complete(client, token, key)
     client.patch('/api/me', json={'skill_level': 'intermediate'},
                  headers=auth_headers(token))
-    sixth = _complete(client, token, _daily_keys(client, token)[0])
-    assert sixth['xp_awarded'] == appmod.REPEAT_EXERCISE_XP
+    assert _daily_keys(client, token) == keys
+    again = _complete(client, token, keys[0])
+    assert again['already_recorded'] is True
+    assert again['xp_awarded'] == 0
+    assert again['completed_count'] == 5
 
 
 # ── Coming back after a while ───────────────────────────────────────────────
@@ -725,7 +732,7 @@ def test_easing_off_is_always_allowed_mid_mission(client):
     assert client.get('/api/daily', headers=auth_headers(token)).get_json()['effort']['level'] == 'easy'
 
 
-def test_asking_for_more_is_refused_once_the_mission_has_started(client):
+def test_asking_for_more_once_started_is_kept_for_tomorrow(client):
     """Not to punish anyone — the five exercises would change underneath
     completions that already exist, and "I've done three, let me swap to the
     harder set" is the one version of this that is about the score."""
@@ -734,8 +741,11 @@ def test_asking_for_more_is_refused_once_the_mission_has_started(client):
     _complete(client, token, keys[0])
     resp = client.put('/api/daily/effort', json={'level': 'more'},
                       headers=auth_headers(token))
-    assert resp.status_code == 409
+    # Step 1: kept for tomorrow rather than refused; today's five do not move.
+    assert resp.status_code == 200
     body = resp.get_json()
+    assert body['applies'] == 'tomorrow'
+    assert _daily_keys(client, token) == keys
     assert 'tomorrow' in body['message'].lower()
     for blaming in ('cannot', 'not allowed', 'too late', 'failed'):
         assert blaming not in body['message'].lower(), body['message']
@@ -765,7 +775,7 @@ def test_the_mission_shown_is_the_mission_accepted(client):
     for level in ('easy', 'usual', 'more'):
         client.put('/api/daily/effort', json={'level': level}, headers=auth_headers(token))
         for key in _daily_keys(client, token):
-            resp = client.post(f'/api/daily/{key}/complete', headers=auth_headers(token))
+            resp = client.post(f'/api/daily/{key}/complete', json=mission_json(), headers=auth_headers(token))
             assert resp.status_code == 200, (level, key, resp.get_json())
         client.put('/api/daily/effort', json={'level': 'easy'}, headers=auth_headers(token))
 

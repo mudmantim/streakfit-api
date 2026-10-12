@@ -15,7 +15,7 @@ from datetime import datetime, timedelta
 
 import pytest
 
-from conftest import register_and_login, auth_headers
+from conftest import register_and_login, auth_headers, mission_json
 
 from app import db, Report, ReportEvidence, PhotoEvidence, EvidenceAccess, \
     ContentRestriction, UserRestriction, ModerationAction, Appeal, DailyCompletion, ModerationNotice, _sweep_moderation_evidence, \
@@ -447,7 +447,7 @@ def test_the_sweep_touches_no_unrelated_user_data(client, team, admin_env):
     owner, member, t = team
     daily = client.get('/api/daily', headers=auth_headers(member)).get_json()
     for ex in daily['exercises']:
-        client.post(f"/api/daily/{ex['key']}/complete", headers=auth_headers(member))
+        client.post(f"/api/daily/{ex['key']}/complete", json=mission_json(), headers=auth_headers(member))
     before_me = client.get('/api/me', headers=auth_headers(member)).get_json()
     before_completions = db.session.query(DailyCompletion).count()
     say(client, member, t['id'], 'an ordinary message')

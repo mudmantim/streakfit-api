@@ -14,7 +14,7 @@ import io
 
 import pytest
 
-from conftest import register_and_login, auth_headers
+from conftest import register_and_login, auth_headers, mission_json
 
 from app import db, Report, ReportEvidence, ContentRestriction, \
     UserRestriction, ModerationAction, TeamMessage, CHALLENGE_PRESETS_BY_KEY, DailyCompletion
@@ -502,7 +502,7 @@ def test_suspension_leaves_the_solo_product_untouched(client, suspended):
     mallory, owner, victim, team_a, team_b = suspended
     daily = client.get('/api/daily', headers=auth_headers(victim)).get_json()
     for ex in daily['exercises']:
-        assert client.post(f"/api/daily/{ex['key']}/complete",
+        assert client.post(f"/api/daily/{ex['key']}/complete", json=mission_json(),
                            headers=auth_headers(victim)).status_code in (200, 201)
     me = client.get('/api/me', headers=auth_headers(victim)).get_json()
     assert me['total_missions'] >= 1

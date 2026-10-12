@@ -74,6 +74,10 @@ SCENARIOS = [
     'Y4_teammate_reference_not_queued',
     'Y5_completion_backstop_executed',
     'Y6_join_backstop_executed',
+    'S1_ease_holds_then_stale_tap',
+    'S2_completion_holds_then_ease',
+    'S3a_get_stores_mission_then_skill_change',
+    'S3b_skill_change_stores_mission_then_get',
 ]
 
 

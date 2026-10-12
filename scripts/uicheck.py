@@ -659,9 +659,11 @@ def check_celebration_stays_clear_of_the_nav(b: Browser, base: str, app) -> None
         for w, h in sizes:
             b.call("Emulation.setDeviceMetricsOverride", width=w, height=h, deviceScaleFactor=2, mobile=True)
             _, token = make_user(app, f"toast_{w}x{h}")
-            keys = [e["key"] for e in _api(base, "/api/daily", token=token)["exercises"]]
+            daily = _api(base, "/api/daily", token=token)
+            keys = [e["key"] for e in daily["exercises"]]
             for k in keys[:4]:
-                _api(base, f"/api/daily/{k}/complete", "POST", token=token)
+                _api(base, f"/api/daily/{k}/complete", "POST", token=token,
+                     body={"mission_date": daily["mission_date"]})
             b.goto(base + "/", wait=1.0)
             b.js(f"localStorage.setItem('streakfit_token', {json.dumps(token)})")
             b.goto(base + "/", wait=3.5)
@@ -725,7 +727,8 @@ def check_team_witness(b: Browser, base: str, app) -> None:
 
     daily = _api(base, "/api/daily", token=kid_token)
     for ex in daily["exercises"]:
-        _api(base, f"/api/daily/{ex['key']}/complete", "POST", kid_token)
+        _api(base, f"/api/daily/{ex['key']}/complete", "POST", kid_token,
+             {"mission_date": daily["mission_date"]})
 
     b.goto(base + "/", wait=1.0)
     b.js(f"localStorage.setItem('streakfit_token', {json.dumps(parent_token)})")
@@ -1341,7 +1344,8 @@ def check_brain_boost_can_be_answered(b: Browser, base: str, app) -> None:
     # about the question.
     daily = _api(base, "/api/daily", token=token)
     for ex in daily["exercises"]:
-        _api(base, f"/api/daily/{ex['key']}/complete", "POST", token)
+        _api(base, f"/api/daily/{ex['key']}/complete", "POST", token,
+             {"mission_date": daily["mission_date"]})
     b.goto(base + "/", wait=3.5)
 
     b.js("(()=>{const r=[...document.querySelectorAll('button')]"

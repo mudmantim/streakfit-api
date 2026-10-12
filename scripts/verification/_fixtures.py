@@ -132,7 +132,12 @@ def complete_daily_mission(api, results, token, check_prefix="mission", capture=
 
     last_status, last_body = None, None
     for key in keys:
-        last_status, last_body = api.request("POST", f"/api/daily/{key}/complete", token=token)
+        # Names the mission day it is for (Step 1): a run that straddles
+        # midnight now gets an honest 409 day_changed instead of crediting the
+        # next day.
+        last_status, last_body = api.request(
+            "POST", f"/api/daily/{key}/complete", token=token,
+            body={"mission_date": daily.get("mission_date") or daily.get("date")})
     if capture is not None:
         capture["final"] = last_body
     return results.check(f"{check_prefix}.complete_all_five", last_status == 200, f"last status={last_status}")

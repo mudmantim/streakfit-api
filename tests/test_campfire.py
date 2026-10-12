@@ -6,7 +6,7 @@ The original brief also listed "Team Rickie never gets touched". That card was
 removed in Sept 2026 and never had a team_campfire row to touch, so there is
 nothing left to assert — the no-teams case below is now the whole of it.
 """
-from conftest import register_and_login, auth_headers
+from conftest import register_and_login, auth_headers, mission_json
 
 
 def create_team(client, token, name):
@@ -26,7 +26,7 @@ def complete_full_mission(client, token):
     assert len(exercise_keys) == 5
     last_resp = None
     for key in exercise_keys:
-        last_resp = client.post(f'/api/daily/{key}/complete', headers=auth_headers(token))
+        last_resp = client.post(f'/api/daily/{key}/complete', json=mission_json(), headers=auth_headers(token))
     return last_resp, exercise_keys
 
 
@@ -103,7 +103,7 @@ def test_repeated_completion_does_not_double_count(client):
     # not the "just inserted, completed_count == 5" branch, so nothing should
     # increment again.
     replay_resp = client.post(
-        f'/api/daily/{exercise_keys[0]}/complete', headers=auth_headers(token)
+        f'/api/daily/{exercise_keys[0]}/complete', json=mission_json(), headers=auth_headers(token)
     )
     assert replay_resp.status_code == 200
     assert replay_resp.get_json()['team_campfire_updates'] == []

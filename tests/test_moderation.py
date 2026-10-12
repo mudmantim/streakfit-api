@@ -14,7 +14,7 @@ import io
 
 import pytest
 
-from conftest import register_and_login, auth_headers
+from conftest import register_and_login, auth_headers, mission_json
 
 from app import db, UserBlock, Report, ReportEvidence, ModerationAction, \
     ContentRestriction, TeamMessage, DailyCompletion
@@ -461,7 +461,7 @@ def test_suspension_stops_posting_but_never_touches_progress(client, pair, admin
     # jacob earns some progress first.
     daily = client.get('/api/daily', headers=auth_headers(b)).get_json()
     for ex in daily['exercises']:
-        client.post(f"/api/daily/{ex['key']}/complete", headers=auth_headers(b))
+        client.post(f"/api/daily/{ex['key']}/complete", json=mission_json(), headers=auth_headers(b))
     before = client.get('/api/me', headers=auth_headers(b)).get_json()
     completions_before = db.session.query(DailyCompletion).count()
 

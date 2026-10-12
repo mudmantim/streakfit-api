@@ -162,6 +162,7 @@ def check_daily_mission(api: ApiClient, token: str) -> None:
     if not check("fetch today's mission", status == 200, f"HTTP {status}"):
         return
     exercises = body.get("exercises", [])
+    mission_day = {"mission_date": body.get("mission_date") or body.get("date")}
     check("mission has 5 exercises", len(exercises) == 5, f"got {len(exercises)}")
     check(
         "every exercise promises an illustration path",
@@ -179,7 +180,8 @@ def check_daily_mission(api: ApiClient, token: str) -> None:
 
     completed = 0
     for e in exercises:
-        status, body = api.request("POST", f"/api/daily/{e['key']}/complete", token=token)
+        status, body = api.request("POST", f"/api/daily/{e['key']}/complete", token=token,
+                                   body=mission_day)
         if status == 200:
             completed += 1
         else:

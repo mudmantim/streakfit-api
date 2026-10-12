@@ -222,6 +222,25 @@ var _pendingJoinCode = null;
 var guestCompleted = new Set();
 var guestCompleteFired = false;
 
+// The mission day this page is showing, as the server named it. Every write
+// for the day sends it back, so a page left open past the end of the day is
+// told so instead of being credited to the next day (D50). Guests keep their
+// ticks on the device, keyed to the same day, so yesterday's ticks never count
+// towards today (D70).
+var currentMissionDate = null;
+var guestMissionDate = null;
+var _dayNotice = null;          // shown once at the top of the next render
+// When the page may need the next day: how long the SERVER said the day had
+// left, and when we heard it. Elapsed time is measured on the device; the
+// device's idea of what time it is is never compared with the server's day,
+// so a device clock that is wrong cannot make the page think the day ended.
+var _dayLeftMs = 0;
+var _dayLoadedMono = 0;
+var _dayLoadedWall = 0;
+var _dayEndTimer = null;
+var _dayRefreshBackoff = 0;     // grows when a refresh finds the same day
+var _dayRefreshNotBefore = 0;
+
 // Picked once per page load, reused across re-renders — see renderJourneyCard's
 // caller and the Rickie intro line below.
 var _cachedGreetingLine = null;
@@ -4098,6 +4117,7 @@ async function api(path, method, body) {
                 : 'That did not go through. Try again in a moment.'
         };
     }
+    if (data && data.refresh_required) _showRefreshPrompt(data.message);
     return { status: res.status, data: data };
 }
 
@@ -4400,6 +4420,13 @@ function _resetAccountState() {
     isGuest = false;
     guestCompleted = new Set();
     guestCompleteFired = false;
+    currentMissionDate = null;
+    guestMissionDate = null;
+    _dayNotice = null;
+    _dayLeftMs = 0;
+    _dayRefreshBackoff = 0;
+    _dayRefreshNotBefore = 0;
+    if (_dayEndTimer) { clearTimeout(_dayEndTimer); _dayEndTimer = null; }
     _pendingJoinCode = null;
 
     // Personalised copy: greeting lines are chosen for a specific person.
@@ -4615,6 +4642,126 @@ function _renderMissionError(listEl) {
     listEl.appendChild(wrap);
 }
 
+// ── The mission day on screen ────────────────────────────────────────────────
+// The server decides what day it is; the page only remembers which day it is
+// showing and when that day ends, so it can fetch the new one instead of
+// sitting on yesterday's mission (D50). Correctness never depends on the
+// device clock: a write for an ended day is refused by the server either way.
+function _monoNow() {
+    return (window.performance && performance.now) ? performance.now() : Date.now();
+}
+
+function _rememberMissionDay(daily) {
+    var prev = currentMissionDate;
+    currentMissionDate = daily.mission_date || daily.date || null;
+    // The only place the page decides a new day has begun: the server's
+    // mission date actually changed.
+    if (prev && currentMissionDate && prev !== currentMissionDate) {
+        _dayNotice = _dayNotice || "A new day has started. Here's today's mission.";
+        _dayRefreshBackoff = 0;
+        _dayRefreshNotBefore = 0;
+    }
+    _dayLeftMs = (typeof daily.day_ends_in_s === 'number' && daily.day_ends_in_s > 0)
+        ? daily.day_ends_in_s * 1000 : 0;
+    _dayLoadedMono = _monoNow();
+    _dayLoadedWall = Date.now();
+    if (_dayEndTimer) { clearTimeout(_dayEndTimer); _dayEndTimer = null; }
+    if (_dayLeftMs) {
+        // A little after the server's day ends, so it has certainly moved on.
+        _dayEndTimer = setTimeout(_checkMissionDay, Math.min(_dayLeftMs + 2000, 2147483647));
+    }
+}
+
+function _missionDayMayHaveEnded() {
+    if (!_dayLeftMs) return false;
+    // Time passed since the server said how much was left: the monotonic
+    // clock, or -- if the device slept and that clock paused -- the wall
+    // clock's own difference. Both are differences, so a device that is
+    // simply set to the wrong time does not matter.
+    var elapsed = Math.max(_monoNow() - _dayLoadedMono, Date.now() - _dayLoadedWall);
+    return elapsed >= _dayLeftMs;
+}
+
+function _checkMissionDay() {
+    if (!currentMissionDate || !document.getElementById('daily-exercises-list')) return;
+    if (!_missionDayMayHaveEnded()) return;
+    var now = _monoNow();
+    if (now < _dayRefreshNotBefore) {
+        // Refreshed recently and found the same day: wait, don't hammer.
+        if (_dayEndTimer) clearTimeout(_dayEndTimer);
+        _dayEndTimer = setTimeout(_checkMissionDay, _dayRefreshNotBefore - now + 100);
+        return;
+    }
+    // Bounded: 30 s, 1 min, 2 min ... up to 30 min between refreshes that keep
+    // finding the same day. Reset the moment the day really changes.
+    _dayRefreshBackoff = _dayRefreshBackoff ? Math.min(_dayRefreshBackoff * 2, 1800000) : 30000;
+    _dayRefreshNotBefore = now + _dayRefreshBackoff;
+    loadDailyExercises();
+}
+
+document.addEventListener('visibilitychange', function () {
+    if (!document.hidden) _checkMissionDay();
+});
+window.addEventListener('focus', _checkMissionDay);
+window.addEventListener('pageshow', _checkMissionDay);
+window.addEventListener('online', _checkMissionDay);
+
+// A response that says this page's code is out of date (a write that does not
+// name its mission day, from a page loaded before an update). Nothing was
+// saved; offer the reload that fixes it.
+function _showRefreshPrompt(message) {
+    if (document.getElementById('refresh-required')) return;
+    var bar = document.createElement('div');
+    bar.id = 'refresh-required';
+    bar.className = 'refresh-required';
+    bar.setAttribute('role', 'alert');
+    bar.style.cssText = 'position:sticky;top:0;z-index:1000;display:flex;gap:12px;'
+        + 'align-items:center;justify-content:space-between;padding:12px 16px;'
+        + 'background:#fff3cd;color:#3d3000;';
+    var text = document.createElement('p');
+    text.style.margin = '0';
+    text.textContent = message || 'StreakFit has been updated. Refresh to continue.';
+    var btn = document.createElement('button');
+    btn.type = 'button';
+    btn.textContent = 'Refresh';
+    btn.style.minHeight = '44px';
+    btn.addEventListener('click', function () { window.location.reload(); });
+    bar.appendChild(text);
+    bar.appendChild(btn);
+    document.body.insertBefore(bar, document.body.firstChild);
+}
+
+function _renderDayNotice(list) {
+    if (!_dayNotice || !list) return;
+    var note = document.createElement('p');
+    note.className = 'daily-day-notice';
+    note.setAttribute('role', 'status');
+    note.textContent = _dayNotice;
+    list.insertBefore(note, list.firstChild);
+    _dayNotice = null;
+}
+
+function _renderSkillNote(select, text) {
+    if (!select || !select.parentNode) return;
+    var note = document.getElementById('daily-skill-note');
+    if (!note) {
+        note = document.createElement('p');
+        note.id = 'daily-skill-note';
+        note.className = 'daily-skill-note';
+        select.parentNode.insertBefore(note, select.nextSibling);
+    }
+    note.hidden = !text;
+    note.textContent = text || '';
+}
+
+// What the server said about a write for a day that has ended, or for a
+// mission that changed (another device eased it). Shown on the next render,
+// which this triggers; never "something went wrong", because nothing did.
+async function _showCurrentMission(data) {
+    _dayNotice = (data && data.message) || "Here's today's mission.";
+    await loadDailyExercises();
+}
+
 async function loadDailyExercises() {
     var list = document.getElementById('daily-exercises-list');
     list.innerHTML = '';
@@ -4637,6 +4784,14 @@ async function loadDailyExercises() {
         }
         if (!guestRes.ok) { _renderMissionError(list); return; }
         daily = await guestRes.json();
+        // A new day: yesterday's ticks belong to yesterday's five.
+        if (guestMissionDate !== daily.mission_date) {
+            guestCompleted = new Set();
+            guestCompleteFired = false;
+            guestMissionDate = daily.mission_date;
+        }
+        var guestToday = new Set(daily.exercises.map(function (ex) { return ex.key; }));
+        guestCompleted.forEach(function (k) { if (!guestToday.has(k)) guestCompleted.delete(k); });
         daily.exercises = daily.exercises.map(function (ex) {
             return Object.assign({}, ex, { completed: guestCompleted.has(ex.key) });
         });
@@ -4650,6 +4805,9 @@ async function loadDailyExercises() {
         if (result.status !== 200) { _renderMissionError(list); return; }
         daily = result.data;
     }
+
+    _rememberMissionDay(daily);
+    _renderDayNotice(list);
 
     // Baseline Rickie expression for this load — overridden moment-to-moment
     // by mission-complete/Brain Boost reactions, then recomputed back to this
@@ -4679,6 +4837,7 @@ async function loadDailyExercises() {
     // Sync the skill-level select
     var select = document.getElementById('skill-level-select');
     if (select) select.value = daily.skill_level;
+    _renderSkillNote(select, daily.skill_note);
 
     // Sync the Rickie Mode select — registered users only, currentUser has
     // the field since it's a guest-hidden control anyway.
@@ -4692,7 +4851,8 @@ async function loadDailyExercises() {
     if (dateEl) {
         var d = new Date();
         var dateStr = d.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' });
-        var level = daily.skill_level.charAt(0).toUpperCase() + daily.skill_level.slice(1);
+        var tier = daily.mission_skill_level || daily.skill_level;
+        var level = tier.charAt(0).toUpperCase() + tier.slice(1);
         dateEl.textContent = dateStr + ' · ' + level + ' · Refreshes tomorrow';
     }
 
@@ -5284,7 +5444,13 @@ function renderBrainBoostQuestion(brainBoost) {
                 var buttons = optionsWrap.querySelectorAll('.bb-option-btn');
                 buttons.forEach(function (b) { b.disabled = true; });
 
-                var result = await api('/api/brain-boost/answer', 'POST', { selected_index: i });
+                var result = await api('/api/brain-boost/answer', 'POST',
+                                       { selected_index: i, mission_date: currentMissionDate });
+                if (result && result.status === 409 && result.data &&
+                        result.data.error === 'day_changed') {
+                    await _showCurrentMission(result.data);
+                    return;
+                }
                 if (!result || result.status !== 200) {
                     buttons.forEach(function (b) { b.disabled = false; });
                     feedback.textContent = "Couldn't save that — try again later.";
@@ -6821,8 +6987,9 @@ function renderEffortChoice(daily) {
     if (isGuest || !daily.effort.show) { wrap.hidden = true; return; }
 
     wrap.hidden = false;
-    noteEl.hidden = !daily.effort.note;
-    noteEl.textContent = daily.effort.note || '';
+    var effortNote = daily.effort.note || daily.effort.next_note || '';
+    noteEl.hidden = !effortNote;
+    noteEl.textContent = effortNote;
 
     optionsWrap.innerHTML = '';
     daily.effort.options.forEach(function (opt) {
@@ -6861,6 +7028,11 @@ async function setEffort(level) {
             return;
         }
         await loadDailyExercises();
+        if (result && result.status === 200 && result.data &&
+                result.data.applies === 'tomorrow' && result.data.message) {
+            var kept = document.getElementById('daily-effort-note');
+            if (kept) { kept.hidden = false; kept.textContent = result.data.message; }
+        }
     } finally {
         _effortBusy = false;
     }
@@ -6922,7 +7094,9 @@ function renderDailyExercise(ex, isNext) {
 
     var thumb = document.createElement('img');
     thumb.className = 'daily-exercise-thumb';
-    thumb.src = ex.image_url;
+    // A completed exercise since removed from the library has no picture;
+    // fall back to the app icon rather than a broken image.
+    thumb.src = ex.image_url || '/static/icons/icon.svg';
     thumb.alt = '';               // decorative: the name sits right beside it
     thumb.loading = 'lazy';
     thumb.decoding = 'async';
@@ -7058,6 +7232,21 @@ async function handleCompleteExercise(key, btn, row) {
     _clearCompleteError(row);
 
     if (isGuest) {
+        // A guest page left open past midnight would otherwise count a tap on
+        // yesterday's list towards today (D70). Check the day first; offline,
+        // the tap counts locally as before.
+        try {
+            var fresh = await fetch('/api/demo/daily');
+            if (fresh.ok) {
+                var today = await fresh.json();
+                var stillListed = today.exercises.some(function (ex) { return ex.key === key; });
+                if (today.mission_date !== guestMissionDate || !stillListed) {
+                    // The loader says "new day" only if the date really changed.
+                    await loadDailyExercises();
+                    return;
+                }
+            }
+        } catch (e) { /* offline: count it on the device */ }
         btn.textContent = '✓';
         if (row) row.classList.add('completing');
         guestCompleted.add(key);
@@ -7093,8 +7282,15 @@ async function handleCompleteExercise(key, btn, row) {
     // the tap, or a request that fails reads as one that worked.
     btn.textContent = 'Saving…';
 
-    var result = await api('/api/daily/' + key + '/complete', 'POST');
+    var result = await api('/api/daily/' + key + '/complete', 'POST',
+                           { mission_date: currentMissionDate });
     if (!result) return;
+
+    if (result.status === 409 && result.data &&
+            (result.data.error === 'day_changed' || result.data.error === 'mission_changed')) {
+        await _showCurrentMission(result.data);
+        return;
+    }
 
     if (result.status === 200) {
         btn.textContent = '✓';

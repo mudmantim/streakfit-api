@@ -94,6 +94,13 @@ ACCOUNT_SCOPED = [
     '_teamPanelMembers',
     '_teamThreadPainted',
     '_photoFilters',
+    # Step 1: the mission day on screen (and the guest's day) is per account.
+    'currentMissionDate',
+    'guestMissionDate',
+    '_dayNotice',
+    '_dayLeftMs',
+    '_dayRefreshBackoff',
+    '_dayRefreshNotBefore',
 ]
 
 

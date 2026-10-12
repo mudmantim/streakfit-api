@@ -5,7 +5,7 @@ campfire_stage_reached. No AI generation (fixed templates only), no new
 tables, and no post on every ordinary campfire_log_added -- that's the
 exact noise this sprint is built to avoid.
 """
-from conftest import register_and_login, auth_headers
+from conftest import register_and_login, auth_headers, mission_json
 
 from app import db, TeamCampfire
 
@@ -28,7 +28,7 @@ def complete_full_mission(client, token):
     assert len(exercise_keys) == 5
     last_resp = None
     for key in exercise_keys:
-        last_resp = client.post(f'/api/daily/{key}/complete', headers=auth_headers(token))
+        last_resp = client.post(f'/api/daily/{key}/complete', json=mission_json(), headers=auth_headers(token))
     return last_resp, exercise_keys
 
 

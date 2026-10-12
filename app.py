@@ -1509,6 +1509,156 @@ def get_daily_brain_boost(date_str, user_id='demo'):
 _JOKE_TRIGGER_WORDS = ('joke', 'funny', 'silly', 'laugh', 'pun', 'hilarious')
 
 
+# ── Server clock and mission days ────────────────────────────────────────────
+# Every "what day is it" decision on the server reads the clock here, so a
+# test (or, later, a per-user day) can replace it in one place instead of
+# patching call sites.
+#
+# One reading, one instant (Step 1 review M2). The clock is a single UTC
+# instant; the mission day is that instant's UTC date. It used to be two
+# separate readings -- the process's local date and a UTC timestamp -- which
+# agreed only when the process ran in UTC, and even then could straddle
+# midnight between the two calls. In production (TZ=UTC) the day is unchanged;
+# in any other process timezone (local dev, `make uicheck`) it is now the same
+# UTC day production uses.
+
+class ServerClock:
+    """The default clock: one naive-UTC instant per reading, resolved through
+    this module's `datetime` at call time (so a harness that patches
+    `app.datetime.utcnow` still steers it). Replace `server_clock` (e.g. via
+    monkeypatch) to pin or move time; a replacement provides `now()`.
+
+    Read once per request (see _clock_snapshot). The day and the timestamps of
+    the rows stamped with it (DailyCompletion.completed_at,
+    BrainBoostAnswer.answered_at, DailyMission.created_at/updated_at) and
+    admin's UTC "today" window all come from that one instant.
+    Other timestamps are NOT on this clock: column defaults elsewhere bind the
+    real `datetime.utcnow` at import, and rolling windows (challenge 24h caps,
+    expiries, retention) call it directly. They measure elapsed time, not
+    calendar days.
+
+    tests/test_day_seams.py enforces that calendar days are derived only in
+    the clock functions below."""
+
+    def now(self):
+        return datetime.utcnow()
+
+
+server_clock = ServerClock()
+
+
+_CLOCK_SNAPSHOT_KEY = 'streakfit.clock_snapshot'
+
+
+def _clock_snapshot():
+    """This request's instant, read from the clock exactly once.
+
+    A request used to read the clock at every decision, so one that straddled
+    midnight could validate against one day and stamp, count or celebrate
+    another. Every day decision and every stamp in a request now comes from
+    this one reading. Kept on the WSGI environ, not flask.g: the test app
+    context outlives single requests, and a snapshot must not. Outside a
+    request (CLI, scripts, direct calls in tests) each call reads afresh."""
+    if has_request_context():
+        snap = request.environ.get(_CLOCK_SNAPSHOT_KEY)
+        if snap is None:
+            snap = server_clock.now()
+            request.environ[_CLOCK_SNAPSHOT_KEY] = snap
+        return snap
+    return server_clock.now()
+
+
+def server_today():
+    """The server's current mission day: the UTC date of this request's
+    instant."""
+    return _clock_snapshot().date()
+
+
+def server_now():
+    """This request's instant (naive UTC): the timestamp for anything stamped
+    with server_today()."""
+    return _clock_snapshot()
+
+
+def mission_day_ends_at(day):
+    """When `day` stops being the mission day (naive UTC): the next UTC
+    midnight, until the per-user local day (Step 2)."""
+    return datetime(day.year, day.month, day.day) + timedelta(days=1)
+
+
+def mission_day_seconds_left(day, now):
+    """Whole seconds until `day` ends, measured on the server's clock -- what
+    the client schedules its refresh from, so it never compares the server's
+    day against the device's clock (Step 1 review M1). At least 1."""
+    left = (mission_day_ends_at(day) - now).total_seconds()
+    return max(1, int(left) + (1 if left > int(left) else 0))
+
+
+def utc_day_start(instant):
+    """Midnight (naive UTC) of the UTC day containing `instant`."""
+    return datetime(instant.year, instant.month, instant.day)
+
+
+def _mission_day_having():
+    """What makes a date a mission day: >= 5 DailyCompletion rows (any keys).
+    The single definition; every mission-day query below uses it."""
+    return db.func.count(DailyCompletion.exercise_key) >= 5
+
+
+def _mission_dates_query(*filters):
+    """One user's (or a filtered set's) mission days, for streaks, the week
+    strip, best-run and missions_since. Pass at least one filter: with none it
+    spans every user."""
+    return (db.select(DailyCompletion.date)
+            .where(*filters)
+            .group_by(DailyCompletion.date)
+            .having(_mission_day_having()))
+
+
+def _mission_dates(user_id):
+    """Sorted mission days for one user."""
+    return sorted(set(db.session.execute(
+        _mission_dates_query(DailyCompletion.user_id == user_id)
+    ).scalars().all()))
+
+
+def _mission_dates_by_user(user_ids):
+    """{user_id: set(mission days)} in one query, for rosters."""
+    out = {}
+    rows = db.session.execute(
+        db.select(DailyCompletion.user_id, DailyCompletion.date)
+        .where(DailyCompletion.user_id.in_(user_ids))
+        .group_by(DailyCompletion.user_id, DailyCompletion.date)
+        .having(_mission_day_having())
+    ).all()
+    for uid, d in rows:
+        out.setdefault(uid, set()).add(d)
+    return out
+
+
+def _current_streak(mission_days, today):
+    """Consecutive mission days ending today, or ending yesterday while today
+    is still open: a streak only breaks once a whole day has passed without a
+    mission. Never punish who showed up."""
+    check = today if today in mission_days else today - timedelta(days=1)
+    streak = 0
+    while check in mission_days:
+        streak += 1
+        check -= timedelta(days=1)
+    return streak
+
+
+def _best_streak(sorted_mission_days):
+    """Longest run of consecutive mission days. Input must be sorted."""
+    best = run = 0
+    prev = None
+    for d in sorted_mission_days:
+        run = run + 1 if (prev and (d - prev).days == 1) else 1
+        best = max(best, run)
+        prev = d
+    return best
+
+
 def get_recent_week(user_id):
     """The last seven days, oldest first: did a mission happen on each one?
 
@@ -1516,13 +1666,10 @@ def get_recent_week(user_id):
     had. Deliberately only reports the days that DID happen -- a blank day is
     blank, never marked, never counted, never coloured as a miss.
     """
-    today = date.today()
+    today = server_today()
     start = today - timedelta(days=6)
     done = set(db.session.execute(
-        db.select(DailyCompletion.date)
-        .where(DailyCompletion.user_id == user_id, DailyCompletion.date >= start)
-        .group_by(DailyCompletion.date)
-        .having(db.func.count(DailyCompletion.exercise_key) >= 5)
+        _mission_dates_query(DailyCompletion.user_id == user_id, DailyCompletion.date >= start)
     ).scalars().all())
     out = []
     for offset in range(6, -1, -1):
@@ -1538,12 +1685,7 @@ def get_recent_week(user_id):
 
 def get_user_stats(user_id):
     """Return current_streak, best_streak, total_missions, and brain_boost_answers."""
-    completed_dates = sorted(set(db.session.execute(
-        db.select(DailyCompletion.date)
-        .where(DailyCompletion.user_id == user_id)
-        .group_by(DailyCompletion.date)
-        .having(db.func.count(DailyCompletion.exercise_key) >= 5)
-    ).scalars().all()))
+    completed_dates = _mission_dates(user_id)
 
     total_missions = len(completed_dates)
 
@@ -1556,22 +1698,8 @@ def get_user_stats(user_id):
         return {'current_streak': 0, 'best_streak': 0, 'total_missions': 0,
                 'brain_boost_answers': brain_boost_answers}
 
-    date_set = set(completed_dates)
-    today     = date.today()
-    yesterday = today - timedelta(days=1)
-
-    check   = today if today in date_set else yesterday
-    current = 0
-    while check in date_set:
-        current += 1
-        check -= timedelta(days=1)
-
-    best = run = 0
-    prev = None
-    for d in completed_dates:
-        run  = run + 1 if (prev and (d - prev).days == 1) else 1
-        best = max(best, run)
-        prev = d
+    current = _current_streak(set(completed_dates), server_today())
+    best = _best_streak(completed_dates)
 
     return {'current_streak': current, 'best_streak': best, 'total_missions': total_missions,
             'brain_boost_answers': brain_boost_answers}
@@ -1693,7 +1821,7 @@ def returning_note(days_away):
 
 
 def get_daily_exercises(user_id, date_str, skill_level, recent=None,
-                        effort=EFFORT_DEFAULT, days_away=0):
+                        effort=EFFORT_DEFAULT, days_away=0, keep=None):
     """The five exercises for one person on one day.
 
     Still a pure function of its arguments — history is passed in rather than
@@ -1704,6 +1832,11 @@ def get_daily_exercises(user_id, date_str, skill_level, recent=None,
                  'high_impact': how many of them were explosive} or None.
     `effort` is one of EFFORT_LEVELS, chosen by the person.
     `days_away` is the gap before today, used to cap load on a return.
+    `keep` is {category: exercise} for slots that are already done and must
+    not change (easing effort mid-mission). Only the other categories are
+    picked, and the whole-day rules -- impact cap, fun floor, low/high impact
+    present -- are checked on the combined five; only the new picks are kept
+    away from yesterday's keys. With no `keep` the draw is exactly as before.
     """
     if skill_level not in EXERCISE_LIBRARY:
         skill_level = 'beginner'
@@ -1793,10 +1926,15 @@ def get_daily_exercises(user_id, date_str, skill_level, recent=None,
     # Preferences, not requirements: a candidate that avoids repeating
     # yesterday wins if we find one, but we never fail to produce a mission
     # over it. 18-20% of slots used to repeat yesterday with nothing watching.
+    kept_high = sum(1 for ex in (keep or {}).values() if ex['impact'] == 'high')
+
     best_relaxed = None
     candidate = None
     for _ in range(_GENERATOR_MAX_RETRIES):
-        candidate = [pick(cat) for cat in _CATEGORIES]
+        if keep:
+            candidate = [keep[cat] if cat in keep else pick(cat) for cat in _CATEGORIES]
+        else:
+            candidate = [pick(cat) for cat in _CATEGORIES]
         impacts   = [ex['impact'] for ex in candidate]
 
         # Constraint 1 — fun floor: at least one high-fun exercise when the
@@ -1810,13 +1948,16 @@ def get_daily_exercises(user_id, date_str, skill_level, recent=None,
         # point rather than a failure to be energetic.
         impact_ok = effort == 'easy' or any(i in ('low', 'high') for i in impacts)
         # Constraint 3 — the high-impact cap worked out above.
-        cap_ok    = impacts.count('high') <= high_cap
+        # Completed (kept) slots cannot change; new picks may not add load
+        # beyond the cap, and add none if the kept ones already exceed it.
+        cap_ok    = impacts.count('high') <= max(high_cap, kept_high)
 
         if not (fun_ok and impact_ok and cap_ok):
             continue
         if best_relaxed is None:
             best_relaxed = candidate
-        if not any(ex['key'] in yesterday_keys for ex in candidate):
+        if not any(ex['key'] in yesterday_keys for ex in candidate
+                   if not keep or ex['category'] not in keep):
             return candidate
 
     # Everything hard was satisfied but we never dodged yesterday entirely.
@@ -1879,11 +2020,8 @@ def missions_since(user_id, since_date):
         return 0
     return db.session.execute(
         db.select(db.func.count()).select_from(
-            db.select(DailyCompletion.date)
-            .where(DailyCompletion.user_id == user_id,
-                   DailyCompletion.date >= since_date)
-            .group_by(DailyCompletion.date)
-            .having(db.func.count(DailyCompletion.exercise_key) >= 5)
+            _mission_dates_query(DailyCompletion.user_id == user_id,
+                                 DailyCompletion.date >= since_date)
             .subquery()
         )
     ).scalar() or 0
@@ -1903,11 +2041,24 @@ def effort_for(user_id, today, days_away, missions_since_return):
     if suggested != EFFORT_DEFAULT:
         return suggested, False
     previous = db.session.execute(
-        db.select(DailyEffort.level)
+        db.select(DailyEffort.date, DailyEffort.level)
         .where(DailyEffort.user_id == user_id, DailyEffort.date < today)
         .order_by(DailyEffort.date.desc()).limit(1)
-    ).scalar()
-    return (previous if previous in EFFORT_LEVELS else EFFORT_DEFAULT), False
+    ).first()
+    # A harder (or, at 5/5, easier) effort asked for on an earlier day is kept
+    # on that day's mission for the next one (DailyMission.next_effort). It was
+    # stated after that day's own effort, so on the same date it wins.
+    pending = db.session.execute(
+        db.select(DailyMission.mission_date, DailyMission.next_effort)
+        .where(DailyMission.user_id == user_id, DailyMission.mission_date < today,
+               DailyMission.next_effort.is_not(None))
+        .order_by(DailyMission.mission_date.desc()).limit(1)
+    ).first()
+    if pending is not None and (previous is None or pending[0] >= previous[0]):
+        level = pending[1]
+    else:
+        level = previous[1] if previous is not None else None
+    return (level if level in EFFORT_LEVELS else EFFORT_DEFAULT), False
 
 
 _READINESS_MORE_DAYS = 5
@@ -1926,10 +2077,18 @@ def tier_readiness(user_id, skill_level):
     nxt = _next_tier(skill_level)
     if not nxt:
         return None
-    days = db.session.execute(
-        db.select(db.func.count(DailyEffort.id))
+    # A day counts when the person chose "more" on it -- whether it applied
+    # that day (DailyEffort) or, chosen after starting, was kept for the next
+    # mission day (DailyMission.next_effort). Counted by distinct day, so a
+    # deferred choice is not lost and is not counted twice.
+    chosen = set(db.session.execute(
+        db.select(DailyEffort.date)
         .where(DailyEffort.user_id == user_id, DailyEffort.level == 'more')
-    ).scalar() or 0
+    ).scalars().all()) | set(db.session.execute(
+        db.select(DailyMission.mission_date)
+        .where(DailyMission.user_id == user_id, DailyMission.next_effort == 'more')
+    ).scalars().all())
+    days = len(chosen)
     if days < _READINESS_MORE_DAYS:
         return None
     return {
@@ -2002,25 +2161,11 @@ def get_daily5_streak(user_id):
     If today is already complete, the streak includes today.
     If today is not yet complete, the streak counts from yesterday — the streak
     remains alive until a day is actually missed, matching challenge-card
-    behaviour."""
-    completed_dates = set(db.session.execute(
-        db.select(DailyCompletion.date)
-        .where(DailyCompletion.user_id == user_id)
-        .group_by(DailyCompletion.date)
-        .having(db.func.count(DailyCompletion.exercise_key) >= 5)
-    ).scalars().all())
+    behaviour.
 
-    today     = date.today()
-    yesterday = today - timedelta(days=1)
-    # Start from today if already complete; otherwise give the user the rest
-    # of today before counting the streak as broken.
-    check = today if today in completed_dates else yesterday
-
-    streak = 0
-    while check in completed_dates:
-        streak += 1
-        check -= timedelta(days=1)
-    return streak
+    Nothing calls this any more (get_user_stats is the canonical streak); it
+    now shares that walk instead of carrying a fifth copy of it."""
+    return _current_streak(set(_mission_dates(user_id)), server_today())
 
 
 # --- Database Models ---
@@ -2226,6 +2371,41 @@ class DailyMissionAward(db.Model):
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), primary_key=True)
     mission_date = db.Column(db.Date, primary_key=True)
     created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+
+
+class DailyMission(db.Model):
+    """The day's mission, decided once and kept (D59/D68, Step 1).
+
+    The five exercises used to be recomputed on every request from inputs
+    that change during the day (effort, skill tier), so the list could swap
+    underneath completions that already existed and the bonus was paid on
+    "any five rows". Now the first request of a person's day writes this row
+    and every later request reads it:
+
+    - `slots`: five {category, key, borrowed}, one per category, in category
+      order. A completed slot never changes. Easing effort regenerates only the
+      unfinished slots (`revision` counts those regenerations); a harder effort
+      or a different skill tier is kept for the next mission day.
+    - `brain_boost`: the question exactly as presented (question, options,
+      correct_index, explanation), so the answer is graded against what the
+      person saw even if the content library changes during the day.
+    - `next_effort`: a harder effort asked for today, applied to the next
+      mission day by effort_for().
+
+    (user_id, mission_date) is the same day identity as DailyMissionAward.
+    """
+    __tablename__ = 'daily_mission'
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), primary_key=True)
+    mission_date = db.Column(db.Date, primary_key=True)
+    skill_level = db.Column(db.String(16), nullable=False)
+    effort = db.Column(db.String(16), nullable=False)
+    next_effort = db.Column(db.String(16), nullable=True)
+    slots = db.Column(db.JSON, nullable=False)
+    brain_boost = db.Column(db.JSON, nullable=False)
+    revision = db.Column(db.Integer, nullable=False, default=0)
+    generator_version = db.Column(db.Integer, nullable=False)
+    created_at = db.Column(db.DateTime, nullable=False)
+    updated_at = db.Column(db.DateTime, nullable=True)
 
 
 class BrainBoostAnswer(db.Model):
@@ -4325,8 +4505,12 @@ def _get_commit_sha():
 def admin_stats():
     _require_admin_secret()
 
-    now = datetime.utcnow()
-    today_start  = datetime(now.year, now.month, now.day)
+    # Admin is UTC by design. Both of its days come from this request's one
+    # clock snapshot: `today_start` (event windows) from its instant, `today`
+    # (completion dates, below) from its day -- the same two sources as before,
+    # which agree in production (TZ=UTC).
+    now = server_now()
+    today_start  = utc_day_start(now)
     seven_ago    = now - timedelta(days=7)
     thirty_ago   = now - timedelta(days=30)
 
@@ -4348,7 +4532,7 @@ def admin_stats():
                 ).filter(AnalyticsEvent.event_name == event_name).scalar() or 0,
             }
 
-        today = date.today()
+        today = server_today()
         seven_days_ago = today - timedelta(days=6)  # inclusive 7-day window
 
         total_registered_users = db.session.query(
@@ -4393,7 +4577,7 @@ def admin_stats():
         full_mission_days = (
             db.session.query(DailyCompletion.user_id)
             .group_by(DailyCompletion.user_id, DailyCompletion.date)
-            .having(db.func.count(DailyCompletion.exercise_key) >= 5)
+            .having(_mission_day_having())
             .subquery()
         )
         users_with_completion = db.session.query(
@@ -4890,11 +5074,35 @@ def update_me():
         return jsonify({"error": "That Rickie setting isn't one we have. Pick full, quiet or minimal."}), 400
 
     user_id = int(get_jwt_identity())
-    user = db.session.get(User, user_id)
+    # Under the user lock: a skill change may rebuild today's stored mission,
+    # and must serialize with completions that would make it tomorrow's.
+    user = _lock_user(user_id)
     if user is None:
         abort(404)
 
+    skill_applies = None
     if 'skill_level' in data:
+        skill_applies = 'today'
+        today = server_today()
+        started = bool(_completed_keys_on(user_id, today))
+        if not started and _load_mission(user_id, today) is None:
+            # Nothing stored or done today: the mission created just below is
+            # built for the new level directly.
+            user.skill_level = data['skill_level']
+        # Today's stored mission, created here if the day has none -- and if
+        # the day's first GET is creating it at this moment, this insert waits
+        # on its key and reads that row back once it commits, so it is rebuilt
+        # below. Only loading it let a concurrent first GET store the old tier
+        # after this request had answered "today" (Step 1 release condition,
+        # S3a).
+        mission = get_or_create_mission(user, today)
+        if data['skill_level'] != mission.skill_level:
+            if started:
+                # Started: today's five keep their tier; the new one starts
+                # with the next mission day.
+                skill_applies = 'tomorrow'
+            else:
+                _rebuild_mission(user, mission, data['skill_level'], mission.effort)
         user.skill_level = data['skill_level']
     if 'display_mode' in data:
         user.display_mode = data['display_mode']
@@ -4915,6 +5123,9 @@ def update_me():
         "acorns_spent": user.acorns_spent or 0,
         "acorns_available": _acorns_available(user),
         "skill_level": user.skill_level,
+        # Present only when skill_level was sent: "today" (today's five were
+        # rebuilt, or none are stored yet) or "tomorrow" (already started).
+        "skill_applies": skill_applies,
         "display_mode": user.display_mode,
         "rickie_mode": user.rickie_mode,
         "current_streak": stats['current_streak'],
@@ -5190,6 +5401,24 @@ def export_my_data():
             "location (photo GPS data is stripped before storage)",
         ],
         "stats": stats,
+        # The stored day: which five, at what level, and how often it changed.
+        "daily_missions": [
+            {"date": m.mission_date.isoformat(), "skill_level": m.skill_level,
+             "effort": m.effort, "next_effort": m.next_effort, "revision": m.revision,
+             "exercises": [{"category": slot['category'], "exercise": slot['key']}
+                           for slot in m.slots]}
+            for m in db.session.execute(
+                db.select(DailyMission).where(DailyMission.user_id == user_id)
+                .order_by(DailyMission.mission_date.desc()).limit(500)
+            ).scalars().all()
+        ],
+        "effort_choices": [
+            {"date": d.isoformat(), "level": lv} for d, lv in db.session.execute(
+                db.select(DailyEffort.date, DailyEffort.level)
+                .where(DailyEffort.user_id == user_id)
+                .order_by(DailyEffort.date.desc()).limit(500)
+            ).all()
+        ],
         "exercise_completions": [
             {"date": d.isoformat(), "exercise": k} for d, k in completions
         ],
@@ -5419,7 +5648,7 @@ def check_in(challenge_id):
     if challenge.user_id != int(current_user_id):
         return jsonify({"error": "Forbidden"}), 403
 
-    today = date.today()
+    today = server_today()
 
     if challenge.last_check_in == today:
         return jsonify({"message": "Already checked in today", "streak": challenge.current_streak}), 200
@@ -5547,20 +5776,282 @@ def todays_mission(user_id, skill_level, today):
     }
 
 
+# ── The stored daily mission (Step 1: D59/D68) ──────────────────────────────
+MISSION_GENERATOR_VERSION = 1
+_BORROW_FLAGS = ('from_next_tier', 'from_easier_tier')
+
+
+def _tier_of_key(key):
+    for tier, cats in EXERCISE_LIBRARY.items():
+        if any(ex['key'] == key for exs in cats.values() for ex in exs):
+            return tier
+    return None
+
+
+def _slot_from_exercise(ex):
+    borrowed = next((f for f in _BORROW_FLAGS if ex.get(f)), None)
+    return {'category': ex['category'], 'key': ex['key'], 'borrowed': borrowed}
+
+
+def _retired_exercise(slot):
+    """A stored slot whose exercise is no longer in the library (renamed or
+    removed by a later deploy). Only ever shown for a slot that is already
+    completed -- unfinished ones are redrawn (_repair_missing_slots) -- so it
+    stands in for history: named from its key, never explosive, no picture."""
+    key = slot['key']
+    return {'key': key, 'name': key.replace('_', ' ').strip().capitalize() or 'Exercise',
+            'category': slot['category'], 'difficulty': '', 'reps_or_duration': '',
+            'instructions': '', 'equipment': False, 'impact': 'low', 'space': 'small',
+            'family_friendly': True, 'fun_score': 'low', 'requires_structure': False,
+            'retired': True}
+
+
+def _exercise_from_slot(slot):
+    known = _EXERCISE_BY_KEY.get(slot['key'])
+    ex = dict(known) if known is not None else _retired_exercise(slot)
+    if slot.get('borrowed') in _BORROW_FLAGS:
+        ex[slot['borrowed']] = True
+    return ex
+
+
+def _adopted_exercise(key, skill_level):
+    """An exercise already completed today, as a slot of a `skill_level`
+    mission: flagged as borrowed when it came from another tier."""
+    ex = dict(_EXERCISE_BY_KEY[key])
+    tier = _tier_of_key(key)
+    if tier and tier != skill_level and skill_level in _TIER_ORDER and tier in _TIER_ORDER:
+        flag = 'from_next_tier' if _TIER_ORDER.index(tier) > _TIER_ORDER.index(skill_level) \
+            else 'from_easier_tier'
+        ex[flag] = True
+    return ex
+
+
+def _completed_keys_on(user_id, day):
+    """Keys completed on `day`, oldest first."""
+    return list(db.session.execute(
+        db.select(DailyCompletion.exercise_key)
+        .where(DailyCompletion.user_id == user_id, DailyCompletion.date == day)
+        .order_by(DailyCompletion.completed_at, DailyCompletion.id)
+    ).scalars().all())
+
+
+def _slots_done(mission, completed_keys):
+    keys = set(completed_keys)
+    return sum(1 for s in mission.slots if s['key'] in keys)
+
+
+def _load_mission(user_id, day):
+    return db.session.execute(
+        db.select(DailyMission)
+        .where(DailyMission.user_id == user_id, DailyMission.mission_date == day)
+        .execution_options(populate_existing=True)
+    ).scalar_one_or_none()
+
+
+def _build_mission(user, today):
+    """Decide today's mission for `user`. The five are exactly the ones the
+    pre-Step-1 code computed for this request. On a day already in progress
+    when this first runs (deploy day), completions that are not in that list
+    -- a tier or effort switched mid-day under the old code -- are adopted
+    into their category slots first and the rest are drawn around them."""
+    plan = todays_mission(user.id, user.skill_level, today)
+    skill_level = user.skill_level if user.skill_level in EXERCISE_LIBRARY else 'beginner'
+    exercises = plan['exercises']
+    done = _completed_keys_on(user.id, today)
+    listed = {ex['key'] for ex in exercises}
+    if any(k not in listed for k in done if k in _EXERCISE_BY_KEY):
+        keep = {}
+        for k in done:
+            if k in _EXERCISE_BY_KEY and _EXERCISE_BY_KEY[k]['category'] not in keep:
+                keep[_EXERCISE_BY_KEY[k]['category']] = _adopted_exercise(k, skill_level)
+        days_away = plan['days_away']
+        exercises = get_daily_exercises(
+            user.id, today.isoformat(), skill_level,
+            recent=recent_movement(user.id, today), effort=plan['effort'],
+            days_away=days_away or 0, keep=keep)
+    boost = get_daily_brain_boost(today.isoformat(), user.id)
+    return DailyMission(
+        user_id=user.id, mission_date=today, skill_level=skill_level,
+        effort=plan['effort'], next_effort=None,
+        slots=[_slot_from_exercise(ex) for ex in exercises],
+        brain_boost={k: boost[k] for k in ('question', 'options', 'correct_index', 'explanation')},
+        revision=0, generator_version=MISSION_GENERATOR_VERSION,
+        created_at=server_now(), updated_at=None)
+
+
+def get_or_create_mission(user, today):
+    """Today's stored mission, writing it on the first request of the day.
+
+    Safe without the user lock (GET /api/daily): two first requests may both
+    build one; the primary key lets exactly one row in and the other request
+    reads the winner. Write routes call this under _lock_user."""
+    mission = _load_mission(user.id, today)
+    if mission is not None:
+        return mission
+    built = _build_mission(user, today)
+    try:
+        _insert_mission(built)
+        return built
+    except IntegrityError:
+        winner = _load_mission(user.id, today)
+        if winner is None:
+            # The insert failed and nobody else's row is there: not a
+            # concurrent first request but a person who no longer exists (on
+            # PostgreSQL, account deletion committing mid-request makes the
+            # foreign key fail). Same answer as any route for a deleted user.
+            abort(404)
+        return winner
+
+
+def _insert_mission(mission):
+    """Insert in a SAVEPOINT, so losing the primary-key race to a concurrent
+    first request rolls back only this insert."""
+    with db.session.begin_nested():
+        db.session.add(mission)
+
+
+def _rebuild_mission(user, mission, skill_level, effort):
+    """Before the first exercise of the day: today's five are redrawn for a new
+    skill level or effort, as a fresh mission for those choices would have
+    been. Nothing is completed, so nothing earned can move; the Brain Boost
+    question shown stays the one stored."""
+    skill_level = skill_level if skill_level in EXERCISE_LIBRARY else 'beginner'
+    days_away = days_since_last_active(user.id, mission.mission_date)
+    exercises = get_daily_exercises(
+        user.id, mission.mission_date.isoformat(), skill_level,
+        recent=recent_movement(user.id, mission.mission_date), effort=effort,
+        days_away=days_away or 0)
+    mission.slots = [_slot_from_exercise(ex) for ex in exercises]
+    mission.skill_level = skill_level
+    mission.effort = effort
+    mission.next_effort = None
+    mission.revision = (mission.revision or 0) + 1
+    mission.updated_at = server_now()
+
+
+def _missing_unfinished_slots(mission, completed_keys):
+    done = set(completed_keys)
+    return [s for s in mission.slots if s['key'] not in done and s['key'] not in _EXERCISE_BY_KEY]
+
+
+def _repair_missing_slots(user, mission, completed_keys):
+    """Redraw unfinished slots whose exercise a later deploy renamed or
+    removed, keeping every other slot exactly as it is (completed or not, the
+    person may be looking at it). Call under _lock_user. True if it changed
+    anything."""
+    if not _missing_unfinished_slots(mission, completed_keys):
+        return False
+    done = set(completed_keys)
+    keep = {s['category']: _exercise_from_slot(s) for s in mission.slots
+            if s['key'] in done or s['key'] in _EXERCISE_BY_KEY}
+    days_away = days_since_last_active(user.id, mission.mission_date)
+    redrawn = get_daily_exercises(
+        user.id, mission.mission_date.isoformat(), mission.skill_level,
+        recent=recent_movement(user.id, mission.mission_date), effort=mission.effort,
+        days_away=days_away or 0, keep=keep)
+    mission.slots = [old if old['category'] in keep else _slot_from_exercise(ex)
+                     for old, ex in zip(mission.slots, redrawn)]
+    mission.revision = (mission.revision or 0) + 1
+    mission.updated_at = server_now()
+    app.logger.warning("event=mission_slot_redrawn_missing_exercise user_id=%s date=%s",
+                       user.id, mission.mission_date)
+    return True
+
+
+def _ease_mission(user, mission, level, completed_keys):
+    """Easier effort: keep every completed slot, redraw the others at `level`
+    with the whole-day rules applied to the combined five."""
+    done = set(completed_keys)
+    keep = {s['category']: _exercise_from_slot(s) for s in mission.slots if s['key'] in done}
+    days_away = days_since_last_active(user.id, mission.mission_date)
+    redrawn = get_daily_exercises(
+        user.id, mission.mission_date.isoformat(), mission.skill_level,
+        recent=recent_movement(user.id, mission.mission_date), effort=level,
+        days_away=days_away or 0, keep=keep)
+    new_slots = []
+    for old, ex in zip(mission.slots, redrawn):
+        assert old['category'] == ex['category']
+        new_slots.append(old if old['key'] in done else _slot_from_exercise(ex))
+    mission.slots = new_slots
+    mission.effort = level
+    mission.next_effort = None
+    mission.revision = (mission.revision or 0) + 1
+    mission.updated_at = server_now()
+
+
+def _requested_mission_date():
+    """(date, None) from the request body's `mission_date`, or (None, error
+    response). Every write for a mission day names the day it was made for, so
+    a page left open across midnight can never be credited to the next day."""
+    raw = (request.get_json(silent=True) or {}).get('mission_date')
+    if raw is None:
+        # Only a page from before mission days existed sends no day. It must
+        # not be credited to whatever today is; it should reload.
+        return None, (jsonify({
+            "error": "mission_date_required",
+            "refresh_required": True,
+            "message": "StreakFit has been updated. Refresh to load today's mission.",
+        }), 400)
+    if isinstance(raw, str) and len(raw) == 10:
+        try:
+            return date.fromisoformat(raw), None
+        except ValueError:
+            pass
+    return None, (jsonify({"error": "invalid_mission_date"}), 400)
+
+
+def _brain_boost_for(user_id, day):
+    """The Brain Boost question as presented on `day`, or None for a day
+    before questions were stored: today's library may hold a different
+    question for that date, and an answer is never shown against one it was
+    not given for."""
+    mission = _load_mission(user_id, day)
+    return mission.brain_boost if mission is not None else None
+
+
+def _day_changed_response(mission_date, today, completed):
+    """A write for a day that has ended: nothing is written. The client shows
+    the new day instead of a generic error, and says what yesterday closed at."""
+    return jsonify({
+        "error": "day_changed",
+        "mission_date": mission_date.isoformat(),
+        "today": today.isoformat(),
+        "closed_completed_count": completed,
+        "message": "A new day has started. Here's today's mission.",
+    }), 409
+
+
+def _completed_count_on(user_id, day):
+    """Slots done for `day`'s stored mission; for a day with no stored
+    mission (before Step 1) the number of completion rows, capped at five."""
+    keys = _completed_keys_on(user_id, day)
+    mission = _load_mission(user_id, day)
+    if mission is not None:
+        return _slots_done(mission, keys)
+    return min(len(set(keys)), 5)
+
+
 @app.route('/api/daily/effort', methods=['PUT'])
 @jwt_required()
 @limiter.limit("60 per hour", key_func=user_or_ip_key)
 def set_daily_effort():
     """Choose how hard today should be.
 
-    Easing off is always allowed. Asking for MORE is refused once the mission
-    has been started, because the five exercises would change underneath
-    completions that already exist — and because "I've done three, let me swap
-    to the harder set" is the one version of this that is about the score
-    rather than about the body.
+    Today's five are stored (DailyMission), so a choice never swaps exercises
+    underneath completions that already exist (D59):
+    - Before the first exercise of the day, any choice rebuilds today's five.
+    - Easier: every completed exercise stays; only the unfinished ones are
+      redrawn at the easier level.
+    - Harder -- or easier once all five are done -- is kept for the next
+      mission day. "I've done three, let me swap to the harder set" is the one
+      version of this that is about the score rather than the body, and a
+      bigger day is there tomorrow.
+    - The same level as today's mission cancels a pending change for tomorrow.
     """
     user_id = int(get_jwt_identity())
-    user = db.session.get(User, user_id)
+    # Under the user lock: this reads and rewrites the stored mission, and the
+    # old select-then-insert on uq_daily_effort could race to a 500 (D72).
+    user = _lock_user(user_id)
     if user is None:
         abort(404)
 
@@ -5569,31 +6060,56 @@ def set_daily_effort():
         return jsonify({"error": "unknown_effort_level",
                         "allowed": list(EFFORT_LEVELS)}), 400
 
-    today = date.today()
-    current = todays_mission(user_id, user.skill_level, today)
-    started = db.session.execute(
-        db.select(db.func.count(DailyCompletion.id))
-        .where(DailyCompletion.user_id == user_id, DailyCompletion.date == today)
-    ).scalar() or 0
-    if started and EFFORT_LEVELS.index(level) > EFFORT_LEVELS.index(current['effort']):
-        return jsonify({
-            "error": "already_started",
-            "message": "You're partway through today — you can always take it "
-                       "easier, and a bigger day is there tomorrow.",
-        }), 409
+    today = server_today()
+    mission = get_or_create_mission(user, today)
+    done = _completed_keys_on(user_id, today)
+    _repair_missing_slots(user, mission, done)
+    unfinished = _slots_done(mission, done) < len(mission.slots)
+    rank = EFFORT_LEVELS.index
 
-    row = db.session.execute(
-        db.select(DailyEffort)
-        .where(DailyEffort.user_id == user_id, DailyEffort.date == today)
-    ).scalar_one_or_none()
-    if row is None:
-        row = DailyEffort(user_id=user_id, date=today, level=level)
-        db.session.add(row)
+    if not done and level != mission.effort:
+        # Nothing done yet today: any effort, either way, is today's.
+        _rebuild_mission(user, mission, mission.skill_level, level)
+        applies = 'today'
+    elif rank(level) < rank(mission.effort) and unfinished:
+        _ease_mission(user, mission, level, done)
+        applies = 'today'
+    elif level == mission.effort:
+        mission.next_effort = None
+        applies = 'today'
     else:
-        row.level = level
+        mission.next_effort = level
+        applies = 'tomorrow'
+
+    # DailyEffort keeps meaning "the effort of today's mission" (tier
+    # readiness counts finished "more" days from it), so a choice kept for
+    # tomorrow is not written here.
+    if applies == 'today':
+        row = db.session.execute(
+            db.select(DailyEffort)
+            .where(DailyEffort.user_id == user_id, DailyEffort.date == today)
+        ).scalar_one_or_none()
+        if row is None:
+            db.session.add(DailyEffort(user_id=user_id, date=today, level=mission.effort))
+        else:
+            row.level = mission.effort
+
+    body = {
+        "level": level,
+        "effort": mission.effort,
+        "next_effort": mission.next_effort,
+        "applies": applies,
+        "mission_date": today.isoformat(),
+        "revision": mission.revision,
+    }
+    if applies == 'tomorrow':
+        body["message"] = ("Saved for tomorrow. Today's five stay as they are "
+                           "— a bigger day is there tomorrow."
+                           if rank(level) > rank(mission.effort)
+                           else "Saved for tomorrow — today's mission is already done.")
     db.session.commit()
-    app.logger.info("event=effort_set user_id=%s level=%s", user_id, level)
-    return jsonify({"level": level}), 200
+    app.logger.info("event=effort_set user_id=%s level=%s applies=%s", user_id, level, applies)
+    return jsonify(body), 200
 
 
 @app.route('/api/daily', methods=['GET'])
@@ -5604,10 +6120,35 @@ def get_daily():
     if user is None:
         abort(404)
 
-    today = date.today()
+    today = server_today()
     today_str = today.isoformat()
-    mission = todays_mission(user_id, user.skill_level, today)
-    exercises = mission['exercises']
+    stored = get_or_create_mission(user, today)
+    if stored.skill_level != user.skill_level:
+        # A skill change may have committed while this request waited for the
+        # mission row it then read back (S3b); show the person as they now are.
+        db.session.refresh(user)
+    if _missing_unfinished_slots(stored, _completed_keys_on(user_id, today)):
+        # A deploy renamed or removed an exercise that is in today's five and
+        # not yet done: redraw that slot, under the lock every write takes.
+        user = _lock_user(user_id)
+        if user is None:
+            abort(404)
+        stored = _load_mission(user_id, today)
+        _repair_missing_slots(user, stored, _completed_keys_on(user_id, today))
+    # Presentation only (the five are stored): whether to offer effort, and
+    # the returning note when nobody has chosen an effort today.
+    days_away = days_since_last_active(user_id, today)
+    effort_chosen = db.session.execute(
+        db.select(DailyEffort.id)
+        .where(DailyEffort.user_id == user_id, DailyEffort.date == today)
+    ).first() is not None
+    mission = {
+        'effort': stored.effort,
+        'effort_chosen': effort_chosen,
+        'show_effort': days_away is not None,
+        'returning_note': None if effort_chosen else returning_note(days_away),
+    }
+    exercises = [_exercise_from_slot(slot) for slot in stored.slots]
     # A larger version offered beside the prescription, never instead of it.
     # Not on an easy day: someone who asked for gentle should not then be
     # invited to do more of it.
@@ -5619,7 +6160,7 @@ def get_daily():
     ]
     readiness = tier_readiness(user_id, user.skill_level)
     insight   = get_daily_insight(today_str, user_id)
-    boost     = get_daily_brain_boost(today_str, user_id)
+    boost     = stored.brain_boost
 
     boost_answer = db.session.execute(
         db.select(BrainBoostAnswer).where(
@@ -5639,40 +6180,46 @@ def get_daily():
         brain_boost_payload["correct_index"] = boost['correct_index']
         brain_boost_payload["explanation"] = boost['explanation']
 
-    completed_keys = set(db.session.execute(
-        db.select(DailyCompletion.exercise_key).where(
-            DailyCompletion.user_id == user_id,
-            DailyCompletion.date == today
-        )
-    ).scalars().all())
+    completed_keys = set(_completed_keys_on(user_id, today))
+    slots_done = _slots_done(stored, completed_keys)
 
     yesterday = today - timedelta(days=1)
-    all_completed_dates = sorted(db.session.execute(
-        db.select(DailyCompletion.date)
-        .where(DailyCompletion.user_id == user_id)
-        .group_by(DailyCompletion.date)
-        .having(db.func.count(DailyCompletion.exercise_key) >= 5)
-    ).scalars().all())
-
+    all_completed_dates = _mission_dates(user_id)
     all_date_set = set(all_completed_dates)
-    best = run = 0
-    prev = None
-    for d in all_completed_dates:
-        run  = run + 1 if (prev and (d - prev).days == 1) else 1
-        best = max(best, run)
-        prev = d
+    best = _best_streak(all_completed_dates)
 
     rise_again = (
         bool(all_date_set)
-        and len(completed_keys) < 5
+        and slots_done < 5
         and yesterday not in all_date_set
         and best >= 7
     )
 
+    # Kept for the next mission day: a harder effort, or a new skill tier.
+    if stored.next_effort:
+        mission['returning_note'] = None
+    skill_note = None
+    if user.skill_level != stored.skill_level:
+        skill_note = (f"{user.skill_level.capitalize()} starts with tomorrow's mission. "
+                      "Today's five stay as they are.")
+
+    # The first request of the day wrote the mission row.
+    db.session.commit()
     return jsonify({
         "date": today_str,
+        # The day this mission belongs to. Every write for it names this date
+        # back, so a page left open across midnight is never credited to the
+        # next day (D50).
+        "mission_date": today_str,
+        "revision": stored.revision,
+        "day_ends_at": mission_day_ends_at(today).isoformat() + "Z",
+        # What the client schedules its refresh from -- the server's own count,
+        # so a device clock that is wrong can never decide the day has ended.
+        "day_ends_in_s": mission_day_seconds_left(today, server_now()),
         "skill_level": user.skill_level,
-        "completed_count": len(completed_keys),
+        "mission_skill_level": stored.skill_level,
+        "skill_note": skill_note,
+        "completed_count": slots_done,
         "rise_again": rise_again,
         "insight": insight,
         "brain_boost": brain_boost_payload,
@@ -5683,6 +6230,9 @@ def get_daily():
             "chosen": mission['effort_chosen'],
             "options": [dict(EFFORT_COPY[lv], level=lv) for lv in EFFORT_LEVELS],
             "note": mission['returning_note'],
+            "next": stored.next_effort,
+            "next_note": (f"Tomorrow: {EFFORT_COPY[stored.next_effort]['label']}."
+                          if stored.next_effort else None),
         },
         "exercises": [
             {
@@ -5700,7 +6250,11 @@ def get_daily():
                 "from_easier_tier": bool(ex.get('from_easier_tier')),
                 "instructions": ex['instructions'],
                 "completed": ex['key'] in completed_keys,
-                "image_url": f"/static/exercises/{ex['key']}.svg"
+                # A completed exercise later removed from the library keeps
+                # its place in the day; it no longer has a picture.
+                "retired": bool(ex.get('retired')),
+                "image_url": (None if ex.get('retired')
+                              else f"/static/exercises/{ex['key']}.svg")
             }
             for ex in exercises
         ]
@@ -5709,12 +6263,17 @@ def get_daily():
 
 @app.route('/api/demo/daily', methods=['GET'])
 def get_demo_daily():
-    today = date.today()
+    today = server_today()
     today_str = today.isoformat()
     exercises = get_daily_exercises('demo', today_str, 'beginner')
     insight   = get_daily_insight(today_str)
     return jsonify({
         "date": today_str,
+        # Guests keep their ticks on the device; this is how the page knows a
+        # new day has started and yesterday's ticks no longer count (D70).
+        "mission_date": today_str,
+        "day_ends_at": mission_day_ends_at(today).isoformat() + "Z",
+        "day_ends_in_s": mission_day_seconds_left(today, server_now()),
         "skill_level": "beginner",
         "completed_count": 0,
         "rise_again": False,
@@ -5785,14 +6344,51 @@ def complete_daily_exercise(exercise_key):
     if user is None:
         abort(404)
 
-    today = date.today()
-
-    valid_keys = {ex['key'] for ex in
-                  todays_mission(user_id, user.skill_level, today)['exercises']}
-    if exercise_key not in valid_keys:
-        return jsonify({"error": "Exercise not in today's daily list"}), 400
-
+    mission_date, error = _requested_mission_date()
+    if error:
+        return error
+    today = server_today()
     old_level = xp_to_level(user.xp_total)['level']
+
+    # A retry of a completion that is already saved -- the response was lost,
+    # or the page re-sent it -- answers "saved" for the day it was made on,
+    # even after midnight. It never writes and never pays.
+    if db.session.execute(
+        db.select(DailyCompletion.id).where(
+            DailyCompletion.user_id == user_id,
+            DailyCompletion.date == mission_date,
+            DailyCompletion.exercise_key == exercise_key)
+    ).first() is not None:
+        return _repeat_completion_response(user, exercise_key, mission_date, old_level)
+
+    # A tap for a day that has ended is refused, never filed under today
+    # (D50: a stale key that happened to be in the next day's list used to be
+    # credited there silently).
+    if mission_date < today:
+        return _day_changed_response(mission_date, today,
+                                     _completed_count_on(user_id, mission_date))
+    if mission_date > today:
+        return jsonify({"error": "mission_date_in_future"}), 400
+
+    mission = get_or_create_mission(user, today)
+    _repair_missing_slots(user, mission, _completed_keys_on(user_id, today))
+    slot_keys = [slot['key'] for slot in mission.slots]
+    if exercise_key not in slot_keys:
+        # Unknown to the library and the mission never changed: not something
+        # this app ever showed. (Once the mission has been revised, an unknown
+        # key is most likely one a deploy removed from an older version of
+        # the five the page is still showing.)
+        if exercise_key not in _EXERCISE_BY_KEY and not mission.revision:
+            return jsonify({"error": "Exercise not in today's daily list"}), 400
+        # A real exercise, just not one of today's five (another device eased
+        # the mission, or the page is from before a change): show the current
+        # five rather than a generic error.
+        return jsonify({
+            "error": "mission_changed",
+            "mission_date": today.isoformat(),
+            "revision": mission.revision,
+            "message": "Today's mission was updated. Here it is.",
+        }), 409
     events = []
 
     existing = db.session.execute(
@@ -5816,7 +6412,8 @@ def complete_daily_exercise(exercise_key):
         db.session.add(DailyCompletion(
             user_id=user_id,
             date=today,
-            exercise_key=exercise_key
+            exercise_key=exercise_key,
+            completed_at=server_now(),
         ))
         try:
             db.session.flush()
@@ -5835,6 +6432,10 @@ def complete_daily_exercise(exercise_key):
                 DailyCompletion.date == today
             )
         ).scalar()
+        # The mission is the stored five: it is done when all five slots are,
+        # not when any five rows exist (D68: the bonus used to be paid on a
+        # mixed set after the five were swapped mid-day).
+        slots_done = _slots_done(mission, _completed_keys_on(user_id, today))
 
         # The discovery bonus is for meeting a new movement in your mission, and
         # a mission is five exercises. Without that bound it was farmable:
@@ -5859,12 +6460,12 @@ def complete_daily_exercise(exercise_key):
         team_campfire_updates = []
         # The bonus is claimed, not inferred: two requests could both see five
         # (RC-B2a D27b); only one can own the (person, day) award row.
-        if completed_count == 5 and _claim_mission_award(user_id, today):
+        if slots_done == 5 and _claim_mission_award(user_id, today):
             events.append(award_progress(user, 'mission_complete', MISSION_COMPLETE_XP, MISSION_COMPLETE_ACORNS))
             events.append(award_progress(user, 'perfect_mission', PERFECT_MISSION_XP, PERFECT_MISSION_ACORNS))
 
             # R2.3 Campfire MVP: this branch (not existing -> just inserted,
-            # completed_count == 5) can only be reached once per user per day,
+            # the fifth slot done) can only be reached once per user per day,
             # the same way it already is for mission_complete/perfect_mission
             # above -- the unique constraint on DailyCompletion makes a 5th
             # *new* completion today a one-time event, so this is naturally
@@ -5926,18 +6527,15 @@ def complete_daily_exercise(exercise_key):
                     )
                     create_rickie_team_message(m.team_id, 'campfire_stage_reached')
     else:
-        completed_count = db.session.execute(
-            db.select(db.func.count(DailyCompletion.id)).where(
-                DailyCompletion.user_id == user_id,
-                DailyCompletion.date == today
-            )
-        ).scalar()
+        slots_done = _slots_done(mission, _completed_keys_on(user_id, today))
         team_campfire_updates = []
 
     response = {
         "message": "Exercise completed",
         "exercise_key": exercise_key,
-        "completed_count": completed_count,
+        "mission_date": today.isoformat(),
+        # Slots done (0-5), the number the progress bar shows.
+        "completed_count": slots_done,
         "team_campfire_updates": team_campfire_updates
     }
     response.update(_progress_response(old_level, user, events))
@@ -5949,19 +6547,17 @@ def complete_daily_exercise(exercise_key):
     return jsonify(response), 200
 
 
-def _repeat_completion_response(user, exercise_key, today, old_level):
-    """What a repeat tap on an already-completed exercise answers: 200,
-    nothing awarded. Used by the duplicate backstop."""
-    completed_count = db.session.execute(
-        db.select(db.func.count(DailyCompletion.id)).where(
-            DailyCompletion.user_id == user.id,
-            DailyCompletion.date == today
-        )
-    ).scalar()
+def _repeat_completion_response(user, exercise_key, mission_date, old_level):
+    """What a repeat of an already-saved completion answers: 200, nothing
+    awarded, for the day it was saved on. Used for retries (including after
+    midnight) and by the duplicate backstop."""
     response = {
         "message": "Exercise completed",
         "exercise_key": exercise_key,
-        "completed_count": completed_count,
+        "mission_date": mission_date.isoformat(),
+        "already_recorded": True,
+        "day_changed": mission_date < server_today(),
+        "completed_count": _completed_count_on(user.id, mission_date),
         "team_campfire_updates": [],
     }
     response.update(_progress_response(old_level, user, []))
@@ -6008,23 +6604,9 @@ def _best_streak_crossing(user_id, today):
     without today, so a mission that extends the record crosses its targets
     and one that does not cannot (R1 D10).
     """
-    dates = sorted(set(db.session.execute(
-        db.select(DailyCompletion.date).where(DailyCompletion.user_id == user_id)
-        .group_by(DailyCompletion.date)
-        .having(db.func.count(DailyCompletion.exercise_key) >= 5)
-    ).scalars().all()))
-
-    def best(ds):
-        top = run = 0
-        prev = None
-        for d in ds:
-            run = run + 1 if (prev and (d - prev).days == 1) else 1
-            top = max(top, run)
-            prev = d
-        return top
-
-    after = best(dates)
-    return after, after - best([d for d in dates if d != today])
+    dates = _mission_dates(user_id)
+    after = _best_streak(dates)
+    return after, after - _best_streak([d for d in dates if d != today])
 
 
 def _completion_milestones(user_id, user, old_level, events, awarded, daily_activity=False,
@@ -6065,12 +6647,12 @@ def _completion_milestones(user_id, user, old_level, events, awarded, daily_acti
         metric_values['missions_completed'] = missions
         deltas['missions_completed'] = 1
         metric_values['best_streak'], deltas['best_streak'] = \
-            _best_streak_crossing(user_id, today or date.today())
+            _best_streak_crossing(user_id, today or server_today())
 
     # Only a daily exercise counts towards an active day; a team challenge
     # completion reuses this function but is not one in the Memory Book.
     if daily_activity:
-        days_active, days_delta = _days_active_crossing(user_id, today or date.today())
+        days_active, days_delta = _days_active_crossing(user_id, today or server_today())
         if days_delta:
             metric_values['days_active'], deltas['days_active'] = days_active, days_delta
 
@@ -6130,46 +6712,66 @@ def answer_brain_boost():
     if user is None:
         abort(404)
 
-    today = date.today()
-    # Same (date, user) as /api/daily presented, so the option order the person
-    # actually saw is the order their answer index is checked against.
-    boost = get_daily_brain_boost(today.isoformat(), user_id)
-
-    if selected_index < 0 or selected_index >= len(boost['options']):
-        return jsonify({"error": "invalid_selected_index"}), 400
-
+    mission_date, error = _requested_mission_date()
+    if error:
+        return error
+    today = server_today()
     old_level = xp_to_level(user.xp_total)['level']
 
-    existing = db.session.execute(
-        db.select(BrainBoostAnswer).where(
-            BrainBoostAnswer.user_id == user_id,
-            BrainBoostAnswer.date == today
-        )
-    ).scalar_one_or_none()
-
-    if existing:
+    def answered(row, boost, day):
+        # The stored result is never regraded. Without the question that was
+        # actually shown (a day before questions were stored), no answer key
+        # is shown against it either.
         response = {
-            "correct": existing.correct,
-            "points_earned": existing.points_earned,
-            "correct_index": boost['correct_index'],
-            "explanation": boost['explanation']
+            "correct": row.correct,
+            "points_earned": row.points_earned,
+            "correct_index": boost['correct_index'] if boost else None,
+            "explanation": boost['explanation'] if boost else None,
+            "question_available": boost is not None,
+            "mission_date": day.isoformat(),
+            "already_recorded": True,
+            "day_changed": day < today,
         }
         response.update(_progress_response(old_level, user, []))
         return jsonify(response), 200
+
+    # Already answered for that day (a retry, or a second tap): the stored
+    # answer, graded against that day's question, on any later day too.
+    existing = db.session.execute(
+        db.select(BrainBoostAnswer).where(
+            BrainBoostAnswer.user_id == user_id,
+            BrainBoostAnswer.date == mission_date
+        )
+    ).scalar_one_or_none()
+    if existing:
+        return answered(existing, _brain_boost_for(user_id, mission_date), mission_date)
+
+    # A question shown before midnight and answered after it used to be graded
+    # against the next day's question and use up that day's only answer (D69).
+    # Now it is refused without grading or storing anything.
+    if mission_date < today:
+        return _day_changed_response(mission_date, today,
+                                     _completed_count_on(user_id, mission_date))
+    if mission_date > today:
+        return jsonify({"error": "mission_date_in_future"}), 400
+
+    # The question exactly as /api/daily presented it, stored with the day's
+    # mission, so the index is checked against the options the person saw.
+    boost = get_or_create_mission(user, today).brain_boost
+    if selected_index < 0 or selected_index >= len(boost['options']):
+        return jsonify({"error": "invalid_selected_index"}), 400
 
     is_correct = (selected_index == boost['correct_index'])
     points = BRAIN_BOOST_CORRECT_POINTS if is_correct else BRAIN_BOOST_INCORRECT_POINTS
 
     try:
-        db.session.add(BrainBoostAnswer(
-            user_id=user_id, date=today, correct=is_correct, points_earned=points
-        ))
-        db.session.flush()
-    except Exception:
-        db.session.rollback()
-        user = _lock_user(user_id)
-        if user is None:
-            abort(404)
+        with db.session.begin_nested():
+            db.session.add(BrainBoostAnswer(
+                user_id=user_id, date=today, correct=is_correct, points_earned=points,
+                answered_at=server_now(),
+            ))
+    except IntegrityError:
+        # Backstop only: under the user lock a second answer cannot get here.
         existing = db.session.execute(
             db.select(BrainBoostAnswer).where(
                 BrainBoostAnswer.user_id == user_id,
@@ -6177,14 +6779,7 @@ def answer_brain_boost():
             )
         ).scalar_one_or_none()
         if existing:
-            response = {
-                "correct": existing.correct,
-                "points_earned": existing.points_earned,
-                "correct_index": boost['correct_index'],
-                "explanation": boost['explanation']
-            }
-            response.update(_progress_response(old_level, user, []))
-            return jsonify(response), 200
+            return answered(existing, boost, today)
         abort(500)
 
     events = [award_progress(user, 'brain_boost_attempt', BRAIN_BOOST_ATTEMPT_XP, 0)]
@@ -6195,7 +6790,8 @@ def answer_brain_boost():
         "correct": is_correct,
         "points_earned": points,
         "correct_index": boost['correct_index'],
-        "explanation": boost['explanation']
+        "explanation": boost['explanation'],
+        "mission_date": today.isoformat(),
     }
     response.update(_progress_response(old_level, user, events))
 
@@ -7701,7 +8297,7 @@ def _witness_for_ids(user_ids):
     if not ids:
         return {}
 
-    today = date.today()
+    today = server_today()
 
     today_counts = dict(db.session.execute(
         db.select(DailyCompletion.user_id, db.func.count(DailyCompletion.exercise_key))
@@ -7711,28 +8307,13 @@ def _witness_for_ids(user_ids):
 
     # One row per (user, day they completed a full mission) -- the same
     # ">= 5 completions" definition of a mission day that get_user_stats uses.
-    mission_days = {}
-    rows = db.session.execute(
-        db.select(DailyCompletion.user_id, DailyCompletion.date)
-        .where(DailyCompletion.user_id.in_(ids))
-        .group_by(DailyCompletion.user_id, DailyCompletion.date)
-        .having(db.func.count(DailyCompletion.exercise_key) >= 5)
-    ).all()
-    for uid, d in rows:
-        mission_days.setdefault(uid, set()).add(d)
+    mission_days = _mission_dates_by_user(ids)
 
-    yesterday = today - timedelta(days=1)
     witness = {}
     for uid in ids:
-        day_set = mission_days.get(uid, set())
-        # A streak is only "broken" once today has also passed without a
-        # mission, so someone mid-day who hasn't started yet still shows the
-        # streak they went to bed with. Never punish who showed up.
-        check = today if today in day_set else yesterday
-        streak = 0
-        while check in day_set:
-            streak += 1
-            check -= timedelta(days=1)
+        # Same walk as get_user_stats: someone mid-day who hasn't started yet
+        # still shows the streak they went to bed with.
+        streak = _current_streak(mission_days.get(uid, set()), today)
 
         count_today = today_counts.get(uid, 0)
         witness[uid] = {
@@ -11702,6 +12283,7 @@ def _forget_coach_memory(user_id):
 _USER_PRIVATE_DELETES = [
     ("challenge",          Challenge,        "user_id"),
     ("daily_mission_award", DailyMissionAward, "user_id"),
+    ("daily_mission",      DailyMission,     "user_id"),
     ("daily_completion",   DailyCompletion,  "user_id"),
     ("brain_boost_answer", BrainBoostAnswer, "user_id"),
     ("progress_event",     ProgressEvent,    "user_id"),
@@ -12697,7 +13279,7 @@ def _coach_insight_for(user_id, client_text):
     today's, when it is one the app offers "tell me more" on; otherwise None
     (no insight block). The client's words only choose; they never reach the
     prompt."""
-    today = date.today()
+    today = server_today()
     mine = [get_daily_insight(d.isoformat(), user_id) for d in (today, today - timedelta(days=1))]
     mine = [i for i in mine if i.get("type") in _COACH_TELL_MORE_TYPES]
     for item in mine:

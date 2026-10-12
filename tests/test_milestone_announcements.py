@@ -15,7 +15,7 @@ it.
 import datetime
 
 from app import BrainBoostAnswer, DailyCompletion, User, db
-from conftest import auth_headers, register_and_login
+from conftest import auth_headers, register_and_login, mission_json
 
 FIVE = ['a1', 'a2', 'a3', 'a4', 'a5']
 
@@ -36,8 +36,9 @@ def _keys(client, token):
     return [e['key'] for e in client.get('/api/daily', headers=auth_headers(token)).get_json()['exercises']]
 
 
-def _complete(client, token, key):
-    return client.post(f'/api/daily/{key}/complete', headers=auth_headers(token)).get_json()
+def _complete(client, token, key, day=None):
+    return client.post(f'/api/daily/{key}/complete', json=mission_json(day),
+                       headers=auth_headers(token)).get_json()
 
 
 def _announced(payload):
@@ -85,7 +86,7 @@ def test_a_brain_boost_that_is_the_days_first_activity_can_cross_three_days(clie
     _seed('ms_bb', 4, FIVE[:1])
     _seed('ms_bb', 1, FIVE[:1])
 
-    r = client.post('/api/brain-boost/answer', json={'selected_index': 0},
+    r = client.post('/api/brain-boost/answer', json=mission_json(selected_index=0),
                     headers=auth_headers(token))
     assert r.status_code == 200
     assert 'days_3' in _announced(r.get_json())
@@ -98,7 +99,7 @@ def test_a_brain_boost_after_todays_completion_does_not_announce_the_day_again(c
     first = _complete(client, token, _keys(client, token)[0])
     assert 'days_3' in _announced(first)
 
-    r = client.post('/api/brain-boost/answer', json={'selected_index': 0},
+    r = client.post('/api/brain-boost/answer', json=mission_json(selected_index=0),
                     headers=auth_headers(token)).get_json()
     assert 'days_3' not in _announced(r)
     assert db.session.query(BrainBoostAnswer).count() == 1
@@ -112,17 +113,19 @@ def test_a_request_that_straddles_midnight_judges_the_day_it_stamped(client, mon
     _seed('ms_midnight', 5, FIVE[:1])
     _seed('ms_midnight', 2, FIVE[:1])
     keys = _keys(client, token)
-    real_today = datetime.date.today()
+    real_today = datetime.datetime.utcnow().date()
 
-    class _Tomorrow(datetime.date):
+    class _Tomorrow:
+        """One second before midnight on the first reading; after midnight on
+        every later one."""
         calls = 0
 
-        @classmethod
-        def today(cls):
-            # First call is the route's own stamp; every later call is "after midnight".
-            cls.calls += 1
-            return real_today if cls.calls == 1 else real_today + datetime.timedelta(days=1)
+        def now(self):
+            _Tomorrow.calls += 1
+            day = real_today if _Tomorrow.calls == 1 else real_today + datetime.timedelta(days=1)
+            return datetime.datetime.combine(day, datetime.time(23, 59, 59))
 
-    monkeypatch.setattr(appmod, 'date', _Tomorrow)
-    first = _complete(client, token, keys[0])
+    monkeypatch.setattr(appmod, 'server_clock', _Tomorrow())
+    # Named explicitly: reading the clock here would use up the "first call".
+    first = _complete(client, token, keys[0], day=real_today)
     assert 'days_3' in _announced(first)

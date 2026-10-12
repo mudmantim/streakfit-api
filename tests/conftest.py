@@ -11,6 +11,15 @@ same per-minute limits real users would hit.
 """
 import os
 import tempfile
+import time
+
+# Tests run in production's process timezone. The server's mission day is the
+# UTC date of its clock's instant, and many tests seed rows with
+# `datetime.date.today()`; in a local timezone those two disagree for several
+# hours a day (every evening in the Americas), which used to make the suite
+# fail depending on when it was run.
+os.environ['TZ'] = 'UTC'
+time.tzset()
 
 os.environ.setdefault('SECRET_KEY', 'test-secret-key-not-for-production')
 os.environ.setdefault('JWT_SECRET_KEY', 'test-jwt-secret-key-not-for-production')
@@ -66,3 +75,12 @@ def _clear_weather_caches():
     _app._GEOCODE_CACHE.clear()
     _app._FORECAST_CACHE.clear()
     yield
+
+
+def mission_json(day=None, **extra):
+    """Request body naming the mission day a write is for. Since Step 1 every
+    daily completion and Brain Boost answer must say which day it belongs to,
+    so a page left open across midnight cannot be credited to the next day.
+    Defaults to the server's current mission day."""
+    import app as appmod
+    return {'mission_date': (day or appmod.server_today()).isoformat(), **extra}

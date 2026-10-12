@@ -11,7 +11,7 @@ from pathlib import Path
 
 
 import app as appmod
-from conftest import auth_headers, register_and_login
+from conftest import auth_headers, register_and_login, mission_json
 
 BANNED_SUBSTRINGS = [
     # Weight, shape and appearance are off limits entirely. A child using a
@@ -216,7 +216,7 @@ def test_the_answer_route_marks_the_presented_answer_correct(client):
     assert correct_text is not None
     chosen = shown["options"].index(correct_text)
 
-    resp = client.post("/api/brain-boost/answer", json={"selected_index": chosen},
+    resp = client.post("/api/brain-boost/answer", json=mission_json(selected_index=chosen),
                        headers=auth_headers(token)).get_json()
 
     assert resp["correct"] is True

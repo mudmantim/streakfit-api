@@ -3,7 +3,7 @@ team creation/joining/leaving/campfire-log/stage-crossing all create the
 right moment, unauthorized reads are blocked, and repeated completion
 doesn't create a duplicate stage moment.
 """
-from conftest import register_and_login, auth_headers
+from conftest import register_and_login, auth_headers, mission_json
 
 
 from app import db, TeamCampfire
@@ -47,7 +47,7 @@ def complete_full_mission(client, token):
     assert len(exercise_keys) == 5
     last_resp = None
     for key in exercise_keys:
-        last_resp = client.post(f'/api/daily/{key}/complete', headers=auth_headers(token))
+        last_resp = client.post(f'/api/daily/{key}/complete', json=mission_json(), headers=auth_headers(token))
     return last_resp, exercise_keys
 
 
@@ -185,7 +185,7 @@ def test_no_duplicate_stage_moment_on_repeated_completion(client, app):
     # Replay an already-completed exercise -- should not create a second
     # stage moment (or a second log moment, since the campfire loop only
     # runs inside the "not existing" / completed_count == 5 branch).
-    client.post(f'/api/daily/{exercise_keys[0]}/complete', headers=auth_headers(token))
+    client.post(f'/api/daily/{exercise_keys[0]}/complete', json=mission_json(), headers=auth_headers(token))
 
     moments_after_replay = get_moments(client, token, team['id']).get_json()
     stage_count_after_replay = len([m for m in moments_after_replay if m['moment_type'] == 'campfire_stage_reached'])

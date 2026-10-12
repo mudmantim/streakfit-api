@@ -204,6 +204,10 @@ def main():
         install(A.db.engine)
     PW = 'RaceTest123!'
     pw_hash = generate_password_hash(PW)
+    # Every daily write names its mission day (Step 1). The races run well
+    # inside one day; a run straddling midnight would see an honest 409.
+    with A.app.app_context():
+        MD = {'mission_date': A.server_today().isoformat()}
     results = {}
     seq = [0]
 
@@ -307,8 +311,8 @@ def main():
         uid, h = person('d27a')
         keys = todays_keys(h)
         ev = race(A, observer,
-                  lambda c: c.post(f'/api/daily/{keys[0]}/complete', headers=h),
-                  lambda c: c.post(f'/api/daily/{keys[1]}/complete', headers=h),
+                  lambda c: c.post(f'/api/daily/{keys[0]}/complete', json=MD, headers=h),
+                  lambda c: c.post(f'/api/daily/{keys[1]}/complete', json=MD, headers=h),
                   r'UPDATE "user" SET .*xp_total', when='after')
         (xp, ac, _sp), (lxp, lac) = totals(uid), ledger(uid)
         inv = {'xp_eq_ledger': xp == lxp, 'acorns_eq_ledger': ac == lac, 'no_5xx': no_5xx(ev),
@@ -324,8 +328,8 @@ def main():
         keys = todays_keys(h)
         seed_completions(uid, keys[:3])
         ev = race(A, observer,
-                  lambda c: c.post(f'/api/daily/{keys[3]}/complete', headers=h),
-                  lambda c: c.post(f'/api/daily/{keys[4]}/complete', headers=h),
+                  lambda c: c.post(f'/api/daily/{keys[3]}/complete', json=MD, headers=h),
+                  lambda c: c.post(f'/api/daily/{keys[4]}/complete', json=MD, headers=h),
                   r'count\(daily_completion\.id\).*daily_completion\.date')
         n = {t: scalar("select count(*) from progress_event where user_id=:u and event_type=:t", u=uid, t=t)
              for t in ('mission_complete', 'perfect_mission')}
@@ -360,8 +364,8 @@ def main():
         uid, h = person('d29')
         keys = todays_keys(h)
         ev = race(A, observer,
-                  lambda c: c.post(f'/api/daily/{keys[0]}/complete', headers=h),
-                  lambda c: c.post(f'/api/daily/{keys[0]}/complete', headers=h),
+                  lambda c: c.post(f'/api/daily/{keys[0]}/complete', json=MD, headers=h),
+                  lambda c: c.post(f'/api/daily/{keys[0]}/complete', json=MD, headers=h),
                   r'INSERT INTO daily_completion')
         rows = scalar('select count(*) from daily_completion where user_id=:u', u=uid)
         awards = scalar('select count(*) from progress_event where user_id=:u', u=uid)
@@ -419,8 +423,8 @@ def main():
         seed_completions(a, ka[:4])
         seed_completions(b, kb[:4])
         ev = race(A, observer,
-                  lambda c: c.post(f'/api/daily/{ka[4]}/complete', headers=ha),
-                  lambda c: c.post(f'/api/daily/{kb[4]}/complete', headers=hb),
+                  lambda c: c.post(f'/api/daily/{ka[4]}/complete', json=MD, headers=ha),
+                  lambda c: c.post(f'/api/daily/{kb[4]}/complete', json=MD, headers=hb),
                   r'UPDATE team_campfire', when='after')
         total = scalar('select total_team_missions from team_campfire where team_id=:t', t=team_id)
         logs = sql("select (moment_metadata::json->>'total_team_missions')::int from team_moment "
@@ -465,8 +469,8 @@ def main():
         uid, h = person('d27c')
         keys = todays_keys(h)
         ev = race(A, observer,
-                  lambda c: c.post(f'/api/daily/{keys[0]}/complete', headers=h),
-                  lambda c: c.post('/api/brain-boost/answer', json={'selected_index': 0}, headers=h),
+                  lambda c: c.post(f'/api/daily/{keys[0]}/complete', json=MD, headers=h),
+                  lambda c: c.post('/api/brain-boost/answer', json={**MD, 'selected_index': 0}, headers=h),
                   r'UPDATE "user" SET .*xp_total', when='after')
         (xp, ac, _sp), (lxp, lac) = totals(uid), ledger(uid)
         inv = {'xp_eq_ledger': xp == lxp, 'acorns_eq_ledger': ac == lac, 'no_5xx': no_5xx(ev)}
@@ -479,8 +483,8 @@ def main():
     def d34():
         uid, h = person('d34')
         ev = race(A, observer,
-                  lambda c: c.post('/api/brain-boost/answer', json={'selected_index': 0}, headers=h),
-                  lambda c: c.post('/api/brain-boost/answer', json={'selected_index': 0}, headers=h),
+                  lambda c: c.post('/api/brain-boost/answer', json={**MD, 'selected_index': 0}, headers=h),
+                  lambda c: c.post('/api/brain-boost/answer', json={**MD, 'selected_index': 0}, headers=h),
                   r'INSERT INTO brain_boost_answer')
         rows = scalar('select count(*) from brain_boost_answer where user_id=:u', u=uid)
         attempts = scalar("select count(*) from progress_event where user_id=:u "
@@ -567,7 +571,7 @@ def main():
         tx = hc.begin()
         holder = hc.execute(text('select pg_backend_pid()')).scalar()
         hc.execute(text('select id from "user" where id=:u for update'), {'u': uid})
-        t, box = _thread(A, 'race-X1', lambda c: c.post(f'/api/daily/{keys[0]}/complete', headers=h))
+        t, box = _thread(A, 'race-X1', lambda c: c.post(f'/api/daily/{keys[0]}/complete', json=MD, headers=h))
         seen, deadline = None, time.monotonic() + SAFETY_S
         while time.monotonic() < deadline and t.is_alive():
             pid = _pids.get('race-X1')
@@ -583,7 +587,7 @@ def main():
         holder_engine.dispose()
         rows = scalar('select count(*) from daily_completion where user_id=:u', u=uid)
         with A.app.app_context():
-            retry = A.app.test_client().post(f'/api/daily/{keys[0]}/complete', headers=h)
+            retry = A.app.test_client().post(f'/api/daily/{keys[0]}/complete', json=MD, headers=h)
         inv = {'observed_wait_on_user': bool(seen and seen.get('waiting_relation') == 'user'),
                # the wait must be _lock_user itself, not a later FK check
                # (W10: with the lock removed X1 still timed out -- on the insert)
@@ -602,7 +606,7 @@ def main():
         keys = todays_keys(h)
         ev = race(A, observer,
                   lambda c: c.delete('/api/me', json={'password': PW}, headers=h),
-                  lambda c: c.post(f'/api/daily/{keys[0]}/complete', headers=h),
+                  lambda c: c.post(f'/api/daily/{keys[0]}/complete', json=MD, headers=h),
                   r'FOR UPDATE', when='after')
         res = residue(uid)
         gone = scalar('select count(*) from "user" where id=:u', u=uid) == 0
@@ -622,7 +626,7 @@ def main():
         keys = todays_keys(h)
         seed_completions(uid, keys[:4])
         ev = race(A, observer,
-                  lambda c: c.post(f'/api/daily/{keys[4]}/complete', headers=h),
+                  lambda c: c.post(f'/api/daily/{keys[4]}/complete', json=MD, headers=h),
                   lambda c: c.delete('/api/me', json={'password': PW}, headers=h),
                   r'UPDATE team_campfire', when='after')
         res = residue(uid)
@@ -645,7 +649,7 @@ def main():
         team_id, _code = team_with(reporter, [subject])
         keys = todays_keys(hs)
         ev = race(A, observer,
-                  lambda c: c.post(f'/api/daily/{keys[0]}/complete', headers=hs),
+                  lambda c: c.post(f'/api/daily/{keys[0]}/complete', json=MD, headers=hs),
                   lambda c: c.post('/api/reports', headers=hr, json={
                       'category': 'spam', 'subject_type': 'user',
                       'reported_user_id': subject, 'team_id': team_id}),
@@ -706,7 +710,7 @@ def main():
         keys = todays_keys(h)
         seed_completions(uid, keys[:4])
         ev = race(A, observer,
-                  lambda c: c.post(f'/api/daily/{keys[4]}/complete', headers=h),
+                  lambda c: c.post(f'/api/daily/{keys[4]}/complete', json=MD, headers=h),
                   lambda c: c.post(f'/api/teams/{team_id}/leave', headers=h),
                   r'UPDATE team_campfire', when='after')
         order = [r[0] for r in sql("select moment_type from team_moment where team_id=:t and subject_user_id=:u "
@@ -729,8 +733,8 @@ def main():
         keys = todays_keys(h)
         seed_completions(uid, keys[:4])
         ev = race(A, observer,
-                  lambda c: c.post(f'/api/daily/{keys[4]}/complete', headers=h),
-                  lambda c: c.post('/api/brain-boost/answer', json={'selected_index': 0}, headers=h),
+                  lambda c: c.post(f'/api/daily/{keys[4]}/complete', json=MD, headers=h),
+                  lambda c: c.post('/api/brain-boost/answer', json={**MD, 'selected_index': 0}, headers=h),
                   r'INSERT INTO daily_mission_award')
         (xp, ac, _sp), (lxp, lac) = totals(uid), ledger(uid)
         ev['invariants'] = {'xp_eq_ledger': xp == lxp, 'acorns_eq_ledger': ac == lac,
@@ -749,7 +753,7 @@ def main():
         _team_id, _code = team_with(owner, [uid])
         keys = todays_keys(h)
         ev = race(A, observer,
-                  lambda c: c.post(f'/api/daily/{keys[0]}/complete', headers=h),
+                  lambda c: c.post(f'/api/daily/{keys[0]}/complete', json=MD, headers=h),
                   lambda c: c.put(f'/api/blocks/{uid}', headers=ho),
                   LOCK_USER, when='after')
         blocked = scalar('select count(*) from user_block where blocker_user_id=:o and blocked_user_id=:u',
@@ -768,7 +772,7 @@ def main():
         uid, h = person('y5')
         keys = todays_keys(h)
         ev = race(A, observer,
-                  lambda c: c.post(f'/api/daily/{keys[0]}/complete', headers=h),
+                  lambda c: c.post(f'/api/daily/{keys[0]}/complete', json=MD, headers=h),
                   raw('insert into daily_completion (user_id, date, exercise_key, completed_at) '
                       'values (:u, :d, :k, now())', u=uid, d=A.date.today(), k=keys[0]),
                   r'INSERT INTO daily_completion')
@@ -803,6 +807,113 @@ def main():
         ev['fixed_ok'] = all(ev['invariants'].values()) and ev['joined']
         return ev
 
+    # S1/S2 (Step 1) -- easing today's mission and completing one of its
+    # exercises from two devices, in each forced order. The stored five are
+    # rewritten under the user lock, so the second request waits for the first
+    # and then answers from what the first left behind.
+    def mission_state(uid):
+        slots = scalar('select slots from daily_mission where user_id=:u and mission_date=:d',
+                       u=uid, d=A.date.today())
+        rev = scalar('select revision from daily_mission where user_id=:u and mission_date=:d',
+                     u=uid, d=A.date.today())
+        rows = {r[0] for r in sql('select exercise_key from daily_completion '
+                                       'where user_id=:u and date=:d', u=uid, d=A.date.today())}
+        return [x['key'] for x in slots], rev, rows
+
+    def s1():
+        # The tap is on an explosive exercise: an easy day only ever picks
+        # gentle ones, so the easing that holds the lock must replace it and
+        # the waiting tap must come back 409 mission_changed.
+        for _ in range(20):
+            uid, h = person('s1', skill_level='advanced')
+            keys = todays_keys(h)                   # stores today's mission
+            high = [k for k in keys if A._EXERCISE_BY_KEY[k]['impact'] == 'high']
+            if high:
+                break
+        tap = high[0]
+        done = [k for k in keys if k != tap][:3]
+        seed_completions(uid, done)
+        ev = race(A, observer,
+                  lambda c: c.put('/api/daily/effort', json={'level': 'easy'}, headers=h),
+                  lambda c: c.post(f'/api/daily/{tap}/complete', json=MD, headers=h),
+                  r'UPDATE daily_mission')
+        slots, rev, rows = mission_state(uid)
+        t2 = ev['t2']
+        honest = (t2.get('status') == 409 and t2.get('body', {}).get('error') == 'mission_changed'
+                  and tap not in slots and tap not in rows)
+        inv = {'ease_200': ev['t1'].get('status') == 200,
+               'completed_slots_kept': all(k in slots for k in done),
+               'rows_are_slots': rows <= set(slots), 'stale_tap_answered_honestly': honest,
+               'one_redraw': rev == 1, 'no_5xx': no_5xx(ev)}
+        ev.update(state={'slots': slots, 'revision': rev, 'rows': sorted(rows)}, invariants=inv,
+                  intended_wait=intended_wait(ev, 'user', LOCK_USER))
+        ev['fixed_ok'] = all(inv.values()) and ev['intended_wait'] and ev['joined']
+        return ev
+
+    def s2():
+        uid, h = person('s2')
+        keys = todays_keys(h)
+        seed_completions(uid, keys[:3])
+        ev = race(A, observer,
+                  lambda c: c.post(f'/api/daily/{keys[3]}/complete', json=MD, headers=h),
+                  lambda c: c.put('/api/daily/effort', json={'level': 'easy'}, headers=h),
+                  r'INSERT INTO daily_completion')
+        slots, rev, rows = mission_state(uid)
+        inv = {'completion_200': ev['t1'].get('status') == 200, 'ease_200': ev['t2'].get('status') == 200,
+               'four_completed_slots_kept': slots[:4] == keys[:4], 'rows_are_slots': rows <= set(slots),
+               'four_rows': len(rows) == 4, 'one_redraw': rev == 1, 'no_5xx': no_5xx(ev)}
+        ev.update(state={'slots': slots, 'revision': rev, 'rows': sorted(rows)}, invariants=inv,
+                  intended_wait=intended_wait(ev, 'user', LOCK_USER))
+        ev['fixed_ok'] = all(inv.values()) and ev['intended_wait'] and ev['joined']
+        return ev
+
+    # S3a/S3b (Step 1 release condition) -- a skill change before the first
+    # exercise, racing the GET that stores the day's mission, in each order.
+    # Whatever the order, today's five must end at the new tier when the PATCH
+    # says the change applies today, with the stored Brain Boost question kept.
+    def s3(first_is_get):
+        uid, h = person('s3', skill_level='beginner')
+        get = lambda c: c.get('/api/daily', headers=h)                      # noqa: E731
+        patch = lambda c: c.patch('/api/me', json={'skill_level': 'advanced'}, headers=h)  # noqa: E731
+        ev = race(A, observer, get if first_is_get else patch, patch if first_is_get else get,
+                  r'INSERT INTO daily_mission', when='after')
+        rows = scalar('select count(*) from daily_mission where user_id=:u', u=uid)
+        tier = scalar('select skill_level from daily_mission where user_id=:u and mission_date=:d',
+                      u=uid, d=A.date.today())
+        rev = scalar('select revision from daily_mission where user_id=:u and mission_date=:d',
+                     u=uid, d=A.date.today())
+        boost = scalar("select brain_boost->>'question' from daily_mission where user_id=:u", u=uid)
+        done = scalar('select count(*) from daily_completion where user_id=:u', u=uid)
+        p_res = ev['t2'] if first_is_get else ev['t1']
+        g_res = ev['t1'] if first_is_get else ev['t2']
+        with A.app.app_context():
+            after = A.app.test_client().get('/api/daily', headers=h).get_json()
+            expected_boost = A.get_daily_brain_boost(A.server_today().isoformat(), uid)['question']
+        inv = {'patch_200_today': p_res.get('status') == 200
+               and p_res.get('body', {}).get('skill_applies') == 'today',
+               'get_200': g_res.get('status') == 200,
+               'get_saw_new_tier': (g_res.get('body') or {}).get('mission_skill_level') == 'advanced'
+               or first_is_get,
+               'get_no_false_note': not (g_res.get('body') or {}).get('skill_note') or first_is_get,
+               'one_row': rows == 1, 'new_tier_stored': tier == 'advanced',
+               # GET first: its old-tier row is rebuilt once. PATCH first: built
+               # at the new tier directly, nothing to rebuild.
+               'revision_as_expected': rev == (1 if first_is_get else 0),
+               'boost_kept': boost == expected_boost, 'nothing_completed': done == 0,
+               'reads_back_new_tier': after.get('mission_skill_level') == 'advanced'
+               and not after.get('skill_note'),
+               'no_5xx': no_5xx(ev)}
+        ev.update(state={'rows': rows, 'tier': tier, 'revision': rev, 'get_body_tier':
+                         (g_res.get('body') or {}).get('mission_skill_level'),
+                         'get_note': (g_res.get('body') or {}).get('skill_note'),
+                         'patch_applies': (p_res.get('body') or {}).get('skill_applies')},
+                  invariants=inv)
+        # The second request must actually have waited for the first's
+        # uncommitted mission row (the unique key), or the order was not forced.
+        ev['intended_wait'] = ev.get('outcome') == 't2_blocked_by_t1'
+        ev['fixed_ok'] = all(inv.values()) and ev['intended_wait'] and ev['joined']
+        return ev
+
     run('D26_concurrent_filter_purchases', d26)
     run('D27a_parallel_awards_lose_updates', d27a)
     run('D27b_mission_bonus_paid_twice', d27b)
@@ -826,6 +937,10 @@ def main():
     run('Y4_teammate_reference_not_queued', y4)
     run('Y5_completion_backstop_executed', y5)
     run('Y6_join_backstop_executed', y6)
+    run('S1_ease_holds_then_stale_tap', s1)
+    run('S2_completion_holds_then_ease', s2)
+    run('S3a_get_stores_mission_then_skill_change', lambda: s3(True))
+    run('S3b_skill_change_stores_mission_then_get', lambda: s3(False))
     print(json.dumps(results, default=str))
     sys.exit(0 if all(r.get('fixed_ok') for r in results.values()) else 1)
 

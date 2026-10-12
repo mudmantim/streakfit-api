@@ -12,7 +12,7 @@ import datetime
 from sqlalchemy import event
 
 from app import DailyCompletion, User, db
-from conftest import auth_headers, register_and_login
+from conftest import auth_headers, register_and_login, mission_json
 
 # These tests check ATTRIBUTION — that the right person is named on a moment,
 # a message or a challenge card. Peer-visible surfaces stopped sending login
@@ -66,7 +66,7 @@ def _seed_mission_days(user_id, day_offsets):
 def _complete_today(client, token, count=5):
     daily = client.get('/api/daily', headers=auth_headers(token)).get_json()
     for ex in daily['exercises'][:count]:
-        client.post(f"/api/daily/{ex['key']}/complete", headers=auth_headers(token))
+        client.post(f"/api/daily/{ex['key']}/complete", json=mission_json(), headers=auth_headers(token))
 
 
 def _make_team(client, token, name='The Hills'):
