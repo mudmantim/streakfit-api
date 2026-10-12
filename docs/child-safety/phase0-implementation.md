@@ -1,8 +1,30 @@
 # Child safety, phase 0: implementation plan (server-side enforcement, switched off)
 
-**Status: plan only, not implemented, nothing activated.** Written 2026-10-12
-against release candidate `1d7b2f2`. It is the first stage of the
+**Status: implemented on branch `feature/pw1-and-child-safety-phase0`, not
+released, not activated.** `STREAKFIT_AGE_POLICY` defaults to `off`. Written
+2026-10-12 against release candidate `1d7b2f2`. It is the first stage of the
 family-service direction in `phased-plan.md`.
+
+- Code: `requires_capability`, `_age_policy_mode`, and the self-check
+  `child_safety.age_policy`.
+- Tests: `tests/test_capability_routes.py`.
+
+**Where the implementation differs from this plan, and why:**
+
+1. **Only denials are audited.** The plan wrote a `PermissionAudit` row per
+   decision under `enforce`. Team messages are polled, so that would be a
+   write per poll for every adult, recording nothing new.
+2. **A deleted account's token gets 404 under `enforce`,** instead of
+   falling through to the route. Falling through would let `/api/coach` call
+   the provider for an account that no longer exists. Under `off` and
+   `shadow`, behaviour is unchanged.
+3. **`_safe_display_name(for_child=True)` is deferred to phase 4.** It would
+   be unused until then, and phase 0 changes nothing that reaches the AI
+   provider. The phase-4 gate test is unchanged.
+4. **The URL-map test classifies by path.** Any route whose path mentions
+   coach, team(s), photo, message, chat or rickie must carry the guard, or
+   be in an exempt list with a written reason. Admin routes are excluded.
+   That covers the 8 guarded routes and 13 exempt ones.
 
 Phase 0 must not change anything for any account:
 

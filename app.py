@@ -927,6 +927,122 @@ def can(user, capability, record=False):
     return allowed, reason
 
 
+# ── Where `can()` is enforced: the route guard, and the switch that holds it off
+#
+# Phase 0 of docs/child-safety/phased-plan.md. Every capability route carries
+# @requires_capability, so the decision has exactly one enforcement point --
+# but nothing changes for anybody until the OWNER changes the switch:
+#
+#   STREAKFIT_AGE_POLICY unset / "off"  `can()` is not consulted. Today's
+#                                       behaviour, byte for byte.
+#   "shadow"                            `can()` decides and a deny is LOGGED
+#                                       (user id, capability, reason code --
+#                                       nothing else); the request proceeds.
+#                                       How the owner counts what "enforce"
+#                                       would affect, without querying anyone.
+#   "enforce"                           A deny is a 403 with a reason code and
+#                                       a PermissionAudit row (denials only).
+#
+# Every account today has age_band NULL, which `can()` treats as a child, so
+# "enforce" would take Ask Rickie and teams from EVERY current user. It must
+# not be set before the existing-account step (phase 2) exists. That is an
+# owner decision, not an engineering one.
+#
+# Anything else in the variable is a configuration error. It behaves as
+# "off" -- a typo must not lock out every account -- and the self-check
+# reports it as a FAIL, so it cannot sit there unnoticed.
+
+AGE_POLICY_MODES = ('off', 'shadow', 'enforce')
+
+
+def _age_policy_setting():
+    """(value as configured, whether it is one of AGE_POLICY_MODES)."""
+    value = (os.environ.get('STREAKFIT_AGE_POLICY') or 'off').strip().lower()
+    return value, value in AGE_POLICY_MODES
+
+
+def _age_policy_mode():
+    value, valid = _age_policy_setting()
+    return value if valid else 'off'
+
+
+_REASON_CODES = {
+    "adult": "adult",
+    "guardian consent on file": "guardian_consent",
+    "age not established": "age_not_established",
+    "teen policy not set": "teen_policy_not_set",
+    "no guardian consent": "no_guardian_consent",
+    _CHILD_HARD_BLOCKED[CAP_ASK_RICKIE][0]: "child_ai_assurance_missing",
+}
+
+_DENIAL_MESSAGES = {
+    CAP_ASK_RICKIE: "Ask Rickie isn't available on this account.",
+    CAP_TEAMS: "Joining or starting a team isn't available on this account.",
+    CAP_TEAM_CHAT: "Team chat isn't available on this account.",
+    CAP_TEAM_PHOTOS: "Team photos aren't available on this account.",
+}
+
+
+def _reason_code(reason):
+    """A stable code for responses and logs. The prose stays in the audit row."""
+    return _REASON_CODES.get(reason, "denied")
+
+
+def requires_capability(capability):
+    """Route guard for `can()`. Goes directly above `def`, below @jwt_required.
+
+    With the policy "off" it calls the view and does nothing else -- no read,
+    no log, no row. tests/test_capability_routes.py walks the URL map and
+    fails for a capability-shaped route without this guard.
+
+    It runs before the view body, so under "enforce" a denied request stores
+    nothing and sends nothing: for /api/coach that means before the context
+    is built, before Coach Notes and history are loaded, before the provider
+    call and before a turn is saved -- and the daily Ask Rickie allowance is
+    not spent, because the provider was never reached.
+    """
+    if capability not in CAPABILITIES:
+        raise ValueError(f"unknown capability {capability!r}")
+
+    def decorate(view):
+        @wraps(view)
+        def wrapper(*args, **kwargs):
+            mode = _age_policy_mode()
+            if mode == 'off':
+                return view(*args, **kwargs)
+            user = db.session.get(User, int(get_jwt_identity()))
+            if user is None:
+                # No subject, nothing to decide on. Under "enforce" that is not
+                # a reason to proceed: /api/coach would otherwise call the
+                # provider for a deleted account's token. Same answer the
+                # deletion contract gives everywhere else.
+                if mode == 'enforce':
+                    return jsonify({"error": "User not found"}), 404
+                return view(*args, **kwargs)
+            # Only DENIALS are audited. Allows are the common case on routes
+            # that are polled (team messages), and a row per poll would be a
+            # write per request for every adult, to record nothing new.
+            allowed, reason = can(user, capability)
+            if allowed:
+                return view(*args, **kwargs)
+            code = _reason_code(reason)
+            if mode == 'shadow':
+                app.logger.info("event=capability_shadow_deny user_id=%s capability=%s reason=%s",
+                                user.id, capability, code)
+                return view(*args, **kwargs)
+            db.session.add(PermissionAudit(subject_user_id=user.id, capability=capability,
+                                           decision="deny", reason=reason[:80]))
+            db.session.commit()
+            app.logger.info("event=capability_denied user_id=%s capability=%s reason=%s",
+                            user.id, capability, code)
+            return jsonify({"error": "capability_denied", "capability": capability,
+                            "reason_code": code,
+                            "message": _DENIAL_MESSAGES[capability]}), 403
+        wrapper._streakfit_capability = capability   # read by the URL-map test
+        return wrapper
+    return decorate
+
+
 def _ratelimit_backend_check():
     """Ask the limiter's storage whether it can actually COUNT.
 
@@ -4450,6 +4566,27 @@ def verification_self():
                     "Rickie is answering 503 by design after a provider stall.",
         critical=False))
 
+    # The child-safety switch, reported so it can never change unnoticed. An
+    # unrecognised value is a FAIL: the app treats it as "off", which is safe
+    # for users, but somebody meant something by it and it is not happening.
+    configured, valid = _age_policy_setting()
+    guarded = sorted({getattr(app.view_functions[r.endpoint], '_streakfit_capability', None)
+                      for r in app.url_map.iter_rules()} - {None})
+    guarded_routes = sum(1 for r in app.url_map.iter_rules()
+                         if getattr(app.view_functions[r.endpoint], '_streakfit_capability', None))
+    checks.append(_self_check(
+        "child_safety.age_policy", "Child-safety switch is set to a known value",
+        "STREAKFIT_AGE_POLICY is off, shadow or enforce, and every capability "
+        "route carries the guard that the setting controls.",
+        "Read the setting this process runs with, and count the guarded routes.",
+        "PASS" if valid else "FAIL", "VERIFIED",
+        f"age policy {configured if valid else 'UNRECOGNISED (treated as off)'}; "
+        f"{guarded_routes} routes guarded for {', '.join(guarded)}",
+        failure_reason=None if valid else
+        "STREAKFIT_AGE_POLICY has a value that is not off, shadow or enforce.",
+        limitations="Reports the switch, not whether anyone is a child: no "
+                    "account's age is established yet."))
+
     now = datetime.utcnow().isoformat() + "Z"
     return jsonify({
         "application": "streakfit",
@@ -7696,6 +7833,7 @@ def _user_team_count_cap(user):
 @app.route('/api/teams', methods=['POST'])
 @jwt_required()
 @limiter.limit("10 per minute", key_func=user_or_ip_key)
+@requires_capability(CAP_TEAMS)
 def create_team():
     data = request.get_json()
     if not data or not data.get('name') or not data['name'].strip():
@@ -7841,6 +7979,7 @@ def list_teams():
 # costs a measured 321 probes/second against a code that is how an adult
 # reaches a child. Those are not close.
 @sensitive_when_degraded("refuse")
+@requires_capability(CAP_TEAMS)
 def lookup_team_by_code(code):
     invite = db.session.execute(
         db.select(TeamInviteCode).where(TeamInviteCode.code == code.strip().upper())
@@ -7985,6 +8124,7 @@ def get_team(team_id):
 @app.route('/api/teams/<int:team_id>/join', methods=['POST'])
 @jwt_required()
 @limiter.limit("10 per minute", key_func=user_or_ip_key)
+@requires_capability(CAP_TEAMS)
 def join_team(team_id):
     data = request.get_json()
     code = (data or {}).get('code', '').strip().upper()
@@ -8622,6 +8762,7 @@ def _serialize_team_message(m, usernames=None, photos=None, challenges=None, vie
 
 @app.route('/api/teams/<int:team_id>/messages', methods=['GET'])
 @jwt_required()
+@requires_capability(CAP_TEAM_CHAT)
 def get_team_messages(team_id):
     user_id = int(get_jwt_identity())
 
@@ -8733,6 +8874,7 @@ def get_team_messages(team_id):
 @app.route('/api/teams/<int:team_id>/messages', methods=['POST'])
 @jwt_required()
 @limiter.limit("30 per minute", key_func=user_or_ip_key)
+@requires_capability(CAP_TEAM_CHAT)
 def post_team_message(team_id):
     user_id = int(get_jwt_identity())
 
@@ -9059,6 +9201,7 @@ def unlock_photo_filter(filter_key):
 @jwt_required()
 @limiter.limit("40 per hour", key_func=user_or_ip_key)
 @limiter.limit("8 per minute", key_func=user_or_ip_key)
+@requires_capability(CAP_TEAM_PHOTOS)
 def upload_team_photo(team_id):
     """Share a photo into one team the caller is a member of.
 
@@ -9165,6 +9308,7 @@ def upload_team_photo(team_id):
 @app.route('/api/teams/<int:team_id>/photos/<string:public_id>', methods=['GET'])
 @jwt_required()
 @limiter.limit("240 per minute", key_func=user_or_ip_key)
+@requires_capability(CAP_TEAM_PHOTOS)
 def get_team_photo(team_id, public_id):
     """Serve the bytes. Membership is checked on every single read.
 
@@ -13576,6 +13720,7 @@ def _coach_reached_provider(response):
 @jwt_required()
 @limiter.limit("10 per day", key_func=user_or_ip_key, deduct_when=_coach_reached_provider)
 @limiter.limit("3 per minute", key_func=user_or_ip_key)
+@requires_capability(CAP_ASK_RICKIE)
 def coach():
     # The deadline starts here, not at the first model call, so the database
     # work below counts against the same budget gunicorn is counting.
