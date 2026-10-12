@@ -2201,6 +2201,14 @@ class User(db.Model):
     # legal question (see docs/child-safety/). The column exists so the
     # permission layer has something real to read.
     age_band = db.Column(db.String(8), nullable=True)
+    # Rollback compat for PW-1 (migration e8b3c1f0a7d2): the schema carries
+    # these, so they are declared to keep models == schema
+    # (tests/test_migrations.py). THIS BUILD NEVER READS OR WRITES THEM: it
+    # issues tokens without a `tv` claim, has no password change, and new rows
+    # take the server default 0. Rolling forward to PW-1 finds every version
+    # exactly where this build left it.
+    token_version = db.Column(db.Integer, nullable=False, default=0, server_default='0')
+    password_changed_at = db.Column(db.DateTime, nullable=True)
     challenges = db.relationship('Challenge', backref='owner', lazy=True)
 
     # The economy's floor and ceiling, held by the database itself, so no code
