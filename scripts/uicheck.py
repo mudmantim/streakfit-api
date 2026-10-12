@@ -3084,6 +3084,128 @@ def check_moderation_operator_can_close_a_report(b: Browser, base: str, app) -> 
                     f"{c['ratio']}:1 on {c['bg']}" for c in weak))
 
 
+def _press(b: Browser, key: str, shift: bool = False) -> None:
+    """A real key press through CDP (trusted: Tab moves focus, Enter submits)."""
+    codes = {"Tab": 9, "Enter": 13, "Escape": 27}
+    mods = 8 if shift else 0
+    # Enter must carry its character, or Chrome performs no implicit submission
+    # (a real keyboard always sends it).
+    extra = {"text": "\r", "unmodifiedText": "\r"} if key == "Enter" else {}
+    b.call("Input.dispatchKeyEvent", type="keyDown", key=key, code=key,
+           windowsVirtualKeyCode=codes[key], modifiers=mods, **extra)
+    b.call("Input.dispatchKeyEvent", type="keyUp", key=key, code=key,
+           windowsVirtualKeyCode=codes[key], modifiers=mods)
+    time.sleep(0.15)
+
+
+def check_change_password_dialog(b: Browser, base: str, app) -> None:
+    """Change password is a real modal dialog, on a phone and on a desktop.
+
+    Review A5 found the first version had no labels once you typed, no Enter,
+    no Escape, focus that wandered behind the sheet and was dropped on close,
+    and nothing to tell a password manager which account it was updating.
+    Keys are sent through CDP, so Tab and Enter do what they do for a person.
+    """
+    print("\nChange password dialog")
+    sizes = [("phone", 390, 844, True), ("desktop", 1280, 800, False)]
+    for label, w, h, mobile in sizes:
+        b.call("Emulation.setDeviceMetricsOverride", width=w, height=h,
+               deviceScaleFactor=2 if mobile else 1, mobile=mobile)
+        username, token = make_user(app, f"pwdlg{w}")
+        b.goto(base + "/", wait=1.0)
+        b.js(f"localStorage.setItem('streakfit_token', {json.dumps(token)})")
+        b.goto(base + "/", wait=2.5)
+
+        def open_dialog():
+            b.js("(()=>{const m=document.getElementById('settings-menu'); if(m) m.hidden=false;"
+                 " document.getElementById('btn-change-password').click(); return 1;})()")
+            time.sleep(0.4)
+
+        open_dialog()
+        info = b.js("""(()=>{const d=document.querySelector('.pw-sheet'); if(!d) return null;
+          const ins=[...d.querySelectorAll('input:not([hidden])')];
+          const btns=[...d.querySelectorAll('button')];
+          const u=d.querySelector('input[autocomplete=username]');
+          const r=d.getBoundingClientRect();
+          return {tag:d.tagName, role:d.getAttribute('role'), modal:d.getAttribute('aria-modal'),
+            title:(document.getElementById(d.getAttribute('aria-labelledby'))||{}).textContent,
+            labels: ins.map(i=>{const l=d.querySelector('label[for="'+i.id+'"]'); return l?l.textContent:null;}),
+            label_visible: ins.every(i=>{const l=d.querySelector('label[for="'+i.id+'"]'); return l && l.offsetParent!==null;}),
+            user_field: u ? {hidden:u.hidden, value:u.value} : null,
+            fonts: ins.map(i=>parseFloat(getComputedStyle(i).fontSize)),
+            heights: ins.map(i=>Math.round(i.getBoundingClientRect().height)).concat(
+                     btns.map(x=>Math.round(x.getBoundingClientRect().height))),
+            hint: (document.getElementById(ins[1].getAttribute('aria-describedby'))||{}).textContent,
+            fits: r.left>=0 && r.right<=innerWidth && document.documentElement.scrollWidth<=innerWidth,
+            focused: document.activeElement && document.activeElement.id,
+            main_inert: !!(document.querySelector('main') && document.querySelector('main').closest('[inert]'))};})()""")
+        if not check(bool(info), f"{label}: the Change password dialog opens"):
+            continue
+        check(info["tag"] == "FORM" and info["role"] == "dialog" and info["modal"] == "true"
+              and info["title"] == "Change your password",
+              f"{label}: it is a labelled modal dialog built on a form", str(info))
+        check(info["labels"] == ["Current password", "New password", "New password again"]
+              and info["label_visible"],
+              f"{label}: every field has a visible label", str(info["labels"]))
+        check(bool(info["user_field"]) and info["user_field"]["hidden"]
+              and info["user_field"]["value"] == username,
+              f"{label}: a hidden username field tells a password manager which account",
+              str(info["user_field"]))
+        check(all(f >= 16 for f in info["fonts"]),
+              f"{label}: inputs are 16px or larger (no iOS zoom on focus)", str(info["fonts"]))
+        check(all(x >= 44 for x in info["heights"]),
+              f"{label}: every field and button is at least 44px tall", str(info["heights"]))
+        check("15 characters" in (info["hint"] or ""),
+              f"{label}: the new-password rule is stated and tied to the field", str(info["hint"]))
+        check(info["fits"], f"{label}: the dialog fits the screen without sideways scrolling")
+        check(info["focused"] == "pw-current", f"{label}: focus starts in Current password",
+              str(info["focused"]))
+        check(info["main_inert"], f"{label}: the page behind the dialog is inert")
+
+        inside = []
+        for _ in range(8):
+            _press(b, "Tab")
+            inside.append(b.js("!!(document.activeElement && document.activeElement.closest('.pw-sheet'))"))
+        _press(b, "Tab", shift=True)
+        inside.append(b.js("!!(document.activeElement && document.activeElement.closest('.pw-sheet'))"))
+        check(all(inside), f"{label}: Tab and Shift+Tab never leave the dialog", str(inside))
+
+        _press(b, "Escape")
+        closed = b.js("!document.querySelector('.pw-sheet')")
+        back = b.js("document.activeElement && document.activeElement.id")
+        restored = b.js("!(document.querySelector('main') && document.querySelector('main').closest('[inert]'))")
+        check(closed and back == "settings-toggle" and restored,
+              f"{label}: Escape closes it, returns focus to Settings and un-inerts the page",
+              f"closed={closed} focus={back} restored={restored}")
+
+        open_dialog()
+        b.js("(()=>{const q=s=>document.getElementById(s); q('pw-current').value='x';"
+             " q('pw-new').value='Lantern-kettle-meadow-9'; q('pw-confirm').value='Lantern-kettle-meadow-8';"
+             " q('pw-confirm').focus(); return 1;})()")
+        _press(b, "Enter")
+        time.sleep(0.5)
+        mism = (b.js("(document.querySelector('.pw-sheet .danger-error')||{}).textContent") or "")
+        same_token = b.js("localStorage.getItem('streakfit_token')") == token
+        check("don't match" in mism and same_token,
+              f"{label}: Enter with a mismatched confirmation is caught in the form", mism)
+
+        b.js("(()=>{const q=s=>document.getElementById(s);"
+             " q('pw-confirm').value='Lantern-kettle-meadow-9'; q('pw-confirm').focus(); return 1;})()")
+        _press(b, "Enter")
+        time.sleep(2.0)
+        done = (b.js("(document.querySelector('.pw-sheet .pw-done')||{}).textContent") or "")
+        new_token = b.js("localStorage.getItem('streakfit_token')")
+        focus_done = b.js("document.activeElement && document.activeElement.textContent")
+        check("Password changed" in done and new_token and new_token != token,
+              f"{label}: Enter submits, and the change is saved with a new token here", done)
+        check(focus_done == "Done", f"{label}: focus moves to Done after success", str(focus_done))
+        _press(b, "Escape")
+        check(b.js("!document.querySelector('.pw-sheet')")
+              and b.js("document.activeElement && document.activeElement.id") == "settings-toggle",
+              f"{label}: closing after success returns focus to Settings")
+    b.call("Emulation.setDeviceMetricsOverride", width=390, height=844, deviceScaleFactor=2, mobile=True)
+
+
 def check_settings_menu_reaches_every_control(b: Browser, base: str, app) -> None:
     """Log Out and Delete my account must be reachable on a phone.
 
@@ -3243,6 +3365,7 @@ def main() -> int:
         check_appeals_are_reachable(browser, base, flask_app)
         check_appeals_stay_hidden_for_everybody_else(browser, base, flask_app)
         check_settings_menu_reaches_every_control(browser, base, flask_app)
+        check_change_password_dialog(browser, base, flask_app)
         check_accessibility_basics(browser, base, flask_app)
         check_page_is_clean(browser, base, flask_app)
     except Exception as exc:  # a crash must never read as a pass

@@ -2494,45 +2494,87 @@ function openDeleteAccount() {
 // account's token version). This device gets a fresh token in the answer and
 // stays signed in. The rules are the server's; the form only catches a
 // mismatched confirmation, which the server never sees.
+//
+// A real modal dialog (review A5): a <form>, so Enter submits and password
+// managers recognise it; visible labels, because placeholders vanish while
+// typing in three look-alike fields; a hidden username field so a manager
+// knows WHICH account's password it is updating; aria-modal plus `inert` on
+// the rest of the page, so neither Tab nor a screen reader leaves the sheet;
+// Escape closes; focus returns to the Settings button, which is the visible
+// control that led here (the menu item itself closes with the menu).
 function openChangePassword() {
     if (document.querySelector('.danger-overlay')) return;
     toggleSettings(false);
+    var returnFocusTo = document.getElementById('settings-toggle');
 
     var overlay = document.createElement('div');
     overlay.className = 'danger-overlay';
-    var sheet = document.createElement('div');
-    sheet.className = 'danger-sheet';
-    sheet.setAttribute('role', 'dialog');
-    sheet.setAttribute('aria-label', 'Change your password');
+    var form = document.createElement('form');
+    form.className = 'danger-sheet pw-sheet';
+    form.setAttribute('role', 'dialog');
+    form.setAttribute('aria-modal', 'true');
+    form.setAttribute('aria-labelledby', 'pw-title');
+    form.setAttribute('aria-describedby', 'pw-body');
+    form.noValidate = true;              // the server's rules and messages, not the browser's
 
     var h = document.createElement('h2');
     h.className = 'danger-title';
+    h.id = 'pw-title';
     h.textContent = 'Change your password';
-    sheet.appendChild(h);
+    form.appendChild(h);
 
     var body = document.createElement('p');
     body.className = 'danger-body';
+    body.id = 'pw-body';
     body.textContent = 'Your other devices will be signed out. This one stays signed in.';
-    sheet.appendChild(body);
+    form.appendChild(body);
 
-    function field(placeholder, autocomplete, cls) {
+    // For password managers: which account this is. Not shown, not focusable.
+    var user = document.createElement('input');
+    user.type = 'text';
+    user.name = 'username';
+    user.setAttribute('autocomplete', 'username');
+    user.value = (currentUser && currentUser.username) || '';
+    user.readOnly = true;
+    user.hidden = true;
+    user.tabIndex = -1;
+    form.appendChild(user);
+
+    function field(id, labelText, autocomplete, cls, hintText) {
+        var label = document.createElement('label');
+        label.className = 'pw-label';
+        label.htmlFor = id;
+        label.textContent = labelText;
+        form.appendChild(label);
         var input = document.createElement('input');
         input.type = 'password';
+        input.id = id;
+        input.name = id;
         input.className = 'danger-input ' + cls;
-        input.placeholder = placeholder;
-        input.setAttribute('aria-label', placeholder);
         input.setAttribute('autocomplete', autocomplete);
-        sheet.appendChild(input);
+        input.required = true;
+        if (hintText) {
+            var hint = document.createElement('p');
+            hint.className = 'pw-hint';
+            hint.id = id + '-hint';
+            hint.textContent = hintText;
+            input.setAttribute('aria-describedby', hint.id);
+            form.appendChild(input);
+            form.appendChild(hint);
+        } else {
+            form.appendChild(input);
+        }
         return input;
     }
-    var current = field('Current password', 'current-password', 'pw-current');
-    var next = field('New password (15 or more characters)', 'new-password', 'pw-new');
-    var confirm = field('New password again', 'new-password', 'pw-confirm');
+    var current = field('pw-current', 'Current password', 'current-password', 'pw-current');
+    var next = field('pw-new', 'New password', 'new-password', 'pw-new',
+                     'At least 15 characters. A few words together works well.');
+    var confirm = field('pw-confirm', 'New password again', 'new-password', 'pw-confirm');
 
     var msg = document.createElement('p');
     msg.className = 'danger-error';
     msg.setAttribute('role', 'alert');
-    sheet.appendChild(msg);
+    form.appendChild(msg);
 
     var row = document.createElement('div');
     row.className = 'danger-actions';
@@ -2540,16 +2582,56 @@ function openChangePassword() {
     cancel.type = 'button';
     cancel.className = 'pw-cancel';
     cancel.textContent = 'Cancel';
-    cancel.addEventListener('click', function () { overlay.remove(); });
-
     var go = document.createElement('button');
-    go.type = 'button';
+    go.type = 'submit';
     go.className = 'btn-primary pw-save';
     go.textContent = 'Change password';
-    go.addEventListener('click', async function () {
+    row.appendChild(cancel);
+    row.appendChild(go);
+    form.appendChild(row);
+    overlay.appendChild(form);
+
+    // Everything else on the page is inert while the dialog is open.
+    var others = Array.prototype.filter.call(document.body.children, function (el) {
+        return el !== overlay && !el.inert;
+    });
+    function close() {
+        document.removeEventListener('keydown', onKey, true);
+        others.forEach(function (el) { el.inert = false; });
+        overlay.remove();
+        if (returnFocusTo && returnFocusTo.offsetParent !== null) returnFocusTo.focus();
+    }
+    function focusables() {
+        return Array.prototype.filter.call(
+            form.querySelectorAll('input, button'),
+            function (el) { return !el.hidden && !el.disabled && el.tabIndex !== -1 && el.offsetParent !== null; });
+    }
+    function onKey(e) {
+        if (e.key === 'Escape') {
+            e.preventDefault();
+            e.stopPropagation();
+            close();
+        } else if (e.key === 'Tab') {
+            // Belt and braces with `inert`: wrap within the sheet.
+            var f = focusables();
+            if (!f.length) return;
+            var first = f[0], last = f[f.length - 1];
+            if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+            else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+        }
+    }
+    cancel.addEventListener('click', close);
+
+    form.addEventListener('submit', async function (e) {
+        e.preventDefault();
+        msg.className = 'danger-error';
         msg.textContent = '';
         if (!current.value || !next.value) { msg.textContent = 'Fill in both passwords.'; return; }
-        if (next.value !== confirm.value) { msg.textContent = "The new passwords don't match."; return; }
+        if (next.value !== confirm.value) {
+            msg.textContent = "The new passwords don't match.";
+            confirm.focus();
+            return;
+        }
         go.disabled = true;
         go.textContent = 'Changing…';
 
@@ -2557,7 +2639,7 @@ function openChangePassword() {
             { current_password: current.value, new_password: next.value });
         go.disabled = false;
         go.textContent = 'Change password';
-        if (!result) return;    // this device was signed out; the sign-in screen is showing
+        if (!result) { close(); return; }   // this device was signed out; the sign-in screen is showing
 
         if (result.status === 200 && result.data && result.data.access_token) {
             localStorage.setItem('streakfit_token', result.data.access_token);
@@ -2566,6 +2648,7 @@ function openChangePassword() {
             msg.textContent = 'Password changed. Your other devices are signed out.';
             go.hidden = true;
             cancel.textContent = 'Done';
+            cancel.focus();
             return;
         }
         var data = result.data || {};
@@ -2573,13 +2656,13 @@ function openChangePassword() {
                 ? 'Too many attempts. Please wait a while and try again.' : null)
             || data.message
             || "Couldn't change the password just now.";
+        if (result.status === 403) current.focus();
+        else if (result.status === 400 && data.code) next.focus();
     });
 
-    row.appendChild(cancel);
-    row.appendChild(go);
-    sheet.appendChild(row);
-    overlay.appendChild(sheet);
     document.body.appendChild(overlay);
+    others.forEach(function (el) { el.inert = true; });
+    document.addEventListener('keydown', onKey, true);
     current.focus();
 }
 
