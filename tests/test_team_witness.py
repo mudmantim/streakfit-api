@@ -185,7 +185,10 @@ def test_roster_witness_does_not_reintroduce_an_n_plus_1(client):
 
     assert resp.status_code == 200
     assert len(resp.get_json()['members']) == 8
-    assert n[0] <= 9, f"query count {n[0]} scales with members — witness added an N+1"
+    # +1 since PW-1: every authenticated request reads the caller's user row
+    # once, to refuse a token a password change revoked. A constant, not a
+    # per-row query (as on PW-1; this build keeps the same revocation read).
+    assert n[0] <= 10, f"query count {n[0]} scales with members — witness added an N+1"
 
 
 def test_team_list_witness_does_not_scale_with_teams(client):
@@ -201,7 +204,10 @@ def test_team_list_witness_does_not_scale_with_teams(client):
 
     assert resp.status_code == 200
     assert len(resp.get_json()) == 6
-    assert n[0] <= 8, f"query count {n[0]} scales with teams — list_teams regressed"
+    # +1 since PW-1: every authenticated request reads the caller's user row
+    # once, to refuse a token a password change revoked. A constant, not a
+    # per-row query (as on PW-1; this build keeps the same revocation read).
+    assert n[0] <= 9, f"query count {n[0]} scales with teams — list_teams regressed"
 
 
 def test_witness_helper_handles_a_member_with_no_history(client):

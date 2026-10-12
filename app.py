@@ -13,6 +13,7 @@ import subprocess
 import threading
 from functools import wraps
 import time
+import unicodedata
 import uuid
 # click ships with Flask and backs its CLI; imported directly so a command
 # can declare options (flask moderation-notify --mark-delivered).
@@ -2201,12 +2202,11 @@ class User(db.Model):
     # legal question (see docs/child-safety/). The column exists so the
     # permission layer has something real to read.
     age_band = db.Column(db.String(8), nullable=True)
-    # Rollback compat for PW-1 (migration e8b3c1f0a7d2): the schema carries
-    # these, so they are declared to keep models == schema
-    # (tests/test_migrations.py). THIS BUILD NEVER READS OR WRITES THEM: it
-    # issues tokens without a `tv` claim, has no password change, and new rows
-    # take the server default 0. Rolling forward to PW-1 finds every version
-    # exactly where this build left it.
+    # Rollback compat for PW-1 (migration e8b3c1f0a7d2). token_version is READ
+    # on every authenticated request (revocation stays enforced) and stamped
+    # into every token, but never MOVED: this build has no password change.
+    # password_changed_at is only declared (models == schema). New rows take
+    # the default 0. Rolling forward to PW-1 finds every version as it was.
     token_version = db.Column(db.Integer, nullable=False, default=0, server_default='0')
     password_changed_at = db.Column(db.DateTime, nullable=True)
     challenges = db.relationship('Challenge', backref='owner', lazy=True)
@@ -4991,6 +4991,51 @@ def register():
 
     return jsonify({"message": "User registered successfully"}), 201
 
+# ── Rollback compat for PW-1: session security is KEPT, password change is not ─
+#
+# This build exists to replace PW-1 without a schema change. The first version
+# ignored `tv`, so a session that a PW-1 password change had revoked worked
+# again for up to an hour -- unacceptable for a SECURITY rollback (owner, 2026-
+# 10-12). So this build carries, verbatim from PW-1:
+#   _issue_access_token          every token carries the account's version
+#   _token_revoked / revoked_token_callback
+#                                every authenticated route refuses a stale one
+#   _password_candidates / _password_matches
+#                                passwords set under PW-1 (NFKC) and before
+#                                (raw) both still sign in; no rehash here
+# and does NOT carry POST /api/me/password: nothing in this build moves a
+# token version, so nothing here can revoke -- but nothing un-revokes either.
+
+
+def _issue_access_token(user):
+    """The only way an access token is made: it carries `tv`. A test fails if
+    create_access_token is called anywhere else."""
+    return create_access_token(identity=str(user.id),
+                               additional_claims={"tv": user.token_version or 0})
+
+
+def _password_hash_form(password):
+    return unicodedata.normalize('NFKC', password)
+
+
+def _password_candidates(password):
+    """NFKC (how PW-1 stores passwords), the raw string (how everything before
+    it did), and for non-ASCII input NFC/NFD. ASCII costs one check."""
+    forms = [_password_hash_form(password), password]
+    if not password.isascii():
+        forms += [unicodedata.normalize('NFC', password), unicodedata.normalize('NFD', password)]
+    seen, out = set(), []
+    for f in forms:
+        if f not in seen:
+            seen.add(f)
+            out.append(f)
+    return out
+
+
+def _password_matches(stored_hash, password):
+    return any(check_password_hash(stored_hash, form) for form in _password_candidates(password))
+
+
 @app.route('/api/login', methods=['POST'])
 @limiter.limit("10 per minute")
 # Failed logins are throttled separately and far harder than successful ones.
@@ -5029,12 +5074,14 @@ def login():
     # Always run a hash comparison — against a fixed dummy when the user doesn't
     # exist — so response time doesn't reveal whether the username is valid. The
     # error is deliberately ambiguous (never reveals whether the username exists).
-    pw_ok = check_password_hash(user.password_hash if user else _DUMMY_PW_HASH,
-                                password)
+    # Same forms tried for a missing user (against the dummy), so timing still
+    # reveals nothing. Passwords set under PW-1 are stored in NFKC; older ones
+    # raw -- both keep working (_password_matches).
+    pw_ok = _password_matches(user.password_hash if user else _DUMMY_PW_HASH, password)
     if not user or not pw_ok:
         return jsonify({"error": "That username and password don’t match."}), 401
 
-    access_token = create_access_token(identity=str(user.id))
+    access_token = _issue_access_token(user)
     app.logger.info("event=login user_id=%s", user.id)
     return jsonify({"access_token": access_token}), 200
 
@@ -5333,7 +5380,7 @@ def delete_my_account():
         return jsonify({"error": "invalid_request",
                         "message": "Send your password as text."}), 400
     password = fields[0] or ''
-    if not check_password_hash(user.password_hash, password):
+    if not _password_matches(user.password_hash, password):
         return jsonify({"error": "password_incorrect",
                         "message": "That password doesn't match."}), 403
 
@@ -13669,6 +13716,30 @@ def invalid_token_callback(error_string):
 @jwt.expired_token_loader
 def expired_token_callback(jwt_header, jwt_payload):
     return jsonify({"error": "Token has expired"}), 401
+
+
+@jwt.token_in_blocklist_loader
+def _token_revoked(jwt_header, jwt_payload):
+    """Verbatim from PW-1: a token is revoked once its account's
+    token_version has moved past it. The row is kept on `g` for the request so
+    a route's own get is answered from the identity map. A missing user is NOT
+    revoked: a deleted account's old token must still reach its 404."""
+    try:
+        user_id = int(jwt_payload.get('sub'))
+    except (TypeError, ValueError):
+        return True
+    user = db.session.get(User, user_id)
+    g._sf_auth_user = user
+    if user is None:
+        return False
+    return jwt_payload.get('tv', 0) != (user.token_version or 0)
+
+
+@jwt.revoked_token_loader
+def revoked_token_callback(jwt_header, jwt_payload):
+    return jsonify({"error": "session_ended",
+                    "message": "Your password was changed, so this device was "
+                               "signed out. Please sign in again."}), 401
 
 
 # --- Error Handlers ---
