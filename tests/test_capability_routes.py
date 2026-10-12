@@ -79,6 +79,8 @@ def _calls(team):
         'upload_team_photo': ('post', f'/api/teams/{team.id}/photos', None),
         'get_team_photo': ('get', f'/api/teams/{team.id}/photos/no-such-photo', None),
         'coach': ('post', '/api/coach', {'message': 'hi'}),
+        'create_team_challenge': ('post', f'/api/teams/{team.id}/challenges', {'preset_key': 'squats_20'}),
+        'complete_team_challenge': ('post', f'/api/teams/{team.id}/challenges/no-such-challenge/complete', None),
     }
 
 
@@ -92,6 +94,7 @@ GUARDED = {
     'get_team_messages': 'team_chat', 'post_team_message': 'team_chat',
     'upload_team_photo': 'team_photos', 'get_team_photo': 'team_photos',
     'coach': 'ask_rickie',
+    'create_team_challenge': 'team_chat', 'complete_team_challenge': 'team_chat',
 }
 
 
@@ -329,7 +332,7 @@ def test_the_self_check_reports_a_known_setting(client, policy, setting, shown):
     _, entry = _self_check_entry(client)
     assert entry['status'] == 'PASS'
     assert entry['observed'].startswith(f'age policy {shown};')
-    assert '8 routes guarded for ask_rickie, team_chat, team_photos, teams' in entry['observed']
+    assert '10 routes guarded for ask_rickie, team_chat, team_photos, teams' in entry['observed']
 
 
 def test_an_unrecognised_setting_fails_the_self_check_without_echoing_it(client, policy):
@@ -353,9 +356,8 @@ EXEMPT = {
     'remove_team_member': 'removing someone must never be blocked',
     'rotate_team_invite': 'an owner closing their team to newcomers',
     'get_team_campfire': 'existing membership; aggregate counts only',
-    'get_team_moments': 'existing membership; preset texts and names, no free text or photo bytes',
-    'create_team_challenge': 'preset challenges only; no free text',
-    'complete_team_challenge': 'preset challenges only; no free text',
+    'get_team_moments': ('existing membership; metadata goes through _public_moment_metadata '
+                         '(allow-list), so stored free text never leaves'),
     'delete_team_photo': 'removing a photo must never be blocked',
     'list_photo_filters': 'a catalogue; no other person involved',
     'unlock_photo_filter': 'spends acorns; no other person involved',
@@ -414,3 +416,102 @@ def test_a_new_unguarded_capability_route_would_fail_this_file():
 def test_the_guard_refuses_an_unknown_capability_at_import_time():
     with pytest.raises(ValueError):
         appmod.requires_capability('teleport')
+
+
+# ── Review A1: moments must not carry stored free text, whatever the row holds ─
+
+def _moment(team, moment_type, subject, metadata):
+    m = appmod.TeamMoment(team_id=team.id, moment_type=moment_type,
+                          subject_user_id=subject.id if subject else None,
+                          moment_metadata=metadata if isinstance(metadata, str) or metadata is None
+                          else appmod.json.dumps(metadata))
+    db.session.add(m)
+    db.session.commit()
+    return m
+
+
+def test_the_original_exploit_a_legacy_caption_no_longer_reaches_a_refused_member(client, policy):
+    """The review's reproduction: a photo_shared moment as upload wrote it
+    before R1 D4 carries the caption. Under enforce, the member refused chat
+    and photos got 403 on messages but read the caption through moments."""
+    adult, ha = _person('cs0_a1_adult', appmod.AGE_ADULT)
+    unknown, hk = _person('cs0_a1_unknown')
+    team = _team_with(adult, unknown)
+    _moment(team, 'photo_shared', adult, {"caption": "pick me up at 5, gate B"})
+    policy('enforce')
+    assert client.get(f'/api/teams/{team.id}/messages', headers=hk).status_code == 403
+    r = client.get(f'/api/teams/{team.id}/moments', headers=hk)
+    assert r.status_code == 200
+    assert 'gate B' not in r.get_data(as_text=True)
+    shared = [m for m in r.get_json() if m['moment_type'] == 'photo_shared']
+    assert shared and shared[0]['metadata'] is None
+    assert shared[0]['display_text'] == f"{shared[0]['subject_username']} shared a photo"
+    # Not a policy effect: with the switch off the caption is gone too.
+    policy(None)
+    assert 'gate B' not in client.get(f'/api/teams/{team.id}/moments', headers=ha).get_data(as_text=True)
+
+
+@pytest.mark.parametrize('moment_type,stored,expected', [
+    ('challenge_started', {'title': '20 squats'}, {'title': '20 squats'}),
+    ('challenge_completed', {'title': '20 squats'}, {'title': '20 squats'}),
+    ('challenge_started', {'title': 'call me on 555-0100'}, None),          # not a preset
+    ('challenge_started', {'title': '20 squats', 'note': 'hi'}, {'title': '20 squats'}),
+    ('campfire_stage_reached', {'stage': 'Bonfire', 'total_team_missions': 750},
+     {'stage': 'Bonfire', 'total_team_missions': 750}),
+    ('campfire_stage_reached', {'stage': 'my secret', 'total_team_missions': '750'}, None),
+    ('campfire_log_added', {'total_team_missions': 3}, {'total_team_missions': 3}),
+    ('campfire_log_added', {'total_team_missions': True}, None),
+    ('photo_shared', {'caption': 'anything'}, None),
+    ('member_joined', {'anything': 'at all'}, None),
+    ('photo_shared', 'not json {', None),
+    ('photo_shared', '["a list"]', None),
+    ('some_future_type', {'text': 'free'}, None),
+])
+def test_moment_metadata_is_an_allow_list_of_server_written_values(moment_type, stored, expected):
+    raw = stored if isinstance(stored, str) else appmod.json.dumps(stored)
+    assert appmod._public_moment_metadata(moment_type, raw) == expected
+
+
+def test_every_moment_the_server_writes_today_survives_the_filter(client):
+    """The allow-list must not blank out legitimate moments: drive the real
+    writers and read the feed back."""
+    adult, h = _person('cs0_a1_writer', appmod.AGE_ADULT)
+    team = _team_with(adult)
+    r = client.post(f'/api/teams/{team.id}/challenges', headers=h, json={'preset_key': 'squats_20'})
+    assert r.status_code == 201
+    moments = client.get(f'/api/teams/{team.id}/moments', headers=h).get_json()
+    started = [m for m in moments if m['moment_type'] == 'challenge_started']
+    assert started[0]['metadata'] == {'title': '20 squats'}
+    assert started[0]['display_text'].endswith('started a challenge: 20 squats')
+
+
+# ── Review B8: a team challenge is a post to the team thread ─────────────────
+
+def test_a_member_refused_team_chat_cannot_post_into_the_thread_through_a_challenge(client, policy):
+    adult, ha = _person('cs0_b8_adult', appmod.AGE_ADULT)
+    unknown, hk = _person('cs0_b8_unknown')
+    team = _team_with(adult, unknown)
+    policy('enforce')
+    r = client.post(f'/api/teams/{team.id}/challenges', headers=hk, json={'preset_key': 'squats_20'})
+    assert r.status_code == 403 and r.get_json()['capability'] == 'team_chat'
+    assert client.get(f'/api/teams/{team.id}/messages', headers=ha).get_json() == []
+
+
+def test_a_child_with_chat_consent_takes_part_in_challenges(client, policy):
+    parent, hp = _person('cs0_b8_parent', appmod.AGE_ADULT)
+    kid, hk = _person('cs0_b8_kid', appmod.AGE_CHILD)
+    team = _team_with(parent, kid)
+    _consent(kid, parent, appmod.CAP_TEAM_CHAT)
+    policy('enforce')
+    r = client.post(f'/api/teams/{team.id}/challenges', headers=hp, json={'preset_key': 'walk_10'})
+    assert r.status_code == 201
+    public_id = r.get_json()['challenge']['public_id']
+    done = client.post(f'/api/teams/{team.id}/challenges/{public_id}/complete', headers=hk)
+    assert done.status_code == 200 and done.get_json()['completed'] is True
+
+
+def test_personal_challenges_are_untouched_by_the_policy(client, policy):
+    unknown, h = _person('cs0_b8_solo')
+    policy('enforce')
+    r = client.post('/api/challenges', headers=h, json={'title': 'Stretch every morning'})
+    assert r.status_code in (200, 201)

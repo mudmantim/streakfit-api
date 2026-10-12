@@ -24,7 +24,20 @@ family-service direction in `phased-plan.md`.
 4. **The URL-map test classifies by path.** Any route whose path mentions
    coach, team(s), photo, message, chat or rickie must carry the guard, or
    be in an exempt list with a written reason. Admin routes are excluded.
-   That covers the 8 guarded routes and 13 exempt ones.
+   After the review corrections, that covers 10 guarded routes and 11 exempt
+   ones.
+5. **Review corrections (2026-10-12):**
+   - **Moments no longer pass stored metadata through.**
+     `_public_moment_metadata` allow-lists the keys per moment type and checks
+     each value against what the server writes:
+     - a preset challenge title;
+     - a real campfire stage;
+     - an integer total.
+
+     Old `photo_shared` rows carrying a caption (written before R1 D4) can no
+     longer reach any reader, scrubbed or not. Reproduced and fixed:
+     `test_the_original_exploit_a_legacy_caption_no_longer_reaches_a_refused_member`.
+   - **Team challenges now require `team_chat`.** Policy below.
 
 Phase 0 must not change anything for any account:
 
@@ -271,3 +284,35 @@ does depend on code review.
 Verification-suite note (CLAUDE.md standard): the self-check line belongs to
 the existing `verification` subsystem module. No production-visible behaviour
 changes, so there is no new end-to-end user-flow check until phase 1.
+
+## Policy: team challenges and the team thread
+
+**Decision implemented:** starting or completing a *team* challenge requires
+`team_chat`, the same as posting a message.
+
+- A team challenge **is** a thread object:
+  - starting one writes a chat row ("Started a challenge: 20 squats",
+    attributed to the starter);
+  - completing one makes Rickie post in the thread;
+  - the card other members act on is rendered from that chat row;
+  - a member who cannot read the thread cannot see a challenge to complete.
+- So a "challenge without the announcement" would be a challenge nobody can
+  see, and "announcement without chat permission" is posting to the thread
+  under another name. The review reproduced the second: a member refused
+  `team_chat` added a line to the thread.
+- **Preserved:**
+  - anyone allowed the team thread (adults, and children whose guardian
+    consented to `team_chat`) starts and completes team challenges as
+    before;
+  - **personal challenges** (`/api/challenges`) are not team features and
+    are untouched;
+  - with the switch `off`, nothing changes for anyone.
+- **Tested:**
+  - `test_a_member_refused_team_chat_cannot_post_into_the_thread_through_a_challenge`
+  - `test_a_child_with_chat_consent_takes_part_in_challenges`
+  - `test_personal_challenges_are_untouched_by_the_policy`
+
+**For a later owner decision:** a separate `team_challenges` capability,
+which a guardian could grant without free-text chat. Challenges are preset-only
+with no free text, so that is a defensible product option. It needs a
+challenge view outside the thread, so it is a feature, not a fix.

@@ -8314,6 +8314,50 @@ def get_team_campfire(team_id):
     return jsonify(payload), 200
 
 
+_CAMPFIRE_STAGE_NAMES = frozenset(name for _, name in CAMPFIRE_STAGE_THRESHOLDS)
+_CHALLENGE_PRESET_TITLES = frozenset(c['title'] for c in CHALLENGE_PRESETS)
+
+
+def _public_moment_metadata(moment_type, raw):
+    """What of a moment's stored metadata may leave the server. An ALLOW-LIST.
+
+    Stored metadata is not trusted to be safe to show. photo_shared moments
+    written before R1 D4 carry `{"caption": ...}` -- another member's own words
+    -- and the moments route is reachable by an account that the child-safety
+    policy refuses team chat and photos, so whatever this returns is readable
+    by someone `can()` has said may not read it. Rather than depend on every
+    old row having been scrubbed, the response is built from known keys whose
+    values are checked against what the server itself would have written:
+
+      challenge_started/_completed  title -- only an existing preset title
+      campfire_stage_reached        stage -- only a real stage name;
+                                    total_team_missions -- only an integer
+      campfire_log_added            total_team_missions -- only an integer
+      everything else               nothing (photo_shared included)
+
+    An unreadable row is None, never a 500.
+    """
+    if not raw:
+        return None
+    try:
+        stored = json.loads(raw)
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(stored, dict):
+        return None
+    out = {}
+    if moment_type in ('challenge_started', 'challenge_completed'):
+        if stored.get('title') in _CHALLENGE_PRESET_TITLES:
+            out['title'] = stored['title']
+    elif moment_type in ('campfire_stage_reached', 'campfire_log_added'):
+        if moment_type == 'campfire_stage_reached' and stored.get('stage') in _CAMPFIRE_STAGE_NAMES:
+            out['stage'] = stored['stage']
+        total = stored.get('total_team_missions')
+        if isinstance(total, int) and not isinstance(total, bool):
+            out['total_team_missions'] = total
+    return out or None
+
+
 def _moment_display_text(moment_type, subject_username, metadata):
     """Kept deliberately plain -- not Rickie's voice. Rickie-voiced moment
     callbacks are a later sprint (team chat / Memory Book), not this one."""
@@ -8444,7 +8488,7 @@ def get_team_moments(team_id):
     result = []
     for m in moments:
         subject_username = usernames.get(m.subject_user_id) if m.subject_user_id else None
-        metadata = json.loads(m.moment_metadata) if m.moment_metadata else None
+        metadata = _public_moment_metadata(m.moment_type, m.moment_metadata)
         result.append({
             "moment_type": m.moment_type,
             "subject_username": subject_username,
@@ -8922,6 +8966,7 @@ def list_challenge_presets():
 @jwt_required()
 @limiter.limit("20 per hour", key_func=user_or_ip_key)
 @limiter.limit("6 per minute", key_func=user_or_ip_key)
+@requires_capability(CAP_TEAM_CHAT)   # a team challenge lives in, and posts to, the team thread
 def create_team_challenge(team_id):
     user_id = int(get_jwt_identity())
 
@@ -9027,6 +9072,7 @@ def create_team_challenge(team_id):
 @app.route('/api/teams/<int:team_id>/challenges/<string:public_id>/complete', methods=['POST'])
 @jwt_required()
 @limiter.limit("30 per hour", key_func=user_or_ip_key)
+@requires_capability(CAP_TEAM_CHAT)   # a team challenge lives in, and posts to, the team thread
 def complete_team_challenge(team_id, public_id):
     """Doing the thing. Awards through the same economy as everything else.
 
