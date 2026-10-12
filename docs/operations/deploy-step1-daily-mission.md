@@ -3,7 +3,12 @@
 D6/D50/D59 day-boundary work, Step 1 (mission identity; mission days stay
 UTC dates). Built on production `bb2c9b0` (D49, Alembic head `c7d2a9e41b30`).
 Adds Alembic revision **`d4f1b6e2a9c3`** (`daily_mission` table).
-**Not deployed.** Deploying, and any rollback, need owner approval.
+
+**Released 2026-10-12** at `6b6e1cd02a6a53ffc10ab1896187787ff1002163`
+(Render deploy `dep-db645qlckfvc73c2l9j0`; application code identical to the
+reviewed Step 1 commit `1b90084`, plus a test-only lint fix). Release record:
+`e2e-campaign/evidence/d6_d50_d59/raw/step1_release_conditions_2026-10-12/PRODUCTION_RELEASE.md`.
+Any rollback needs owner approval.
 
 ## What changes for people
 
@@ -20,20 +25,58 @@ Adds Alembic revision **`d4f1b6e2a9c3`** (`daily_mission` table).
 - The page learns how long the server's day has left and refreshes from that,
   never from the device clock.
 
-## Deploy sequence
+## How production runs a deploy
 
-Unchanged from every release: the Render Start Command
-`flask db upgrade && STREAKFIT_ENFORCE_DB_HEAD=1 gunicorn app:app` applies the
-migration once, before the new code serves.
+Render service `streakfit-api` (`srv-d8f1hh6rnols73ak3a10`, `streakfit.pro`):
 
-- The migration only **creates** `daily_mission` (foreign key to `user`). It
-  reads, changes and backfills nothing; history is untouched.
+- **Auto-Deploy is Off.** Pushing to `main` deploys nothing; every release is
+  a manual deploy of an exact commit.
+- **Pre-Deploy Command: `flask db upgrade`.** Render runs it once per deploy,
+  after the build and before the new instance starts. This is where
+  migrations run. If it fails, the deploy stops and the build already live
+  keeps serving.
+- **Start Command:
+  `STREAKFIT_ENFORCE_DB_HEAD=1 STREAKFIT_RETENTION_SWEEPER=1 gunicorn app:app`.**
+  It does not migrate. `STREAKFIT_ENFORCE_DB_HEAD=1` makes the app refuse to
+  boot (`SystemExit(1)`) unless the database is stamped at this build's Alembic
+  head; `STREAKFIT_RETENTION_SWEEPER=1` runs the retention sweep in-process;
+  gunicorn runs one sync worker (Render's default `WEB_CONCURRENCY=1` on this
+  plan). One instance, autoscaling off.
+
+## Deploy sequence (as released)
+
+1. **Preconditions**, each re-checked immediately before deploying:
+   - Production `/api/build-identity` shows the expected current commit and
+     migration head; the dashboard shows Auto-Deploy Off and 1 instance.
+   - `main` is exactly the release commit and its CI run is green — and CI
+     actually ran past lint (mypy, build gate, tests), not just "completed".
+   - Time is outside 23:30–00:30 UTC (a deploy should not coincide with a
+     mission-day change) and away from announced Render maintenance.
+2. **Fresh backup and restore rehearsal (owner-run; the scripts ask for the
+   owner's secrets).** In `~/backups/streakfit/`: `streakfit-backup.sh` takes
+   an encrypted dump and proves it decrypts and parses; `streakfit-rehearse.sh`
+   restores that dump into a disposable container and runs this release's
+   migration chain against it (`SFRH_BEFORE=c7d2a9e41b30`,
+   `SFRH_REPO=<release worktree at the release commit>`). **The deploy must
+   start within 30 minutes of the backup finishing**; if that window passes,
+   take a new backup and rehearse again. The backup's own deletion deadline is
+   printed by the script — see `backup-retention-deadline.md`.
+3. **Manual deploy of the exact commit:** Render → `streakfit-api` → Manual
+   Deploy → Deploy a specific commit → paste the **full 40-character SHA** →
+   select the single matching commit → Deploy Commit. Record the deploy ID
+   (`dep-…`).
+4. **Watch the deploy log:** the build checks out the exact SHA; Pre-Deploy
+   logs `Running upgrade c7d2a9e41b30 -> d4f1b6e2a9c3`; startup logs
+   `Database migration check passed (at head d4f1b6e2a9c3)`,
+   `Using worker: sync` and **one** `Booting worker`; status Deploy succeeded.
+
+What the migration does:
+
+- It only **creates** `daily_mission` (foreign key to `user`). It reads,
+  changes and backfills nothing; history is untouched.
 - `CREATE TABLE … REFERENCES "user"` takes a SHARE ROW EXCLUSIVE lock on
   `user` for the instant of the create; `lock_timeout = 5s` makes a stuck lock
-  fail the deploy instead of queueing requests behind it. A failed upgrade
-  stops the new build from starting; the old one keeps serving.
-- Deploy outside the UTC midnight window (00:00Z ± 30 min), so the deploy and
-  a day change do not coincide.
+  fail the Pre-Deploy instead of queueing requests behind it.
 
 ### Pages open across the deploy
 
@@ -66,16 +109,26 @@ reconstructed from today's library.
 
 ## After deploy
 
-1. `/health` and `/admin` → build identity shows the new commit; database at
-   head `d4f1b6e2a9c3`.
-2. `verify_all` against production (explicit base URL). Suite version 14: the
-   mission module checks the Step 1 contract — the stored five are stable
-   across reads, `day_ends_in_s` is sane, an undated write asks for a refresh,
-   a stale day is refused (409 `day_changed`) with nothing written, retries are
-   idempotent, and the five-slot bonus is paid once. (Rehearsed 211/211 against
-   a disposable local server with rate limiting on.)
-3. Watch for `event=mission_slot_redrawn_missing_exercise` (should be zero:
+Read-only checks (as done for this release):
+
+1. `/api/build-identity`: `gitSha` = the release commit, `migration.latest`
+   `d4f1b6e2a9c3`, `atHead: true`, `appliedCount` 28.
+2. `/health`: HTTP 200, `{"status":"ok"}`.
+3. Topology: one instance (Manual Scaling 1), one sync worker (a single
+   `Booting worker` line).
+4. Application logs since go-live: search for `Traceback` and for 5xx
+   statuses, with a positive control (a search for status 200 must find
+   requests, or an empty 5xx result means nothing).
+5. Watch for `event=mission_slot_redrawn_missing_exercise` (should be zero:
    it means a deploy removed an exercise someone had today — see below).
+
+Owner-approved only:
+
+6. One disposable `qa_smoke_*` account, created, exercised and deleted by an
+   owner-run script (for this release: 14/14 — see the release record).
+7. `verify_all` against production (explicit base URL; suite v14 includes the
+   Step 1 contract). It creates throwaway accounts, so it is not run without
+   approval. (Rehearsed 211/211 against a disposable local server.)
 
 ## Exercise keys are now stored data
 
@@ -88,13 +141,28 @@ is redrawn; a completed one is shown without its picture), but
 ## Rollback runbook
 
 The previous build cannot start against a database at `d4f1b6e2a9c3`: its
-`flask db upgrade` fails ("Can't locate revision d4f1b6e2a9c3"), and if that
-were bypassed `STREAKFIT_ENFORCE_DB_HEAD=1` refuses to boot (`SystemExit(1)`).
-So the schema goes back **first, with the Step 1 code**:
+Pre-Deploy `flask db upgrade` fails ("Can't locate revision d4f1b6e2a9c3"),
+and if that were bypassed `STREAKFIT_ENFORCE_DB_HEAD=1` refuses to boot. So
+**the schema goes back first, with the Step 1 code, then the old build is
+deployed.** Never the other way round.
 
-1. **Downgrade, using the Step 1 build** (Render shell on the running Step 1
-   service, or a one-off job from the Step 1 commit, with production's
-   `DATABASE_URL`):
+**Expect a short interruption.** Between step 2 (the downgrade) and step 3
+finishing (the old build live), the Step 1 build is still serving against a
+database without `daily_mission`: `GET /api/daily`, completions, effort and
+Brain Boost answers return errors, while `/health` and the rest of the app
+keep working. It lasts as long as the old build's deploy (a few minutes; the
+Step 1 build took about 80 seconds from click to live). Nothing is written
+wrongly during it — the failing routes write nothing.
+
+1. **Decide on Maintenance Mode (owner).** Render → `streakfit-api` →
+   Settings → Maintenance Mode → enable, so visitors see Render's maintenance
+   page instead of errors for the interruption above. It is a settings change:
+   enable it only with the owner's approval, and remember it also hides
+   `/health` and `/api/build-identity` from outside checks until it is turned
+   off. Without it, the interruption is visible as failed mission requests.
+2. **Downgrade, using the Step 1 build.** In the Render Shell on the running
+   Step 1 service (the owner runs this; assistants are not given the shell),
+   with production's `DATABASE_URL` already in the environment:
 
    ```
    flask db downgrade c7d2a9e41b30
@@ -104,24 +172,30 @@ So the schema goes back **first, with the Step 1 code**:
    their Brain Boost snapshots, and harder-effort choices saved for tomorrow
    (`next_effort`). Kept: every completion, mission bonus, Brain Boost answer,
    effort choice, XP and acorn — the previous build reads all of them.
-
-2. **Deploy the previous build (`bb2c9b0`).** Its `flask db upgrade` is now a
+   Confirm the output ends with `Running downgrade d4f1b6e2a9c3 -> c7d2a9e41b30`.
+3. **Deploy the previous build:** Manual Deploy → Deploy a specific commit →
+   `bb2c9b04a61fe26e51b2a33efaf6807d326f2eeb`. Its Pre-Deploy upgrade is now a
    no-op and the head check passes.
-
-3. **Check:** `/health`, `/admin` (head `c7d2a9e41b30`), `verify_all`.
+4. **Recovery checks:** `/api/build-identity` shows `bb2c9b04a61f` and
+   `c7d2a9e41b30` with `atHead: true`; `/health` 200; one `Booting worker`;
+   no `Traceback`/5xx after the old build is live. Then turn Maintenance Mode
+   off if it was enabled, and re-check `/health` from outside.
 
 Effects while rolled back: the previous build recomputes the five per request
 again (D59 returns); pages loaded from the Step 1 build keep working against
 it (they send `mission_date`, which it ignores, and without `day_ends_in_s`
 they simply do not schedule the day-end refresh).
 
-**Never** deploy `bb2c9b0` before step 1: the deploy fails at
-`flask db upgrade` and Render keeps the Step 1 build serving — safe, but not a
-rollback.
+**If the old build is deployed first by mistake:** its Pre-Deploy fails and
+Render keeps the Step 1 build serving — safe, but not a rollback. Start again
+at step 1.
 
-**Roll forward:** redeploy the Step 1 build; its upgrade recreates an empty
+**Roll forward:** redeploy the Step 1 build; its Pre-Deploy recreates an empty
 `daily_mission`, and each person's mission is stored again on their next
 request (a day already in progress adopts its completions).
 
 Rehearsed on disposable PostgreSQL 16 (not production): see
-`e2e-campaign/evidence/d6_d50_d59/raw/step1_remediation_2026-10-12/rollback/`.
+`e2e-campaign/evidence/d6_d50_d59/raw/step1_remediation_2026-10-12/rollback/`
+and `.../step1_release_conditions_2026-10-12/rollback_rehearsal_final.json`.
+The rehearsal ran the steps in sequence; it did not measure the interruption
+window, which is estimated from the release's own deploy time.

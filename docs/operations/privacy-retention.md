@@ -290,9 +290,12 @@ filed a report, for anyone who can read the operator view or the database:
 
 **Outside the database, and not changed by deletion:**
 
-- **Encrypted backups** (`~/backups/streakfit/`) and the **Neon snapshot**
+- **Encrypted backups** (`~/backups/streakfit/`) and any **Neon snapshot**
   keep every row as it was when taken — including `reporter_user_id` — until
-  that file or snapshot is destroyed (see the backup retention dates).
+  that file or snapshot is destroyed. Each backup is deleted 14 days after it
+  was taken, or as soon as the release it protects is verified, whichever
+  comes first (`backup-retention-deadline.md`). The only Neon snapshot ever
+  recorded was deleted on 2026-10-04; any future one falls under the same rule.
 - **Neon history** (point-in-time restore) holds the earlier values for the
   plan's history window — 6 hours on Free.
 - **Render request logs** record `POST /api/reports` and `DELETE /api/me`
