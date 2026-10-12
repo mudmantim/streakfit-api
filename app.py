@@ -5075,7 +5075,20 @@ def _credential_fields(*names, missing_body_ok=False):
     values = tuple(data.get(name) for name in names)
     if any(v is not None and not isinstance(v, str) for v in values):
         return None
+    # Valid JSON can carry a lone surrogate ("\ud800"), which is not text
+    # and cannot be encoded for the hasher; it used to surface as a 500 from
+    # register, login and password change. Malformed, so None -> 400.
+    if any(v is not None and not v.isascii() and not _utf8_encodable(v) for v in values):
+        return None
     return values
+
+
+def _utf8_encodable(text):
+    try:
+        text.encode('utf-8')
+    except UnicodeEncodeError:
+        return False
+    return True
 
 
 @app.route('/api/register', methods=['POST'])

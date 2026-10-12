@@ -202,3 +202,31 @@ def test_the_builder_refuses_a_source_whose_digest_is_not_pinned(tmp_path):
     bad.write_bytes(b'password\n')
     assert b.main([str(bad), str(bad), '--out', str(tmp_path / 'out.txt')]) == 1
     assert not (tmp_path / 'out.txt').exists()
+
+
+# ── A lone surrogate is malformed input, never a 500 ─────────────────────────
+
+@pytest.mark.parametrize('route,body', [
+    ('/api/register', '{"username":"sur_reg","password":"Lantern-kettle-\\ud800-meadow"}'),
+    ('/api/login', '{"username":"sur_login","password":"Lantern-kettle-\\ud800-meadow"}'),
+    ('/api/login', '{"username":"sur_\\udfff","password":"Lantern-kettle-meadow-9"}'),
+])
+def test_a_lone_surrogate_in_credentials_is_a_400(client, route, body):
+    """Valid JSON, but not encodable text: register and login used to 500
+    (pre-existing on production 1d7b2f2; found in the pre-release gate)."""
+    r = client.post(route, data=body, content_type='application/json')
+    assert r.status_code == 400
+
+
+def test_a_lone_surrogate_in_a_new_or_current_password_is_a_400(client):
+    client.post('/api/register', json={'username': 'sur_change', 'password': 'Lantern-kettle-meadow-9'})
+    token = _login(client, 'sur_change', 'Lantern-kettle-meadow-9').get_json()['access_token']
+    for body in ('{"current_password":"Lantern-kettle-meadow-9","new_password":"Lantern-kettle-\\ud800-x"}',
+                 '{"current_password":"Lantern-\\ud800","new_password":"Another-lantern-meadow-1"}'):
+        r = client.post('/api/me/password', data=body, content_type='application/json',
+                        headers=auth_headers(token))
+        assert r.status_code == 400
+    r = client.delete('/api/me', data='{"password":"\\ud800"}', content_type='application/json',
+                      headers=auth_headers(token))
+    assert r.status_code == 400
+    assert _login(client, 'sur_change', 'Lantern-kettle-meadow-9').status_code == 200
