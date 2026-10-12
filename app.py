@@ -2201,6 +2201,13 @@ class User(db.Model):
     # legal question (see docs/child-safety/). The column exists so the
     # permission layer has something real to read.
     age_band = db.Column(db.String(8), nullable=True)
+    # Sign-out everywhere. Every access token carries the version it was issued
+    # under (the `tv` claim) and is refused once this moves on -- a password
+    # change moves it. Tokens issued before the column existed carry no claim
+    # and read as 0, which is the default, so a deploy signs nobody out.
+    token_version = db.Column(db.Integer, nullable=False, default=0, server_default='0')
+    # When the password last changed. Shown in the data export; never the hash.
+    password_changed_at = db.Column(db.DateTime, nullable=True)
     challenges = db.relationship('Challenge', backref='owner', lazy=True)
 
     # The economy's floor and ceiling, held by the database itself, so no code
@@ -5026,7 +5033,7 @@ def login():
     if not user or not pw_ok:
         return jsonify({"error": "That username and password don’t match."}), 401
 
-    access_token = create_access_token(identity=str(user.id))
+    access_token = _issue_access_token(user)
     app.logger.info("event=login user_id=%s", user.id)
     return jsonify({"access_token": access_token}), 200
 
@@ -5298,6 +5305,138 @@ def _account_deletion_refusal(plan):
     }), 409
 
 
+def _issue_access_token(user):
+    """The only way an access token is made. It carries the account's current
+    token_version (`tv`), which is what lets a password change sign every
+    other device out. A test fails if create_access_token is called anywhere
+    else."""
+    return create_access_token(identity=str(user.id),
+                               additional_claims={"tv": user.token_version or 0})
+
+
+PASSWORD_MIN_LENGTH = 8      # the same bounds registration has always enforced
+PASSWORD_MAX_LENGTH = 128
+
+# The common-password list is an OWNER DECISION (source and licence), and a
+# list somebody made up is worse than none: it looks like a control and
+# blocks a handful of guesses an attacker would not bother with. Empty until
+# that decision is taken; the check below is already wired to it.
+_COMMON_PASSWORDS: frozenset[str] = frozenset()
+
+# Context-specific words, which NIST SP 800-63B names explicitly ("the name of
+# the service, the username"). These are not a common-password list.
+_SERVICE_WORDS = ('streakfit', 'rickie')
+
+
+def _password_policy_problem(username, new):
+    """Why `new` is not acceptable as a password, or None. Never hashes.
+
+    Length bounds as at registration; then what can be judged from the
+    password and the account alone: the username or the service's name, one
+    character or short unit repeated, or a straight run of keys. No
+    composition rules and no expiry (NIST SP 800-63B).
+
+    Applied to password CHANGES only. Registration keeps its own rules until
+    the owner decides otherwise.
+    """
+    if len(new) < PASSWORD_MIN_LENGTH:
+        return 'too_short'
+    if len(new) > PASSWORD_MAX_LENGTH:
+        return 'too_long'
+    folded = new.casefold()
+    name = (username or '').strip().casefold()
+    if len(name) >= 4 and name in folded:
+        return 'contains_username'
+    letters = ''.join(ch for ch in folded if ch.isalpha())
+    if letters in _SERVICE_WORDS:
+        return 'service_name'
+    for unit in (1, 2, 3):
+        if len(folded) % unit == 0 and folded == folded[:unit] * (len(folded) // unit):
+            return 'repetitive'
+    steps = {ord(b) - ord(a) for a, b in zip(folded, folded[1:])}
+    if steps in ({1}, {-1}):
+        return 'sequential'
+    if folded in _COMMON_PASSWORDS:
+        return 'common'
+    return None
+
+
+_PASSWORD_POLICY_MESSAGES = {
+    'too_short': f"Use at least {PASSWORD_MIN_LENGTH} characters.",
+    'too_long': f"Use at most {PASSWORD_MAX_LENGTH} characters.",
+    'contains_username': "Choose a password that doesn't include your username.",
+    'service_name': "Choose a password that isn't just the app's name.",
+    'repetitive': "That's one thing repeated. Try something less predictable.",
+    'sequential': "That's a straight run of keys. Try something less predictable.",
+    'common': "That password is too common. Try something less predictable.",
+    'same_as_current': "That's your current password. Choose a new one.",
+}
+
+
+@app.route('/api/me/password', methods=['POST'])
+@jwt_required()
+# Only a wrong CURRENT password is charged: a stolen token cannot be used to
+# grind the password, while someone fixing a too-short new one pays nothing.
+# Keyed per user, so a household behind one router does not share it.
+@limiter.limit("5 per 15 minutes", key_func=user_or_ip_key,
+               deduct_when=lambda response: response.status_code == 403)
+@limiter.limit("10 per day", key_func=user_or_ip_key)
+@sensitive_when_degraded("strict")
+def change_my_password():
+    """Change your password; every other device is signed out.
+
+    Cheap refusals first, so a policy failure costs no slow hash (165 ms each
+    on this hardware, one sync worker in production): the shape of the body,
+    the policy, and "new equals current" -- which needs no hash, because once
+    the current password is verified, a new one that differs from what was
+    typed differs from what is stored. Then the person's row is locked, the
+    current password checked (one hash), and the new one hashed (one more).
+
+    403, not 401, for a wrong current password: every client treats 401 as
+    "signed out", and a typo must not sign anybody out.
+
+    Nothing about the passwords is ever logged: not the values, not their
+    lengths, not the hashes, not the tokens.
+    """
+    user_id = int(get_jwt_identity())
+    fields = _credential_fields('current_password', 'new_password')
+    if fields is None or not fields[0] or not fields[1]:
+        return jsonify({"error": "invalid_request",
+                        "message": "Send your current and new password as text."}), 400
+    current, new = fields
+
+    user = db.session.get(User, user_id)
+    if user is None:
+        return jsonify({"error": "User not found"}), 404
+    problem = _password_policy_problem(user.username, new)
+    if problem is None and new == current:
+        problem = 'same_as_current'
+    if problem is not None:
+        app.logger.info("event=password_change_refused user_id=%s reason=%s", user_id, problem)
+        return jsonify({"error": "password_policy", "code": problem,
+                        "message": _PASSWORD_POLICY_MESSAGES[problem]}), 400
+
+    # Locked before the check, so two changes run one after the other: the
+    # second sees the first's hash and is refused, never a lost update.
+    user = _lock_user(user_id)
+    if user is None:
+        db.session.rollback()
+        return jsonify({"error": "User not found"}), 404
+    if not check_password_hash(user.password_hash, current):
+        db.session.rollback()
+        app.logger.info("event=password_change_refused user_id=%s reason=current_password_wrong",
+                        user_id)
+        return jsonify({"error": "password_incorrect",
+                        "message": "Your current password doesn't match."}), 403
+
+    user.password_hash = generate_password_hash(new, method='pbkdf2:sha256')
+    user.password_changed_at = datetime.utcnow()
+    user.token_version = (user.token_version or 0) + 1
+    db.session.commit()
+    app.logger.info("event=password_changed user_id=%s sessions_revoked=true", user_id)
+    return jsonify({"changed": True, "access_token": _issue_access_token(user)}), 200
+
+
 @app.route('/api/me', methods=['DELETE'])
 @jwt_required()
 @limiter.limit("5 per hour", key_func=user_or_ip_key)
@@ -5399,6 +5538,10 @@ def export_my_data():
             "xp_total": user.xp_total,
             "acorns_earned": user.acorns_total,
             "acorns_spent": user.acorns_spent,
+            # When, never what: the password itself is not kept, only a hash,
+            # and the hash is not exported either.
+            "password_changed_at": (user.password_changed_at.isoformat() + 'Z'
+                                    if user.password_changed_at else None),
         },
         # What is kept, and for how long. An export that lists rows without
         # saying when they go is only half an answer, and the half it leaves
@@ -13661,6 +13804,38 @@ def invalid_token_callback(error_string):
 @jwt.expired_token_loader
 def expired_token_callback(jwt_header, jwt_payload):
     return jsonify({"error": "Token has expired"}), 401
+
+
+@jwt.token_in_blocklist_loader
+def _token_revoked(jwt_header, jwt_payload):
+    """A token is revoked once its account's token_version has moved past it.
+
+    Runs on every authenticated request (and in user_or_ip_key, which verifies
+    optionally). The primary-key read lands in the session's identity map, so
+    the routes that load the same user afterwards -- most of them -- do not
+    query again.
+
+    A MISSING USER IS NOT REVOKED. A deleted account's old token must keep
+    reaching the route so it can answer 404, which the deletion contract, its
+    tests and verify_all's auth.deleted_account_* checks depend on.
+    """
+    try:
+        user_id = int(jwt_payload.get('sub'))
+    except (TypeError, ValueError):
+        return True                     # signed by us, but not a person's token
+    user = db.session.get(User, user_id)
+    if user is None:
+        return False
+    return jwt_payload.get('tv', 0) != (user.token_version or 0)
+
+
+@jwt.revoked_token_loader
+def revoked_token_callback(jwt_header, jwt_payload):
+    # 401, so every client -- including pages loaded before this release --
+    # signs out and shows the sign-in screen, as for an expired token.
+    return jsonify({"error": "session_ended",
+                    "message": "Your password was changed, so this device was "
+                               "signed out. Please sign in again."}), 401
 
 
 # --- Error Handlers ---

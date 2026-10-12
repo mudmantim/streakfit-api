@@ -3239,6 +3239,22 @@ body.theme-classic .theme-btn.active { background: rgba(79,70,229,.2); }
    deliberate reach, not a thumb landing on the nearest button. */
 .danger-cancel { flex: 2; }
 
+/* Change password reuses the sheet, but nothing here is destructive: the
+   save is the primary action, Cancel is a quiet one, success is not red. */
+.danger-input + .danger-input { margin-top: .5rem; }
+.pw-save { flex: 2; }
+.pw-cancel {
+    flex: 1;
+    min-height: 44px;
+    background: none;
+    border: 1px solid var(--gray-200);
+    border-radius: 8px;
+    color: var(--gray-700);
+    font-weight: 700;
+    cursor: pointer;
+}
+.danger-error.pw-done { color: #166534; }
+
 .danger-confirm {
     flex: 1;
     min-height: 44px;

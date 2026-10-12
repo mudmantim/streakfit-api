@@ -2490,6 +2490,99 @@ function openDeleteAccount() {
     pw.focus();
 }
 
+// Changing the password signs every OTHER device out (the server moves the
+// account's token version). This device gets a fresh token in the answer and
+// stays signed in. The rules are the server's; the form only catches a
+// mismatched confirmation, which the server never sees.
+function openChangePassword() {
+    if (document.querySelector('.danger-overlay')) return;
+    toggleSettings(false);
+
+    var overlay = document.createElement('div');
+    overlay.className = 'danger-overlay';
+    var sheet = document.createElement('div');
+    sheet.className = 'danger-sheet';
+    sheet.setAttribute('role', 'dialog');
+    sheet.setAttribute('aria-label', 'Change your password');
+
+    var h = document.createElement('h2');
+    h.className = 'danger-title';
+    h.textContent = 'Change your password';
+    sheet.appendChild(h);
+
+    var body = document.createElement('p');
+    body.className = 'danger-body';
+    body.textContent = 'Your other devices will be signed out. This one stays signed in.';
+    sheet.appendChild(body);
+
+    function field(placeholder, autocomplete, cls) {
+        var input = document.createElement('input');
+        input.type = 'password';
+        input.className = 'danger-input ' + cls;
+        input.placeholder = placeholder;
+        input.setAttribute('aria-label', placeholder);
+        input.setAttribute('autocomplete', autocomplete);
+        sheet.appendChild(input);
+        return input;
+    }
+    var current = field('Current password', 'current-password', 'pw-current');
+    var next = field('New password (8 or more characters)', 'new-password', 'pw-new');
+    var confirm = field('New password again', 'new-password', 'pw-confirm');
+
+    var msg = document.createElement('p');
+    msg.className = 'danger-error';
+    msg.setAttribute('role', 'alert');
+    sheet.appendChild(msg);
+
+    var row = document.createElement('div');
+    row.className = 'danger-actions';
+    var cancel = document.createElement('button');
+    cancel.type = 'button';
+    cancel.className = 'pw-cancel';
+    cancel.textContent = 'Cancel';
+    cancel.addEventListener('click', function () { overlay.remove(); });
+
+    var go = document.createElement('button');
+    go.type = 'button';
+    go.className = 'btn-primary pw-save';
+    go.textContent = 'Change password';
+    go.addEventListener('click', async function () {
+        msg.textContent = '';
+        if (!current.value || !next.value) { msg.textContent = 'Fill in both passwords.'; return; }
+        if (next.value !== confirm.value) { msg.textContent = "The new passwords don't match."; return; }
+        go.disabled = true;
+        go.textContent = 'Changing…';
+
+        var result = await api('/api/me/password', 'POST',
+            { current_password: current.value, new_password: next.value });
+        go.disabled = false;
+        go.textContent = 'Change password';
+        if (!result) return;    // this device was signed out; the sign-in screen is showing
+
+        if (result.status === 200 && result.data && result.data.access_token) {
+            localStorage.setItem('streakfit_token', result.data.access_token);
+            current.value = next.value = confirm.value = '';
+            msg.className = 'danger-error pw-done';
+            msg.textContent = 'Password changed. Your other devices are signed out.';
+            go.hidden = true;
+            cancel.textContent = 'Done';
+            return;
+        }
+        var data = result.data || {};
+        msg.textContent = (result.status === 429
+                ? 'Too many attempts. Please wait a while and try again.' : null)
+            || data.message
+            || "Couldn't change the password just now.";
+    });
+
+    row.appendChild(cancel);
+    row.appendChild(go);
+    sheet.appendChild(row);
+    overlay.appendChild(sheet);
+    document.body.appendChild(overlay);
+    current.focus();
+}
+
 
 // ── StreakFit photo filters ────────────────────────────────────────────────────
 //
@@ -4094,10 +4187,15 @@ async function api(path, method, body) {
     // else could sign in on the same device, and the previous account's
     // identity and block list would still be in memory to render from.
     if (res.status === 401 && token) {
+        // A password change elsewhere ends this device's session on purpose
+        // (session_ended); say so, rather than calling it an expiry.
+        var reason = null;
+        try { reason = await res.json(); } catch (err) { reason = null; }
         _resetAccountState();
         localStorage.removeItem('streakfit_token');
         showView('auth');
-        setError('login-error', 'Session expired. Please log in again.');
+        setError('login-error', (reason && reason.error === 'session_ended' && reason.message)
+            || 'Session expired. Please log in again.');
         return null;
     }
 
@@ -4312,6 +4410,8 @@ function setGuestUI(guest) {
     if (dataRow) dataRow.hidden = guest;
     var deleteRow = document.getElementById('settings-row-delete');
     if (deleteRow) deleteRow.hidden = guest;
+    var passwordRow = document.getElementById('settings-row-password');
+    if (passwordRow) passwordRow.hidden = guest;
 
     var sideQuests = document.getElementById('side-quests-section');
     if (sideQuests) sideQuests.hidden = guest;

@@ -1,6 +1,6 @@
 # Password change and recovery codes — review, implementation checklist, test matrix
 
-**Status: plan only.** No password change or recovery code exists in code yet.
+**Status:** PW-1 (password change + token version) is implemented on branch `feature/pw1-and-child-safety-phase0`, not released; see `pw1-implementation-plan.md`. PW-2 (recovery codes) is plan only.
 Written 2026-10-12 after reviewing `password-change.md` and
 `password-recovery.md`.
 

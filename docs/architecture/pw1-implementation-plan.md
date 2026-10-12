@@ -1,7 +1,29 @@
 # PW-1: password change with sign-out everywhere — implementation plan
 
-**Status: plan only, not implemented.** Written 2026-10-12 against release
-candidate `1d7b2f2`.
+**Status: implemented on branch `feature/pw1-and-child-safety-phase0`. Not
+released.** Written 2026-10-12 against release candidate `1d7b2f2`. The
+runbook is `docs/operations/deploy-pw1-password-change.md`.
+
+**Where the implementation differs from this plan, and why:**
+
+1. **Two slow hashes, not three.** "Same as current" is checked by comparing
+   the two submitted strings, before any hashing. Once the current password
+   is verified, a new one that differs from what was typed also differs from
+   what is stored. `test_a_successful_change_hashes_exactly_twice` pins this.
+2. **No `g` cache.** The blocklist loader's `db.session.get` puts the user in
+   the session's identity map, so routes that load the same user get it
+   without a second query. `_lock_user` still re-reads under the lock.
+3. **Policy:** `equals_username` became `contains_username` (usernames of 4+
+   characters). Also added, all from NIST SP 800-63B's own examples and
+   needing no list:
+   - `service_name` (only "streakfit"/"rickie" once digits and symbols are
+     dropped);
+   - `repetitive` (one unit of 1–3 characters repeated);
+   - `sequential` (a straight run of keys).
+
+   The common-password list is still empty pending the owner's decision.
+4. **The rollback order in §6 was corrected:** downgrade first. That is now
+   reproduced by a test.
 
 - It narrows `password-change.md` and `password-implementation-checklist.md`
   (findings F1–F7, test matrix T1–T16) to one small release.
