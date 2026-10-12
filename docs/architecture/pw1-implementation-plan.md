@@ -10,9 +10,12 @@ runbook is `docs/operations/deploy-pw1-password-change.md`.
    the two submitted strings, before any hashing. Once the current password
    is verified, a new one that differs from what was typed also differs from
    what is stored. `test_a_successful_change_hashes_exactly_twice` pins this.
-2. **No `g` cache.** The blocklist loader's `db.session.get` puts the user in
-   the session's identity map, so routes that load the same user get it
-   without a second query. `_lock_user` still re-reads under the lock.
+2. **The `g` cache is needed after all,** and is now implemented. The first
+   version relied on the identity map alone and claimed routes would reuse
+   the loader's read. They did not: the identity map holds objects weakly, so
+   the instance was collected and `/api/me` read the row twice. The review
+   measured this (`/api/me` 4 → 5 statements). The loader now keeps the row on
+   `g` for the request.
 3. **Policy:** `equals_username` became `contains_username` (usernames of 4+
    characters). Also added, all from NIST SP 800-63B's own examples and
    needing no list:

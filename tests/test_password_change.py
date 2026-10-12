@@ -379,3 +379,44 @@ def test_the_revocation_check_is_one_query_that_does_not_scale(client):
 
     small, large = cost(2), cost(10)
     assert small == large
+
+
+def test_routes_that_load_the_caller_read_the_row_once_not_twice(client):
+    """The revocation check's read is reused by the route (request-scoped
+    reference on g). Before the fix /api/me read the user row twice: the
+    identity map holds objects weakly, so the loader's instance was collected
+    before the route asked for it again."""
+    from sqlalchemy import event
+    token = register_and_login(client, 'pw_once')
+    client.get('/api/daily', headers=auth_headers(token))          # create the day's mission
+    seen = []
+
+    def spy(conn, cursor, statement, params, context, executemany):
+        s = statement.replace('"', '')
+        if 'FROM user' in s and 'WHERE user.id' in s:
+            seen.append(s)
+
+    event.listen(appmod.db.engine, 'before_cursor_execute', spy)
+    try:
+        # Expected = the count on production 1d7b2f2, before PW-1 existed
+        # (measured with the same data). /api/daily reads the row twice there
+        # too: it commits the day's mission and reads again.
+        for path, expected in (('/api/me', 1), ('/api/daily', 2), ('/api/me/data', 1)):
+            appmod.db.session.remove()
+            seen.clear()
+            assert client.get(path, headers=auth_headers(token)).status_code == 200
+            assert len(seen) == expected, (path, len(seen))
+    finally:
+        event.remove(appmod.db.engine, 'before_cursor_execute', spy)
+
+
+def test_the_cached_row_never_outlives_a_password_change(client):
+    """The same app context (and so the same g and session) serves the tablet
+    before and after the phone's change: the cached instance must not keep an
+    old token_version alive."""
+    phone = register_and_login(client, 'pw_cache_stale')
+    tablet = _login(client, 'pw_cache_stale', PASSWORD).get_json()['access_token']
+    assert client.get('/api/me', headers=auth_headers(tablet)).status_code == 200
+    assert _change(client, phone).status_code == 200
+    r = client.get('/api/me', headers=auth_headers(tablet))
+    assert r.status_code == 401 and r.get_json()['error'] == 'session_ended'

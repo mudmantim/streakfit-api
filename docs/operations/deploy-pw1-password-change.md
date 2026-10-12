@@ -14,7 +14,7 @@ here is the owner's.
 | Tokens | Login tokens carry a `tv` claim. Every authenticated request compares it with `user.token_version`; a mismatch is `401 session_ended`. Tokens from the previous build have no `tv`, which reads as 0, so **nobody is signed out by the deploy**. |
 | New route | `POST /api/me/password {current_password, new_password}`. Results: 200 + new token; 403 wrong current password; 400 policy or malformed body; 429 throttled. |
 | Throttles | 5 wrong current passwords per 15 minutes, and 10 attempts of any kind per day, both per user. Per-process strict cap while the shared store is degraded. |
-| Cost | One primary-key read of `user` per authenticated request. Most routes then load the same user from the session's identity map at no extra cost. |
+| Cost | One primary-key read of `user` per authenticated request. It is kept for the request (`g._sf_auth_user`), so a route that loads the caller itself (`/api/me`, `/api/daily`, the export) issues **no** extra statement. Routes that never load the caller (team list, team detail, messages, moments) issue **one** more than before, constant with data size. Measured against `1d7b2f2`; see `tests/test_password_change.py`. *(Corrected: an earlier version claimed the identity map alone avoided the second read. It does not, because it holds objects weakly.)* |
 | Client | Settings → Password → Change password. A `session_ended` 401 shows "Your password was changed…" on the sign-in screen. `sw.js` v1008. |
 | Export | `account.password_changed_at`. |
 | Verification suite | v16 adds 7 `auth.password_*` checks on the throwaway leaver account. |

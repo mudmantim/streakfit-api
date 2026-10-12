@@ -13956,9 +13956,21 @@ def _token_revoked(jwt_header, jwt_payload):
     """A token is revoked once its account's token_version has moved past it.
 
     Runs on every authenticated request (and in user_or_ip_key, which verifies
-    optionally). The primary-key read lands in the session's identity map, so
-    the routes that load the same user afterwards -- most of them -- do not
-    query again.
+    optionally): one primary-key read of the caller's row.
+
+    The row is kept on `g` for the rest of the request. That reference is the
+    whole cache: SQLAlchemy's identity map holds objects WEAKLY, so without it
+    the instance was garbage-collected as soon as this function returned and a
+    route's own `db.session.get(User, id)` queried the same row again (measured:
+    /api/me 4 -> 5 statements, /api/daily 13 -> 14). With it, that get is
+    answered from the identity map. Nothing reads `g._sf_auth_user` directly,
+    so no route can mistake it for an authorisation decision; `_lock_user`
+    still re-reads under the lock (populate_existing), and a commit still
+    expires it, exactly as before.
+
+    Routes that never load the caller (team list, detail, messages, moments)
+    pay the one read; that is the cost of revocation and it does not grow with
+    data (tests/test_password_change.py pins it).
 
     A MISSING USER IS NOT REVOKED. A deleted account's old token must keep
     reaching the route so it can answer 404, which the deletion contract, its
@@ -13969,6 +13981,7 @@ def _token_revoked(jwt_header, jwt_payload):
     except (TypeError, ValueError):
         return True                     # signed by us, but not a person's token
     user = db.session.get(User, user_id)
+    g._sf_auth_user = user              # request-scoped strong reference (see above)
     if user is None:
         return False
     return jwt_payload.get('tv', 0) != (user.token_version or 0)
