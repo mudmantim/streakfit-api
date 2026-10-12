@@ -4913,15 +4913,35 @@ def record_event():
 
 # --- API Routes ---
 
+def _credential_fields(*names, missing_body_ok=False):
+    """The named fields of a JSON object body, each a string, or None.
+
+    Anything else -- no body, a body that is not JSON, a JSON array, a number
+    or a list where a string belongs -- is a malformed request, and is answered
+    as one (400) by the caller. It used to reach `.strip()`, `len()` or the
+    password hasher and come back as a 500, which says "the server broke" and
+    puts noise in the 5xx figures a release is judged on.
+    """
+    data = request.get_json(silent=True)
+    if data is None and missing_body_ok and not request.get_data(cache=True):
+        data = {}   # no body at all: every field missing, not malformed
+    if not isinstance(data, dict):
+        return None
+    values = tuple(data.get(name) for name in names)
+    if any(v is not None and not isinstance(v, str) for v in values):
+        return None
+    return values
+
+
 @app.route('/api/register', methods=['POST'])
 @limiter.limit("5 per minute")
 def register():
-    data = request.get_json()
-    if not data or not data.get('username') or not data.get('password'):
+    fields = _credential_fields('username', 'password')
+    if fields is None or not fields[0] or not fields[1]:
         return jsonify({"error": "Please choose a username and password."}), 400
 
-    username = data['username'].strip()
-    password = data['password']
+    username = fields[0].strip()
+    password = fields[1]
 
     # Basic, honest account hygiene. A skeptical first-time user should never be
     # able to set a one-character password on something that stores a streak they
@@ -4992,16 +5012,17 @@ def register():
 # bounded guessing window that the self-check reports as degraded.
 @sensitive_when_degraded("strict")
 def login():
-    data = request.get_json()
-    if not data or not data.get('username') or not data.get('password'):
+    fields = _credential_fields('username', 'password')
+    if fields is None or not fields[0] or not fields[1]:
         return jsonify({"error": "Please enter your username and password."}), 400
+    username, password = fields
 
-    user = User.query.filter_by(username=data['username']).first()
+    user = User.query.filter_by(username=username).first()
     # Always run a hash comparison — against a fixed dummy when the user doesn't
     # exist — so response time doesn't reveal whether the username is valid. The
     # error is deliberately ambiguous (never reveals whether the username exists).
     pw_ok = check_password_hash(user.password_hash if user else _DUMMY_PW_HASH,
-                                data['password'])
+                                password)
     if not user or not pw_ok:
         return jsonify({"error": "That username and password don’t match."}), 401
 
@@ -5053,9 +5074,9 @@ def get_me():
 @app.route('/api/me', methods=['PATCH'])
 @jwt_required()
 def update_me():
-    data = request.get_json()
+    data = request.get_json(silent=True)
     fields = ('skill_level', 'display_mode', 'rickie_mode', 'display_name')
-    if not data or not any(f in data for f in fields):
+    if not isinstance(data, dict) or not any(f in data for f in fields):
         return jsonify({"error": "Provide skill_level, display_mode, rickie_mode, "
                                  "and/or display_name"}), 400
 
@@ -5064,13 +5085,16 @@ def update_me():
         if not ok:
             return jsonify({"error": cleaned}), 400
 
-    if 'skill_level' in data and data['skill_level'] not in VALID_SKILL_LEVELS:
+    if 'skill_level' in data and (not isinstance(data['skill_level'], str)
+                                  or data['skill_level'] not in VALID_SKILL_LEVELS):
         return jsonify({"error": "That difficulty isn't one of the three. Pick beginner, intermediate or advanced."}), 400
 
-    if 'display_mode' in data and data['display_mode'] not in VALID_DISPLAY_MODES:
+    if 'display_mode' in data and (not isinstance(data['display_mode'], str)
+                                   or data['display_mode'] not in VALID_DISPLAY_MODES):
         return jsonify({"error": "That theme isn't one we have. Pick classic, bright or game."}), 400
 
-    if 'rickie_mode' in data and data['rickie_mode'] not in VALID_RICKIE_MODES:
+    if 'rickie_mode' in data and (not isinstance(data['rickie_mode'], str)
+                                  or data['rickie_mode'] not in VALID_RICKIE_MODES):
         return jsonify({"error": "That Rickie setting isn't one we have. Pick full, quiet or minimal."}), 400
 
     user_id = int(get_jwt_identity())
@@ -5084,6 +5108,11 @@ def update_me():
     if 'skill_level' in data:
         skill_applies = 'today'
         today = server_today()
+        # Checked before anything is written: a skill change from a stale page
+        # refuses the whole request, theme and name included.
+        refusal = _stale_day_refusal(user_id, today, 'skill')
+        if refusal is not None:
+            return refusal
         started = bool(_completed_keys_on(user_id, today))
         if not started and _load_mission(user_id, today) is None:
             # Nothing stored or done today: the mission created just below is
@@ -5289,8 +5318,13 @@ def delete_my_account():
     if user is None:
         return jsonify({"error": "User not found"}), 404
 
-    data = request.get_json(silent=True) or {}
-    password = data.get('password') or ''
+    fields = _credential_fields('password', missing_body_ok=True)
+    if fields is None:
+        # Malformed, not wrong: a 400 that changes nothing. A missing password
+        # is still the 403 below, as it always was.
+        return jsonify({"error": "invalid_request",
+                        "message": "Send your password as text."}), 400
+    password = fields[0] or ''
     if not check_password_hash(user.password_hash, password):
         return jsonify({"error": "password_incorrect",
                         "message": "That password doesn't match."}), 403
@@ -6000,6 +6034,36 @@ def _requested_mission_date():
     return None, (jsonify({"error": "invalid_mission_date"}), 400)
 
 
+def _stale_day_refusal(user_id, today, route):
+    """For a write that reshapes a day's mission (effort, skill): None to go
+    ahead, or the response that refuses it.
+
+    The page names the day it is showing. A day that has ended gets 409
+    `day_changed` and nothing is written, so a page left open since yesterday
+    cannot rebuild or ease TODAY's five, which the person has not seen. (It
+    could: an "easier" tap after midnight came back 200 and redrew the new
+    day.) A future day is impossible for an honest page: 400.
+
+    No `mission_date` at all is a page from before this check existed. It is
+    served exactly as before, so a tab open across this deploy keeps working,
+    and logged so the tolerance can be retired once the log goes quiet.
+    """
+    body = request.get_json(silent=True)
+    raw = body.get('mission_date') if isinstance(body, dict) else None
+    if raw is None:
+        app.logger.info("event=undated_day_write route=%s user_id=%s", route, user_id)
+        return None
+    mission_date, error = _requested_mission_date()
+    if error:
+        return error
+    if mission_date < today:
+        return _day_changed_response(mission_date, today,
+                                     _completed_count_on(user_id, mission_date))
+    if mission_date > today:
+        return jsonify({"error": "mission_date_in_future"}), 400
+    return None
+
+
 def _brain_boost_for(user_id, day):
     """The Brain Boost question as presented on `day`, or None for a day
     before questions were stored: today's library may hold a different
@@ -6055,12 +6119,16 @@ def set_daily_effort():
     if user is None:
         abort(404)
 
-    level = (request.get_json(silent=True) or {}).get('level')
+    body = request.get_json(silent=True)
+    level = body.get('level') if isinstance(body, dict) else None
     if level not in EFFORT_LEVELS:
         return jsonify({"error": "unknown_effort_level",
                         "allowed": list(EFFORT_LEVELS)}), 400
 
     today = server_today()
+    refusal = _stale_day_refusal(user_id, today, 'effort')
+    if refusal is not None:
+        return refusal
     mission = get_or_create_mission(user, today)
     done = _completed_keys_on(user_id, today)
     _repair_missing_slots(user, mission, done)
@@ -9709,7 +9777,33 @@ def create_report():
 
 # --- Moderation: operator review ---------------------------------------------
 
+# Rate limits for the moderation routes below. They had none: the other
+# /api/admin/* routes carry a limit each, these seven were added later and
+# missed it, so X-Admin-Secret could be guessed against them without any
+# throttle at all. Authorization is unchanged -- every route still calls
+# _require_admin_secret() first; this only bounds how often anyone may try.
+#
+# Failures are throttled across all seven TOGETHER (one shared bucket, keyed
+# per IP), so spreading guesses over routes buys nothing. The bucket is charged
+# only for a 403 on a request that SENT a secret -- a guess. A request with no
+# secret at all cannot match and is not a guess; charging it would let the
+# verification suite (which checks the no-secret refusal on every route, from
+# the operator's own machine) lock the operator out. An operator who types the
+# secret correctly is never charged.
+# The per-route ceilings are generous for a person working a queue (the
+# operator page polls) and exist only so a leaked secret cannot be used to
+# hammer the database.
+_admin_secret_failures = limiter.shared_limit(
+    "10 per minute;50 per hour", scope="admin-secret-failures",
+    deduct_when=lambda response: (response.status_code == 403
+                                  and bool(request.headers.get('X-Admin-Secret'))))
+_moderation_read_limit = limiter.limit("120 per minute")
+_moderation_write_limit = limiter.limit("30 per minute")
+
+
 @app.route('/api/admin/reports', methods=['GET'])
+@_admin_secret_failures
+@_moderation_read_limit
 def admin_list_reports():
     """The queue. Operator-only, server-enforced by the same X-Admin-Secret
     gate as every other admin route -- there is no second way in."""
@@ -9804,6 +9898,8 @@ def _review_queue_counts():
 
 
 @app.route('/api/admin/reports/<string:public_id>', methods=['GET'])
+@_admin_secret_failures
+@_moderation_read_limit
 def admin_report_detail(public_id):
     """One report, with its preserved evidence and its action history."""
     _require_admin_secret()
@@ -9856,6 +9952,8 @@ def admin_report_detail(public_id):
 
 
 @app.route('/api/admin/reports/<string:public_id>/photo-evidence', methods=['GET'])
+@_admin_secret_failures
+@_moderation_read_limit
 def admin_photo_evidence(public_id):
     """Decrypt and serve one preserved image, to an operator, once, with a row
     written for it.
@@ -9914,6 +10012,8 @@ def admin_photo_evidence(public_id):
 
 
 @app.route('/api/admin/reports/<string:public_id>/legal-hold', methods=['POST'])
+@_admin_secret_failures
+@_moderation_write_limit
 def admin_legal_hold(public_id):
     """Set or release an explicit legal hold.
 
@@ -9955,6 +10055,8 @@ MODERATION_ACTIONS = (
 
 
 @app.route('/api/admin/reports/<string:public_id>/action', methods=['POST'])
+@_admin_secret_failures
+@_moderation_write_limit
 def admin_report_action(public_id):
     """Take a moderation action and record it.
 
@@ -10271,6 +10373,8 @@ def create_appeal():
 
 
 @app.route('/api/admin/appeals', methods=['GET'])
+@_admin_secret_failures
+@_moderation_read_limit
 def admin_list_appeals():
     _require_admin_secret()
     status = request.args.get('status', 'open')
@@ -10291,6 +10395,8 @@ def admin_list_appeals():
 
 
 @app.route('/api/admin/appeals/<string:public_id>/decide', methods=['POST'])
+@_admin_secret_failures
+@_moderation_write_limit
 def admin_decide_appeal(public_id):
     """Uphold or overturn. Overturning reverses the original action; it never
     deletes it, so the trail still shows what was done and that it was undone."""

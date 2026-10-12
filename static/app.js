@@ -7014,17 +7014,15 @@ async function setEffort(level) {
     if (_effortBusy) return;
     _effortBusy = true;
     try {
-        var result = await api('/api/daily/effort', 'PUT', { level: level });
-        if (result && result.status === 409) {
-            // Asking for MORE once the mission has been started would change
-            // the five exercises underneath completions that already exist.
-            // Easing off is always allowed; this only ever fires upward.
-            var note = document.getElementById('daily-effort-note');
-            if (note) {
-                note.hidden = false;
-                note.textContent = (result.data && result.data.message)
-                    || "You're partway through today — a bigger day is there tomorrow.";
-            }
+        // The day this page is showing goes with the choice. If that day has
+        // ended, the server changes nothing and says so (409 day_changed), and
+        // the page moves to the new day -- a choice made on yesterday's page
+        // must not reshape today's five, which nobody has seen yet.
+        var result = await api('/api/daily/effort', 'PUT',
+                               { level: level, mission_date: currentMissionDate });
+        if (result && result.status === 409 && result.data &&
+                result.data.error === 'day_changed') {
+            await _showCurrentMission(result.data);
             return;
         }
         await loadDailyExercises();
@@ -7346,8 +7344,15 @@ async function handleCompleteExercise(key, btn, row) {
 }
 
 async function handleSkillLevelChange(value) {
-    var result = await api('/api/me', 'PATCH', { skill_level: value });
+    // Same rule as effort: the page names its day, and a day that has ended
+    // changes nothing (409 day_changed) and shows the new day instead.
+    var result = await api('/api/me', 'PATCH',
+                           { skill_level: value, mission_date: currentMissionDate });
     if (!result) return;
+    if (result.status === 409 && result.data && result.data.error === 'day_changed') {
+        await _showCurrentMission(result.data);
+        return;
+    }
     // Reload either way — on failure, reverts the select to server value
     await loadDailyExercises();
 }

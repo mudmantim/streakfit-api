@@ -79,6 +79,24 @@ def run(api, results, scenario):
     results.check("mission.refused_writes_count_nothing", _count(api, token) == 0,
                   f"completed_count={_count(api, token)!r}")
 
+    # An effort or skill change from a page showing a day that has ended is
+    # refused and reshapes nothing: a page left open overnight must not
+    # rebuild today's five, which the person has not seen.
+    status, body = api.request("PUT", "/api/daily/effort", token=token,
+                               body={"level": "easy", "mission_date": yesterday})
+    status2, body2 = api.request("PATCH", "/api/me", token=token,
+                                 body={"skill_level": "advanced", "mission_date": yesterday})
+    _, after = api.request("GET", "/api/daily", token=token)
+    results.check(
+        "mission.stale_effort_and_skill_are_refused",
+        status == 409 and (body or {}).get("error") == "day_changed"
+        and status2 == 409 and (body2 or {}).get("error") == "day_changed"
+        and _keys(after) == _keys(first)
+        and (after or {}).get("revision") == first.get("revision"),
+        f"effort={status}/{(body or {}).get('error')} skill={status2}/{(body2 or {}).get('error')} "
+        f"five_unchanged={_keys(after) == _keys(first)}",
+    )
+
     # Step 1: a retried completion (lost response, double tap) is saved once.
     status, once = api.request("POST", f"/api/daily/{key}/complete", token=token, body=day)
     status2, again = api.request("POST", f"/api/daily/{key}/complete", token=token, body=day)
