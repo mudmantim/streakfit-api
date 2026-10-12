@@ -53,8 +53,8 @@ def _fail(g):
 
 
 def _team(client):
-    token = register_and_login(client, "deg_joiner", "TestPass123!")
-    other = register_and_login(client, "deg_owner", "TestPass123!")
+    token = register_and_login(client, "deg_joiner", "TestPass-Lantern-123!")
+    other = register_and_login(client, "deg_owner", "TestPass-Lantern-123!")
     team = client.post("/api/teams", json={"name": "T"},
                        headers=auth_headers(other)).get_json()["team"]
     return token, team["invite_code"]
@@ -68,7 +68,7 @@ def test_ordinary_routes_keep_working_when_the_backend_is_down(client, gate):
     Measured before the first fix: with the backend refused, every limited
     route returned 500. The daily mission is the product.
     """
-    token = register_and_login(client, "degraded_mover", "TestPass123!")
+    token = register_and_login(client, "degraded_mover", "TestPass-Lantern-123!")
     _fail(gate)
     r = client.get("/api/daily", headers=auth_headers(token))
     assert r.status_code == 200, r.get_json()
@@ -76,7 +76,7 @@ def test_ordinary_routes_keep_working_when_the_backend_is_down(client, gate):
 
 
 def test_an_existing_session_still_works_when_the_backend_is_down(client, gate):
-    token = register_and_login(client, "degraded_session", "TestPass123!")
+    token = register_and_login(client, "degraded_session", "TestPass-Lantern-123!")
     _fail(gate)
     assert client.get("/api/me", headers=auth_headers(token)).status_code == 200
 
@@ -96,10 +96,10 @@ def test_invite_lookup_refuses_on_the_first_failure(client, gate):
 
 def test_login_keeps_working_but_tightens_on_the_first_failure(client, gate):
     client.post("/api/register",
-                json={"username": "degraded_login", "password": "TestPass123!"})
+                json={"username": "degraded_login", "password": "TestPass-Lantern-123!"})
     _fail(gate)
     ok = client.post("/api/login",
-                     json={"username": "degraded_login", "password": "TestPass123!"})
+                     json={"username": "degraded_login", "password": "TestPass-Lantern-123!"})
     assert ok.status_code == 200, "a real user was locked out during an outage"
     codes = [client.post("/api/login",
                          json={"username": "degraded_login", "password": "wrong"}
@@ -123,7 +123,7 @@ def test_every_other_limit_still_holds_from_process_memory(client, gate):
     minute, measured). Now each keeps its own limit."""
     _fail(gate)
     codes = [client.post("/api/register",
-                         json={"username": f"deg_reg_{i}", "password": "TestPass123!"}
+                         json={"username": f"deg_reg_{i}", "password": "TestPass-Lantern-123!"}
                          ).status_code for i in range(8)]
     assert codes.count(201) == 5 and codes[5:] == [429] * 3, codes
     assert gate.degraded and appmod.limiter.enabled is True
@@ -133,11 +133,11 @@ def test_the_allowance_carries_over_into_the_outage(client, gate):
     """Counts made while the backend was healthy are still counted after it
     fails. Flask-Limiter's own fallback restarted them from zero."""
     codes = [client.post("/api/register",
-                         json={"username": f"carry_{i}", "password": "TestPass123!"}
+                         json={"username": f"carry_{i}", "password": "TestPass-Lantern-123!"}
                          ).status_code for i in range(3)]
     _fail(gate)
     codes += [client.post("/api/register",
-                          json={"username": f"carry_b{i}", "password": "TestPass123!"}
+                          json={"username": f"carry_b{i}", "password": "TestPass-Lantern-123!"}
                           ).status_code for i in range(5)]
     assert codes.count(201) == 5, codes
 
@@ -146,7 +146,7 @@ def test_flask_limiters_zero_based_fallback_is_never_engaged(client, gate):
     _fail(gate)
     for i in range(3):
         client.post("/api/register",
-                    json={"username": f"nofb_{i}", "password": "TestPass123!"})
+                    json={"username": f"nofb_{i}", "password": "TestPass-Lantern-123!"})
     assert appmod.limiter._storage_dead is False
 
 
@@ -174,7 +174,7 @@ def test_while_degraded_requests_reach_the_backend_only_as_the_paced_probe(clien
     Now /api/health (itself throttled) and everything else are answered from
     memory; the only backend call is one probe per interval."""
     _fail(gate)
-    client.post("/api/register", json={"username": "h1", "password": "TestPass123!"})
+    client.post("/api/register", json={"username": "h1", "password": "TestPass-Lantern-123!"})
     calls = len(gate.redis.calls)
     gate.clock.t += 10 * gate.PROBE_INTERVAL_S
     for _ in range(8):
@@ -222,7 +222,7 @@ def test_the_self_check_calls_the_degradation_what_it_is(client, gate, monkeypat
     monkeypatch.setenv("STREAKFIT_ENV", "production")
     monkeypatch.setenv("RATELIMIT_STORAGE_URI", "redis://localhost:6379")
     _fail(gate)
-    client.post("/api/register", json={"username": "sc1", "password": "TestPass123!"})
+    client.post("/api/register", json={"username": "sc1", "password": "TestPass-Lantern-123!"})
     calls = len(gate.redis.calls)
 
     checks = {c["id"]: c for c in client.get("/api/verification/self").get_json()["checks"]}

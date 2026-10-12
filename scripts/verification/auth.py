@@ -146,6 +146,15 @@ def check_password_change(api, results, username, token):
                                   "new_password": CHANGED_PASSWORD})
     results.check("auth.password_wrong_current_is_403", status == 403, f"status={status}")
 
+    # The shared policy: a password on the breached/common list is refused,
+    # before any hashing, and changes nothing.
+    status, data = api.request("POST", "/api/me/password", token=token,
+                               body={"current_password": SMOKE_PASSWORD,
+                                     "new_password": "passwordpassword"})
+    results.check("auth.password_common_is_refused",
+                  status == 400 and (data or {}).get("code") == "common",
+                  f"status={status} code={(data or {}).get('code')!r}")
+
     status, data = api.request("POST", "/api/me/password", token=token,
                                body={"current_password": SMOKE_PASSWORD,
                                      "new_password": CHANGED_PASSWORD})

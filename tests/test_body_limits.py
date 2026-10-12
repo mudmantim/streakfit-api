@@ -68,7 +68,7 @@ def _user(name):
 def test_an_oversized_chunked_body_cannot_register_anyone(client):
     """3 MB of valid JSON plus padding used to create the account from the
     first 2 MB."""
-    body = padded_json({"username": "d64_trunc", "password": "WalkTest123!"}, 3 * 1024 * 1024)
+    body = padded_json({"username": "d64_trunc", "password": "WalkTest-Lantern-123!"}, 3 * 1024 * 1024)
     resp = chunked(client, "/api/register", body)
     assert resp.status_code == 413
     assert resp.get_json() == {"error": "payload_too_large"}
@@ -77,7 +77,7 @@ def test_an_oversized_chunked_body_cannot_register_anyone(client):
 
 @pytest.mark.parametrize("size", [L + 1, PHOTO, PHOTO + 1, 8 * 1024 * 1024])
 def test_the_json_ceiling_holds_for_chunked_bodies(client, size):
-    body = padded_json({"username": f"d64_{size}", "password": "WalkTest123!"}, size)
+    body = padded_json({"username": f"d64_{size}", "password": "WalkTest-Lantern-123!"}, size)
     resp = chunked(client, "/api/register", body)
     assert resp.status_code == 413, size
     assert resp.get_json() == {"error": "payload_too_large"}
@@ -86,7 +86,7 @@ def test_the_json_ceiling_holds_for_chunked_bodies(client, size):
 
 @pytest.mark.parametrize("size", [L - 1, L])
 def test_a_chunked_body_up_to_the_ceiling_is_still_accepted(client, size):
-    body = padded_json({"username": f"d64_ok_{size}", "password": "WalkTest123!"}, size)
+    body = padded_json({"username": f"d64_ok_{size}", "password": "WalkTest-Lantern-123!"}, size)
     resp = chunked(client, "/api/register", body)
     assert resp.status_code == 201, (size, resp.get_data(as_text=True)[:200])
     assert _user(f"d64_ok_{size}") is not None
@@ -189,9 +189,9 @@ def test_an_outsider_with_a_huge_chunked_photo_is_refused_for_size_before_any_lo
 # ── Content-Length behaviour is unchanged ─────────────────────────────────────
 
 def test_content_length_bodies_keep_their_exact_boundaries(client):
-    ok = padded_json({"username": "d64_cl_ok", "password": "WalkTest123!"}, L)
+    ok = padded_json({"username": "d64_cl_ok", "password": "WalkTest-Lantern-123!"}, L)
     assert client.post("/api/register", data=ok, content_type="application/json").status_code == 201
-    over = padded_json({"username": "d64_cl_over", "password": "WalkTest123!"}, L + 1)
+    over = padded_json({"username": "d64_cl_over", "password": "WalkTest-Lantern-123!"}, L + 1)
     resp = client.post("/api/register", data=over, content_type="application/json")
     assert resp.status_code == 413 and resp.get_json() == {"error": "payload_too_large"}
     assert _user("d64_cl_over") is None

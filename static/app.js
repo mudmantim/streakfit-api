@@ -2526,7 +2526,7 @@ function openChangePassword() {
         return input;
     }
     var current = field('Current password', 'current-password', 'pw-current');
-    var next = field('New password (8 or more characters)', 'new-password', 'pw-new');
+    var next = field('New password (15 or more characters)', 'new-password', 'pw-new');
     var confirm = field('New password again', 'new-password', 'pw-confirm');
 
     var msg = document.createElement('p');

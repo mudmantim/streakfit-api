@@ -14,7 +14,7 @@ from flask_jwt_extended import create_access_token
 import app as appmod
 from conftest import auth_headers, register_and_login
 
-PASSWORD = 'WalkTest123!'
+PASSWORD = 'WalkTest-Lantern-123!'
 NEW = 'Kettle-Morning-Lantern'
 
 
@@ -159,16 +159,19 @@ def test_account_deletion_works_with_the_new_password_and_not_the_old(client):
 # ── T9: policy, and that a policy failure spends no slow hash ────────────────
 
 @pytest.mark.parametrize('new,code', [
-    ('short1!', 'too_short'),
+    ('Short-pass-1', 'too_short'),                     # 12: the minimum is 15
     ('x' * 120 + 'Qz9!-abcd', 'too_long'),
-    ('my-pw_policy_kid-2026', 'contains_username'),
-    ('StreakFit2026!', 'service_name'),
-    ('rickie!!', 'service_name'),
-    ('aaaaaaaaaa', 'repetitive'),
-    ('abababababab', 'repetitive'),
-    ('123123123', 'repetitive'),
-    ('12345678', 'sequential'),
-    ('zyxwvuts', 'sequential'),
+    ('pw_policy_kid-2026', 'username_based'),          # the username is most of it
+    ('StreakFit-2026-!!!', 'service_name'),
+    ('rickie!!!!!!!!!!', 'service_name'),
+    ('aaaaaaaaaaaaaaaa', 'repetitive'),
+    ('abababababababab', 'repetitive'),
+    ('123123123123123', 'repetitive'),
+    ('abcdefghijklmnop', 'sequential'),
+    ('zyxwvutsrqponmlk', 'sequential'),
+    ('iloveyouiloveyou', 'common'),                    # on the breached-password list
+    ('PasswordPassword', 'common'),                    # case does not get it past
+    ('\uff50\uff41\uff53\uff53\uff57\uff4f\uff52\uff44password', 'common'),  # full-width
     (PASSWORD, 'same_as_current'),
 ])
 def test_a_weak_new_password_is_refused_without_hashing_anything(client, monkeypatch, new, code):
@@ -191,18 +194,42 @@ def test_a_weak_new_password_is_refused_without_hashing_anything(client, monkeyp
     'Kettle-Morning-Lantern',
     'correct horse battery staple',
     'pw_policy_ok is my name',        # contains a DIFFERENT username fragment
-    '12345678a',                      # not a straight run once the 'a' is there
-    'Ünïcødé-pässwörd',
+    '0123456789abcdefX',              # not a straight run: 9 -> a is a jump
+    'Ünïcødé-pässwörd-lantern',
+    'Savannah-lantern-meadow',        # review B3: a short name inside is no weakness
 ])
 def test_reasonable_passwords_are_accepted(client, new):
     token = register_and_login(client, 'pw_ok_user')
     assert _change(client, token, new=new).status_code == 200
 
 
-def test_registration_rules_are_unchanged(client):
-    """The policy is for changes only, until the owner decides otherwise."""
-    for name, pw in (('reg_seq', '12345678'), ('reg_rep', 'aaaaaaaa'), ('reg_rickie', 'rickie!!')):
-        assert client.post('/api/register', json={'username': name, 'password': pw}).status_code == 201
+def test_registration_applies_the_same_policy(client):
+    """One policy for every new password (owner decision, 2026-10-12)."""
+    for name, pw, code in (('reg_short', 'Fourteen-chars', 'too_short'),
+                           ('reg_common', 'passwordpassword', 'common'),
+                           ('reg_seq', 'abcdefghijklmnop', 'sequential'),
+                           ('reg_mostly_name', 'reg_mostly_name-1', 'username_based')):
+        r = client.post('/api/register', json={'username': name, 'password': pw})
+        assert r.status_code == 400, (name, r.get_json())
+        assert r.get_json()['code'] == code
+        assert r.get_json()['error'] == appmod._PASSWORD_POLICY_MESSAGES[code]
+    assert client.post('/api/register', json={'username': 'reg_ok',
+                                              'password': 'Fifteen-chars-ok'}).status_code == 201
+
+
+def test_an_existing_short_password_keeps_working(client):
+    """The new minimum judges NEW passwords only. An account created under
+    the old 8-character rule still signs in, deletes, and can change to a
+    compliant password."""
+    from werkzeug.security import generate_password_hash
+    u = appmod.User(username='pw_legacy_short', password_hash=generate_password_hash('Old8char', method='pbkdf2:sha256'))
+    appmod.db.session.add(u)
+    appmod.db.session.commit()
+    r = _login(client, 'pw_legacy_short', 'Old8char')
+    assert r.status_code == 200
+    token = r.get_json()['access_token']
+    assert _change(client, token, current='Old8char').status_code == 200
+    assert _login(client, 'pw_legacy_short', NEW).status_code == 200
 
 
 def test_a_successful_change_hashes_exactly_twice(client, monkeypatch):

@@ -18,7 +18,10 @@ here is the owner's.
 | Client | Settings → Password → Change password. A `session_ended` 401 shows "Your password was changed…" on the sign-in screen. `sw.js` v1008. |
 | Export | `account.password_changed_at`. |
 | Verification suite | v16 adds 7 `auth.password_*` checks on the throwaway leaver account. |
-| Unchanged | Registration rules, login responses, deletion (a deleted account's token is still 404), JWT expiry (1 h). |
+| Password policy | **New passwords only** (registration and change), one shared policy (`docs/security/password-policy.md`):<br>• 15+ characters<br>• not mostly the username<br>• not the service name<br>• not repetitive or sequential<br>• not on the breached/common blocklist (`docs/security/password-blocklist.md`)<br>Registration's 400 keeps `error` as the human sentence and adds `code`. |
+| Unicode | New passwords are hashed in NFKC. Sign-in, deletion and the current-password check try NFKC, the raw string, and (non-ASCII only) NFC/NFD, then upgrade the hash once, under the row lock. **No existing password stops working.** |
+| Unchanged | **Existing accounts' access:** a password set under the old 8-character rule keeps signing in. Also unchanged: login responses, deletion (a deleted account's token is still 404), JWT expiry (1 h). |
+| Verification suite | v18. `SMOKE_PASSWORD` is now 15+ characters, and it still works against a pre-PW-1 build. New check: `auth.password_common_is_refused`. |
 
 ## Preconditions
 

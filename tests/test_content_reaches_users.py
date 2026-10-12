@@ -76,7 +76,7 @@ def test_two_users_are_not_shown_the_same_item_every_day():
 def test_brain_boost_reaches_the_client_through_api_daily(client):
     """There is no GET /api/brain-boost — the question ships inside /api/daily,
     which is the only way a real client ever sees one."""
-    token = register_and_login(client, "content_reaches_bb", "TestPass123!")
+    token = register_and_login(client, "content_reaches_bb", "TestPass-Lantern-123!")
     r = client.get("/api/daily", headers=auth_headers(token))
     assert r.status_code == 200
     body = r.get_json() or {}
@@ -90,7 +90,7 @@ def test_brain_boost_reaches_the_client_through_api_daily(client):
 
 
 def test_daily_insight_endpoint_serves_an_item_from_the_store(client):
-    token = register_and_login(client, "content_reaches_insight", "TestPass123!")
+    token = register_and_login(client, "content_reaches_insight", "TestPass-Lantern-123!")
     r = client.get("/api/daily", headers=auth_headers(token))
     assert r.status_code == 200
     insight = (r.get_json() or {}).get("insight") or {}

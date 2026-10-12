@@ -24,7 +24,7 @@ import threading
 import time
 import uuid
 
-PASSWORD = 'WalkTest123!'
+PASSWORD = 'WalkTest-Lantern-123!'
 ADMIN = 'race-admin-secret'
 _pause = threading.local()
 

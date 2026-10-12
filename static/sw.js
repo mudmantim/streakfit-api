@@ -1,4 +1,4 @@
-const CACHE = 'streakfit-v1008';
+const CACHE = 'streakfit-v1009';
 // Executable/style assets (app.js, rickie-roam.js, style.css) are intentionally
 // NOT precached here: the document now requests them with a content-hash query
 // (`?v=...`, see app.py), so they are cache-first at runtime under version-tied

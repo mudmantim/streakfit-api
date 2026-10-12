@@ -41,7 +41,7 @@ def _login(client, username, password):
 
 def test_repeated_wrong_passwords_are_eventually_refused(client):
     client.post("/api/register",
-                json={"username": "throttle_target", "password": "TestPass123!"})
+                json={"username": "throttle_target", "password": "TestPass-Lantern-123!"})
     seen = []
     for _ in range(7):
         seen.append(_login(client, "throttle_target", "wrong-password").status_code)
@@ -59,10 +59,10 @@ def test_a_person_who_mistypes_twice_still_gets_in(client):
     would spend the budget on people who are simply logging in.
     """
     client.post("/api/register",
-                json={"username": "fumbler", "password": "TestPass123!"})
+                json={"username": "fumbler", "password": "TestPass-Lantern-123!"})
     assert _login(client, "fumbler", "nope").status_code == 401
     assert _login(client, "fumbler", "also-nope").status_code == 401
-    ok = _login(client, "fumbler", "TestPass123!")
+    ok = _login(client, "fumbler", "TestPass-Lantern-123!")
     assert ok.status_code == 200, ok.get_json()
     assert "access_token" in ok.get_json()
 
@@ -70,16 +70,16 @@ def test_a_person_who_mistypes_twice_still_gets_in(client):
 def test_successful_logins_are_not_charged_to_the_failure_budget(client):
     """Ten good logins in a row must not trip the failed-login limiter."""
     client.post("/api/register",
-                json={"username": "regular", "password": "TestPass123!"})
+                json={"username": "regular", "password": "TestPass-Lantern-123!"})
     for i in range(8):
-        r = _login(client, "regular", "TestPass123!")
+        r = _login(client, "regular", "TestPass-Lantern-123!")
         assert r.status_code == 200, f"good login {i + 1} returned {r.status_code}"
 
 
 def test_the_refusal_does_not_reveal_whether_the_account_exists(client):
     """Guessing at a real account and an imaginary one must look identical."""
     client.post("/api/register",
-                json={"username": "real_person", "password": "TestPass123!"})
+                json={"username": "real_person", "password": "TestPass-Lantern-123!"})
     real = _login(client, "real_person", "wrong").status_code
     import app as appmod
     appmod.limiter.reset()

@@ -15,7 +15,7 @@ import random
 import string
 import time
 
-SMOKE_PASSWORD = "SmokeTest123!"
+SMOKE_PASSWORD = "SmokeTest-Lantern-123!"   # 15+ characters since the password policy (PW-1)
 ROLES = ("a", "b", "c", "outsider")
 
 

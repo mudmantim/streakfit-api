@@ -38,7 +38,7 @@ def test_deleting_the_account_removes_the_caption_everywhere(client, family):  #
     assert upload(client, family['kid'], family['team_id'], caption=MARK).status_code == 201
     assert MARK in _everything_a_teammate_can_read(client, family['parent'], family['team_id'])
 
-    r = client.delete('/api/me', json={'password': 'WalkTest123!'},
+    r = client.delete('/api/me', json={'password': 'WalkTest-Lantern-123!'},
                       headers=auth_headers(family['kid']))
     assert r.status_code == 200
 
@@ -100,7 +100,7 @@ def test_pre_fix_moment_caption_is_scrubbed_when_the_account_goes(client, family
     _plant_pre_fix_moment(family['team_id'], _kid_id(client, family), MARK)
     assert _caption_rows()['team_moment'] >= 1
 
-    client.delete('/api/me', json={'password': 'WalkTest123!'}, headers=auth_headers(family['kid']))
+    client.delete('/api/me', json={'password': 'WalkTest-Lantern-123!'}, headers=auth_headers(family['kid']))
     assert _caption_rows()['team_moment'] == 0
 
 

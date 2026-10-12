@@ -16,15 +16,13 @@ runbook is `docs/operations/deploy-pw1-password-change.md`.
    the instance was collected and `/api/me` read the row twice. The review
    measured this (`/api/me` 4 → 5 statements). The loader now keeps the row on
    `g` for the request.
-3. **Policy:** `equals_username` became `contains_username` (usernames of 4+
-   characters). Also added, all from NIST SP 800-63B's own examples and
-   needing no list:
-   - `service_name` (only "streakfit"/"rickie" once digits and symbols are
-     dropped);
-   - `repetitive` (one unit of 1–3 characters repeated);
-   - `sequential` (a straight run of keys).
-
-   The common-password list is still empty pending the owner's decision.
+3. **Policy:** superseded by the correction pass (owner decisions,
+   2026-10-12): `docs/security/password-policy.md`.
+   - One policy for registration and change.
+   - 15-character minimum for new passwords.
+   - `username_based` replaces containment.
+   - A pinned SecLists-derived blocklist (`docs/security/password-blocklist.md`).
+   - NFKC with lock-out-free verification of existing hashes.
 4. **The rollback order in §6 was corrected:** downgrade first. That is now
    reproduced by a test.
 
