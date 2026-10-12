@@ -152,27 +152,47 @@ database without `daily_mission`: `GET /api/daily`, completions, effort and
 Brain Boost answers return errors, while `/health` and the rest of the app
 keep working. It lasts as long as the old build's deploy (a few minutes; the
 Step 1 build took about 80 seconds from click to live). Nothing is written
-wrongly during it — the failing routes write nothing.
+wrongly during it — the failing routes write nothing. **If the Step 1 instance
+restarts inside that window** (crash, platform restart), it cannot boot: the
+head check finds `c7d2a9e41b30` and refuses, so the whole site is down until
+step 3 finishes. Keep the window short; it is the main reason for step 1.
 
 1. **Decide on Maintenance Mode (owner).** Render → `streakfit-api` →
    Settings → Maintenance Mode → enable, so visitors see Render's maintenance
    page instead of errors for the interruption above. It is a settings change:
-   enable it only with the owner's approval, and remember it also hides
-   `/health` and `/api/build-identity` from outside checks until it is turned
-   off. Without it, the interruption is visible as failed mission requests.
+   enable it only with the owner's approval. Render answers **every** public
+   request with 503 while it is on, so `/health` and `/api/build-identity`
+   cannot be checked from outside until it is off. Render's documentation says
+   the service stays reachable over the private network and SSH but does not
+   say whether the dashboard Shell or a manual deploy behave differently in
+   Maintenance Mode — confirm that before relying on it mid-rollback. Without
+   it, the interruption is visible as failed mission requests.
 2. **Downgrade, using the Step 1 build.** In the Render Shell on the running
    Step 1 service (the owner runs this; assistants are not given the shell),
    with production's `DATABASE_URL` already in the environment:
 
    ```
-   flask db downgrade c7d2a9e41b30
+   PGOPTIONS='-c lock_timeout=5s' flask db downgrade c7d2a9e41b30
    ```
+
+   **Always with the lock timeout.** `DROP TABLE daily_mission` takes an
+   ACCESS EXCLUSIVE lock on `user` (its foreign key's parent), and the
+   migration's downgrade sets no timeout of its own. Without one, a single
+   open transaction that has read `user` makes the drop wait — and while it
+   waits, every new query on `user` (every signed-in request) queues behind it.
+   With the timeout the downgrade fails cleanly instead (`canceling statement
+   due to lock timeout`, database still at `d4f1b6e2a9c3`); simply run it
+   again. Both behaviours were reproduced on local PostgreSQL 17 on 2026-10-12
+   (review branch `review/housekeeping-corrections`, evidence in the overnight
+   report). `PGOPTIONS` reaches the connection because the app passes no
+   `options` of its own to libpq.
 
    One transaction; drops `daily_mission` only. Lost: today's stored fives,
    their Brain Boost snapshots, and harder-effort choices saved for tomorrow
    (`next_effort`). Kept: every completion, mission bonus, Brain Boost answer,
    effort choice, XP and acorn — the previous build reads all of them.
-   Confirm the output ends with `Running downgrade d4f1b6e2a9c3 -> c7d2a9e41b30`.
+   Confirm the output shows `Running downgrade d4f1b6e2a9c3 -> c7d2a9e41b30`
+   with no error after it, and `flask db current` prints `c7d2a9e41b30`.
 3. **Deploy the previous build:** Manual Deploy → Deploy a specific commit →
    `bb2c9b04a61fe26e51b2a33efaf6807d326f2eeb`. Its Pre-Deploy upgrade is now a
    no-op and the head check passes.

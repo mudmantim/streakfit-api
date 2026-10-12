@@ -60,7 +60,8 @@ the 2026-09-21 Neon snapshot as live, eight days after it was deleted.
   Nothing else changed: no connection, dump, encryption, verification or
   cleanup behaviour.
 - New `~/backups/streakfit/test-streakfit-retention.sh`: the rule (14 days,
-  inside 30, not overridable from the environment); the four deadlines above;
+  not overridable from the environment); the three deadlines above plus the
+  2026-10-12 02:11Z backup (→ 2026-10-26);
   first and last second of a UTC day; month, year and leap-day boundaries; the
   US DST change; four process timezones; rejection of non-numeric, negative,
   date-string and injection-shaped input; and `streakfit-backup.sh` statically
@@ -110,3 +111,129 @@ are the disaster-recovery point only. Deleting them is the owner's decision
 here deletes them. Note from the 2026-10-04 cleanup: on this btrfs SSD,
 `shred -u` removes the file but cannot prove the physical blocks were
 overwritten; the residue is AES-256 ciphertext.
+
+## Restoring or reproducing the change
+
+Nothing in these files is secret, so they are reproduced here in full; the
+SHA-256 values in the custody record above verify any copy.
+
+**Undo** (back to the hard-coded banner): in `~/backups/streakfit/`,
+`cp -p streakfit-backup.sh.orig-20261012 streakfit-backup.sh && chmod 700
+streakfit-backup.sh`, then `sha256sum streakfit-backup.sh` must print the
+"before" value. The library can stay; the old script never reads it.
+
+**Reproduce** (custody directory lost or rebuilt): save the library below as
+`streakfit-retention.sh` (mode 600) and the patch below as `backup.patch`,
+then `cp streakfit-backup.sh.orig-20261012 streakfit-backup.sh && chmod 700
+streakfit-backup.sh && patch streakfit-backup.sh < backup.patch` (the `.orig`
+is mode 500, so the copy needs the `chmod` before patching). Verified
+2026-10-12: this yields exactly the "after" SHA-256. Compare all hashes. The test file
+is not reproduced here; it can be rewritten from the list in "The fix".
+
+Known wording flaw, left unchanged because editing the file changes its
+recorded SHA-256: the library's comment and one test name say 14 days "stays
+inside" the 30-day promise. That is true of how long a backup lives, not of
+how old the rows in it are (see "Why 14 days" above). Fix it the next time the
+file is edited for another reason, and record the new hash here.
+
+### `streakfit-retention.sh`
+
+```bash
+# streakfit-retention.sh -- sourced, never executed. The one place the
+# backup-retention deadline is computed.
+#
+# THE RULE (owner-controlled; see the repo's
+# docs/operations/backup-retention-deadline.md):
+#   An encrypted production backup is deleted (shred -u) 14 days after the UTC
+#   date it was taken, OR as soon as the release it protects is verified --
+#   whichever comes first.
+#
+# Why 14: the backup freezes data StreakFit promises to delete within 30 days
+# (coach conversations, moderation evidence). 14 days stays inside that
+# promise while covering a deploy and a week of verification. It is the rule
+# behind every deadline used so far: 2026-09-21 -> 2026-10-05 (the date this
+# script used to print for EVERY backup), 2026-09-24 -> 2026-10-08,
+# 2026-10-03 -> 2026-10-17.
+#
+# Deliberately NOT configurable from the environment: a longer window would
+# quietly void the 30-day promise. Changing it means editing this file, which
+# the custody record tracks by SHA-256.
+
+streakfit_backup_max_days() {
+    printf '%s\n' 14
+}
+
+# streakfit_backup_delete_by EPOCH
+#   EPOCH: the backup's own timestamp, UNIX seconds (UTC).
+#   Prints the delete-by date, YYYY-MM-DD in UTC. Independent of the process
+#   timezone. Returns non-zero, printing nothing on stdout, for anything that
+#   is not a plain non-negative integer.
+streakfit_backup_delete_by() {
+    local epoch="${1-}" day days
+    if [[ ! "$epoch" =~ ^[0-9]+$ ]]; then
+        printf 'ERROR: delete-by needs the backup time as UNIX seconds, got: %q\n' "$epoch" >&2
+        return 2
+    fi
+    day="$(TZ=UTC date -u -d "@${epoch}" +%F)" || return 2
+    days="$(streakfit_backup_max_days)"
+    TZ=UTC date -u -d "${day} + ${days} days" +%F || return 2
+}
+```
+
+### `backup.patch` (original → current `streakfit-backup.sh`)
+
+```diff
+--- streakfit-backup.sh.orig-20261012	2026-09-23 17:11:14.590119478 -0400
++++ streakfit-backup.sh	2026-10-11 22:37:44.282214273 -0400
+@@ -88,7 +88,10 @@
+ readonly IMAGE="${SFBK_IMAGE:-docker.io/library/postgres:17}"
+ readonly DEST="${SFBK_DEST:-$HOME/backups/streakfit}"
+ readonly RUNDIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+-readonly STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
++# One instant for the file name and the retention deadline, so the two can
++# never disagree (e.g. a backup started at 23:59:59 UTC).
++readonly STAMP_EPOCH="$(date -u +%s)"
++readonly STAMP="$(date -u -d "@${STAMP_EPOCH}" +%Y%m%dT%H%M%SZ)"
+ readonly BASE="streakfit-neondb-production-${STAMP}.dump.gpg"
+
+ # Every libpq variable we are willing to carry over from the URL. Anything in
+@@ -108,6 +111,18 @@
+ die() { printf '%s\n' "ERROR: $*" >&2; exit 1; }
+ note() { printf '%s\n' "$*"; }
+
++# Retention deadline, computed from this backup's own timestamp (it used to be
++# a hard-coded 2026-10-05, printed for every backup). The rule lives in one
++# sourced file beside this script; computed before anything connects, so a
++# missing or broken rule stops the run instead of printing a wrong date.
++readonly SFBK_LIBDIR="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")"
++# shellcheck source=streakfit-retention.sh
++. "${SFBK_LIBDIR}/streakfit-retention.sh" \
++    || die "cannot load ${SFBK_LIBDIR}/streakfit-retention.sh (the retention rule)"
++DELETE_BY="$(streakfit_backup_delete_by "$STAMP_EPOCH")" \
++    || die "could not compute the retention deadline"
++readonly DELETE_BY
++
+ cleanup() {
+     local rc=$?
+     # A container only lingers if we were killed mid-run; --rm covers the rest.
+@@ -324,13 +339,14 @@
+ records, and verbatim coach conversations.
+   * Keep it at mode 600 under $DEST. Never in the repo, Downloads, Desktop,
+     or any cloud-synced directory.
+-  * DELETE BY 2026-10-05, or as soon as the production migration is verified —
+-    whichever comes first:  shred -u "$FINAL"
++  * DELETE BY ${DELETE_BY} ($(streakfit_backup_max_days) days after this backup, UTC), or as soon as
++    the release it protects is verified — whichever comes first:
++        shred -u "$FINAL"
+   * This file freezes data StreakFit promises to delete after 30 days. Holding
+     it longer quietly voids that promise.
+-  * THE NEON SNAPSHOT NEEDS THE SAME DECISION. The manual snapshot taken on
+-    2026-09-21 18:07:41 UTC is set to expire NEVER, and is a permanent frozen
+-    copy of the same data until someone removes it.
++  * NEON SNAPSHOTS NEED THE SAME RULE. None existed after the 2026-10-04
++    cleanup. A manual snapshot set to expire NEVER is a permanent frozen copy
++    of this data: if one is ever taken, give it the same deadline.
+   * Losing the passphrase makes this file unrecoverable. There is no reset.
+
+ Remember: unset PGURL
+```
