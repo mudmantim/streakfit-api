@@ -31,7 +31,8 @@ here is the owner's.
 3. Outside 23:30–00:30 UTC.
 4. Both CI jobs are green on the exact SHA. The `postgres` job now includes
    `test_password_change_postgres.py`.
-5. **A fresh backup**, because this release changes the schema. Use the
+5. **The rollback build is ready:** `rollback/pw1-compat` is pushed, CI is green on it, and its SHA is recorded (Rollback A).
+6. **A fresh backup**, because this release changes the schema. Use the
    custody scripts; the 14-day deadline is printed.
 
 ## Deploy
@@ -53,44 +54,133 @@ here is the owner's.
 5. Owner-approved: `verify_all` v16. It changes the password of its own
    throwaway account only.
 
-## Rollback: downgrade FIRST, then redeploy
+## Rollback
 
-The previous build runs with `STREAKFIT_ENFORCE_DB_HEAD=1` and **refuses to
-boot** against `e8b3c1f0a7d2`. That is reproduced in
-`test_the_head_check_refuses_a_build_that_does_not_know_the_revision`.
+There are two procedures. **Use A.** B exists for the case where A's
+prerequisites aren't met, and it causes an outage.
 
-1. From a trusted machine, with the production `DATABASE_URL` in the
+### A. Zero-downtime rollback: deploy the compatibility build (preferred)
+
+**What it is:** branch `rollback/pw1-compat`, commit `f50ac70` (local; not
+yet pushed). That is production `1d7b2f2` plus:
+
+- the PW-1 migration file, byte-identical;
+- the two new columns declared on the model and never used.
+
+Its Alembic head is `e8b3c1f0a7d2`, so **its own `STREAKFIT_ENFORCE_DB_HEAD`
+check passes against the PW-1 database as it stands**:
+
+- nothing is disabled;
+- nothing is downgraded;
+- no request ever meets a missing column.
+
+**Prerequisites, all before PW-1 is released:**
+
+1. `rollback/pw1-compat` is pushed, and **both CI jobs are green on it**.
+   Record its full SHA next to the PW-1 release SHA.
+2. Production's database is at `e8b3c1f0a7d2`, and **no later migration has
+   been deployed**. The compatibility build refuses any other head (see
+   failure conditions).
+3. Render Auto-Deploy is Off (manual deploys by SHA).
+
+**Procedure:**
+
+1. Render → Manual Deploy → Deploy a specific commit → the compatibility SHA.
+2. Watch the log:
+   - Pre-Deploy `flask db upgrade` prints **no** "Running upgrade";
+   - `Database migration check passed (at head e8b3c1f0a7d2)`;
+   - one worker;
+   - "Deploy succeeded".
+3. Check:
+   - identity shows the compatibility SHA, `e8b3c1f0a7d2`, `atHead: true`,
+     `appliedCount` 29;
+   - `/health` 200;
+   - **and a real sign-in**, with a positive control. `/health` does not
+     touch the user table.
+4. Later, roll forward by deploying a fixed PW-1 build. No migration either
+   way.
+
+**Rehearsed on disposable PostgreSQL 17.10, 2026-10-12**
+(`scripts/rehearse_pw1_rollback.py`; the head check is on at every boot):
+
+| Step | Observed |
+|---|---|
+| PW-1 → compat | Pre-Deploy ran no upgrade. Boot check passed. Sign-in with the changed password 200; old password 401; `/api/daily` 200; `/api/me/password` 404. A new registration got `token_version 0` from the default. Versions written under PW-1 unchanged |
+| `verify_all` v15 against the compat build, serving with the head check on | **214/214**, 0 Tracebacks, 0 5xx |
+| compat → PW-1 again | No upgrade; boot check passed. `token_version` values exactly as left. PW-1 tokens still valid |
+
+**Limitations (observed, not assumed):**
+
+- **Revoked sessions come back while the compatibility build serves.** It
+  ignores `tv`, so a token that a password change had revoked works again
+  until it expires (at most 1 hour after it was issued). Someone who changed
+  their password *because* a device was lost is exposed for that hour.
+- **One sign-out after rolling forward.** Tokens the compatibility build
+  issued carry no `tv`, which reads as 0. For anyone who had changed their
+  password (`token_version` ≥ 1), those tokens are refused
+  (`session_ended`) after rolling forward, so they sign in once.
+- Under the compatibility build:
+  - registration is back to 8 characters, with no blocklist;
+  - sign-in doesn't normalise Unicode (only the exact stored form works);
+  - **a password set under PW-1 is stored in NFKC**, so a non-ASCII password
+    typed in a non-NFKC form (rare, e.g. full-width input) may not sign in
+    until roll-forward.
+- Pages loaded on PW-1 show "Change password", which gets 404 → "Couldn't
+  change the password just now."
+
+**Failure conditions and recovery:**
+
+| Condition | What happens | Recovery |
+|---|---|---|
+| The database isn't at `e8b3c1f0a7d2` (someone downgraded, or a later migration was deployed) | The compatibility build **refuses to start** (`Refusing to start: database is at Alembic revision …`). Rehearsed for both a downgraded and a newer head. Render keeps serving the previous instance when a new one fails to boot (verify on staging before relying on it) | Don't force it. Deploy a build whose head matches the database, or use B |
+| CI hasn't run on the compatibility SHA | Unknown build quality | Push it and wait for green **before** the PW-1 release (prerequisite 1) |
+| Sign-in fails after the deploy although `/health` is 200 | Not expected (rehearsed); treat it as an incident | Redeploy PW-1 (same head, no migration), then investigate |
+
+### B. Downgrade-first rollback (fallback only): **this causes an outage**
+
+Use B only if A's prerequisites aren't met, e.g. the compatibility build was
+never pushed.
+
+1. From a trusted machine with production's `DATABASE_URL` in the
    environment (never in argv or chat):
 
    ```
    PGOPTIONS='-c lock_timeout=5s' flask db downgrade d4f1b6e2a9c3
    ```
 
-   - If it stops on `lock timeout`, retry. Nothing is half-applied
-     (rehearsed: `test_a_held_row_lock_makes_the_rollback_fail_fast_and_then_it_succeeds`).
-   - From this moment the still-serving PW-1 build reads columns that are
-     gone, so authenticated requests fail. **Do step 2 immediately.**
-2. Render: Manual Deploy → the previous SHA.
-3. Check:
-   - identity shows the previous SHA, `d4f1b6e2a9c3`, `atHead: true`;
-   - `/health` 200.
+   If it stops on `lock timeout`, retry. Nothing is half-applied (rehearsed:
+   `test_a_held_row_lock_makes_the_rollback_fail_fast_and_then_it_succeeds`).
+2. **Immediately** deploy `1d7b2f2d48b36beccc21f09cfc88675cac11629a` by SHA.
+   Its head check needs `d4f1b6e2a9c3`, and would refuse `e8b3c1f0a7d2`
+   (rehearsed: `test_the_head_check_refuses_a_build_that_does_not_know_the_revision`).
 
-## What rollback does not undo (limitations)
+**⚠ Between steps 1 and 2 the still-serving PW-1 build returns HTTP 500 for:**
 
-- **Changed passwords stay changed.** The hash format is identical, so
-  anyone who changed their password logs in with the new one on the old build.
-- **Sign-outs stop.** The old build ignores `tv`. A token that a change had
-  revoked becomes valid again until it expires (at most 1 hour after it was
-  issued). Someone who changed their password *because* a device was lost is
-  exposed for that hour. **Prefer roll-forward** for anything short of an
-  outage.
-- `password_changed_at` values are dropped by the downgrade, and the export
-  loses that field.
-- Pages loaded on the PW-1 build show a "Change password" button that 404s
-  on the old build until they reload. The form shows "Couldn't change the
-  password just now."
-- Between steps 1 and 2 authenticated requests fail. The gap is as long as
-  the redeploy takes.
+- **sign-in**;
+- **registration**;
+- **every signed-in request**.
+
+Its model selects columns that no longer exist. **Meanwhile `/health`,
+`/api/health` and the demo still answer 200, so Render's health check stays
+green.** The outage is invisible to health monitoring and lasts as long as
+the redeploy: build, Pre-Deploy and boot, so minutes.
+
+Rehearsed on PostgreSQL (`scripts/rehearse_pw1_rollback_window.py`):
+
+| Requests | Status |
+|---|---|
+| login, register, `/api/me`, `/api/daily` | 500 |
+| `/health`, `/api/health`, `/api/demo/daily` | 200 |
+
+Monitor with a real sign-in, not `/health`.
+
+**B also:**
+
+- drops `token_version` and `password_changed_at` (the export loses that
+  field);
+- a later roll-forward resets every version to 0, which re-validates tokens
+  revoked within the last hour and signs out once the holders of `tv ≥ 1`
+  tokens.
 
 ## Watch afterwards
 
