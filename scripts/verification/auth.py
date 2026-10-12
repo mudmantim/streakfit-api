@@ -37,6 +37,15 @@ def run(api, results, scenario):
     )
     results.check("auth.wrong_password_rejected", status == 401, f"status={status}")
 
+    # A malformed body is the caller's mistake, answered as one -- never a 500.
+    # (Registration is checked by pytest only: one more /api/register here
+    # would spend the 5-per-minute budget the scenario's own sign-ups need.)
+    status, _ = api.request(
+        "POST", "/api/login",
+        body={"username": users["a"]["username"], "password": 12345678},
+    )
+    results.check("auth.malformed_login_is_400", status == 400, f"status={status}")
+
     check_account_deletion(api, results, scenario)
     return scenario
 
@@ -93,6 +102,11 @@ def check_account_deletion(api, results, scenario):
 
     status, _ = api.request("DELETE", "/api/me", token=token, body={"password": "wrong"})
     results.check("auth.delete_needs_the_password", status == 403, f"status={status}")
+
+    # Malformed, not wrong: 400, and nothing is deleted (the next step proves
+    # the account is still there by deleting it).
+    status, _ = api.request("DELETE", "/api/me", token=token, body={"password": ["x"]})
+    results.check("auth.delete_malformed_is_400", status == 400, f"status={status}")
 
     status, body = api.request("DELETE", "/api/me", token=token,
                                body={"password": SMOKE_PASSWORD})

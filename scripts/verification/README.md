@@ -26,9 +26,9 @@ Exit codes: `0` all passed, `1` at least one check failed, `2` a setup step (e.g
 
 | Module | Covers |
 |---|---|
-| `auth.py` | Register, login, `/api/me`, duplicate-username and wrong-password rejection, and `DELETE /api/me` for a throwaway account that holds a block (deletes itself) |
+| `auth.py` | Register, login, `/api/me`, duplicate-username and wrong-password rejection, a malformed login answered 400 (not 500), and `DELETE /api/me` for a throwaway account that holds a block (a malformed deletion is 400 and deletes nothing; then it deletes itself) |
 | `teams.py` | Create, join, roster (names + creator flag), bad-code and duplicate-join rejection |
-| `mission.py` | Daily Mission completion, streak/total-missions stats, and that a refused completion is reported as an error and counts for nothing. Step 1 contract: the stored five are stable across reads, `day_ends_in_s` is sane, an undated write asks for a refresh, a stale day is refused (409 `day_changed`) with nothing written, retries are idempotent, and the five-slot bonus is paid once |
+| `mission.py` | Daily Mission completion, streak/total-missions stats, and that a refused completion is reported as an error and counts for nothing. Step 1 contract: the stored five are stable across reads, `day_ends_in_s` is sane, an undated write asks for a refresh, a stale day is refused (409 `day_changed`) with nothing written, an effort or skill change from a page showing an ended day is refused the same way and leaves today's five untouched, retries are idempotent, and the five-slot bonus is paid once |
 | `campfire.py` | Cumulative team mission counter and derived stage |
 | `moments.py` | Team Moments history (`team_created`, `member_joined`, `campfire_log_added`, ordering) |
 | `chat.py` | Team Chat post/read, empty/over-length rejection, emoji reactions as plain messages |
