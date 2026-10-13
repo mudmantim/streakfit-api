@@ -17,8 +17,9 @@ is a separate process running one tree against the same database:
   3. ROLL FORWARD to PW-1, no migration: versions intact, compat's tokens
      still valid (they carry `tv`), revoked ones still refused, and a new
      change still revokes.
-  4. Failure conditions: the compat build must refuse a downgraded and a
-     newer head.
+  4. Failure conditions, in Render's order (Pre-Deploy, then boot): a
+     downgraded database is re-upgraded by the compat build's Pre-Deploy and
+     then boots; a newer head fails Pre-Deploy (and boot would refuse).
 
 Prints the observations as JSON and exits 1 if any expectation failed.
 """
@@ -213,18 +214,31 @@ out['compat_token_after_change'] = st(c.get('/api/me', headers=H(COMPAT_TOKEN)))
     expect('roll-forward: a new change revokes the compat session',
            f['change_again'] == 200 and f['compat_token_after_change'] == [401, 'session_ended'])
 
-    # 4. Failure conditions.
+    # 4. Failure conditions, as Render runs a deploy: Pre-Deploy
+    #    (`flask db upgrade`) FIRST, then boot with the head check.
+    #    a) Database downgraded to d4f1b6e2a9c3: the boot check alone would
+    #       refuse, but Pre-Deploy runs first, and the compat build carries
+    #       e8b3c1f0a7d2 -- so it RE-APPLIES the migration and then boots.
     obs['downgrade_rc'] = flask(PW1, 'downgrade', 'd4f1b6e2a9c3',
                                 extra={'PGOPTIONS': '-c lock_timeout=5s'}).returncode
-    obs['compat_boot_on_d4f1'] = boot(COMPAT)
-    flask(PW1, 'upgrade')
+    obs['compat_boot_alone_on_d4f1'] = boot(COMPAT)
+    obs['compat_predeploy_on_d4f1'] = predeploy(COMPAT)
+    obs['compat_boot_after_predeploy_on_d4f1'] = boot(COMPAT)
+    expect('boot check alone refuses a downgraded head', obs['compat_boot_alone_on_d4f1']['refused'])
+    expect('on Render, Pre-Deploy re-applies e8b3c1f0a7d2 and the build boots',
+           obs['compat_predeploy_on_d4f1'] == {'rc': 0, 'ran_upgrade': True}
+           and obs['compat_boot_after_predeploy_on_d4f1']['passed'])
+    #    b) A NEWER head (a later migration the compat build does not know):
+    #       Pre-Deploy fails (Alembic cannot locate the revision), so the
+    #       deploy stops before boot; and boot would refuse anyway.
     eng = create_engine(URL)
     with eng.begin() as c:
         c.execute(text("UPDATE alembic_version SET version_num = 'f0f0f0f0f0f0'"))
     eng.dispose()
+    obs['compat_predeploy_on_future_head'] = predeploy(COMPAT)
     obs['compat_boot_on_future_head'] = boot(COMPAT)
-    expect('compat refuses a downgraded head', obs['compat_boot_on_d4f1']['refused'])
-    expect('compat refuses a newer head', obs['compat_boot_on_future_head']['refused'])
+    expect('Pre-Deploy fails on a newer head', obs['compat_predeploy_on_future_head']['rc'] != 0)
+    expect('boot refuses a newer head', obs['compat_boot_on_future_head']['refused'])
 finally:
     with admin.connect() as c:
         c.execute(text(f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)'))
