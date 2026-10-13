@@ -161,8 +161,13 @@ from flask_jwt_extended import decode_token
 out['compat_token_tv'] = decode_token(ct)['tv']
 out['compat_token'] = ct
 out['password_change_route'] = c.post('/api/me/password', json={'current_password': ALICE_NEW, 'new_password': 'Another-long-one-77'}, headers=H(ct)).status_code
-out['register'] = c.post('/api/register', json={'username': 'reh_bob', 'password': 'Bob8char'}).status_code
-out['bob_token'] = c.post('/api/login', json={'username': 'reh_bob', 'password': 'Bob8char'}).get_json()['access_token']
+def reg(u, p):
+    r = c.post('/api/register', json={'username': u, 'password': p})
+    return [r.status_code, (r.get_json(silent=True) or {}).get('code')]
+out['register_short'] = reg('reh_short', 'Bob8char')
+out['register_common'] = reg('reh_common', 'passwordpassword')
+out['register'] = reg('reh_bob', 'Bob-lantern-kettle-9')
+out['bob_token'] = c.post('/api/login', json={'username': 'reh_bob', 'password': 'Bob-lantern-kettle-9'}).get_json()['access_token']
 """, REVOKED=t['a_tablet'], A_TABLET=t['a_tablet'], C_TABLET=t['c_tablet'], A_NEW=t['a_new'],
         ALICE_NEW=ALICE_NEW, ALICE_OLD=ALICE_OLD, CAROL_NEW_TYPED=CAROL_NEW_TYPED,
         CAROL_NEW_WIDE=CAROL_NEW_WIDE, CAROL_OLD=CAROL_OLD)
@@ -179,6 +184,9 @@ out['bob_token'] = c.post('/api/login', json={'username': 'reh_bob', 'password':
     expect('compat: PW-1 tokens keep working', k['pw1_token_still_valid'] == 200)
     expect('compat: its tokens carry the current version', k['compat_token_tv'] == 1)
     expect('compat: no password change', k['password_change_route'] in (404, 405))
+    expect('compat: sign-up keeps PW-1 policy',
+           k['register_short'] == [400, 'too_short'] and k['register_common'] == [400, 'common']
+           and k['register'] == [201, None])
     expect('compat: versions untouched', obs['versions_after_compat']['reh_alice'] == 1
            and obs['versions_after_compat']['reh_carol'] == 1)
 

@@ -61,8 +61,7 @@ prerequisites aren't met, and it causes an outage.
 
 ### A. Zero-downtime rollback: deploy the compatibility build (preferred)
 
-**What it is:** branch `rollback/pw1-compat`, commit **`7a7fee3`** (local;
-not yet pushed). That is production `1d7b2f2` plus:
+**What it is:** branch `rollback/pw1-compat`, commit **`e4dcb4f`**. That is production `1d7b2f2` plus:
 
 - the PW-1 migration file, byte-identical, so its Alembic head is
   `e8b3c1f0a7d2`;
@@ -75,6 +74,10 @@ not yet pushed). That is production `1d7b2f2` plus:
 - PW-1's password verification (NFKC, raw, and for non-ASCII input NFC/NFD),
   so passwords set under PW-1 and before it both sign in;
 - malformed (unencodable) credentials answered 400.
+- **PW-1's sign-up password policy, verbatim** (owner decision,
+  2026-10-12): 15+ characters, the same blocklist file, the same rules and
+  messages. New passwords are hashed in NFKC. A rollback never lowers the
+  rules for new passwords.
 
 It does **not** have `POST /api/me/password`, and no code in it writes
 `token_version`. So nothing in it can revoke a session, and nothing can
@@ -89,7 +92,7 @@ as it stands:**
 
 *History:* the first compatibility build (`f50ac70`) ignored `tv`, so
 sessions revoked by a PW-1 change worked again for up to an hour while it
-served. That was rejected at the security gate; `1a286d6` fixed it.
+served. That was rejected at the security gate; `1a286d6` fixed it. `e4dcb4f` added PW-1's sign-up policy.
 
 **Prerequisites, all before PW-1 is released:**
 
@@ -126,7 +129,7 @@ served. That was rejected at the security gate; `1a286d6` fixed it.
 | Phase | Observed |
 |---|---|
 | PW-1 | Two people changed their password, one to a full-width password. Their second devices got 401 |
-| PW-1 → compat | Pre-Deploy: no upgrade. Boot check passed. **Revoked sessions refused on all 44 authenticated routes** (URL-map walk, `401 session_ended`), including `DELETE /api/me` and `/api/daily`. New passwords sign in (the full-width one typed either way); old ones 401. PW-1 tokens keep working. Compat tokens carry `tv = 1`. `/api/me/password` 404. Versions untouched |
+| PW-1 → compat | Pre-Deploy: no upgrade. Boot check passed. **Revoked sessions refused on all 44 authenticated routes** (URL-map walk, `401 session_ended`), including `DELETE /api/me` and `/api/daily`. New passwords sign in (the full-width one typed either way); old ones 401. PW-1 tokens keep working. Compat tokens carry `tv = 1`. `/api/me/password` 404. Sign-up refuses short (`too_short`) and common (`common`) passwords and accepts a compliant one. Versions untouched |
 | compat → PW-1 | No upgrade; boot check passed. **Compat sessions still valid (no forced sign-out).** The revoked tablet still refused. A new change revokes the compat session |
 | Failure conditions | The compat build refuses to start on a downgraded head and on a newer head |
 
@@ -142,10 +145,6 @@ Results are in the release record.
 
 - **No password change** while it serves. Pages loaded on PW-1 show the form,
   which gets 404 → "Couldn't change the password just now."
-- **Registration uses production `1d7b2f2`'s rules** (8+ characters, no
-  blocklist) while it serves. This is an owner decision: the compatibility
-  build could carry PW-1's registration policy too, at the cost of being
-  further from the known-good build.
 - **No one-time NFKC rehash** at sign-in (verification still accepts every
   form). PW-1 does the rehash after roll-forward.
 - **Old cached pages** show "Session expired" instead of the
