@@ -233,7 +233,14 @@ Two **staging-only** builds, each one commit on the PW-1 SHA. They are
 - **`staging/boot-fails`:** `_assert_db_at_head()` always refuses.
   - The real head check, made to fail. Pre-Deploy runs without
     `STREAKFIT_ENFORCE_DB_HEAD`, so it passes with nothing to do, and the
-    gunicorn master then exits 1.
+    gunicorn master then exits 1. Its log line reads "at revision
+    'e8b3c1f0a7d2' but the code expects head 'e8b3c1f0a7d2'": the check is
+    forced, so that is expected.
+  - **This models production only under `--preload`** (S1 step 2).
+    Rehearsed locally on 2026-10-13: with `--preload` the master exits 1.
+    Without it, the worker exits 1, which gunicorn does not treat as a boot
+    error, so the master respawns workers forever while holding the port. If
+    S1 showed no preload, Q3b is testing a different failure.
 
 **For each build, in turn:**
 
