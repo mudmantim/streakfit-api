@@ -17,7 +17,9 @@ from a clean git worktree of that ref, so nothing is shared but the database):
      rows behind, written by the newer code.
   3. ROLLBACK: the TARGET build's Pre-Deploy (`flask db upgrade`) runs against
      that database -- exactly what Render does on a rollback deploy.
-  4. TARGET build boots with the head check on. If it boots, its own
+  4. TARGET build boots with the head check on. Before it writes anything,
+     every table's row count is compared with the snapshot taken after step 2:
+     a table that disappeared or lost rows is DATA LOSS. Then its own
      verify_all runs against the data the deployed build wrote.
 
 Verdicts:
@@ -25,6 +27,9 @@ Verdicts:
   BLOCKED     target Pre-Deploy or boot refuses (Render would abort the deploy
               and keep the deployed build serving: safe, but this is not a
               rollback path -- use a compatibility build or a downgrade).
+  DATA LOSS   the target's Pre-Deploy or boot removed a table or rows the
+              deployed build had written (a downgrade-style migration, a boot
+              hook that deletes, ...).
   UNSAFE      target boots but its verify_all fails on the deployed build's data.
   BROKEN      the deployed build itself does not migrate/boot/verify here.
 
@@ -90,6 +95,51 @@ class Rehearsal:
         self.url = self.server.set(database=self.db).render_as_string(hide_password=False)
         return self
 
+    def fingerprints(self) -> dict:
+        """md5 over every row of every table in public (read-only). Only
+        comparable when the schema did not change in between."""
+        from sqlalchemy import create_engine, text
+        eng = create_engine(self.url)
+        try:
+            with eng.connect() as c:
+                names = [r[0] for r in c.execute(text(
+                    "select table_name from information_schema.tables "
+                    "where table_schema = 'public' and table_type = 'BASE TABLE' order by 1"))]
+                return {n: c.execute(text(
+                    f'select coalesce(md5(string_agg(x::text, \'|\' order by x::text)), \'empty\') '
+                    f'from public."{n}" x')).scalar() for n in names}
+        finally:
+            eng.dispose()
+
+    def head(self) -> str:
+        from sqlalchemy import create_engine, text
+        eng = create_engine(self.url)
+        try:
+            with eng.connect() as c:
+                return c.execute(text('select version_num from alembic_version')).scalar()
+        finally:
+            eng.dispose()
+
+    def row_counts(self) -> dict:
+        """Exact row count of every table in public (read-only)."""
+        from sqlalchemy import create_engine, text
+        eng = create_engine(self.url)
+        try:
+            with eng.connect() as c:
+                names = [r[0] for r in c.execute(text(
+                    "select table_name from information_schema.tables "
+                    "where table_schema = 'public' and table_type = 'BASE TABLE' order by 1"))]
+                return {n: c.execute(text(f'select count(*) from public."{n}"')).scalar() for n in names}
+        finally:
+            eng.dispose()
+
+    def compare_counts(self, before: dict, after: dict) -> bool:
+        lost = {t: (n, after.get(t)) for t, n in before.items() if after.get(t) is None or after[t] < n}
+        return self._step('target: deployed build\'s data survives Pre-Deploy and boot', not lost,
+                          tables=len(before), rows=sum(before.values()),
+                          lost={t: f'{a} -> {b if b is not None else "table gone"}' for t, (a, b) in lost.items()}
+                          or None)
+
     def __exit__(self, *exc):
         from sqlalchemy import text
         try:
@@ -125,7 +175,7 @@ class Rehearsal:
         return self._step(f'{role}: pre-deploy (flask db upgrade)', p.returncode == 0,
                           exit=p.returncode, output=_tail(p.stderr + p.stdout))
 
-    def serve_and_verify(self, role: str) -> tuple:
+    def serve_and_verify(self, role: str, before_verify=None) -> tuple:
         """(booted, verified). Boots the build like production and runs its own
         verify_all against it."""
         port = _free_port()
@@ -150,6 +200,8 @@ class Rehearsal:
                 return self._step(f'{role}: boot with head check', False, exit=server.poll(),
                                   output=_tail(log.read())), False
             self._step(f'{role}: boot with head check', True)
+            if before_verify is not None and not before_verify():
+                return True, False
             # verify_all's URL is ALWAYS explicit: its default is production.
             v = subprocess.run([sys.executable, 'scripts/verify_all.py', base], cwd=self.trees[role],
                                env=self._env(boot=False), capture_output=True, text=True,
@@ -172,11 +224,28 @@ class Rehearsal:
         booted, verified = self.serve_and_verify('deployed')
         if not (booted and verified):
             return 'BROKEN'
+        snapshot, prints, head_before = self.row_counts(), self.fingerprints(), self.head()
         if not self.predeploy('target'):
             return 'BLOCKED'
-        booted, verified = self.serve_and_verify('target')
+        preserved = []
+
+        def check_preserved() -> bool:
+            ok = self.compare_counts(snapshot, self.row_counts())
+            # Same schema before and after (no migration ran): the deployed
+            # build's rows must be byte-identical, not merely as many.
+            if ok and self.head() == head_before:
+                changed = sorted(t for t, h in self.fingerprints().items() if prints.get(t) != h)
+                ok = self._step('target: deployed build\'s rows unchanged (same schema, content fingerprints)',
+                                not changed, tables=len(prints), rows=sum(snapshot.values()),
+                                lost={t: 'content changed' for t in changed} or None)
+            preserved.append(ok)
+            return ok
+
+        booted, verified = self.serve_and_verify('target', before_verify=check_preserved)
         if not booted:
             return 'BLOCKED'
+        if preserved and not preserved[-1]:
+            return 'DATA LOSS'
         return 'SAFE' if verified else 'UNSAFE'
 
 
@@ -198,7 +267,11 @@ def main(argv: list) -> int:
             line = f"  {'PASS' if s['ok'] else 'FAIL'}  {s['step']}"
             if s.get('summary'):
                 line += f"  [{s['summary'].strip()}]"
+            if s.get('rows') is not None:
+                line += f"  [{s['tables']} tables, {s['rows']} rows]"
             print(line)
+            if s.get('lost'):
+                print('        lost: ' + ', '.join(f'{t} {v}' for t, v in s['lost'].items()))
             if not s['ok'] and s.get('output'):
                 print('        ' + s['output'].strip().replace('\n', '\n        ')[-800:])
         print(f'VERDICT: {verdict}')

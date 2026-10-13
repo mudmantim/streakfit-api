@@ -328,9 +328,12 @@ python scripts/rehearse_rollback.py <candidate ref> <rollback target ref> \
     postgresql://postgres:<throwaway>@127.0.0.1:55433/postgres
 ```
 
-Verdicts: **SAFE** (it is a real rollback), **BLOCKED** (Render would refuse
-the deploy; prepare a compatibility build), **UNSAFE** (it boots but fails on
-the candidate's data), **BROKEN** (the candidate itself fails). Recorded
+Verdicts:
+- **SAFE:** it is a real rollback.
+- **BLOCKED:** Render would refuse the deploy; prepare a compatibility build.
+- **DATA LOSS:** the target's Pre-Deploy or boot removed a table or rows the candidate wrote. When no migration ran, it also covers **changed** rows: content fingerprints must be identical.
+- **UNSAFE:** it boots but fails its own verify_all on the candidate's data.
+- **BROKEN:** the candidate itself fails. Recorded
 2026-10-13: `1d7b2f2 → 6b6e1cd` SAFE; PW-1 `434b0f6 → 1d7b2f2` BLOCKED;
 PW-1 `434b0f6 → e4dcb4f` (compat) SAFE.
 
