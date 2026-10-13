@@ -104,7 +104,7 @@ def test_blank_clears_it_rather_than_erroring():
 # ── End to end through the API ──────────────────────────────────────────────
 
 def test_patch_me_sets_and_clears_display_name(client):
-    token = register_and_login(client, "olivia@example.com", "TestPass123!")
+    token = register_and_login(client, "olivia@example.com", "TestPass-Lantern-123!")
     r = client.patch("/api/me", json={"display_name": "Olivia"},
                      headers=auth_headers(token))
     assert r.status_code == 200
@@ -119,7 +119,7 @@ def test_patch_me_sets_and_clears_display_name(client):
 
 
 def test_patch_me_rejects_an_email_as_a_display_name(client):
-    token = register_and_login(client, "someone_ok", "TestPass123!")
+    token = register_and_login(client, "someone_ok", "TestPass-Lantern-123!")
     r = client.patch("/api/me", json={"display_name": "olivia@example.com"},
                      headers=auth_headers(token))
     assert r.status_code == 400
@@ -145,7 +145,7 @@ def test_patch_me_rejects_an_email_as_a_display_name(client):
 ])
 def test_validation_errors_are_written_for_a_person_not_a_developer(client, payload):
     token = register_and_login(client, "reader_" + str(abs(hash(str(payload))))[:6],
-                               "TestPass123!")
+                               "TestPass-Lantern-123!")
     r = client.patch("/api/me", json=payload, headers=auth_headers(token))
     assert r.status_code == 400, payload
     message = r.get_json()["error"]

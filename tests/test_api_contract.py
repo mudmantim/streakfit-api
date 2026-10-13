@@ -35,9 +35,9 @@ def test_register_short_password_400(client):
 
 def test_register_success_then_duplicate(client):
     assert client.post("/api/register",
-                       json={"username": "contract_u", "password": "ValidPass123"}).status_code == 201
+                       json={"username": "contract_u", "password": "ValidPass-Lantern-123"}).status_code == 201
     assert client.post("/api/register",
-                       json={"username": "contract_u", "password": "ValidPass123"}).status_code == 400
+                       json={"username": "contract_u", "password": "ValidPass-Lantern-123"}).status_code == 400
 
 
 # ── login ────────────────────────────────────────────────────────────────────
@@ -47,14 +47,14 @@ def test_login_missing_fields_400(client):
 
 
 def test_login_wrong_password_401(client):
-    client.post("/api/register", json={"username": "contract_l", "password": "ValidPass123"})
+    client.post("/api/register", json={"username": "contract_l", "password": "ValidPass-Lantern-123"})
     assert client.post("/api/login",
                        json={"username": "contract_l", "password": "WRONGpass1"}).status_code == 401
 
 
 def test_login_success_returns_token(client):
-    client.post("/api/register", json={"username": "contract_ok", "password": "ValidPass123"})
-    r = client.post("/api/login", json={"username": "contract_ok", "password": "ValidPass123"})
+    client.post("/api/register", json={"username": "contract_ok", "password": "ValidPass-Lantern-123"})
+    r = client.post("/api/login", json={"username": "contract_ok", "password": "ValidPass-Lantern-123"})
     assert r.status_code == 200 and "access_token" in r.get_json()
 
 

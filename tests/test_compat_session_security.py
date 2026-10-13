@@ -18,7 +18,7 @@ from werkzeug.security import generate_password_hash
 import app as appmod
 from conftest import auth_headers
 
-PW = 'WalkTest123!'
+PW = 'WalkTest-Lantern-123!'
 
 
 def _user(username, password=PW, version=0):

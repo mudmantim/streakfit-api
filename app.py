@@ -4969,17 +4969,15 @@ def register():
     # care about — this is server-authoritative, mirrored by the form's minlength.
     if len(username) < 2 or len(username) > 80:
         return jsonify({"error": "Username needs to be 2–80 characters."}), 400
-    if len(password) < 8:
-        return jsonify({"error": "Password needs to be at least 8 characters."}), 400
-    if len(password) > 128:
-        # Upper bound so a pathologically long password can't turn each hash
-        # into a slow-request DoS. 128 is far beyond any real passphrase.
-        return jsonify({"error": "Password can be at most 128 characters."}), 400
+    # PW-1's policy, verbatim: `error` stays the human sentence, `code` is new.
+    problem = _password_policy_problem(username, password)
+    if problem is not None:
+        return jsonify({"error": _PASSWORD_POLICY_MESSAGES[problem], "code": problem}), 400
 
     if User.query.filter_by(username=username).first():
         return jsonify({"error": "That username is taken — try another."}), 400
 
-    hashed_pw = generate_password_hash(password, method='pbkdf2:sha256')
+    hashed_pw = generate_password_hash(_password_hash_form(password), method='pbkdf2:sha256')
     new_user = User(username=username, password_hash=hashed_pw)
     db.session.add(new_user)
     try:
@@ -5018,6 +5016,108 @@ def register():
 #                                (raw) both still sign in; no rehash here
 # and does NOT carry POST /api/me/password: nothing in this build moves a
 # token version, so nothing here can revoke -- but nothing un-revokes either.
+
+
+# ── Sign-up password policy: PW-1's, verbatim (owner decision, 2026-10-12) ──
+#
+# The rollback build keeps PW-1's rules for NEW passwords so a rollback never
+# lowers them: 15+ characters, not mostly the username, not the service name,
+# not repetitive or sequential, not on the breached/common blocklist. Existing
+# passwords are never re-judged (sign-in and deletion accept what an account
+# has). docs/security/password-blocklist.md has the list's provenance.
+PASSWORD_MIN_LENGTH = 15
+PASSWORD_MAX_LENGTH = 128
+
+# Context-specific words, which NIST SP 800-63B names explicitly ("the name of
+# the service, the username").
+_SERVICE_WORDS = ('streakfit', 'rickie')
+
+_PASSWORD_BLOCKLIST_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                        'content', 'security', 'common-passwords.txt')
+
+
+def _load_password_blocklist(path=_PASSWORD_BLOCKLIST_PATH):
+    """The common/breached-password blocklist, already in comparison form.
+
+    Generated from pinned public lists by scripts/build_password_blocklist.py
+    (sources, licence and update procedure: docs/security/password-blocklist.md).
+    Format: a header, one blank line, then one entry per line -- an entry may
+    itself begin with '#', so nothing after the blank line is treated as a
+    comment.
+
+    A MISSING FILE STOPS THE APP AT IMPORT. A deploy without it would accept
+    every common password while looking configured, which is the failure the
+    list exists to prevent; refusing to start is loud and immediate.
+    """
+    with open(path, encoding='utf-8') as f:
+        text = f.read()
+    _, sep, body = text.partition('\n\n')
+    if not sep:
+        raise RuntimeError(f"password blocklist {path} has no header/body separator")
+    entries = frozenset(line for line in body.split('\n') if line)
+    if not entries:
+        raise RuntimeError(f"password blocklist {path} is empty")
+    return entries
+
+
+_COMMON_PASSWORDS: frozenset[str] = _load_password_blocklist()
+
+
+def _password_compare_form(password):
+    """Policy comparisons (blocklist, username, same-as-current): NFKC + casefold."""
+    return _password_hash_form(password).casefold()
+
+
+def _password_policy_problem(username, new):
+    """Why `new` is not acceptable as a NEW password, or None. Never hashes.
+
+    Judged on the NFKC + casefold form, and in this order:
+      too_short / too_long   15-128 characters (NFKC code points)
+      username_based         the username IS most of it: equal to it, or the
+                             username is at least half of the password. Not
+                             mere containment -- "anna" inside
+                             "Savannah-lantern-meadow" is not a weakness, and
+                             rejecting it was the review's finding B3.
+      service_name           nothing but "streakfit"/"rickie" once digits and
+                             symbols are ignored
+      repetitive             one unit of 1-3 characters repeated
+      sequential             a straight run of code points (abc..., 987...)
+      common                 on the common/breached-password blocklist
+    No composition rules and no expiry (NIST SP 800-63B).
+    """
+    hashed = _password_hash_form(new)
+    if len(hashed) < PASSWORD_MIN_LENGTH:
+        return 'too_short'
+    if len(hashed) > PASSWORD_MAX_LENGTH:
+        return 'too_long'
+    folded = hashed.casefold()
+    name = _password_compare_form((username or '').strip())
+    if len(name) >= 4 and (folded == name or (name in folded and 2 * len(name) >= len(folded))):
+        return 'username_based'
+    letters = ''.join(ch for ch in folded if ch.isalpha())
+    if letters in _SERVICE_WORDS:
+        return 'service_name'
+    for unit in (1, 2, 3):
+        if len(folded) % unit == 0 and folded == folded[:unit] * (len(folded) // unit):
+            return 'repetitive'
+    steps = {ord(b) - ord(a) for a, b in zip(folded, folded[1:])}
+    if steps in ({1}, {-1}):
+        return 'sequential'
+    if folded in _COMMON_PASSWORDS:
+        return 'common'
+    return None
+
+
+_PASSWORD_POLICY_MESSAGES = {
+    'too_short': f"Use at least {PASSWORD_MIN_LENGTH} characters. A few words together is easiest.",
+    'too_long': f"Use at most {PASSWORD_MAX_LENGTH} characters.",
+    'username_based': "Choose a password that isn't mostly your username.",
+    'service_name': "Choose a password that isn't just the app's name.",
+    'repetitive': "That's one thing repeated. Try something less predictable.",
+    'sequential': "That's a straight run of keys. Try something less predictable.",
+    'common': "That password is on a list of common or leaked passwords. Try something less predictable.",
+    'same_as_current': "That's your current password. Choose a new one.",
+}
 
 
 def _issue_access_token(user):

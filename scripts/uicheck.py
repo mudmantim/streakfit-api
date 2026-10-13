@@ -1304,7 +1304,7 @@ def check_someone_can_actually_sign_up(b: Browser, base: str, app) -> None:
     username = f"uicheck_signup_{int(time.time() * 1000) % 1000000}"
     b.js("(function(){document.getElementById('reg-username').value="
          + json.dumps(username)
-         + "; document.getElementById('reg-password').value='Passw0rd!x'; return 1;})()")
+         + "; document.getElementById('reg-password').value='Passw0rd!x-lantern-kettle'; return 1;})()")
     b.js("(()=>{const f=document.getElementById('register-form');"
          " f.dispatchEvent(new Event('submit',{cancelable:true})); return 1;})()")
     time.sleep(4.0)

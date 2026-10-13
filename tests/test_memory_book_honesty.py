@@ -23,7 +23,7 @@ from conftest import auth_headers, register_and_login
 
 
 def _mk(client, name):
-    token = register_and_login(client, name, "TestPass123!")
+    token = register_and_login(client, name, "TestPass-Lantern-123!")
     uid = db.session.execute(
         db.select(User.id).where(User.username == name)).scalar_one()
     return token, uid

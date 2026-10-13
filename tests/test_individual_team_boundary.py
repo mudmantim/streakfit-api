@@ -47,8 +47,8 @@ def _seed_personal_life(username):
 
 
 def test_leaving_a_team_takes_nothing_personal_with_it(client, app):
-    owner = register_and_login(client, "boundary_owner", "TestPass123!")
-    member = register_and_login(client, "boundary_member", "TestPass123!")
+    owner = register_and_login(client, "boundary_owner", "TestPass-Lantern-123!")
+    member = register_and_login(client, "boundary_member", "TestPass-Lantern-123!")
     team = _create_team(client, owner, "The Hills").get_json()["team"]
     assert _join(client, member, team["id"], team["invite_code"]).status_code in (200, 201)
 
@@ -78,8 +78,8 @@ def test_leaving_a_team_takes_nothing_personal_with_it(client, app):
 
 
 def test_a_person_can_belong_to_several_teams_at_once(client, app):
-    owner = register_and_login(client, "multi_owner", "TestPass123!")
-    joiner = register_and_login(client, "multi_joiner", "TestPass123!")
+    owner = register_and_login(client, "multi_owner", "TestPass-Lantern-123!")
+    joiner = register_and_login(client, "multi_joiner", "TestPass-Lantern-123!")
 
     ids = []
     for i in range(5):
@@ -97,8 +97,8 @@ def test_a_person_can_belong_to_several_teams_at_once(client, app):
 
 
 def test_leaving_one_team_does_not_touch_the_others(client, app):
-    owner = register_and_login(client, "many_owner", "TestPass123!")
-    joiner = register_and_login(client, "many_joiner", "TestPass123!")
+    owner = register_and_login(client, "many_owner", "TestPass-Lantern-123!")
+    joiner = register_and_login(client, "many_joiner", "TestPass-Lantern-123!")
     ids = []
     for i in range(3):
         t = _create_team(client, owner, f"Crew {i}").get_json()["team"]
@@ -118,7 +118,7 @@ def test_leaving_one_team_does_not_touch_the_others(client, app):
 
 def test_a_user_in_no_team_still_has_everything_that_is_theirs(client, app):
     """The default state of the product, asserted rather than assumed."""
-    token = register_and_login(client, "never_joins", "TestPass123!")
+    token = register_and_login(client, "never_joins", "TestPass-Lantern-123!")
     uid = _seed_personal_life("never_joins")
     assert TeamMembership.query.filter_by(user_id=uid).count() == 0
 

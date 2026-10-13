@@ -56,7 +56,7 @@ def client(app):
     return app.test_client()
 
 
-def register_and_login(client, username, password='WalkTest123!'):
+def register_and_login(client, username, password='WalkTest-Lantern-123!'):
     """Registers a user and returns their JWT access token."""
     client.post('/api/register', json={'username': username, 'password': password})
     resp = client.post('/api/login', json={'username': username, 'password': password})

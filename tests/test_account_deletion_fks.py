@@ -67,16 +67,16 @@ def fk_app(app):
 
 def test_the_production_bug_a_daily_effort_no_longer_stops_deletion(fk_app):
     client = fk_app.test_client()
-    client.post('/api/register', json={'username': 'effortful', 'password': 'WalkTest123!'})
+    client.post('/api/register', json={'username': 'effortful', 'password': 'WalkTest-Lantern-123!'})
     tok = client.post('/api/login', json={'username': 'effortful',
-                                          'password': 'WalkTest123!'}).get_json()['access_token']
+                                          'password': 'WalkTest-Lantern-123!'}).get_json()['access_token']
     h = {'Authorization': f'Bearer {tok}'}
     uid = appmod.User.query.filter_by(username='effortful').one().id
     import datetime
     db.session.add(appmod.DailyEffort(user_id=uid, date=datetime.date(2026, 9, 1),
                                       level='easy'))
     db.session.commit()
-    resp = client.delete('/api/me', json={'password': 'WalkTest123!'}, headers=h)
+    resp = client.delete('/api/me', json={'password': 'WalkTest-Lantern-123!'}, headers=h)
     assert resp.status_code == 200, resp.get_json()
     db.session.remove()
     assert db.session.get(appmod.User, uid) is None
@@ -96,9 +96,9 @@ def test_self_deletion_never_tells_you_that_you_were_reported(fk_app):
     import uuid
     client = fk_app.test_client()
     for name in ('reported_one', 'someone_else'):
-        client.post('/api/register', json={'username': name, 'password': 'WalkTest123!'})
+        client.post('/api/register', json={'username': name, 'password': 'WalkTest-Lantern-123!'})
     tok = client.post('/api/login', json={'username': 'reported_one',
-                                          'password': 'WalkTest123!'}).get_json()['access_token']
+                                          'password': 'WalkTest-Lantern-123!'}).get_json()['access_token']
     me = appmod.User.query.filter_by(username='reported_one').one().id
     other = appmod.User.query.filter_by(username='someone_else').one().id
     rep = appmod.Report(public_id=uuid.uuid4().hex, reporter_user_id=other,
@@ -112,7 +112,7 @@ def test_self_deletion_never_tells_you_that_you_were_reported(fk_app):
         appmod.UserBlock(blocker_user_id=other, blocked_user_id=me),
     ])
     db.session.commit()
-    resp = client.delete('/api/me', json={'password': 'WalkTest123!'},
+    resp = client.delete('/api/me', json={'password': 'WalkTest-Lantern-123!'},
                          headers={'Authorization': f'Bearer {tok}'})
     assert resp.status_code == 200
     body = resp.get_json()
@@ -127,12 +127,12 @@ def test_deletion_log_lines_carry_no_user_id(fk_app, caplog):
     row, would name the reporter those rows were written to forget."""
     import logging
     client = fk_app.test_client()
-    client.post('/api/register', json={'username': 'logless', 'password': 'WalkTest123!'})
+    client.post('/api/register', json={'username': 'logless', 'password': 'WalkTest-Lantern-123!'})
     tok = client.post('/api/login', json={'username': 'logless',
-                                          'password': 'WalkTest123!'}).get_json()['access_token']
+                                          'password': 'WalkTest-Lantern-123!'}).get_json()['access_token']
     uid = appmod.User.query.filter_by(username='logless').one().id
     with caplog.at_level(logging.INFO, logger=fk_app.logger.name):
-        resp = client.delete('/api/me', json={'password': 'WalkTest123!'},
+        resp = client.delete('/api/me', json={'password': 'WalkTest-Lantern-123!'},
                              headers={'Authorization': f'Bearer {tok}'})
     assert resp.status_code == 200
     lines = [r.getMessage() for r in caplog.records if 'account_' in r.getMessage()]
@@ -148,20 +148,20 @@ def test_a_team_owner_cannot_use_deletion_to_learn_about_a_report(fk_app):
     import uuid
     client = fk_app.test_client()
     for name in ('owner_o', 'mate_o'):
-        client.post('/api/register', json={'username': name, 'password': 'WalkTest123!'})
+        client.post('/api/register', json={'username': name, 'password': 'WalkTest-Lantern-123!'})
     tok = client.post('/api/login', json={'username': 'owner_o',
-                                          'password': 'WalkTest123!'}).get_json()['access_token']
+                                          'password': 'WalkTest-Lantern-123!'}).get_json()['access_token']
     h = {'Authorization': f'Bearer {tok}'}
     owner = appmod.User.query.filter_by(username='owner_o').one().id
     mate = appmod.User.query.filter_by(username='mate_o').one().id
     db.session.add(appmod.Team(name='mine', created_by_user_id=owner))
     db.session.commit()
-    before = client.delete('/api/me', json={'password': 'WalkTest123!'}, headers=h)
+    before = client.delete('/api/me', json={'password': 'WalkTest-Lantern-123!'}, headers=h)
     db.session.add(appmod.Report(public_id=uuid.uuid4().hex, reporter_user_id=mate,
                                  reported_user_id=owner, category='harassment',
                                  subject_type='user', legal_hold=True, legal_hold_reason='x'))
     db.session.commit()
-    after = client.delete('/api/me', json={'password': 'WalkTest123!'}, headers=h)
+    after = client.delete('/api/me', json={'password': 'WalkTest-Lantern-123!'}, headers=h)
     assert before.status_code == after.status_code == 409
     assert before.get_json() == after.get_json()
     assert after.get_json()['blocker_codes'] == ['team_owned']
@@ -170,9 +170,9 @@ def test_a_team_owner_cannot_use_deletion_to_learn_about_a_report(fk_app):
 
 
 def _person(client, name):
-    client.post('/api/register', json={'username': name, 'password': 'WalkTest123!'})
+    client.post('/api/register', json={'username': name, 'password': 'WalkTest-Lantern-123!'})
     tok = client.post('/api/login', json={'username': name,
-                                          'password': 'WalkTest123!'}).get_json()['access_token']
+                                          'password': 'WalkTest-Lantern-123!'}).get_json()['access_token']
     return (appmod.User.query.filter_by(username=name).one().id,
             {'Authorization': f'Bearer {tok}'})
 
@@ -194,7 +194,7 @@ def test_a_refusal_tells_the_operator_not_the_person(fk_app, monkeypatch):
     db.session.commit()
     pid, rid, oid = rep.public_id, rep.id, other.id
 
-    first = client.delete('/api/me', json={'password': 'WalkTest123!'}, headers=fh)
+    first = client.delete('/api/me', json={'password': 'WalkTest-Lantern-123!'}, headers=fh)
     db.session.remove()
     body = first.get_json()
     assert first.status_code == 409 and body['blocker_codes'] == ['safety_record']
@@ -204,7 +204,7 @@ def test_a_refusal_tells_the_operator_not_the_person(fk_app, monkeypatch):
     assert marked is not None
     assert db.session.get(appmod.Report, oid).deletion_requested_at is None
 
-    again = client.delete('/api/me', json={'password': 'WalkTest123!'}, headers=fh)
+    again = client.delete('/api/me', json={'password': 'WalkTest-Lantern-123!'}, headers=fh)
     db.session.remove()
     assert again.get_json() == body                               # same answer
     assert db.session.get(appmod.Report, rid).deletion_requested_at == marked   # first time only
@@ -221,7 +221,7 @@ def test_a_refusal_tells_the_operator_not_the_person(fk_app, monkeypatch):
     queue = client.get('/api/admin/reports?status=all', headers=AH).get_json()
     row = next(r for r in queue['reports'] if r['report_id'] == pid)
     assert row['deletion_waiting'] is False and queue['counts']['deletion_waiting'] == 0
-    assert client.delete('/api/me', json={'password': 'WalkTest123!'},
+    assert client.delete('/api/me', json={'password': 'WalkTest-Lantern-123!'},
                          headers=fh).status_code == 200
 
 
@@ -238,7 +238,7 @@ def test_a_team_owner_refusal_marks_nothing(fk_app):
     db.session.add(rep)
     db.session.commit()
     rid = rep.id
-    assert client.delete('/api/me', json={'password': 'WalkTest123!'},
+    assert client.delete('/api/me', json={'password': 'WalkTest-Lantern-123!'},
                          headers=oh).get_json()['blocker_codes'] == ['team_owned']
     db.session.remove()
     assert db.session.get(appmod.Report, rid).deletion_requested_at is None
@@ -256,7 +256,7 @@ def test_challenge_evidence_says_the_target_left(fk_app):
     preset = appmod.CHALLENGE_PRESETS[0]['key']
     ch = client.post(f"/api/teams/{team['id']}/challenges",
                      json={'preset_key': preset, 'target_user_id': mate}, headers=oh).get_json()
-    assert client.delete('/api/me', json={'password': 'WalkTest123!'}, headers=mh).status_code == 200
+    assert client.delete('/api/me', json={'password': 'WalkTest-Lantern-123!'}, headers=mh).status_code == 200
     db.session.remove()
     cid = ch.get('challenge', ch).get('public_id')
     r = client.post('/api/reports', json={'category': 'inappropriate_content',
