@@ -3441,6 +3441,14 @@ def _detect_environment():
 
     Both markers are read here and discarded -- neither reaches the payload.
     """
+    # A declared deployment wins (db_guard, incident 2026-10-13): staging on
+    # Render used to report itself as production here, while db_guard requires
+    # it to declare STREAKFIT_DEPLOYMENT=staging. Undeclared, the markers decide
+    # exactly as before -- the live production service declares nothing. An
+    # unrecognised value is ignored here; db_guard refuses it at import.
+    declared = (os.environ.get(_db_guard.DEPLOYMENT_VAR) or '').strip().lower()
+    if declared in _db_guard.DEPLOYMENTS:
+        return declared
     if os.environ.get('RENDER') or os.environ.get('RENDER_SERVICE_ID'):
         return 'production'
     if os.environ.get('STREAKFIT_ENFORCE_DB_HEAD') == '1':
