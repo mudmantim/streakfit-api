@@ -78,3 +78,13 @@ def test_obvious_placeholders_are_ignored():
 def test_findings_never_include_the_value():
     problems = [f'x:{n}: {k}' for n, k in S.findings('postgresql://app:' + PW + '@db.internal/x')]
     assert problems and PW not in ''.join(problems)
+
+
+def test_new_untracked_files_are_scanned_before_they_are_committed(tmp_path):
+    """Regression: a credential in a file not yet `git add`-ed must be found."""
+    probe = Path(S.REPO) / 'tests' / f'_untracked_probe_{tmp_path.name}.txt'
+    probe.write_text('DATABASE_URL=postgresql://app:' + PW + '@db.internal/x\n')
+    try:
+        assert any(p.startswith(f'tests/{probe.name}:1:') for p in S.scan_tracked())
+    finally:
+        probe.unlink()

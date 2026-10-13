@@ -82,7 +82,12 @@ def findings(text: str):
 
 
 def tracked_files():
-    out = subprocess.run(['git', 'ls-files', '-z'], cwd=REPO, capture_output=True, check=True).stdout
+    """Tracked files AND untracked files that are not ignored. A new file is
+    scanned before it is committed, so a local run sees what CI will see.
+    (The first version read tracked files only: it passed locally on a test
+    file that was not yet committed, and failed in CI the moment it was.)"""
+    out = subprocess.run(['git', 'ls-files', '-z', '--cached', '--others', '--exclude-standard'], cwd=REPO,
+                         capture_output=True, check=True).stdout
     for name in out.decode().split('\0'):
         if not name or Path(name).suffix.lower() in SKIP_SUFFIXES:
             continue
@@ -141,7 +146,7 @@ def scan_history() -> list:
 def main(argv: list) -> int:
     history = '--history' in argv
     problems = scan_history() if history else scan_tracked()
-    scope = 'repository history (all refs)' if history else 'tracked files'
+    scope = 'repository history (all refs)' if history else 'the working tree (tracked + untracked, not ignored)'
     if problems:
         print(f'possible committed credentials in {scope} (values withheld):')
         for p in problems:
