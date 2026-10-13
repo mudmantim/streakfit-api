@@ -306,10 +306,33 @@ encrypted backup preserves them; nothing in the application will.
 | Situation | Action | Works? |
 |---|---|---|
 | **Pre-deploy migration failed** | **Nothing.** The whole run rolled back (§4b); the old version never stopped serving | **Yes** — fix and retry |
-| Bad code, schema fine | Redeploy `fa92abd` | **Yes.** The new migrations only add; `fa92abd` ignores what it does not know about |
+| Bad code, schema fine | Redeploy the previous commit | **Only if both builds share a migration head.** Production boots with `STREAKFIT_ENFORCE_DB_HEAD=1`, so an older build **refuses to start** on a newer schema, and its Pre-Deploy fails with *Can't locate revision* first. Render aborts that deploy and keeps the newer build serving (safe, but no rollback). Across a migration, use a **compatibility build** (old behaviour, new migration chain) prepared before release. *(Corrected 2026-10-13: this row used to say "Yes"; true only before the head guard existed.)* |
 | Migration failed partway | Restore §3.3's dump | Yes, losing everything written since |
 | Migration succeeded, data wrong | Restore §3.3's dump | Yes, same loss |
 | Want the schema back | — | **No.** Treat the migrations as forward-only |
+
+### Before a release: prove the rollback path
+
+Two tools; run both for every release candidate and record the output.
+
+```bash
+# Seconds, no database: is "redeploy the previous commit" schema-compatible?
+python scripts/rollback_check.py <candidate ref> <current production ref>
+
+# Minutes, disposable LOCAL PostgreSQL only (refuses any other host):
+# the candidate migrates, boots with the head guard and passes its verify_all;
+# then the rollback target runs Render's Pre-Deploy and boot on that database
+# and its own verify_all against the candidate's data.
+podman run -d --rm -e POSTGRES_PASSWORD=<throwaway> -p 127.0.0.1:55433:5432 postgres:17
+python scripts/rehearse_rollback.py <candidate ref> <rollback target ref> \
+    postgresql://postgres:<throwaway>@127.0.0.1:55433/postgres
+```
+
+Verdicts: **SAFE** (it is a real rollback), **BLOCKED** (Render would refuse
+the deploy; prepare a compatibility build), **UNSAFE** (it boots but fails on
+the candidate's data), **BROKEN** (the candidate itself fails). Recorded
+2026-10-13: `1d7b2f2 → 6b6e1cd` SAFE; PW-1 `434b0f6 → 1d7b2f2` BLOCKED;
+PW-1 `434b0f6 → e4dcb4f` (compat) SAFE.
 
 **The migrations are not reversible in practice.** They have `downgrade()`
 functions and those have never been rehearsed against real data. Do not
