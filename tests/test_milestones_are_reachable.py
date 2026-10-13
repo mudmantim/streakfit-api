@@ -70,7 +70,7 @@ def test_every_milestone_is_computable(client):
     A typo here does not fail loudly — it raises a KeyError inside the Memory
     Book for every user at once.
     """
-    token = register_and_login(client, "milestone_reader", "TestPass123!")
+    token = register_and_login(client, "milestone_reader", "TestPass-Lantern-123!")
     got = _milestones(client, token)
     assert set(got) == {m["key"] for m in appmod._MILESTONE_DEFINITIONS}
     for key, m in got.items():
@@ -81,7 +81,7 @@ def test_every_milestone_is_computable(client):
 
 def test_a_brand_new_account_sees_progress_not_only_locks(client):
     """Day one: the first mission is the only thing anyone has done."""
-    token = register_and_login(client, "milestone_fresh", "TestPass123!")
+    token = register_and_login(client, "milestone_fresh", "TestPass-Lantern-123!")
     got = _milestones(client, token)
     assert not got["first_mission"]["unlocked"]
     # The near ones must have small targets, so the page reads as a start

@@ -77,8 +77,8 @@
                 <input id="reg-username" type="text" placeholder="Choose a username"
                        autocomplete="username" required minlength="2" maxlength="80">
                 <input id="reg-password" type="password" placeholder="Choose a password"
-                       autocomplete="new-password" required minlength="8">
-                <p class="field-hint">At least 8 characters. No email needed — just a username.</p>
+                       autocomplete="new-password" required minlength="15">
+                <p class="field-hint">At least 15 characters — a few words together works well. No email needed — just a username.</p>
                 <button type="submit" class="btn-primary btn-full">Start free — takes 10 seconds</button>
                 <p id="register-error" class="error" role="alert"></p>
             </form>
@@ -231,6 +231,14 @@
                     <div id="moderation-panel" class="moderation-panel"
                          role="region" aria-label="Moderation decisions and appeals"
                          hidden></div>
+                    <div class="settings-row" id="settings-row-password">
+                        <span class="settings-label">Password</span>
+                        <button id="btn-change-password" class="btn-forget-coach"
+                                onclick="openChangePassword()"
+                                title="Change your password and sign out your other devices">
+                            Change password
+                        </button>
+                    </div>
                     <div class="settings-row" id="settings-row-delete">
                         <span class="settings-label">Account</span>
                         <button id="btn-delete-account" class="btn-delete-account"

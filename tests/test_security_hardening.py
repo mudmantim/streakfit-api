@@ -24,7 +24,7 @@ from conftest import auth_headers, register_and_login
 REPO = pathlib.Path(__file__).resolve().parents[1]
 D = datetime.date(2031, 5, 12)
 ONE = datetime.timedelta(days=1)
-PASSWORD = 'WalkTest123!'
+PASSWORD = 'WalkTest-Lantern-123!'
 
 
 class _Clock:

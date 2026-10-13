@@ -9,13 +9,13 @@ from sqlalchemy.exc import IntegrityError
 
 def test_register_success_returns_201(client):
     resp = client.post('/api/register',
-                       json={'username': 'newbie', 'password': 'ValidPass123'})
+                       json={'username': 'newbie', 'password': 'ValidPass-Lantern-123'})
     assert resp.status_code == 201
 
 
 def test_register_duplicate_username_fast_path_returns_400(client):
-    client.post('/api/register', json={'username': 'dupe', 'password': 'ValidPass123'})
-    resp = client.post('/api/register', json={'username': 'dupe', 'password': 'ValidPass123'})
+    client.post('/api/register', json={'username': 'dupe', 'password': 'ValidPass-Lantern-123'})
+    resp = client.post('/api/register', json={'username': 'dupe', 'password': 'ValidPass-Lantern-123'})
     assert resp.status_code == 400
     assert 'taken' in resp.get_json()['error'].lower()
 
@@ -31,7 +31,7 @@ def test_register_commit_integrityerror_returns_400_not_500(client, monkeypatch)
 
     monkeypatch.setattr(app_module.db.session, 'commit', boom)
     resp = client.post('/api/register',
-                       json={'username': 'racer', 'password': 'ValidPass123'})
+                       json={'username': 'racer', 'password': 'ValidPass-Lantern-123'})
     assert resp.status_code == 400, f"expected 400, got {resp.status_code}"
     assert 'taken' in resp.get_json()['error'].lower()
 
@@ -39,14 +39,14 @@ def test_register_commit_integrityerror_returns_400_not_500(client, monkeypatch)
 def test_register_short_password_returns_400(client):
     resp = client.post('/api/register', json={'username': 'shorty', 'password': 'abc'})
     assert resp.status_code == 400
-    assert '8 characters' in resp.get_json()['error']
+    assert '15 characters' in resp.get_json()['error']
 
 
 def test_login_success_and_wrong_password(client):
-    client.post('/api/register', json={'username': 'loginner', 'password': 'ValidPass123'})
-    ok = client.post('/api/login', json={'username': 'loginner', 'password': 'ValidPass123'})
+    client.post('/api/register', json={'username': 'loginner', 'password': 'ValidPass-Lantern-123'})
+    ok = client.post('/api/login', json={'username': 'loginner', 'password': 'ValidPass-Lantern-123'})
     assert ok.status_code == 200
     assert 'access_token' in ok.get_json()
 
-    bad = client.post('/api/login', json={'username': 'loginner', 'password': 'WrongPass123'})
+    bad = client.post('/api/login', json={'username': 'loginner', 'password': 'WrongPass-Lantern-123'})
     assert bad.status_code == 401

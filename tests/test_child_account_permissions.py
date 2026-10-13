@@ -1,7 +1,9 @@
 """Default deny, and the things that must never be able to override it.
 
-These are the foundations, not the features. No route consults `can()` yet,
-no age screen exists, and nothing writes a GuardianLink — deliberately, because
+These are the foundations, not the features. Since child-safety phase 0 the
+capability routes call `can()` through @requires_capability, but only when
+STREAKFIT_AGE_POLICY is switched on (default off; tests/test_capability_routes.py).
+No age screen exists, and nothing writes a GuardianLink — deliberately, because
 what counts as a compliant neutral age screen and what a guardian may see are
 open questions (docs/child-safety/architecture.md).
 

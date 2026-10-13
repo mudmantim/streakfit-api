@@ -26,7 +26,7 @@ from conftest import auth_headers, register_and_login
 _register_without_a_name = register_and_login
 
 
-def register_and_login(client, username, password='WalkTest123!'):
+def register_and_login(client, username, password='WalkTest-Lantern-123!'):
     token = _register_without_a_name(client, username, password)
     client.patch('/api/me', json={'display_name': username},
                  headers=auth_headers(token))

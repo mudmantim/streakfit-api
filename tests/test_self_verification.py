@@ -516,7 +516,7 @@ def test_no_filesystem_path_leaks(client):
 
 
 def test_payload_carries_no_user_data(client, app):
-    client.post('/api/register', json={'username': 'sentineluser', 'password': 'WalkTest123!'})
+    client.post('/api/register', json={'username': 'sentineluser', 'password': 'WalkTest-Lantern-123!'})
     assert 'sentineluser' not in json.dumps(_get(client))
 
 

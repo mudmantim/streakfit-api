@@ -100,6 +100,10 @@ def check_account_deletion(api, results, scenario):
     results.check("auth.delete_leaver_has_a_block", status == 204 and b_id in listed,
                   f"status={status} listed={listed}")
 
+    token = check_password_change(api, results, leaver, token)
+    if not token:
+        return
+
     status, _ = api.request("DELETE", "/api/me", token=token, body={"password": "wrong"})
     results.check("auth.delete_needs_the_password", status == 403, f"status={status}")
 
@@ -109,13 +113,69 @@ def check_account_deletion(api, results, scenario):
     results.check("auth.delete_malformed_is_400", status == 400, f"status={status}")
 
     status, body = api.request("DELETE", "/api/me", token=token,
-                               body={"password": SMOKE_PASSWORD})
+                               body={"password": CHANGED_PASSWORD})
     results.check("auth.delete_account_with_dependent_rows", status == 200,
                   f"status={status} body={str(body)[:160]}")
 
     status, _ = api.request("POST", "/api/login",
-                            body={"username": leaver, "password": SMOKE_PASSWORD})
+                            body={"username": leaver, "password": CHANGED_PASSWORD})
     results.check("auth.deleted_account_cannot_log_in", status == 401, f"status={status}")
+
+
+CHANGED_PASSWORD = SMOKE_PASSWORD + "-renewed"
+
+
+def check_password_change(api, results, username, token):
+    """PW-1, on the same throwaway account the deletion check then removes.
+
+    A second sign-in stands for another device. A wrong current password is
+    refused without signing anybody out; the change returns a new token for
+    this device and signs out both earlier ones; the old password stops
+    working. Returns the new token (or None if the change failed), which the
+    deletion that follows uses with the new password -- so deletion is also
+    proven to work after a change."""
+    status, data = api.request("POST", "/api/login",
+                               body={"username": username, "password": SMOKE_PASSWORD})
+    other_device = (data or {}).get("access_token")
+    if not results.check("auth.password_second_device_login", status == 200 and other_device,
+                         f"status={status}"):
+        return None
+
+    status, _ = api.request("POST", "/api/me/password", token=token,
+                            body={"current_password": "not-the-password",
+                                  "new_password": CHANGED_PASSWORD})
+    results.check("auth.password_wrong_current_is_403", status == 403, f"status={status}")
+
+    # The shared policy: a password on the breached/common list is refused,
+    # before any hashing, and changes nothing.
+    status, data = api.request("POST", "/api/me/password", token=token,
+                               body={"current_password": SMOKE_PASSWORD,
+                                     "new_password": "passwordpassword"})
+    results.check("auth.password_common_is_refused",
+                  status == 400 and (data or {}).get("code") == "common",
+                  f"status={status} code={(data or {}).get('code')!r}")
+
+    status, data = api.request("POST", "/api/me/password", token=token,
+                               body={"current_password": SMOKE_PASSWORD,
+                                     "new_password": CHANGED_PASSWORD})
+    new_token = (data or {}).get("access_token")
+    if not results.check("auth.password_change_succeeds", status == 200 and new_token,
+                         f"status={status}"):
+        return None
+
+    for label, old in (("this_device", token), ("other_device", other_device)):
+        status, data = api.request("GET", "/api/me", token=old)
+        results.check(f"auth.password_old_token_signed_out_{label}",
+                      status == 401 and (data or {}).get("error") == "session_ended",
+                      f"status={status} error={(data or {}).get('error')!r}")
+
+    status, _ = api.request("GET", "/api/me", token=new_token)
+    results.check("auth.password_new_token_works", status == 200, f"status={status}")
+
+    status, _ = api.request("POST", "/api/login",
+                            body={"username": username, "password": SMOKE_PASSWORD})
+    results.check("auth.password_old_password_refused", status == 401, f"status={status}")
+    return new_token
 
 
 REGISTER_WINDOW_S = 61   # /api/register: "5 per minute", plus a second's margin

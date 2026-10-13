@@ -268,7 +268,7 @@ def test_no_filesystem_path_leaks(client):
 def test_payload_carries_no_user_data(client, app):
     """A registered user's identifiers must not appear. Nothing here reads users,
     and this is the test that keeps it that way."""
-    client.post('/api/register', json={'username': 'sentineluser', 'password': 'WalkTest123!'})
+    client.post('/api/register', json={'username': 'sentineluser', 'password': 'WalkTest-Lantern-123!'})
     raw = json.dumps(client.get('/api/build-identity').get_json())
     assert 'sentineluser' not in raw
 

@@ -13,6 +13,7 @@ import subprocess
 import threading
 from functools import wraps
 import time
+import unicodedata
 import uuid
 # click ships with Flask and backs its CLI; imported directly so a command
 # can declare options (flask moderation-notify --mark-delivered).
@@ -925,6 +926,122 @@ def can(user, capability, record=False):
             subject_user_id=user.id, capability=capability,
             decision="allow" if allowed else "deny", reason=reason[:80]))
     return allowed, reason
+
+
+# ── Where `can()` is enforced: the route guard, and the switch that holds it off
+#
+# Phase 0 of docs/child-safety/phased-plan.md. Every capability route carries
+# @requires_capability, so the decision has exactly one enforcement point --
+# but nothing changes for anybody until the OWNER changes the switch:
+#
+#   STREAKFIT_AGE_POLICY unset / "off"  `can()` is not consulted. Today's
+#                                       behaviour, byte for byte.
+#   "shadow"                            `can()` decides and a deny is LOGGED
+#                                       (user id, capability, reason code --
+#                                       nothing else); the request proceeds.
+#                                       How the owner counts what "enforce"
+#                                       would affect, without querying anyone.
+#   "enforce"                           A deny is a 403 with a reason code and
+#                                       a PermissionAudit row (denials only).
+#
+# Every account today has age_band NULL, which `can()` treats as a child, so
+# "enforce" would take Ask Rickie and teams from EVERY current user. It must
+# not be set before the existing-account step (phase 2) exists. That is an
+# owner decision, not an engineering one.
+#
+# Anything else in the variable is a configuration error. It behaves as
+# "off" -- a typo must not lock out every account -- and the self-check
+# reports it as a FAIL, so it cannot sit there unnoticed.
+
+AGE_POLICY_MODES = ('off', 'shadow', 'enforce')
+
+
+def _age_policy_setting():
+    """(value as configured, whether it is one of AGE_POLICY_MODES)."""
+    value = (os.environ.get('STREAKFIT_AGE_POLICY') or 'off').strip().lower()
+    return value, value in AGE_POLICY_MODES
+
+
+def _age_policy_mode():
+    value, valid = _age_policy_setting()
+    return value if valid else 'off'
+
+
+_REASON_CODES = {
+    "adult": "adult",
+    "guardian consent on file": "guardian_consent",
+    "age not established": "age_not_established",
+    "teen policy not set": "teen_policy_not_set",
+    "no guardian consent": "no_guardian_consent",
+    _CHILD_HARD_BLOCKED[CAP_ASK_RICKIE][0]: "child_ai_assurance_missing",
+}
+
+_DENIAL_MESSAGES = {
+    CAP_ASK_RICKIE: "Ask Rickie isn't available on this account.",
+    CAP_TEAMS: "Joining or starting a team isn't available on this account.",
+    CAP_TEAM_CHAT: "Team chat isn't available on this account.",
+    CAP_TEAM_PHOTOS: "Team photos aren't available on this account.",
+}
+
+
+def _reason_code(reason):
+    """A stable code for responses and logs. The prose stays in the audit row."""
+    return _REASON_CODES.get(reason, "denied")
+
+
+def requires_capability(capability):
+    """Route guard for `can()`. Goes directly above `def`, below @jwt_required.
+
+    With the policy "off" it calls the view and does nothing else -- no read,
+    no log, no row. tests/test_capability_routes.py walks the URL map and
+    fails for a capability-shaped route without this guard.
+
+    It runs before the view body, so under "enforce" a denied request stores
+    nothing and sends nothing: for /api/coach that means before the context
+    is built, before Coach Notes and history are loaded, before the provider
+    call and before a turn is saved -- and the daily Ask Rickie allowance is
+    not spent, because the provider was never reached.
+    """
+    if capability not in CAPABILITIES:
+        raise ValueError(f"unknown capability {capability!r}")
+
+    def decorate(view):
+        @wraps(view)
+        def wrapper(*args, **kwargs):
+            mode = _age_policy_mode()
+            if mode == 'off':
+                return view(*args, **kwargs)
+            user = db.session.get(User, int(get_jwt_identity()))
+            if user is None:
+                # No subject, nothing to decide on. Under "enforce" that is not
+                # a reason to proceed: /api/coach would otherwise call the
+                # provider for a deleted account's token. Same answer the
+                # deletion contract gives everywhere else.
+                if mode == 'enforce':
+                    return jsonify({"error": "User not found"}), 404
+                return view(*args, **kwargs)
+            # Only DENIALS are audited. Allows are the common case on routes
+            # that are polled (team messages), and a row per poll would be a
+            # write per request for every adult, to record nothing new.
+            allowed, reason = can(user, capability)
+            if allowed:
+                return view(*args, **kwargs)
+            code = _reason_code(reason)
+            if mode == 'shadow':
+                app.logger.info("event=capability_shadow_deny user_id=%s capability=%s reason=%s",
+                                user.id, capability, code)
+                return view(*args, **kwargs)
+            db.session.add(PermissionAudit(subject_user_id=user.id, capability=capability,
+                                           decision="deny", reason=reason[:80]))
+            db.session.commit()
+            app.logger.info("event=capability_denied user_id=%s capability=%s reason=%s",
+                            user.id, capability, code)
+            return jsonify({"error": "capability_denied", "capability": capability,
+                            "reason_code": code,
+                            "message": _DENIAL_MESSAGES[capability]}), 403
+        wrapper._streakfit_capability = capability   # read by the URL-map test
+        return wrapper
+    return decorate
 
 
 def _ratelimit_backend_check():
@@ -2201,6 +2318,13 @@ class User(db.Model):
     # legal question (see docs/child-safety/). The column exists so the
     # permission layer has something real to read.
     age_band = db.Column(db.String(8), nullable=True)
+    # Sign-out everywhere. Every access token carries the version it was issued
+    # under (the `tv` claim) and is refused once this moves on -- a password
+    # change moves it. Tokens issued before the column existed carry no claim
+    # and read as 0, which is the default, so a deploy signs nobody out.
+    token_version = db.Column(db.Integer, nullable=False, default=0, server_default='0')
+    # When the password last changed. Shown in the data export; never the hash.
+    password_changed_at = db.Column(db.DateTime, nullable=True)
     challenges = db.relationship('Challenge', backref='owner', lazy=True)
 
     # The economy's floor and ceiling, held by the database itself, so no code
@@ -4443,6 +4567,27 @@ def verification_self():
                     "Rickie is answering 503 by design after a provider stall.",
         critical=False))
 
+    # The child-safety switch, reported so it can never change unnoticed. An
+    # unrecognised value is a FAIL: the app treats it as "off", which is safe
+    # for users, but somebody meant something by it and it is not happening.
+    configured, valid = _age_policy_setting()
+    guarded = sorted({getattr(app.view_functions[r.endpoint], '_streakfit_capability', None)
+                      for r in app.url_map.iter_rules()} - {None})
+    guarded_routes = sum(1 for r in app.url_map.iter_rules()
+                         if getattr(app.view_functions[r.endpoint], '_streakfit_capability', None))
+    checks.append(_self_check(
+        "child_safety.age_policy", "Child-safety switch is set to a known value",
+        "STREAKFIT_AGE_POLICY is off, shadow or enforce, and every capability "
+        "route carries the guard that the setting controls.",
+        "Read the setting this process runs with, and count the guarded routes.",
+        "PASS" if valid else "FAIL", "VERIFIED",
+        f"age policy {configured if valid else 'UNRECOGNISED (treated as off)'}; "
+        f"{guarded_routes} routes guarded for {', '.join(guarded)}",
+        failure_reason=None if valid else
+        "STREAKFIT_AGE_POLICY has a value that is not off, shadow or enforce.",
+        limitations="Reports the switch, not whether anyone is a child: no "
+                    "account's age is established yet."))
+
     now = datetime.utcnow().isoformat() + "Z"
     return jsonify({
         "application": "streakfit",
@@ -4930,7 +5075,20 @@ def _credential_fields(*names, missing_body_ok=False):
     values = tuple(data.get(name) for name in names)
     if any(v is not None and not isinstance(v, str) for v in values):
         return None
+    # Valid JSON can carry a lone surrogate ("\ud800"), which is not text
+    # and cannot be encoded for the hasher; it used to surface as a 500 from
+    # register, login and password change. Malformed, so None -> 400.
+    if any(v is not None and not v.isascii() and not _utf8_encodable(v) for v in values):
+        return None
     return values
+
+
+def _utf8_encodable(text):
+    try:
+        text.encode('utf-8')
+    except UnicodeEncodeError:
+        return False
+    return True
 
 
 @app.route('/api/register', methods=['POST'])
@@ -4943,22 +5101,22 @@ def register():
     username = fields[0].strip()
     password = fields[1]
 
-    # Basic, honest account hygiene. A skeptical first-time user should never be
-    # able to set a one-character password on something that stores a streak they
-    # care about — this is server-authoritative, mirrored by the form's minlength.
+    # Server-authoritative, mirrored by the form's minlength. The password rules
+    # are the SAME function a password change uses (_password_policy_problem):
+    # 15+ characters, not the username, not a common or breached password. The
+    # 128 upper bound stays, so a pathological length is refused before any
+    # hashing. `error` stays the human sentence (the client shows it as is);
+    # `code` is new and machine-readable.
     if len(username) < 2 or len(username) > 80:
         return jsonify({"error": "Username needs to be 2–80 characters."}), 400
-    if len(password) < 8:
-        return jsonify({"error": "Password needs to be at least 8 characters."}), 400
-    if len(password) > 128:
-        # Upper bound so a pathologically long password can't turn each hash
-        # into a slow-request DoS. 128 is far beyond any real passphrase.
-        return jsonify({"error": "Password can be at most 128 characters."}), 400
+    problem = _password_policy_problem(username, password)
+    if problem is not None:
+        return jsonify({"error": _PASSWORD_POLICY_MESSAGES[problem], "code": problem}), 400
 
     if User.query.filter_by(username=username).first():
         return jsonify({"error": "That username is taken — try another."}), 400
 
-    hashed_pw = generate_password_hash(password, method='pbkdf2:sha256')
+    hashed_pw = generate_password_hash(_password_hash_form(password), method='pbkdf2:sha256')
     new_user = User(username=username, password_hash=hashed_pw)
     db.session.add(new_user)
     try:
@@ -4982,6 +5140,29 @@ def register():
         app.logger.warning('analytics write failed for event: account_created')
 
     return jsonify({"message": "User registered successfully"}), 201
+
+def _upgrade_password_hash(user_id, verified_hash, password):
+    """Rewrite a pre-normalisation hash in NFKC after a successful sign-in.
+
+    Only when the hash is still the one just verified: under the row lock, so
+    a password change committed in between is never overwritten with the old
+    password. The token version does not move -- nothing about the password
+    changed. A failure here is logged and ignored; the sign-in has already
+    succeeded on the old hash, which keeps working.
+    """
+    try:
+        user = _lock_user(user_id)
+        if user is not None and user.password_hash == verified_hash:
+            user.password_hash = generate_password_hash(_password_hash_form(password),
+                                                        method='pbkdf2:sha256')
+            db.session.commit()
+            app.logger.info("event=password_hash_normalised user_id=%s", user_id)
+        else:
+            db.session.rollback()
+    except Exception:
+        db.session.rollback()
+        app.logger.warning("event=password_hash_normalise_failed user_id=%s", user_id)
+
 
 @app.route('/api/login', methods=['POST'])
 @limiter.limit("10 per minute")
@@ -5018,15 +5199,21 @@ def login():
     username, password = fields
 
     user = User.query.filter_by(username=username).first()
-    # Always run a hash comparison — against a fixed dummy when the user doesn't
-    # exist — so response time doesn't reveal whether the username is valid. The
-    # error is deliberately ambiguous (never reveals whether the username exists).
-    pw_ok = check_password_hash(user.password_hash if user else _DUMMY_PW_HASH,
-                                password)
+    # Always run the same hash comparisons — against a fixed dummy when the user
+    # doesn't exist — so response time doesn't reveal whether the username is
+    # valid (_password_matches tries the same forms either way). The error is
+    # deliberately ambiguous (never reveals whether the username exists).
+    stored = user.password_hash if user else _DUMMY_PW_HASH
+    pw_ok, needs_rehash = _password_matches(stored, password)
     if not user or not pw_ok:
         return jsonify({"error": "That username and password don’t match."}), 401
+    if needs_rehash:
+        _upgrade_password_hash(user.id, stored, password)
+        user = db.session.get(User, user.id)
+        if user is None:
+            return jsonify({"error": "That username and password don’t match."}), 401
 
-    access_token = create_access_token(identity=str(user.id))
+    access_token = _issue_access_token(user)
     app.logger.info("event=login user_id=%s", user.id)
     return jsonify({"access_token": access_token}), 200
 
@@ -5298,6 +5485,227 @@ def _account_deletion_refusal(plan):
     }), 409
 
 
+def _issue_access_token(user):
+    """The only way an access token is made. It carries the account's current
+    token_version (`tv`), which is what lets a password change sign every
+    other device out. A test fails if create_access_token is called anywhere
+    else."""
+    return create_access_token(identity=str(user.id),
+                               additional_claims={"tv": user.token_version or 0})
+
+
+# ── Passwords: one policy, one normal form, one way to check ───────────────
+#
+# Registration and password change share _password_policy_problem; every
+# place that hashes or checks a password goes through _password_hash_form /
+# _password_matches. docs/security/password-policy.md has the reasoning.
+#
+# 15 characters minimum for every NEW password (registration and change).
+# NIST SP 800-63B-4 sets 15 for a password that is the only factor, which it
+# is here. Existing passwords are never re-judged: login, deletion and the
+# current-password check accept whatever the account already has.
+PASSWORD_MIN_LENGTH = 15
+PASSWORD_MAX_LENGTH = 128
+
+# Context-specific words, which NIST SP 800-63B names explicitly ("the name of
+# the service, the username").
+_SERVICE_WORDS = ('streakfit', 'rickie')
+
+_PASSWORD_BLOCKLIST_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                        'content', 'security', 'common-passwords.txt')
+
+
+def _load_password_blocklist(path=_PASSWORD_BLOCKLIST_PATH):
+    """The common/breached-password blocklist, already in comparison form.
+
+    Generated from pinned public lists by scripts/build_password_blocklist.py
+    (sources, licence and update procedure: docs/security/password-blocklist.md).
+    Format: a header, one blank line, then one entry per line -- an entry may
+    itself begin with '#', so nothing after the blank line is treated as a
+    comment.
+
+    A MISSING FILE STOPS THE APP AT IMPORT. A deploy without it would accept
+    every common password while looking configured, which is the failure the
+    list exists to prevent; refusing to start is loud and immediate.
+    """
+    with open(path, encoding='utf-8') as f:
+        text = f.read()
+    _, sep, body = text.partition('\n\n')
+    if not sep:
+        raise RuntimeError(f"password blocklist {path} has no header/body separator")
+    entries = frozenset(line for line in body.split('\n') if line)
+    if not entries:
+        raise RuntimeError(f"password blocklist {path} is empty")
+    return entries
+
+
+_COMMON_PASSWORDS: frozenset[str] = _load_password_blocklist()
+
+
+def _password_hash_form(password):
+    """What is hashed for a NEW password: NFKC.
+
+    The same visible password can arrive as different code points -- an
+    accented letter composed (NFC) on one keyboard, decomposed (NFD) on
+    another; full-width forms from some input methods. Hashing one normal form
+    makes them one password. NFKC is what NIST SP 800-63B recommends.
+    """
+    return unicodedata.normalize('NFKC', password)
+
+
+def _password_compare_form(password):
+    """Policy comparisons (blocklist, username, same-as-current): NFKC + casefold."""
+    return _password_hash_form(password).casefold()
+
+
+def _password_candidates(password):
+    """Forms to try against a STORED hash, in order. Never locks anyone out.
+
+    Hashes written before normalisation are of the raw string, so the raw
+    string is always tried. For non-ASCII input the NFC and NFD forms are
+    tried too, which lets an account whose password was stored in one
+    composition sign in from a keyboard that produces the other -- the review
+    reproduced exactly that lockout. ASCII input is invariant under all of
+    these, so it costs one hash as before; non-ASCII costs at most four, and
+    every caller is throttled.
+    """
+    forms = [_password_hash_form(password), password]
+    if not password.isascii():
+        forms += [unicodedata.normalize('NFC', password), unicodedata.normalize('NFD', password)]
+    seen, out = set(), []
+    for f in forms:
+        if f not in seen:
+            seen.add(f)
+            out.append(f)
+    return out
+
+
+def _password_matches(stored_hash, password):
+    """(matched, needs_rehash). needs_rehash: matched, but not in hash form."""
+    for i, form in enumerate(_password_candidates(password)):
+        if check_password_hash(stored_hash, form):
+            return True, i != 0
+    return False, False
+
+
+def _password_policy_problem(username, new):
+    """Why `new` is not acceptable as a NEW password, or None. Never hashes.
+
+    Judged on the NFKC + casefold form, and in this order:
+      too_short / too_long   15-128 characters (NFKC code points)
+      username_based         the username IS most of it: equal to it, or the
+                             username is at least half of the password. Not
+                             mere containment -- "anna" inside
+                             "Savannah-lantern-meadow" is not a weakness, and
+                             rejecting it was the review's finding B3.
+      service_name           nothing but "streakfit"/"rickie" once digits and
+                             symbols are ignored
+      repetitive             one unit of 1-3 characters repeated
+      sequential             a straight run of code points (abc..., 987...)
+      common                 on the common/breached-password blocklist
+    No composition rules and no expiry (NIST SP 800-63B).
+    """
+    hashed = _password_hash_form(new)
+    if len(hashed) < PASSWORD_MIN_LENGTH:
+        return 'too_short'
+    if len(hashed) > PASSWORD_MAX_LENGTH:
+        return 'too_long'
+    folded = hashed.casefold()
+    name = _password_compare_form((username or '').strip())
+    if len(name) >= 4 and (folded == name or (name in folded and 2 * len(name) >= len(folded))):
+        return 'username_based'
+    letters = ''.join(ch for ch in folded if ch.isalpha())
+    if letters in _SERVICE_WORDS:
+        return 'service_name'
+    for unit in (1, 2, 3):
+        if len(folded) % unit == 0 and folded == folded[:unit] * (len(folded) // unit):
+            return 'repetitive'
+    steps = {ord(b) - ord(a) for a, b in zip(folded, folded[1:])}
+    if steps in ({1}, {-1}):
+        return 'sequential'
+    if folded in _COMMON_PASSWORDS:
+        return 'common'
+    return None
+
+
+_PASSWORD_POLICY_MESSAGES = {
+    'too_short': f"Use at least {PASSWORD_MIN_LENGTH} characters. A few words together is easiest.",
+    'too_long': f"Use at most {PASSWORD_MAX_LENGTH} characters.",
+    'username_based': "Choose a password that isn't mostly your username.",
+    'service_name': "Choose a password that isn't just the app's name.",
+    'repetitive': "That's one thing repeated. Try something less predictable.",
+    'sequential': "That's a straight run of keys. Try something less predictable.",
+    'common': "That password is on a list of common or leaked passwords. Try something less predictable.",
+    'same_as_current': "That's your current password. Choose a new one.",
+}
+
+
+@app.route('/api/me/password', methods=['POST'])
+@jwt_required()
+# Only a wrong CURRENT password is charged: a stolen token cannot be used to
+# grind the password, while someone fixing a too-short new one pays nothing.
+# Keyed per user, so a household behind one router does not share it.
+@limiter.limit("5 per 15 minutes", key_func=user_or_ip_key,
+               deduct_when=lambda response: response.status_code == 403)
+@limiter.limit("10 per day", key_func=user_or_ip_key)
+@sensitive_when_degraded("strict")
+def change_my_password():
+    """Change your password; every other device is signed out.
+
+    Cheap refusals first, so a policy failure costs no slow hash (165 ms each
+    on this hardware, one sync worker in production): the shape of the body,
+    the policy, and "new equals current" -- which needs no hash, because once
+    the current password is verified, a new one that differs from what was
+    typed differs from what is stored (both compared in NFKC). Then the
+    person's row is locked, the current password checked (one hash for an
+    ASCII password; a non-ASCII one may need up to four, see
+    _password_candidates), and the new one hashed in NFKC (one more).
+
+    403, not 401, for a wrong current password: every client treats 401 as
+    "signed out", and a typo must not sign anybody out.
+
+    Nothing about the passwords is ever logged: not the values, not their
+    lengths, not the hashes, not the tokens.
+    """
+    user_id = int(get_jwt_identity())
+    fields = _credential_fields('current_password', 'new_password')
+    if fields is None or not fields[0] or not fields[1]:
+        return jsonify({"error": "invalid_request",
+                        "message": "Send your current and new password as text."}), 400
+    current, new = fields
+
+    user = db.session.get(User, user_id)
+    if user is None:
+        return jsonify({"error": "User not found"}), 404
+    problem = _password_policy_problem(user.username, new)
+    if problem is None and _password_hash_form(new) == _password_hash_form(current):
+        problem = 'same_as_current'
+    if problem is not None:
+        app.logger.info("event=password_change_refused user_id=%s reason=%s", user_id, problem)
+        return jsonify({"error": "password_policy", "code": problem,
+                        "message": _PASSWORD_POLICY_MESSAGES[problem]}), 400
+
+    # Locked before the check, so two changes run one after the other: the
+    # second sees the first's hash and is refused, never a lost update.
+    user = _lock_user(user_id)
+    if user is None:
+        db.session.rollback()
+        return jsonify({"error": "User not found"}), 404
+    if not _password_matches(user.password_hash, current)[0]:
+        db.session.rollback()
+        app.logger.info("event=password_change_refused user_id=%s reason=current_password_wrong",
+                        user_id)
+        return jsonify({"error": "password_incorrect",
+                        "message": "Your current password doesn't match."}), 403
+
+    user.password_hash = generate_password_hash(_password_hash_form(new), method='pbkdf2:sha256')
+    user.password_changed_at = datetime.utcnow()
+    user.token_version = (user.token_version or 0) + 1
+    db.session.commit()
+    app.logger.info("event=password_changed user_id=%s sessions_revoked=true", user_id)
+    return jsonify({"changed": True, "access_token": _issue_access_token(user)}), 200
+
+
 @app.route('/api/me', methods=['DELETE'])
 @jwt_required()
 @limiter.limit("5 per hour", key_func=user_or_ip_key)
@@ -5325,7 +5733,7 @@ def delete_my_account():
         return jsonify({"error": "invalid_request",
                         "message": "Send your password as text."}), 400
     password = fields[0] or ''
-    if not check_password_hash(user.password_hash, password):
+    if not _password_matches(user.password_hash, password)[0]:
         return jsonify({"error": "password_incorrect",
                         "message": "That password doesn't match."}), 403
 
@@ -5399,6 +5807,10 @@ def export_my_data():
             "xp_total": user.xp_total,
             "acorns_earned": user.acorns_total,
             "acorns_spent": user.acorns_spent,
+            # When, never what: the password itself is not kept, only a hash,
+            # and the hash is not exported either.
+            "password_changed_at": (user.password_changed_at.isoformat() + 'Z'
+                                    if user.password_changed_at else None),
         },
         # What is kept, and for how long. An export that lists rows without
         # saying when they go is only half an answer, and the half it leaves
@@ -7553,6 +7965,7 @@ def _user_team_count_cap(user):
 @app.route('/api/teams', methods=['POST'])
 @jwt_required()
 @limiter.limit("10 per minute", key_func=user_or_ip_key)
+@requires_capability(CAP_TEAMS)
 def create_team():
     data = request.get_json()
     if not data or not data.get('name') or not data['name'].strip():
@@ -7698,6 +8111,7 @@ def list_teams():
 # costs a measured 321 probes/second against a code that is how an adult
 # reaches a child. Those are not close.
 @sensitive_when_degraded("refuse")
+@requires_capability(CAP_TEAMS)
 def lookup_team_by_code(code):
     invite = db.session.execute(
         db.select(TeamInviteCode).where(TeamInviteCode.code == code.strip().upper())
@@ -7842,6 +8256,7 @@ def get_team(team_id):
 @app.route('/api/teams/<int:team_id>/join', methods=['POST'])
 @jwt_required()
 @limiter.limit("10 per minute", key_func=user_or_ip_key)
+@requires_capability(CAP_TEAMS)
 def join_team(team_id):
     data = request.get_json()
     code = (data or {}).get('code', '').strip().upper()
@@ -8031,6 +8446,50 @@ def get_team_campfire(team_id):
     return jsonify(payload), 200
 
 
+_CAMPFIRE_STAGE_NAMES = frozenset(name for _, name in CAMPFIRE_STAGE_THRESHOLDS)
+_CHALLENGE_PRESET_TITLES = frozenset(c['title'] for c in CHALLENGE_PRESETS)
+
+
+def _public_moment_metadata(moment_type, raw):
+    """What of a moment's stored metadata may leave the server. An ALLOW-LIST.
+
+    Stored metadata is not trusted to be safe to show. photo_shared moments
+    written before R1 D4 carry `{"caption": ...}` -- another member's own words
+    -- and the moments route is reachable by an account that the child-safety
+    policy refuses team chat and photos, so whatever this returns is readable
+    by someone `can()` has said may not read it. Rather than depend on every
+    old row having been scrubbed, the response is built from known keys whose
+    values are checked against what the server itself would have written:
+
+      challenge_started/_completed  title -- only an existing preset title
+      campfire_stage_reached        stage -- only a real stage name;
+                                    total_team_missions -- only an integer
+      campfire_log_added            total_team_missions -- only an integer
+      everything else               nothing (photo_shared included)
+
+    An unreadable row is None, never a 500.
+    """
+    if not raw:
+        return None
+    try:
+        stored = json.loads(raw)
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(stored, dict):
+        return None
+    out = {}
+    if moment_type in ('challenge_started', 'challenge_completed'):
+        if stored.get('title') in _CHALLENGE_PRESET_TITLES:
+            out['title'] = stored['title']
+    elif moment_type in ('campfire_stage_reached', 'campfire_log_added'):
+        if moment_type == 'campfire_stage_reached' and stored.get('stage') in _CAMPFIRE_STAGE_NAMES:
+            out['stage'] = stored['stage']
+        total = stored.get('total_team_missions')
+        if isinstance(total, int) and not isinstance(total, bool):
+            out['total_team_missions'] = total
+    return out or None
+
+
 def _moment_display_text(moment_type, subject_username, metadata):
     """Kept deliberately plain -- not Rickie's voice. Rickie-voiced moment
     callbacks are a later sprint (team chat / Memory Book), not this one."""
@@ -8161,7 +8620,7 @@ def get_team_moments(team_id):
     result = []
     for m in moments:
         subject_username = usernames.get(m.subject_user_id) if m.subject_user_id else None
-        metadata = json.loads(m.moment_metadata) if m.moment_metadata else None
+        metadata = _public_moment_metadata(m.moment_type, m.moment_metadata)
         result.append({
             "moment_type": m.moment_type,
             "subject_username": subject_username,
@@ -8479,6 +8938,7 @@ def _serialize_team_message(m, usernames=None, photos=None, challenges=None, vie
 
 @app.route('/api/teams/<int:team_id>/messages', methods=['GET'])
 @jwt_required()
+@requires_capability(CAP_TEAM_CHAT)
 def get_team_messages(team_id):
     user_id = int(get_jwt_identity())
 
@@ -8590,6 +9050,7 @@ def get_team_messages(team_id):
 @app.route('/api/teams/<int:team_id>/messages', methods=['POST'])
 @jwt_required()
 @limiter.limit("30 per minute", key_func=user_or_ip_key)
+@requires_capability(CAP_TEAM_CHAT)
 def post_team_message(team_id):
     user_id = int(get_jwt_identity())
 
@@ -8637,6 +9098,7 @@ def list_challenge_presets():
 @jwt_required()
 @limiter.limit("20 per hour", key_func=user_or_ip_key)
 @limiter.limit("6 per minute", key_func=user_or_ip_key)
+@requires_capability(CAP_TEAM_CHAT)   # a team challenge lives in, and posts to, the team thread
 def create_team_challenge(team_id):
     user_id = int(get_jwt_identity())
 
@@ -8742,6 +9204,7 @@ def create_team_challenge(team_id):
 @app.route('/api/teams/<int:team_id>/challenges/<string:public_id>/complete', methods=['POST'])
 @jwt_required()
 @limiter.limit("30 per hour", key_func=user_or_ip_key)
+@requires_capability(CAP_TEAM_CHAT)   # a team challenge lives in, and posts to, the team thread
 def complete_team_challenge(team_id, public_id):
     """Doing the thing. Awards through the same economy as everything else.
 
@@ -8916,6 +9379,7 @@ def unlock_photo_filter(filter_key):
 @jwt_required()
 @limiter.limit("40 per hour", key_func=user_or_ip_key)
 @limiter.limit("8 per minute", key_func=user_or_ip_key)
+@requires_capability(CAP_TEAM_PHOTOS)
 def upload_team_photo(team_id):
     """Share a photo into one team the caller is a member of.
 
@@ -9022,6 +9486,7 @@ def upload_team_photo(team_id):
 @app.route('/api/teams/<int:team_id>/photos/<string:public_id>', methods=['GET'])
 @jwt_required()
 @limiter.limit("240 per minute", key_func=user_or_ip_key)
+@requires_capability(CAP_TEAM_PHOTOS)
 def get_team_photo(team_id, public_id):
     """Serve the bytes. Membership is checked on every single read.
 
@@ -13433,6 +13898,7 @@ def _coach_reached_provider(response):
 @jwt_required()
 @limiter.limit("10 per day", key_func=user_or_ip_key, deduct_when=_coach_reached_provider)
 @limiter.limit("3 per minute", key_func=user_or_ip_key)
+@requires_capability(CAP_ASK_RICKIE)
 def coach():
     # The deadline starts here, not at the first model call, so the database
     # work below counts against the same budget gunicorn is counting.
@@ -13661,6 +14127,51 @@ def invalid_token_callback(error_string):
 @jwt.expired_token_loader
 def expired_token_callback(jwt_header, jwt_payload):
     return jsonify({"error": "Token has expired"}), 401
+
+
+@jwt.token_in_blocklist_loader
+def _token_revoked(jwt_header, jwt_payload):
+    """A token is revoked once its account's token_version has moved past it.
+
+    Runs on every authenticated request (and in user_or_ip_key, which verifies
+    optionally): one primary-key read of the caller's row.
+
+    The row is kept on `g` for the rest of the request. That reference is the
+    whole cache: SQLAlchemy's identity map holds objects WEAKLY, so without it
+    the instance was garbage-collected as soon as this function returned and a
+    route's own `db.session.get(User, id)` queried the same row again (measured:
+    /api/me 4 -> 5 statements, /api/daily 13 -> 14). With it, that get is
+    answered from the identity map. Nothing reads `g._sf_auth_user` directly,
+    so no route can mistake it for an authorisation decision; `_lock_user`
+    still re-reads under the lock (populate_existing), and a commit still
+    expires it, exactly as before.
+
+    Routes that never load the caller (team list, detail, messages, moments)
+    pay the one read; that is the cost of revocation and it does not grow with
+    data (tests/test_password_change.py pins it).
+
+    A MISSING USER IS NOT REVOKED. A deleted account's old token must keep
+    reaching the route so it can answer 404, which the deletion contract, its
+    tests and verify_all's auth.deleted_account_* checks depend on.
+    """
+    try:
+        user_id = int(jwt_payload.get('sub'))
+    except (TypeError, ValueError):
+        return True                     # signed by us, but not a person's token
+    user = db.session.get(User, user_id)
+    g._sf_auth_user = user              # request-scoped strong reference (see above)
+    if user is None:
+        return False
+    return jwt_payload.get('tv', 0) != (user.token_version or 0)
+
+
+@jwt.revoked_token_loader
+def revoked_token_callback(jwt_header, jwt_payload):
+    # 401, so every client -- including pages loaded before this release --
+    # signs out and shows the sign-in screen, as for an expired token.
+    return jsonify({"error": "session_ended",
+                    "message": "Your password was changed, so this device was "
+                               "signed out. Please sign in again."}), 401
 
 
 # --- Error Handlers ---

@@ -79,7 +79,7 @@ def prime():
 out = {}
 with A.app.test_client() as c:
     prime()
-    c.post('/api/register', json={'username': 'rl_probe', 'password': 'Correct1!pass'})
+    c.post('/api/register', json={'username': 'rl_probe', 'password': 'Correct1!pass-lantern'})
     prime()
     out['health'] = c.get('/api/health').status_code
     prime()

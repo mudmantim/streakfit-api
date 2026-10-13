@@ -109,6 +109,18 @@ def run(api, results, scenario):
     status, _ = api.request("GET", "/api/daily")  # no Authorization header at all
     results.check("security.no_token_blocked", status == 401, f"status={status}")
 
+    # Child-safety phase 0: the switch is a known value and the guard is on
+    # all ten capability routes. Reports the mode; does not require "off",
+    # so the check stays true when the owner later chooses "shadow".
+    status, payload = api.request("GET", "/api/verification/self")
+    by_id = {c.get("id"): c for c in (payload or {}).get("checks", [])}
+    entry = by_id.get("child_safety.age_policy") or {}
+    results.check("security.child_safety_switch_reported",
+                  entry.get("status") == "PASS"
+                  and "10 routes guarded for ask_rickie, team_chat, team_photos, teams"
+                  in (entry.get("observed") or ""),
+                  f"status={entry.get('status')!r} observed={entry.get('observed')!r}")
+
     return scenario
 
 

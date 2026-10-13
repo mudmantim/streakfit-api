@@ -19,7 +19,7 @@ import os
 import sys
 import uuid
 
-PASSWORD = 'WalkTest123!'
+PASSWORD = 'WalkTest-Lantern-123!'
 
 
 def _register(client, username):

@@ -138,7 +138,7 @@ def test_deleting_the_account_takes_the_conversation_with_it(client):
     token = register_and_login(client, "delete_convo")
     uid = User.query.filter_by(username="delete_convo").first().id
     appmod._record_coach_exchange(uid, SENSITIVE, "ok")
-    resp = client.delete("/api/me", json={"password": "WalkTest123!"},
+    resp = client.delete("/api/me", json={"password": "WalkTest-Lantern-123!"},
                          headers=auth_headers(token))
     assert resp.status_code == 200, resp.get_json()
     assert CoachTurn.query.filter_by(user_id=uid).count() == 0

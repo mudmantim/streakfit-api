@@ -3239,6 +3239,41 @@ body.theme-classic .theme-btn.active { background: rgba(79,70,229,.2); }
    deliberate reach, not a thumb landing on the nearest button. */
 .danger-cancel { flex: 2; }
 
+/* Change password reuses the sheet, but nothing here is destructive: the
+   save is the primary action, Cancel is a quiet one, success is not red. */
+.danger-input + .danger-input { margin-top: .5rem; }
+.pw-save { flex: 2; }
+.pw-cancel {
+    flex: 1;
+    min-height: 44px;
+    background: none;
+    border: 1px solid var(--gray-200);
+    border-radius: 8px;
+    color: var(--gray-700);
+    font-weight: 700;
+    cursor: pointer;
+}
+.danger-error.pw-done { color: #166534; }
+/* Visible labels (review A5): placeholders vanish as you type, and three
+   password fields look identical once filled. */
+.pw-label {
+    display: block;
+    margin: .7rem 0 .25rem;
+    font-size: .85rem;
+    font-weight: 700;
+    color: var(--gray-800);
+}
+.pw-hint {
+    margin: .3rem 0 0;
+    font-size: .78rem;
+    color: var(--gray-700);
+}
+.pw-sheet .danger-input:focus-visible,
+.pw-sheet button:focus-visible {
+    outline: 3px solid #2563eb;
+    outline-offset: 2px;
+}
+
 .danger-confirm {
     flex: 1;
     min-height: 44px;

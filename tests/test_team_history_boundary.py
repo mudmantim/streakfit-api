@@ -19,7 +19,7 @@ from conftest import auth_headers, register_and_login
 
 
 def _t(client, name):
-    return register_and_login(client, name, "TestPass123!")
+    return register_and_login(client, name, "TestPass-Lantern-123!")
 
 
 def _team(client, token, name="The Hills"):

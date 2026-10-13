@@ -1,6 +1,6 @@
 # Password change and recovery codes — review, implementation checklist, test matrix
 
-**Status: plan only.** No password change or recovery code exists in code yet.
+**Status:** PW-1 (password change + token version) is implemented on branch `feature/pw1-and-child-safety-phase0`, not released; see `pw1-implementation-plan.md`. PW-2 (recovery codes) is plan only.
 Written 2026-10-12 after reviewing `password-change.md` and
 `password-recovery.md`.
 
@@ -74,8 +74,10 @@ Milestone **PW-1**: password change plus token version. One release.
   - delete with the new password.
 
   Bump the suite version.
-- [ ] Runbook entry. Rollback: redeploy the previous build (it ignores `tv`
-      and the columns), then downgrade if wanted.
+- [ ] Runbook entry. Rollback: **downgrade first** (with the lock timeout),
+      **then** redeploy the previous build. The old build runs with
+      `STREAKFIT_ENFORCE_DB_HEAD=1` and won't boot against the newer head.
+      Corrected 2026-10-12; see `pw1-implementation-plan.md` §6.
 
 Milestone **PW-2**: recovery codes. Separate release, after PW-1.
 
