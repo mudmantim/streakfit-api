@@ -1,6 +1,7 @@
 # Staging test plan: PW-1, its rollback, and Render's failed-deploy behaviour
 
-**Status: approved in principle (2026-10-13). No staging resource exists.**
+**Status (revised 2026-10-13, after the staging incident): resources exist
+and are SUSPENDED. Read "Resuming after the 2026-10-13 incident" first.**
 Resource creation needs the owner's separate approval after reviewing the
 pricing and configuration in their own accounts. The D67 staging service
 was deleted on 2026-10-05.
@@ -14,6 +15,82 @@ was deleted on 2026-10-05.
 - **Budget:** one Render Starter web service ($7/month, billed by the
   second; expected well under $1 for this round). Key Value Free and Neon
   Free are $0. **Ceiling for this round: $7.**
+
+## Resuming after the 2026-10-13 incident (read first)
+
+On 2026-10-13 the staging service was created with **production's**
+`DATABASE_URL` and ran against the production database for about 6.5 hours.
+No user data was damaged (incident report:
+`e2e-campaign/evidence/d6_d50_d59/INCIDENT_STAGING_ON_PRODUCTION_DB_2026-10-13.md`).
+The root cause was a copied connection string, and every check that should
+have caught it was a person reading a hostname. This section replaces those
+checks with ones the code performs.
+
+### Current state (verified 2026-10-13)
+
+| Resource | State |
+|---|---|
+| Render `streakfit-staging-pw1` (`srv-db72…`) | **Suspended**. Environment: `SECRET_KEY`, `JWT_SECRET_KEY`, `ADMIN_SECRET` (generated), `STREAKFIT_AGE_POLICY=off`. **No `DATABASE_URL`** (removed, Phase A). |
+| Neon `streakfit-staging-pw1` (`<staging endpoint>`: the ID recorded at S0.2 in the private evidence file, not in this public repo) | Empty: no tables. Never used. |
+| Render Key Value for staging | **Not created** (one Free Key Value per workspace; option A). `RATELIMIT_STORAGE_URI` stays unset, so shared Redis rate limiting is **untested** in this round. |
+
+### Why the order matters: the guard is only in builds that contain it
+
+`db_guard.py` (PR #10, `safety/db-environment-guards`) refuses a staging
+service on the production database (rule R2, by Render service ID), and it
+proves the server's identity at boot (R7). **The builds this plan tests —
+`1d7b2f2`, PW-1 `434b0f6`, `rollback/pw1-compat` `e4dcb4f` and the two
+`staging/*` failure branches — do not contain it.** Setting
+`STREAKFIT_DEPLOYMENT=staging` is harmless for them (they ignore it) and
+required for the guard build.
+
+So the round starts by deploying the **guard build** once (S0.7). That
+proves, by the code and the server's own account, that this service's
+environment is bound to the staging database. Every later deploy reuses
+**the same environment, unchanged**. **Any edit to staging's environment
+after S0.7 repeats S0.7 before the next deploy.**
+
+### Environment prerequisites (complete list)
+
+| Key | Value | Why |
+|---|---|---|
+| `DATABASE_URL` | built from **Neon → project `streakfit-staging-pw1` → Connect** (direct, database `neondb`, role `neondb_owner`). Never copied from anywhere else | the incident |
+| `STREAKFIT_DEPLOYMENT` | `staging` | the guard build refuses to start without it (R4); it also makes `/api/build-identity` report `staging` |
+| `SECRET_KEY`, `JWT_SECRET_KEY`, `ADMIN_SECRET` | already generated (keep) | staging's own, never production's |
+| `STREAKFIT_AGE_POLICY` | `off` | unchanged |
+| `RATELIMIT_STORAGE_URI` | **unset** | option A; the `ratelimit.shared_storage` self-check FAILs (expected) |
+| `ANTHROPIC_API_KEY`, `RESEND_API_KEY`, `STREAKFIT_NOTIFY_*`, `STREAKFIT_PUBLIC_URL`, `STREAKFIT_EVIDENCE_KEY`, `MIGRATION_DATABASE_URL`, `STREAKFIT_PRODUCTION_DB_ENDPOINT`, `STREAKFIT_ALLOW_PRODUCTION_DB_FROM_HERE`, `WEB_CONCURRENCY`, `GUNICORN_CMD_ARGS` | **unset** | nothing reaches a provider; no override exists that could point staging at production |
+
+**Start Command for S0.7:** `STREAKFIT_ENFORCE_DB_HEAD=1 gunicorn app:app`,
+**without** `STREAKFIT_RETENTION_SWEEPER=1`. Nothing sweeps until the
+database is proven. Add the sweeper flag back only after S0.7 passes.
+
+### S0.7 Guard build smoke (before S1; owner deploys, Claude reads)
+
+1. **Staging SQL Editor, read-only.**
+   `select current_setting('neon.endpoint_id', true)` must return
+   `<staging endpoint>`. Expect **no tables**.
+2. **Render.** Set the environment exactly as the table above, with the
+   S0.7 Start Command. Set the service **Branch** to
+   `safety/db-environment-guards` (PR #10's tip).
+3. **Resume and deploy.** Expect in the log, in this order:
+   - Pre-Deploy: `Migrating database: deployment=staging endpoint=<staging endpoint> hosted=True service=srv-…`.
+     **This line settles the open question: whether `RENDER_SERVICE_ID` exists during Pre-Deploy.** Record what `service=` shows.
+   - the migration chain from empty to `d4f1b6e2a9c3` (`Running upgrade …` lines, if Render keeps them);
+   - boot: `Database identity verified (deployment=staging endpoint=<staging endpoint> … service=srv-…, server endpoint <staging endpoint>)`, then `Database migration check passed`.
+4. **`/api/build-identity`** reports `"environment": "staging"`.
+5. **Negative test (the incident replayed safely).**
+   - Temporarily replace `DATABASE_URL` with a **dummy** string that names production's endpoint, with a made-up password: `postgresql://nobody:not-a-password@ep-odd-star-ajye3lag.c-2.us-east-2.aws.neon.tech/neondb?sslmode=require`.
+   - Deploy. Expect Pre-Deploy to fail at import with `Refusing to start: R2 … may not use the production database`, **before any connection** (no real credential exists, so nothing could connect anyway).
+   - Restore the real staging URL, then repeat step 3's checks.
+6. **Missing URL.** Remove `DATABASE_URL` and deploy. Expect `R1 … refusing the SQLite fallback`. Restore it.
+7. Only now add `STREAKFIT_RETENTION_SWEEPER=1` back to the Start Command.
+   **From here the environment must not change.**
+
+Pass criteria: every expectation above. If `service=` is empty in the
+Pre-Deploy line, **stop**. The guard release cannot go to production until
+`RENDER_SERVICE_ID` handling is revised (R2 would refuse production's own
+Pre-Deploy).
 
 ## What staging must answer
 
@@ -136,8 +213,9 @@ branch chosen below. Choosing `main` makes that first deploy test S1.
    | `SECRET_KEY` | click **Generate** |
    | `JWT_SECRET_KEY` | click **Generate** |
    | `ADMIN_SECRET` | click **Generate** |
-   | `DATABASE_URL` | the staging Neon string (S0.2) |
-   | `RATELIMIT_STORAGE_URI` | the staging internal Key Value URL (S0.3) |
+   | `DATABASE_URL` | the staging Neon string (S0.2), from the **staging** project's Connect dialog only |
+   | `STREAKFIT_DEPLOYMENT` | `staging` (added 2026-10-13; see "Resuming after the 2026-10-13 incident") |
+   | `RATELIMIT_STORAGE_URI` | the staging internal Key Value URL (S0.3). **Superseded:** unset under option A |
    | `STREAKFIT_AGE_POLICY` | `off` |
 
    **Leave unset.** Production may set some of these; staging must not:
@@ -162,6 +240,13 @@ service's variable can be revealed and the part after the final `@` read.
 
 - [ ] The staging `DATABASE_URL` host ≠ production's. The endpoint ID is the
       one recorded in S0.2.
+- [ ] **(2026-10-13)** Its host's **first label is exactly**
+      `<staging endpoint>` or `<staging endpoint>-pooler`. Its
+      **database** is `neondb`, and its **role** is the staging project's
+      own. Reading "contains the endpoint" was not enough: Check 1 passed on
+      the wrong URL.
+- [ ] **(2026-10-13)** Superseded as the deciding check by S0.7, where the
+      code and the server confirm it. This list stays as a first look.
 - [ ] The staging `RATELIMIT_STORAGE_URI` host (`red-…`) ≠ production's.
 - [ ] Staging → Environment shows **no linked environment group**.
 - [ ] The three secrets were generated, not pasted.
@@ -180,7 +265,9 @@ secrets and are copied into the evidence folder.
 
 1. The service's first deploy, from `main` = `1d7b2f2`.
 2. **Expect in the deploy and boot log:**
-   - Pre-Deploy builds the chain from empty up to `d4f1b6e2a9c3`;
+   - Pre-Deploy builds the chain from empty up to `d4f1b6e2a9c3`. **Since
+     2026-10-13, S0.7 has already built it, so expect Pre-Deploy to report
+     nothing to do.** Same head;
    - `Database migration check passed (at head d4f1b6e2a9c3)`;
    - **the app imports before `Booting worker`**, `Using worker: sync`, and
      exactly **one** `Booting worker`.
