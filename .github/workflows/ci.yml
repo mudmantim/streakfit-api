@@ -143,4 +143,4 @@ jobs:
           run sf_concurrency tests/test_concurrency_postgres.py
           run sf_deletion    tests/test_account_deletion_postgres.py
           run postgres       tests/test_daily_mission_postgres.py tests/test_migrations_postgres.py \
-                             tests/test_db_roles_kit_postgres.py
+                             tests/test_db_roles_kit_postgres.py tests/test_db_identity_postgres.py
