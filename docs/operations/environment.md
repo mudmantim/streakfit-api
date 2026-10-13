@@ -8,7 +8,11 @@ The complete, authoritative reference for everything the StreakFit process needs
 |---|---|---|---|---|
 | `SECRET_KEY` | **Yes** | 🔒 | — | Flask session/signing key. **`RuntimeError` at import if unset** — the process will not start. |
 | `JWT_SECRET_KEY` | **Yes** | 🔒 | — | HS256 signing key for access tokens. **`RuntimeError` at import if unset.** |
-| `DATABASE_URL` | Prod: **Yes** | 🔒 | `sqlite:///streakfit.db` | SQLAlchemy connection string. `postgres://` is auto-rewritten to `postgresql://`. Local dev falls back to SQLite when unset. |
+| `DATABASE_URL` | Prod: **Yes** | 🔒 | `sqlite:///streakfit.db` | SQLAlchemy connection string. `postgres://` is auto-rewritten to `postgresql://`. Local dev falls back to SQLite when unset; **a hosted service without it refuses to start** (`db_guard` R1). Checked against the deployment before anything connects — see *Database binding* below. |
+| `MIGRATION_DATABASE_URL` | No | 🔒 | unset | When set, `flask db upgrade` connects with **this** URL (migrations/env.py) and `DATABASE_URL` can be a least-privilege role that cannot run DDL. Same `db_guard` rules; the server is re-checked on the migration connection. Unset → migrations use `DATABASE_URL`, as before. |
+| `STREAKFIT_DEPLOYMENT` | Staging: **`staging`** | — | unset (= `production` when hosted, `development` locally) | Declares what this process is. A hosted non-production service **must** set it, or it refuses to start; a declared `staging`/`development` process can never use the production database. |
+| `STREAKFIT_PRODUCTION_DB_ENDPOINT` | No (disaster recovery only) | — | unset | Lets production run on a database endpoint other than the known one (after a restore onto a new Neon endpoint). Must equal the URL's endpoint exactly; ignored on non-production services. |
+| `STREAKFIT_ALLOW_PRODUCTION_DB_FROM_HERE` | No (operator tools only) | — | unset | `1` lets a non-hosted process (laptop, one-off script such as `cleanup_qa_smoke.py`, a manual `flask db upgrade`) use the production database. Without it such a process refuses. Set it for one command, never in a profile. |
 | `ANTHROPIC_API_KEY` | No (soft) | 🔒 | — | Powers Rickie. **Unset → `/api/coach` returns `503`; the rest of the app is unaffected** (fail-closed). |
 | `ADMIN_SECRET` | Prod: recommended | 🔒 | `''` | Shared secret for `/api/admin/*` (header `X-Admin-Secret`). **Unset/empty → all admin routes `403`** (fail-closed). |
 | `STREAKFIT_ENFORCE_DB_HEAD` | Prod: **`1`** | — | unset | Enables the boot guard. `== '1'` → process `SystemExit(1)` unless the DB is at the Alembic head. Must be set **inline on gunicorn only**, never globally (see below). |
@@ -25,6 +29,26 @@ The complete, authoritative reference for everything the StreakFit process needs
 | `RATELIMIT_STORAGE_URI` | No | — | `memory://` | Flask-Limiter backend. Default is per-worker in-memory (resets every deploy). Point at `redis://…` for shared limits. |
 | `RENDER_GIT_COMMIT` | No | — | `git rev-parse HEAD` | Commit SHA shown in the admin dashboard. Render sets it automatically. |
 | `PORT` | No | — | dev `5000` | Dev server (`python app.py`) uses it. **In prod Render sets `PORT` (default 10000) and gunicorn honors it** — its default `bind` becomes `0.0.0.0:$PORT`, which is why the start command needs no `--bind`. |
+
+### Database binding (`db_guard.py`, incident 2026-10-13)
+
+Before the app or the migration runner connects, `db_guard.resolve()` decides whether this process may use the database it was given, and after connecting the boot check and the migration runner ask the **server** which Neon endpoint it is (`neon.endpoint_id`) and apply the same rules to that answer. Refusals name the rule and the endpoint, never the URL.
+
+| Rule | Refuses |
+|---|---|
+| R1 | a hosted service with no `DATABASE_URL` (no silent SQLite fallback) |
+| R2 | the production database from any Render service whose `RENDER_SERVICE_ID` is not a production service — or from a hosted process with no service ID at all |
+| R3 | the production database from a process that **declares** `STREAKFIT_DEPLOYMENT=staging`/`development` |
+| R4 | a process calling itself production on a non-production service, or production on any database but the production one (unless `STREAKFIT_PRODUCTION_DB_ENDPOINT` names it) |
+| R5 | the production database from a laptop/CI process without `STREAKFIT_ALLOW_PRODUCTION_DB_FROM_HERE=1` |
+| R6 | URLs or environment that override the host (`?host=`, `?hostaddr=`, `?service=`, `PGHOSTADDR`, `PGSERVICE`, `PGSERVICEFILE`) |
+| R7 | a server whose own endpoint disagrees with the URL, or fails R2–R5 itself |
+
+The production endpoint and service IDs are constants in `db_guard.py` (`PRODUCTION_DB_ENDPOINTS`, `PRODUCTION_RENDER_SERVICE_IDS`). **Any new production service that needs the database — e.g. the render.yaml cron jobs when they are created — must have its service ID added there in a reviewed change before it can connect.**
+
+The retention sweeper on a hosted service starts only after the boot check has verified the database (`STREAKFIT_ENFORCE_DB_HEAD=1`); otherwise it logs `retention_sweeper_refused` and deletes nothing.
+
+Every log record in the process passes through `db_guard.install_log_redaction()`: credentials in URLs, `password=` in conninfo strings, bearer tokens and the values of known secret variables are masked. Exception tracebacks formatted later by a handler are not covered.
 
 🔒 = secret: never commit, never log, set via the Render dashboard (prod) or `.env` (local, git-ignored).
 

@@ -1,16 +1,41 @@
 import logging
+import os
 from logging.config import fileConfig
 
 from flask import current_app
+from sqlalchemy import create_engine
+from sqlalchemy.pool import NullPool
 
 from alembic import context
+
+import db_guard
 
 config = context.config
 fileConfig(config.config_file_name)
 logger = logging.getLogger('alembic.env')
 
 
+# The migration credential (db_guard, incident 2026-10-13 follow-up B-2).
+# When MIGRATION_DATABASE_URL is set, migrations connect with it and the app's
+# DATABASE_URL can be a least-privilege role that cannot run DDL. It passes the
+# same db_guard rules as the app's URL, and the server is re-checked (R7) on the
+# connection the migration actually uses. Unset: the app's engine, as before.
+MIGRATION_BINDING = (db_guard.resolve(url_var='MIGRATION_DATABASE_URL')
+                     if os.environ.get('MIGRATION_DATABASE_URL') else None)
+_migration_engine = (create_engine(MIGRATION_BINDING.url, poolclass=NullPool)
+                     if MIGRATION_BINDING else None)
+
+
+def _binding():
+    if MIGRATION_BINDING is not None:
+        return MIGRATION_BINDING
+    import app as app_module   # already imported by the flask CLI
+    return app_module.DB_BINDING
+
+
 def get_engine():
+    if _migration_engine is not None:
+        return _migration_engine
     try:
         return current_app.extensions['migrate'].db.get_engine()
     except (TypeError, AttributeError):
@@ -55,6 +80,16 @@ def run_migrations_online():
 
     connectable = get_engine()
     with connectable.connect() as connection:
+        binding = _binding()
+        reported = db_guard.verify_server(connection, binding)
+        # The check's query auto-began a transaction (SQLAlchemy 2.0). End it
+        # here: if it were still open, Alembic would treat it as the caller's,
+        # never commit, and every migration would log "Running upgrade" and
+        # then roll back when the connection closed. Caught on PostgreSQL by
+        # tests/test_db_roles_kit_postgres.py; SQLite never runs the query.
+        connection.commit()
+        logger.info('Migrating database: %s (server endpoint %s)',
+                    binding.describe(), reported or 'not reported')
         context.configure(
             connection=connection,
             target_metadata=get_metadata(),
