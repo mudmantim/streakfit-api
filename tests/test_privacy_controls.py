@@ -10,7 +10,7 @@ from app import TeamPhoto, User, UserFilterUnlock, db
 from conftest import auth_headers, register_and_login
 from test_team_photos import upload
 
-PASSWORD = "WalkTest123!"
+PASSWORD = "WalkTest-Lantern-123!"
 
 
 # ── A family can leave, and take the photographs with them ─────────────────

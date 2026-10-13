@@ -13,6 +13,7 @@ import subprocess
 import threading
 from functools import wraps
 import time
+import unicodedata
 import uuid
 # click ships with Flask and backs its CLI; imported directly so a command
 # can declare options (flask moderation-notify --mark-delivered).
@@ -2201,6 +2202,13 @@ class User(db.Model):
     # legal question (see docs/child-safety/). The column exists so the
     # permission layer has something real to read.
     age_band = db.Column(db.String(8), nullable=True)
+    # Rollback compat for PW-1 (migration e8b3c1f0a7d2). token_version is READ
+    # on every authenticated request (revocation stays enforced) and stamped
+    # into every token, but never MOVED: this build has no password change.
+    # password_changed_at is only declared (models == schema). New rows take
+    # the default 0. Rolling forward to PW-1 finds every version as it was.
+    token_version = db.Column(db.Integer, nullable=False, default=0, server_default='0')
+    password_changed_at = db.Column(db.DateTime, nullable=True)
     challenges = db.relationship('Challenge', backref='owner', lazy=True)
 
     # The economy's floor and ceiling, held by the database itself, so no code
@@ -4930,7 +4938,20 @@ def _credential_fields(*names, missing_body_ok=False):
     values = tuple(data.get(name) for name in names)
     if any(v is not None and not isinstance(v, str) for v in values):
         return None
+    # Valid JSON can carry a lone surrogate ("\ud800"), which is not text
+    # and cannot be encoded for the hasher; it used to surface as a 500 from
+    # register, login and password change. Malformed, so None -> 400.
+    if any(v is not None and not v.isascii() and not _utf8_encodable(v) for v in values):
+        return None
     return values
+
+
+def _utf8_encodable(text):
+    try:
+        text.encode('utf-8')
+    except UnicodeEncodeError:
+        return False
+    return True
 
 
 @app.route('/api/register', methods=['POST'])
@@ -4948,17 +4969,15 @@ def register():
     # care about — this is server-authoritative, mirrored by the form's minlength.
     if len(username) < 2 or len(username) > 80:
         return jsonify({"error": "Username needs to be 2–80 characters."}), 400
-    if len(password) < 8:
-        return jsonify({"error": "Password needs to be at least 8 characters."}), 400
-    if len(password) > 128:
-        # Upper bound so a pathologically long password can't turn each hash
-        # into a slow-request DoS. 128 is far beyond any real passphrase.
-        return jsonify({"error": "Password can be at most 128 characters."}), 400
+    # PW-1's policy, verbatim: `error` stays the human sentence, `code` is new.
+    problem = _password_policy_problem(username, password)
+    if problem is not None:
+        return jsonify({"error": _PASSWORD_POLICY_MESSAGES[problem], "code": problem}), 400
 
     if User.query.filter_by(username=username).first():
         return jsonify({"error": "That username is taken — try another."}), 400
 
-    hashed_pw = generate_password_hash(password, method='pbkdf2:sha256')
+    hashed_pw = generate_password_hash(_password_hash_form(password), method='pbkdf2:sha256')
     new_user = User(username=username, password_hash=hashed_pw)
     db.session.add(new_user)
     try:
@@ -4982,6 +5001,153 @@ def register():
         app.logger.warning('analytics write failed for event: account_created')
 
     return jsonify({"message": "User registered successfully"}), 201
+
+# ── Rollback compat for PW-1: session security is KEPT, password change is not ─
+#
+# This build exists to replace PW-1 without a schema change. The first version
+# ignored `tv`, so a session that a PW-1 password change had revoked worked
+# again for up to an hour -- unacceptable for a SECURITY rollback (owner, 2026-
+# 10-12). So this build carries, verbatim from PW-1:
+#   _issue_access_token          every token carries the account's version
+#   _token_revoked / revoked_token_callback
+#                                every authenticated route refuses a stale one
+#   _password_candidates / _password_matches
+#                                passwords set under PW-1 (NFKC) and before
+#                                (raw) both still sign in; no rehash here
+# and does NOT carry POST /api/me/password: nothing in this build moves a
+# token version, so nothing here can revoke -- but nothing un-revokes either.
+
+
+# ── Sign-up password policy: PW-1's, verbatim (owner decision, 2026-10-12) ──
+#
+# The rollback build keeps PW-1's rules for NEW passwords so a rollback never
+# lowers them: 15+ characters, not mostly the username, not the service name,
+# not repetitive or sequential, not on the breached/common blocklist. Existing
+# passwords are never re-judged (sign-in and deletion accept what an account
+# has). docs/security/password-blocklist.md has the list's provenance.
+PASSWORD_MIN_LENGTH = 15
+PASSWORD_MAX_LENGTH = 128
+
+# Context-specific words, which NIST SP 800-63B names explicitly ("the name of
+# the service, the username").
+_SERVICE_WORDS = ('streakfit', 'rickie')
+
+_PASSWORD_BLOCKLIST_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                        'content', 'security', 'common-passwords.txt')
+
+
+def _load_password_blocklist(path=_PASSWORD_BLOCKLIST_PATH):
+    """The common/breached-password blocklist, already in comparison form.
+
+    Generated from pinned public lists by scripts/build_password_blocklist.py
+    (sources, licence and update procedure: docs/security/password-blocklist.md).
+    Format: a header, one blank line, then one entry per line -- an entry may
+    itself begin with '#', so nothing after the blank line is treated as a
+    comment.
+
+    A MISSING FILE STOPS THE APP AT IMPORT. A deploy without it would accept
+    every common password while looking configured, which is the failure the
+    list exists to prevent; refusing to start is loud and immediate.
+    """
+    with open(path, encoding='utf-8') as f:
+        text = f.read()
+    _, sep, body = text.partition('\n\n')
+    if not sep:
+        raise RuntimeError(f"password blocklist {path} has no header/body separator")
+    entries = frozenset(line for line in body.split('\n') if line)
+    if not entries:
+        raise RuntimeError(f"password blocklist {path} is empty")
+    return entries
+
+
+_COMMON_PASSWORDS: frozenset[str] = _load_password_blocklist()
+
+
+def _password_compare_form(password):
+    """Policy comparisons (blocklist, username, same-as-current): NFKC + casefold."""
+    return _password_hash_form(password).casefold()
+
+
+def _password_policy_problem(username, new):
+    """Why `new` is not acceptable as a NEW password, or None. Never hashes.
+
+    Judged on the NFKC + casefold form, and in this order:
+      too_short / too_long   15-128 characters (NFKC code points)
+      username_based         the username IS most of it: equal to it, or the
+                             username is at least half of the password. Not
+                             mere containment -- "anna" inside
+                             "Savannah-lantern-meadow" is not a weakness, and
+                             rejecting it was the review's finding B3.
+      service_name           nothing but "streakfit"/"rickie" once digits and
+                             symbols are ignored
+      repetitive             one unit of 1-3 characters repeated
+      sequential             a straight run of code points (abc..., 987...)
+      common                 on the common/breached-password blocklist
+    No composition rules and no expiry (NIST SP 800-63B).
+    """
+    hashed = _password_hash_form(new)
+    if len(hashed) < PASSWORD_MIN_LENGTH:
+        return 'too_short'
+    if len(hashed) > PASSWORD_MAX_LENGTH:
+        return 'too_long'
+    folded = hashed.casefold()
+    name = _password_compare_form((username or '').strip())
+    if len(name) >= 4 and (folded == name or (name in folded and 2 * len(name) >= len(folded))):
+        return 'username_based'
+    letters = ''.join(ch for ch in folded if ch.isalpha())
+    if letters in _SERVICE_WORDS:
+        return 'service_name'
+    for unit in (1, 2, 3):
+        if len(folded) % unit == 0 and folded == folded[:unit] * (len(folded) // unit):
+            return 'repetitive'
+    steps = {ord(b) - ord(a) for a, b in zip(folded, folded[1:])}
+    if steps in ({1}, {-1}):
+        return 'sequential'
+    if folded in _COMMON_PASSWORDS:
+        return 'common'
+    return None
+
+
+_PASSWORD_POLICY_MESSAGES = {
+    'too_short': f"Use at least {PASSWORD_MIN_LENGTH} characters. A few words together is easiest.",
+    'too_long': f"Use at most {PASSWORD_MAX_LENGTH} characters.",
+    'username_based': "Choose a password that isn't mostly your username.",
+    'service_name': "Choose a password that isn't just the app's name.",
+    'repetitive': "That's one thing repeated. Try something less predictable.",
+    'sequential': "That's a straight run of keys. Try something less predictable.",
+    'common': "That password is on a list of common or leaked passwords. Try something less predictable.",
+    'same_as_current': "That's your current password. Choose a new one.",
+}
+
+
+def _issue_access_token(user):
+    """The only way an access token is made: it carries `tv`. A test fails if
+    create_access_token is called anywhere else."""
+    return create_access_token(identity=str(user.id),
+                               additional_claims={"tv": user.token_version or 0})
+
+
+def _password_hash_form(password):
+    return unicodedata.normalize('NFKC', password)
+
+
+def _password_candidates(password):
+    """NFKC (how PW-1 stores passwords), the raw string (how everything before
+    it did), and for non-ASCII input NFC/NFD. ASCII costs one check."""
+    forms = [_password_hash_form(password), password]
+    if not password.isascii():
+        forms += [unicodedata.normalize('NFC', password), unicodedata.normalize('NFD', password)]
+    seen, out = set(), []
+    for f in forms:
+        if f not in seen:
+            seen.add(f)
+            out.append(f)
+    return out
+
+
+def _password_matches(stored_hash, password):
+    return any(check_password_hash(stored_hash, form) for form in _password_candidates(password))
+
 
 @app.route('/api/login', methods=['POST'])
 @limiter.limit("10 per minute")
@@ -5021,12 +5187,14 @@ def login():
     # Always run a hash comparison — against a fixed dummy when the user doesn't
     # exist — so response time doesn't reveal whether the username is valid. The
     # error is deliberately ambiguous (never reveals whether the username exists).
-    pw_ok = check_password_hash(user.password_hash if user else _DUMMY_PW_HASH,
-                                password)
+    # Same forms tried for a missing user (against the dummy), so timing still
+    # reveals nothing. Passwords set under PW-1 are stored in NFKC; older ones
+    # raw -- both keep working (_password_matches).
+    pw_ok = _password_matches(user.password_hash if user else _DUMMY_PW_HASH, password)
     if not user or not pw_ok:
         return jsonify({"error": "That username and password don’t match."}), 401
 
-    access_token = create_access_token(identity=str(user.id))
+    access_token = _issue_access_token(user)
     app.logger.info("event=login user_id=%s", user.id)
     return jsonify({"access_token": access_token}), 200
 
@@ -5325,7 +5493,7 @@ def delete_my_account():
         return jsonify({"error": "invalid_request",
                         "message": "Send your password as text."}), 400
     password = fields[0] or ''
-    if not check_password_hash(user.password_hash, password):
+    if not _password_matches(user.password_hash, password):
         return jsonify({"error": "password_incorrect",
                         "message": "That password doesn't match."}), 403
 
@@ -13661,6 +13829,30 @@ def invalid_token_callback(error_string):
 @jwt.expired_token_loader
 def expired_token_callback(jwt_header, jwt_payload):
     return jsonify({"error": "Token has expired"}), 401
+
+
+@jwt.token_in_blocklist_loader
+def _token_revoked(jwt_header, jwt_payload):
+    """Verbatim from PW-1: a token is revoked once its account's
+    token_version has moved past it. The row is kept on `g` for the request so
+    a route's own get is answered from the identity map. A missing user is NOT
+    revoked: a deleted account's old token must still reach its 404."""
+    try:
+        user_id = int(jwt_payload.get('sub'))
+    except (TypeError, ValueError):
+        return True
+    user = db.session.get(User, user_id)
+    g._sf_auth_user = user
+    if user is None:
+        return False
+    return jwt_payload.get('tv', 0) != (user.token_version or 0)
+
+
+@jwt.revoked_token_loader
+def revoked_token_callback(jwt_header, jwt_payload):
+    return jsonify({"error": "session_ended",
+                    "message": "Your password was changed, so this device was "
+                               "signed out. Please sign in again."}), 401
 
 
 # --- Error Handlers ---

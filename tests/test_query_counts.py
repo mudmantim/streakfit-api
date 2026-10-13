@@ -68,4 +68,7 @@ def test_get_team_messages_is_flat_not_n_plus_1(client):
         resp = client.get(f"/api/teams/{t.id}/messages", headers=auth_headers(token))
     assert resp.status_code == 200
     assert len(resp.get_json()) == 12
-    assert n[0] <= 6, f"query count {n[0]} scales with rows — N+1 regressed"
+    # +1 since PW-1: every authenticated request reads the caller's user row
+    # once, to refuse a token a password change revoked. A constant, not a
+    # per-row query (as on PW-1; this build keeps the same revocation read).
+    assert n[0] <= 7, f"query count {n[0]} scales with rows — N+1 regressed"

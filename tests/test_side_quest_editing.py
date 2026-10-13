@@ -131,4 +131,4 @@ def test_both_routes_require_a_token(client):
 
 
 def _t(client, name):
-    return register_and_login(client, name, "TestPass123!")
+    return register_and_login(client, name, "TestPass-Lantern-123!")

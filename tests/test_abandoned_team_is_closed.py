@@ -26,7 +26,7 @@ def _team(client, token, name="The Hills"):
 
 
 def _t(client, name):
-    return register_and_login(client, name, "TestPass123!")
+    return register_and_login(client, name, "TestPass-Lantern-123!")
 
 
 # ── The hole ────────────────────────────────────────────────────────────────

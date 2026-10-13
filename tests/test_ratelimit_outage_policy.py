@@ -74,7 +74,7 @@ def call(method, url, ip, **kw):
 def register():
     seq[0] += 1
     s, dt, _ = call('post', '/api/register', '10.0.0.2',
-                    json={'username': f'd7_reg_{seq[0]}', 'password': 'Correct1!pass'})
+                    json={'username': f'd7_reg_{seq[0]}', 'password': 'Correct1!pass-lantern'})
     return s, dt
 
 
@@ -92,9 +92,9 @@ def event():
 def setup_team():
     def reg_login(name):
         call('post', '/api/register', '10.0.0.1',
-             json={'username': name, 'password': 'Correct1!pass'})
+             json={'username': name, 'password': 'Correct1!pass-lantern'})
         _, _, r = call('post', '/api/login', '10.0.0.1',
-                       json={'username': name, 'password': 'Correct1!pass'})
+                       json={'username': name, 'password': 'Correct1!pass-lantern'})
         return r.get_json()['access_token']
     owner = reg_login('d7_owner')
     joiner = reg_login('d7_joiner')
