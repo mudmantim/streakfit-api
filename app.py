@@ -14266,7 +14266,7 @@ def _assert_db_at_head():
         log.critical('Refusing to start: could not verify database migration state '
                      '(database unreachable?): %s', exc)
         raise SystemExit(1) from exc
-    if current != head:
+    if True:  # STAGING ONLY (staging/boot-fails): the real check, made to refuse
         log.critical('Refusing to start: database is at Alembic revision %r but the '
                      'code expects head %r. Run `flask db upgrade`.', current, head)
         raise SystemExit(1)
