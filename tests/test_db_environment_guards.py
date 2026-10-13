@@ -237,19 +237,19 @@ def test_sqlite_connections_are_not_asked():
 # -- secret redaction ------------------------------------------------------------
 
 def test_redact_masks_url_credentials_conninfo_bearer_and_known_values():
-    text = (f'connect {url(PROD_EP)} redis://default:redispw123@host:6379 '
+    text = (f'connect {url(PROD_EP)} redis://default:redis-test-pw123@host:6379 '
             f"host=x password='{PASSWORD}' Authorization: Bearer abcdefghijklmnop and raw sentinel-secret-1")
     out = G.redact(text, ('sentinel-secret-1',))
-    for secret in (PASSWORD, 'redispw123', 'abcdefghijklmnop', 'sentinel-secret-1'):
+    for secret in (PASSWORD, 'redis-test-pw123', 'abcdefghijklmnop', 'sentinel-secret-1'):
         assert secret not in out
     assert 'neondb_owner:***@ep-odd-star-ajye3lag' in out     # who and where survive; only the secret goes
 
 
 def test_secret_values_come_from_the_environment():
     values = G._secret_values({'SECRET_KEY': 'k' * 20, 'ADMIN_SECRET': 'short',
-                               'MIGRATION_DATABASE_URL': 'postgresql://u:pw%40long123@h/db'})
+                               'MIGRATION_DATABASE_URL': 'postgresql://u:test-pw%40long123@h/db'})
     assert 'k' * 20 in values and 'short' not in values
-    assert 'pw@long123' in values and 'pw%40long123' in values
+    assert 'test-pw@long123' in values and 'test-pw%40long123' in values
 
 
 def test_log_redaction_covers_every_logger(monkeypatch, caplog):
