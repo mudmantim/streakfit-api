@@ -48,7 +48,7 @@ The production endpoint and service IDs are constants in `db_guard.py` (`PRODUCT
 
 The retention sweeper on a hosted service starts only after the boot check has verified the database (`STREAKFIT_ENFORCE_DB_HEAD=1`); otherwise it logs `retention_sweeper_refused` and deletes nothing.
 
-Every log record in the process passes through `db_guard.install_log_redaction()`: credentials in URLs, `password=` in conninfo strings, bearer tokens and the values of known secret variables are masked. Exception tracebacks formatted later by a handler are not covered.
+Every log record in the process passes through `db_guard.install_log_redaction()`: credentials in URLs, `password=` in conninfo strings, bearer tokens and the values of known secret variables are masked, in messages **and** in exception tracebacks (via `logging.Formatter.formatException`, which gunicorn's formatter inherits). A handler that formats exceptions by some other route is not covered.
 
 🔒 = secret: never commit, never log, set via the Render dashboard (prod) or `.env` (local, git-ignored).
 

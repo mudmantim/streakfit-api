@@ -233,10 +233,13 @@ def install_log_redaction(env: Mapping[str, str] = os.environ) -> None:
     """Mask credentials in every log record this process creates, from any
     logger (app, gunicorn, alembic, SQLAlchemy). Idempotent.
 
-    Done in the record factory, not a handler filter, so a handler added later
-    by a library still only ever sees redacted text. Exception tracebacks are
-    formatted later by handlers and are NOT covered; the database layer already
-    hides bound parameters (hide_parameters=True)."""
+    Messages: done in the record factory, not a handler filter, so a handler
+    added later by a library still only ever sees redacted text.
+    Tracebacks: formatted later, by each handler's Formatter, so the standard
+    logging.Formatter.formatException is wrapped too. That covers every
+    formatter that inherits it (gunicorn's included). A handler that formats
+    exceptions some other way is not covered; the database layer already hides
+    bound parameters (hide_parameters=True)."""
     global _installed
     if _installed:
         return
@@ -255,4 +258,11 @@ def install_log_redaction(env: Mapping[str, str] = os.environ) -> None:
         return record
 
     logging.setLogRecordFactory(factory)
+
+    original_format_exception = logging.Formatter.formatException
+
+    def format_exception(self, ei):
+        return redact(original_format_exception(self, ei), secrets)
+
+    logging.Formatter.formatException = format_exception  # type: ignore[method-assign]
     _installed = True

@@ -254,6 +254,7 @@ def test_secret_values_come_from_the_environment():
 
 def test_log_redaction_covers_every_logger(monkeypatch, caplog):
     monkeypatch.setattr(G, '_installed', False)
+    monkeypatch.setattr(logging.Formatter, 'formatException', logging.Formatter.formatException)
     previous = logging.getLogRecordFactory()
     try:
         G.install_log_redaction({'ADMIN_SECRET': 'admin-sentinel-value'})
@@ -374,3 +375,31 @@ def test_boot_check_marks_the_identity_verified_on_success(monkeypatch):
     monkeypatch.setattr(A, '_DB_IDENTITY_VERIFIED', False)
     A._assert_db_at_head()
     assert A._DB_IDENTITY_VERIFIED is True
+
+
+def test_tracebacks_are_redacted_too(monkeypatch):
+    """A database error's traceback can carry the connection string; the
+    message passes the record factory but the traceback is formatted later."""
+    import io
+    monkeypatch.setattr(G, '_installed', False)
+    monkeypatch.setattr(logging.Formatter, 'formatException', logging.Formatter.formatException)
+    previous = logging.getLogRecordFactory()
+    stream = io.StringIO()
+    handler = logging.StreamHandler(stream)
+    handler.setFormatter(logging.Formatter('%(message)s'))
+    log = logging.getLogger('tb-test')
+    log.addHandler(handler)
+    try:
+        G.install_log_redaction({'JWT_SECRET_KEY': 'jwt-sentinel-value-123'})
+        try:
+            raise RuntimeError(f'could not connect to {url(PROD_EP)} using jwt-sentinel-value-123')
+        except RuntimeError:
+            log.exception('boom')
+        out = stream.getvalue()
+        assert 'Traceback' in out and 'boom' in out
+        assert PASSWORD not in out and 'jwt-sentinel-value-123' not in out
+        assert 'neondb_owner:***@' in out
+    finally:
+        log.removeHandler(handler)
+        logging.setLogRecordFactory(previous)
+        G._installed = False
