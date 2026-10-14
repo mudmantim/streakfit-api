@@ -12,7 +12,7 @@ The repository is **public**. A committed credential is a published credential: 
 
 The `secret-history` job checks out with `fetch-depth: 0`, so it sees every branch and tag. Locally, run `git fetch --all` before the history scan. It took ~35 s for 542 commits on 2026-10-13, and found no real credential.
 
-`secret-history` is **not** a required check in the branch-protection proposal. Add it only once it has been green on `main`.
+`secret-history` is **not** a required check yet. See "Making secret scanning required" below.
 
 ## Why two scanners
 
@@ -36,6 +36,28 @@ Output is redacted (`--redact`): it shows rule, file, line, commit and fingerpri
 - **Real credential:** follow "If a real credential is found" below.
 - **Synthetic, and in a current file:** rename the value, as for our scanner.
 - **Synthetic, and only in old history:** add the finding's fingerprint (`commit:file:rule:line`) to `.gitleaksignore`, with a comment naming who reviewed it, when, and why it is synthetic. A fingerprint names one commit and line, so it cannot excuse anything else.
+
+## First CI run (2026-10-14, run 38548032272): 44 findings, 1 genuine
+- 518 commits scanned, all values redacted in the log (88 of 88 value fields read `REDACTED`).
+- **41 fingerprints are synthetic**: test-client passwords, rehearsal JWT signing keys, test-only Fernet keys, a password-list citation, an exercise key, an OpenAPI header example. They are recorded in `.gitleaksignore` by exact fingerprint, grouped by reason.
+- **Genuine: `photostate.json`** (commit `d76815b`, 2026-09-18, on `main`) holds two HS256 **access tokens** for users `Dad14443` and `Olivia14443`.
+  - They were issued 2026-09-18 20:11 UTC and **expired 22:11 UTC the same day**.
+  - Nothing in the repository writes this file. The UI harness of that period only runs against localhost and signs tokens with the local key.
+  - They are not signed with any of the repository's known test keys. Checking them against the local `.env` key was blocked by a permission rule.
+  - The file is removed from the tree on this branch and ignored, but it stays in public history.
+  - **Owner decision:** if those tokens could have been signed with production's `JWT_SECRET_KEY`, rotating it is the conservative fix. They are expired, so the only residual risk is offline guessing of a weak key.
+  - The finding is deliberately **not** in `.gitleaksignore`, so `secret-history` stays red until that decision is recorded.
+- Our scanner missed it: it had no JWT rule. It now has one (header.payload.signature), and both scanners agree on exactly this one blob across all history.
+
+## Making secret scanning required (plan, not applied)
+Branch protection (proposal in `e2e-campaign/proposals/`) currently requires `test` and `postgres`. The current-tree scan already runs inside `test`, so it is **already** required once protection is on. The history job is the step still to take:
+1. **Validate.** `secret-history` must be green on `main` once #13 is merged, and green on every open PR for two weeks (or ten runs), with no unexplained failures and no flakiness. Each failure must be triaged as genuine or synthetic; a scanner fix is acceptable, a broad allowlist is not.
+2. **Resolve `photostate.json`.** The owner decides on key rotation. The fingerprint can then be added with that decision as its reason.
+3. **Require it.** Add `{"context": "secret-history", "app_id": 15368}` to the required checks, after the same probe-branch rehearsal (a commit introducing a synthetic-looking but unlisted credential must be **refused**).
+4. **Keep it honest.**
+   - Rebasing a branch changes commit SHAs, so its fingerprints no longer match. Re-triage rather than widening the ignore list.
+   - Upgrading Gitleaks may add rules and new findings. Upgrade in its own PR.
+   - Exceptions in either list need a one-line reason and a date.
 
 ## What it reports
 

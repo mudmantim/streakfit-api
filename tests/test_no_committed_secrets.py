@@ -44,6 +44,7 @@ def test_catches_each_credential_kind():
         'Stripe live key': 'sk_' + 'live_' + 'A1b2C3d4E5f6G7h8I9j0K1l2',
         'private key': '-----BEGIN OPENSSH PRIVATE ' + 'KEY-----',
         'AWS access key': 'AKIA' + 'ABCDEFGHIJKLMNOP',
+        'JSON Web Token': 'Authorization: Bearer ' + 'eyJ' + 'hbGciOiJIUzI1NiJ9.' + 'eyJ' + 'zdWIiOiI0MiJ9.' + HEX[:43],
         'GitHub token': 'ghp_' + 'A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8',
     }
     for kind, line in cases.items():
@@ -71,6 +72,7 @@ def test_obvious_placeholders_are_ignored():
                  'JWT_SECRET_KEY=localdev-jwt-not-real',
                  'SECRET_KEY="build-check-not-for-production"',
                  'redis://user:SUPERSECRET@host:6379/0',
+                 'example: {"access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."}',
                  'ADMIN_SECRET=<generate: python -c "import secrets; print(secrets.token_hex(32))">'):
         assert kinds(line) == [], line
 

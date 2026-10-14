@@ -10,7 +10,7 @@ of credential, NEVER the value. Exit 1 if anything is found.
 What it looks for: the credentials StreakFit actually uses or could plausibly
 hold -- Neon passwords and API keys, postgres/redis URLs and libpq conninfo with
 a password, values assigned to the app's own secret variables, Render /
-Anthropic / Resend / Stripe-live / GitHub / AWS keys, private keys.
+Anthropic / Resend / Stripe-live / GitHub / AWS keys, JSON Web Tokens, private keys.
 
 What counts as synthetic (not reported): values whose SHAPE says placeholder.
 That means angle brackets, braces, shell/f-string interpolation, ellipses or
@@ -60,6 +60,10 @@ PATTERNS = {
     'Stripe live key': re.compile(r'\b(?:sk|rk)_live_[A-Za-z0-9]{20,}'),
     'private key': re.compile(r'-----BEGIN (?:RSA |EC |OPENSSH |DSA |ENCRYPTED )?PRIVATE KEY-----'),
     'AWS access key': re.compile(r'\bAKIA[0-9A-Z]{16}\b'),
+    # header.payload.signature, both JSON parts base64url ('eyJ' = '{"'). A
+    # header alone (an API doc example) has no payload and is not a token.
+    # Gitleaks found two committed in photostate.json that this scanner missed.
+    'JSON Web Token': re.compile(r'\beyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{16,}'),
     'GitHub token': re.compile(r'\b(?:gh[pousr]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{40,})'),
 }
 
