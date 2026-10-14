@@ -8,7 +8,7 @@ checked against the source, so a new route fails this file until someone
 decides which class it belongs to:
 
   PROTECTED  @jwt_required(): an expired or foreign token is refused exactly as
-             no token is (401/422), and a live token is not.
+             no token is (401), and a live token is not.
   ADMIN      _require_admin_secret() (X-Admin-Secret): a token of any kind
              changes nothing.
   PUBLIC     no authentication: any token, expired or foreign, gets exactly what
@@ -57,7 +57,7 @@ PUBLIC = {
     'service_worker', 'health', 'api_health', 'build_identity', 'verification_self',
     'get_demo_daily', 'record_event', 'register', 'login',
 }
-DENIED = {401, 422}
+DENIED = {401}       # an invalid token was 422 until fix/invalid-token-401
 # GET /api/daily creates the caller's mission for today. The only accepted
 # writes of the live pass are DELETE /api/blocks/1 and DELETE /api/coach/memory,
 # both idempotent no-ops on an empty account (measured 2026-10-14).
@@ -177,7 +177,7 @@ def test_protected_routes_refuse_expired_and_foreign_tokens_and_accept_a_live_on
         assert client.open(url, method=method).status_code == 401, (method, url)
         for label, token in bad.items():
             r = client.open(url, method=method, headers=auth_headers(token))
-            expected = (401, 'Token has expired') if label.startswith('expired') else (422, 'Invalid token')
+            expected = (401, 'Token has expired') if label.startswith('expired') else (401, 'Invalid token')
             assert (r.status_code, (r.get_json() or {}).get('error')) == expected, (method, url, label)
     assert _changed(before, _row_counts(app)) == set(), 'a refused request wrote to the database'
 
