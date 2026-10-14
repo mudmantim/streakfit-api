@@ -88,3 +88,22 @@ def test_new_untracked_files_are_scanned_before_they_are_committed(tmp_path):
         assert any(p.startswith(f'tests/{probe.name}:1:') for p in S.scan_tracked())
     finally:
         probe.unlink()
+
+
+def test_ci_runs_gitleaks_only_after_verifying_its_pinned_checksum():
+    """The secret-history job must not execute an unverified download: the
+    SHA-256 is fixed in the workflow and checked before the tarball is opened,
+    and no third-party action installs it. (Text checks: PyYAML is not a
+    dependency.)"""
+    import re
+    wf = (Path(S.REPO) / '.github' / 'workflows' / 'ci.yml').read_text()
+    job = wf[wf.index('\n  secret-history:'):]
+    nxt = re.search(r'\n  [a-z][\w-]*:\n', job[1:])
+    job = job[:nxt.start() + 1] if nxt else job
+    assert re.search(r'GITLEAKS_VERSION: \d+\.\d+\.\d+\n', job)
+    assert re.search(r'GITLEAKS_SHA256: [0-9a-f]{64}\n', job)
+    assert 'fetch-depth: 0' in job and 'persist-credentials: false' in job
+    assert not re.search(r'uses: .*gitleaks', job, re.I)
+    assert job.index('sha256sum --check --strict') < job.index('tar -xzf') < job.index('gitleaks git')
+    assert 'secret_scan.py --history' in job
+    assert '--redact' in job and '--log-opts="--all"' in job
