@@ -1,0 +1,65 @@
+# Gitleaks findings reviewed as NOT real credentials. One fingerprint = one commit, file, rule and line,
+# so an entry can never excuse anything else. Values were classified without printing them.
+# See docs/operations/secret-scanning.md -> "Triaging a Gitleaks finding".
+#
+# NOT listed on purpose: photostate.json (rule jwt, commit d76815b). Those are real bearer tokens (expired
+# 2026-09-18 22:11 UTC); their origin is unconfirmed. They stay reported until the owner decides.
+
+# Reviewed 2026-10-14 (Claude, first CI run 38548032272): Test-client passwords registered against a throwaway test database (ValidPass/WrongPass/Lantern-kettle/SyntheticPass/Alice-third-lantern)
+1ebb6358ad23ee523e7519c1dcfa7f174ef64cb1:tests/test_capability_routes.py:generic-api-key:272
+6d8b55b95e38861360408b99523f87226bc1efb1:tests/test_api_contract.py:generic-api-key:38
+6d8b55b95e38861360408b99523f87226bc1efb1:tests/test_api_contract.py:generic-api-key:40
+6d8b55b95e38861360408b99523f87226bc1efb1:tests/test_api_contract.py:generic-api-key:50
+6d8b55b95e38861360408b99523f87226bc1efb1:tests/test_api_contract.py:generic-api-key:56
+6d8b55b95e38861360408b99523f87226bc1efb1:tests/test_api_contract.py:generic-api-key:57
+6d8b55b95e38861360408b99523f87226bc1efb1:tests/test_auth.py:generic-api-key:12
+6d8b55b95e38861360408b99523f87226bc1efb1:tests/test_auth.py:generic-api-key:17
+6d8b55b95e38861360408b99523f87226bc1efb1:tests/test_auth.py:generic-api-key:18
+6d8b55b95e38861360408b99523f87226bc1efb1:tests/test_auth.py:generic-api-key:34
+6d8b55b95e38861360408b99523f87226bc1efb1:tests/test_auth.py:generic-api-key:46
+6d8b55b95e38861360408b99523f87226bc1efb1:tests/test_auth.py:generic-api-key:47
+6d8b55b95e38861360408b99523f87226bc1efb1:tests/test_auth.py:generic-api-key:51
+8538d26bfd1884b958ff7c6364ef8a3dde036f55:tests/test_password_policy.py:generic-api-key:212
+8538d26bfd1884b958ff7c6364ef8a3dde036f55:tests/test_password_policy.py:generic-api-key:222
+8538d26bfd1884b958ff7c6364ef8a3dde036f55:tests/test_password_policy.py:generic-api-key:224
+96dfedd1a1f2976f759103eda7d47e4995fa4020:scripts/rehearse_pw1_rollback.py:generic-api-key:195
+e4dcb4f5af09c3c7b6fedf47a75297c811ef1343:tests/test_api_contract.py:generic-api-key:38
+e4dcb4f5af09c3c7b6fedf47a75297c811ef1343:tests/test_api_contract.py:generic-api-key:40
+e4dcb4f5af09c3c7b6fedf47a75297c811ef1343:tests/test_api_contract.py:generic-api-key:50
+e4dcb4f5af09c3c7b6fedf47a75297c811ef1343:tests/test_api_contract.py:generic-api-key:56
+e4dcb4f5af09c3c7b6fedf47a75297c811ef1343:tests/test_api_contract.py:generic-api-key:57
+e4dcb4f5af09c3c7b6fedf47a75297c811ef1343:tests/test_auth.py:generic-api-key:12
+e4dcb4f5af09c3c7b6fedf47a75297c811ef1343:tests/test_auth.py:generic-api-key:17
+e4dcb4f5af09c3c7b6fedf47a75297c811ef1343:tests/test_auth.py:generic-api-key:18
+e4dcb4f5af09c3c7b6fedf47a75297c811ef1343:tests/test_auth.py:generic-api-key:34
+e4dcb4f5af09c3c7b6fedf47a75297c811ef1343:tests/test_auth.py:generic-api-key:46
+e4dcb4f5af09c3c7b6fedf47a75297c811ef1343:tests/test_auth.py:generic-api-key:47
+e4dcb4f5af09c3c7b6fedf47a75297c811ef1343:tests/test_auth.py:generic-api-key:51
+
+# Reviewed 2026-10-14 (Claude, first CI run 38548032272): Synthetic JWT signing keys for local rehearsal/test processes (contain probe/rehearsal/ident-test)
+107eb63b45c027a3019035f26565537595ba70cd:tests/test_db_identity_postgres.py:generic-api-key:59
+7f18b87f37659372be27b5cb6653c3d5478cb503:scripts/rehearse_pw1_rollback.py:generic-api-key:31
+7f18b87f37659372be27b5cb6653c3d5478cb503:scripts/rehearse_pw1_rollback_window.py:generic-api-key:17
+7f18b87f37659372be27b5cb6653c3d5478cb503:scripts/rehearse_pw1_rollback_window.py:generic-api-key:21
+
+# Reviewed 2026-10-14 (Claude, first CI run 38548032272): Synthetic test password in a test fixture, already renamed in cc0405b (history only)
+a7ad16d0fb4d5664a9218d1cc2bc7a32f9a722bf:tests/test_db_environment_guards.py:generic-api-key:26
+
+# Reviewed 2026-10-14 (Claude, first CI run 38548032272): Test-only Fernet / base64 keys (labelled test-only; base64 decodes to placeholder words)
+6c57033cbdff72f350ef80f8ac24ae71400e9e1a:tests/test_evidence_key_lifecycle.py:generic-api-key:25
+6c57033cbdff72f350ef80f8ac24ae71400e9e1a:tests/test_evidence_key_lifecycle.py:generic-api-key:26
+6e6a22e6ddec9d253a737e51e7d5786f8acb6c8e:tests/test_moderation_operations.py:generic-api-key:30
+
+# Reviewed 2026-10-14 (Claude, first CI run 38548032272): Not a secret: source citation + sha256 of a public common-password list
+6d8b55b95e38861360408b99523f87226bc1efb1:content/security/common-passwords.txt:generic-api-key:4
+e4dcb4f5af09c3c7b6fedf47a75297c811ef1343:content/security/common-passwords.txt:generic-api-key:4
+
+# Reviewed 2026-10-14 (Claude, first CI run 38548032272): Not a secret: exercise key "jumping_jacks" in a content table
+9de4d929f2ebf952e021f1cd08874ff0717cf8f3:app.py:generic-api-key:3212
+
+# Reviewed 2026-10-14 (Claude, first CI run 38548032272): Not a secret: OpenAPI example token, JOSE header only
+d13dbd5cebfeb0bd20cb843f01e78a0370c2ab9e:docs/api/openapi.yaml:generic-api-key:473
+
+# Reviewed 2026-10-14 (Claude, CI run 38554486147): our scanner's own negative test case, the public JOSE header
+# {"alg":"HS256","typ":"JWT"} with no payload or signature. Not a token.
+6c4f04ee763bc8507f110546edc9201627d235ee:tests/test_no_committed_secrets.py:generic-api-key:75

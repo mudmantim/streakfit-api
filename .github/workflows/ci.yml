@@ -66,6 +66,49 @@ jobs:
       - name: Verification suite is import-clean (stdlib-only smoke)
         run: python -c "import scripts.verify_all"
 
+  # Both secret scanners over the FULL history of every branch and tag: the
+  # repository is public, so a credential in any old commit is already
+  # published. The `test` job's scan only sees the current files.
+  #
+  # Gitleaks is a second, independently maintained rule set alongside our own
+  # scanner (scripts/secret_scan.py), which only knows StreakFit's credential
+  # shapes. It is a pinned release binary, NOT a third-party action: the
+  # tarball's SHA-256 is fixed below (it matches both the release's
+  # checksums.txt and GitHub's recorded asset digest, checked 2026-10-13), and
+  # nothing runs unless it matches. Findings are printed redacted. See
+  # docs/operations/secret-scanning.md for upgrading it and triaging findings.
+  secret-history:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GITLEAKS_VERSION: 8.30.1
+      GITLEAKS_SHA256: 551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4 on 2026-10-12
+        with:
+          fetch-depth: 0          # every commit of every branch and tag
+          persist-credentials: false
+
+      - name: StreakFit scanner over all history
+        run: python3 scripts/secret_scan.py --history
+
+      - name: Install Gitleaks (pinned version, checksum verified before use)
+        if: ${{ !cancelled() }}   # run even when our scanner failed: two independent answers
+        run: |
+          dir="$RUNNER_TEMP/gitleaks"
+          mkdir -p "$dir"
+          tarball="$dir/gitleaks.tar.gz"
+          curl -fsSL --proto '=https' --tlsv1.2 -o "$tarball" \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          echo "${GITLEAKS_SHA256}  $tarball" | sha256sum --check --strict
+          tar -xzf "$tarball" -C "$dir" gitleaks
+          "$dir/gitleaks" version
+          echo "$dir" >> "$GITHUB_PATH"
+
+      - name: Gitleaks over all history (redacted)
+        if: ${{ !cancelled() }}   # run even when our scanner failed: two independent answers
+        run: gitleaks git --log-opts="--all" --redact --no-banner --verbose --exit-code 1 .
+
   # The PostgreSQL-only tests: the concurrency and locking scenarios, account
   # deletion against real foreign keys, the daily-mission races, and the
   # migration chain on the dialect production runs. Without a database the
