@@ -96,10 +96,12 @@ def no_sweeper_thread_survives_its_test():
     fails, deterministically, instead of a random later test."""
     import threading
     yield
-    leaked = [t for t in threading.enumerate() if t.name == 'streakfit-retention' and t.is_alive()]
+    leaked = [t for t in threading.enumerate() if t.name.startswith('streakfit-retention') and t.is_alive()]
     for t in leaked:
         stop = getattr(t, 'stop_event', None)
         if stop is not None:
             stop.set()
             t.join(timeout=10)
-    assert not leaked, f'{len(leaked)} retention sweeper thread(s) still running at the end of this test'
+    stuck = [t.name for t in leaked if t.is_alive()]
+    assert not leaked, (f'{len(leaked)} retention sweeper thread(s) still running at the end of this test'
+                        + (f'; {len(stuck)} did not stop within 10 s: {stuck}' if stuck else ''))
