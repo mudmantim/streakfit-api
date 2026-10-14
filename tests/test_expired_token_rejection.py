@@ -19,6 +19,11 @@ decides which class it belongs to:
 
 No external service is invoked: provider keys are removed, and any outbound
 connection attempt is refused AND counted. Each sweep asserts the count is zero.
+
+No accidental state change either. Requests without a valid token must not
+write a single row. The live-token pass may change only what is listed in
+LIVE_PASS_MAY_CHANGE. The probe account must survive it. No test may leave
+behind a file, a thread or an app.config change (checked around every test).
 """
 import inspect
 import re
@@ -53,6 +58,10 @@ PUBLIC = {
     'get_demo_daily', 'record_event', 'register', 'login',
 }
 DENIED = {401, 422}
+# GET /api/daily creates the caller's mission for today. The only accepted
+# writes of the live pass are DELETE /api/blocks/1 and DELETE /api/coach/memory,
+# both idempotent no-ops on an empty account (measured 2026-10-14).
+LIVE_PASS_MAY_CHANGE = {'daily_mission'}
 ADMIN_SECRET = 'admin-test-secret-not-for-production'
 
 
@@ -70,6 +79,38 @@ def isolated(monkeypatch):
         monkeypatch.delenv(key, raising=False)
     monkeypatch.setenv('ADMIN_SECRET', ADMIN_SECRET)
     return attempts
+
+
+@pytest.fixture(autouse=True)
+def no_side_effects(app):
+    """Around every test: no new or modified files in the checkout, no thread
+    left running, no app.config change."""
+    import subprocess
+    import threading
+
+    def files():
+        return set(subprocess.run(['git', 'status', '--porcelain', '-uall'], capture_output=True, text=True,
+                                  cwd=app.root_path).stdout.splitlines())
+    before_files, before_threads = files(), set(threading.enumerate())
+    before_config = dict(app.config)
+    yield
+    assert files() - before_files == set(), 'a test wrote into the checkout'
+    assert {t for t in threading.enumerate() if t.is_alive()} - before_threads == set(), 'a thread was left running'
+    assert {k for k in before_config if app.config.get(k) != before_config[k]} == set(), 'app.config changed'
+
+
+def _row_counts(app):
+    from sqlalchemy import inspect as sa_inspect
+    from sqlalchemy import text
+
+    from app import db
+    with app.app_context():
+        return {t: db.session.execute(text(f'select count(*) from "{t}"')).scalar()
+                for t in sa_inspect(db.engine).get_table_names()}
+
+
+def _changed(before, after):
+    return {t for t in before if before[t] != after.get(t)}
 
 
 def _source(app, endpoint):
@@ -129,22 +170,28 @@ def test_the_classification_matches_the_source(app):
 # --- behaviour, per class -----------------------------------------------------
 
 def test_protected_routes_refuse_expired_and_foreign_tokens_and_accept_a_live_one(app, client, isolated):
-    _, live, bad = _tokens(app, client)
-    for endpoint, method, url in _routes(app):
-        if endpoint not in PROTECTED:
-            continue
+    uid, live, bad = _tokens(app, client)
+    protected = [(m, u) for e, m, u in _routes(app) if e in PROTECTED]
+    before = _row_counts(app)
+    for method, url in protected:
         assert client.open(url, method=method).status_code == 401, (method, url)
         for label, token in bad.items():
             r = client.open(url, method=method, headers=auth_headers(token))
             expected = (401, 'Token has expired') if label.startswith('expired') else (422, 'Invalid token')
             assert (r.status_code, (r.get_json() or {}).get('error')) == expected, (method, url, label)
+    assert _changed(before, _row_counts(app)) == set(), 'a refused request wrote to the database'
+
+    for method, url in protected:
         got = client.open(url, method=method, headers=auth_headers(live)).status_code
         assert got not in DENIED, (method, url, 'a live token was refused, so this sweep proves nothing')
+    assert _changed(before, _row_counts(app)) <= LIVE_PASS_MAY_CHANGE
+    assert client.get('/api/me', headers=auth_headers(live)).get_json()['id'] == uid, 'the probe account was lost'
     assert isolated == [], f'outbound connection attempted: {isolated}'
 
 
 def test_admin_routes_ignore_tokens_entirely(app, client, isolated):
     _, live, bad = _tokens(app, client)
+    before = _row_counts(app)
     for endpoint, method, url in _routes(app):
         if endpoint not in ADMIN:
             continue
@@ -156,11 +203,13 @@ def test_admin_routes_ignore_tokens_entirely(app, client, isolated):
             for token in bad.values():
                 assert client.open(url, method=method, headers={**with_secret, **auth_headers(token)}
                                    ).status_code == plain, (method, url)
+    assert _changed(before, _row_counts(app)) == set(), 'an admin request wrote to the database'
     assert isolated == [], f'outbound connection attempted: {isolated}'
 
 
 def test_public_routes_answer_a_bad_token_exactly_as_no_token(app, client, isolated):
     _, _, bad = _tokens(app, client)
+    before = _row_counts(app)
     for endpoint, method, url in _routes(app):
         if endpoint not in PUBLIC:
             continue
@@ -168,6 +217,7 @@ def test_public_routes_answer_a_bad_token_exactly_as_no_token(app, client, isola
         for label, token in bad.items():
             got = client.open(url, method=method, headers=auth_headers(token)).status_code
             assert got == anon, (method, url, label, anon, got)
+    assert _changed(before, _row_counts(app)) == set(), 'a public request with no valid token wrote to the database'
     assert isolated == [], f'outbound connection attempted: {isolated}'
 
 
