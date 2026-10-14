@@ -13656,7 +13656,13 @@ def missing_token_callback(reason):
 
 @jwt.invalid_token_loader
 def invalid_token_callback(error_string):
-    return jsonify({"error": "Invalid token"}), 422
+    # 401, not Flask-JWT-Extended's default 422 (RFC 6750: invalid_token is a
+    # 401). The client signs out only on 401, so with 422 a token that no
+    # longer verifies -- every stored token after a JWT_SECRET_KEY rotation --
+    # left people on a dashboard that failed to load instead of the login
+    # screen. A 401 reaches the existing "Session expired" path in every client
+    # already installed, with no new JavaScript to deliver.
+    return jsonify({"error": "Invalid token"}), 401
 
 @jwt.expired_token_loader
 def expired_token_callback(jwt_header, jwt_payload):
@@ -13905,7 +13911,7 @@ def _sweeper_delivery_step():
             sent['delivered'], sent['failed'], sent['contended'])
 
 
-def _retention_sweeper_loop():
+def _retention_sweeper_loop(stop=None):
     # SETTLE, THEN WORK, THEN SLEEP -- in that order, deliberately.
     #
     # This loop used to sleep a full interval FIRST, so every deploy, restart
@@ -13925,6 +13931,16 @@ def _retention_sweeper_loop():
     # of them.
     time.sleep(min(_RETENTION_FIRST_PASS_SETTLE_S, _RETENTION_THREAD_INTERVAL_S))
     while True:
+        # `stop` exists for tests only: _start_retention_sweeper() gives every
+        # thread its own Event, and nothing in production ever sets it, so in
+        # production this is never true and the loop runs for the life of the
+        # process exactly as before (D42: nothing may END this thread by
+        # accident -- this ends it only on an explicit, test-owned request).
+        # Checked after a sleep, never instead of one: the sleeps are where
+        # tests drive the loop. A test that started a thread sets the Event and
+        # joins; the thread finishes at most its current pass and one interval.
+        if stop is not None and stop.is_set():
+            return
         # Four steps, each through `_run_sweeper_step`: its own app context,
         # its own failure record, and nothing it does -- the step, the record,
         # the logging, even entering or leaving a context -- can end this
@@ -13959,8 +13975,10 @@ def _start_retention_sweeper():
     # Stamped BEFORE the thread runs, so a request served in the first seconds
     # of a new process can still distinguish "just started" from "never ran".
     _WORKER_STARTED_AT = datetime.utcnow()
-    thread = threading.Thread(target=_retention_sweeper_loop,
+    stop = threading.Event()   # never set in production; see _retention_sweeper_loop
+    thread = threading.Thread(target=_retention_sweeper_loop, args=(stop,),
                               name='streakfit-retention', daemon=True)
+    thread.stop_event = stop  # read by tests to stop and join this thread
     thread.start()
     app.logger.info('event=retention_sweeper_started interval_s=%d',
                     _RETENTION_THREAD_INTERVAL_S)

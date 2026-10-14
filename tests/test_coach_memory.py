@@ -451,16 +451,25 @@ def test_retention_sweeper_thread_runs_with_no_requests_at_all(app, monkeypatch)
     monkeypatch.setattr(appmod, "_WORKER_STARTED_AT", appmod._WORKER_STARTED_AT)
 
     thread = appmod._start_retention_sweeper()
-    assert thread.daemon, "a non-daemon sweeper would hold the process open on exit"
+    try:
+        assert thread.daemon, "a non-daemon sweeper would hold the process open on exit"
 
-    deadline = _time.monotonic() + 10
-    while _time.monotonic() < deadline:
-        if CoachTurn.query.filter_by(user_id=gone.id).count() == 0:
-            break
-        _time.sleep(0.2)
+        deadline = _time.monotonic() + 10
+        while _time.monotonic() < deadline:
+            if CoachTurn.query.filter_by(user_id=gone.id).count() == 0:
+                break
+            _time.sleep(0.2)
 
-    assert CoachTurn.query.filter_by(user_id=gone.id).count() == 0, (
-        "the background sweeper did not delete an expired turn without a request")
+        assert CoachTurn.query.filter_by(user_id=gone.id).count() == 0, (
+            "the background sweeper did not delete an expired turn without a request")
+    finally:
+        # Stop it HERE, while the 0.2 s interval is still patched: after this
+        # function returns, monkeypatch restores the hour-long default and a
+        # thread caught in that sleep could not be joined. Left running, it
+        # wrote runs into later tests' databases (CI flake, 2026-10-14).
+        thread.stop_event.set()
+        thread.join(timeout=10)
+    assert not thread.is_alive(), "the sweeper thread did not stop when asked"
 
 
 def test_retention_sweeper_is_off_unless_explicitly_enabled():
