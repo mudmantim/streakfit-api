@@ -13656,7 +13656,13 @@ def missing_token_callback(reason):
 
 @jwt.invalid_token_loader
 def invalid_token_callback(error_string):
-    return jsonify({"error": "Invalid token"}), 422
+    # 401, not Flask-JWT-Extended's default 422 (RFC 6750: invalid_token is a
+    # 401). The client signs out only on 401, so with 422 a token that no
+    # longer verifies -- every stored token after a JWT_SECRET_KEY rotation --
+    # left people on a dashboard that failed to load instead of the login
+    # screen. A 401 reaches the existing "Session expired" path in every client
+    # already installed, with no new JavaScript to deliver.
+    return jsonify({"error": "Invalid token"}), 401
 
 @jwt.expired_token_loader
 def expired_token_callback(jwt_header, jwt_payload):
