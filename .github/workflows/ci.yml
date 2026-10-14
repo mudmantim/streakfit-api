@@ -93,6 +93,7 @@ jobs:
         run: python3 scripts/secret_scan.py --history
 
       - name: Install Gitleaks (pinned version, checksum verified before use)
+        if: ${{ !cancelled() }}   # run even when our scanner failed: two independent answers
         run: |
           dir="$RUNNER_TEMP/gitleaks"
           mkdir -p "$dir"
@@ -105,6 +106,7 @@ jobs:
           echo "$dir" >> "$GITHUB_PATH"
 
       - name: Gitleaks over all history (redacted)
+        if: ${{ !cancelled() }}   # run even when our scanner failed: two independent answers
         run: gitleaks git --log-opts="--all" --redact --no-banner --verbose --exit-code 1 .
 
   # The PostgreSQL-only tests: the concurrency and locking scenarios, account

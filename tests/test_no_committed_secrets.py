@@ -109,3 +109,5 @@ def test_ci_runs_gitleaks_only_after_verifying_its_pinned_checksum():
     assert job.index('sha256sum --check --strict') < job.index('tar -xzf') < job.index('gitleaks git')
     assert 'secret_scan.py --history' in job
     assert '--redact' in job and '--log-opts="--all"' in job
+    # Gitleaks must still run when our scanner fails (first seen in run 38551316559).
+    assert job.count('if: ${{ !cancelled() }}') == 2
