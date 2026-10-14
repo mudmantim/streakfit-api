@@ -59,3 +59,7 @@ e4dcb4f5af09c3c7b6fedf47a75297c811ef1343:content/security/common-passwords.txt:g
 
 # Reviewed 2026-10-14 (Claude, first CI run 38548032272): Not a secret: OpenAPI example token, JOSE header only
 d13dbd5cebfeb0bd20cb843f01e78a0370c2ab9e:docs/api/openapi.yaml:generic-api-key:473
+
+# Reviewed 2026-10-14 (Claude, CI run 38554486147): our scanner's own negative test case, the public JOSE header
+# {"alg":"HS256","typ":"JWT"} with no payload or signature. Not a token.
+6c4f04ee763bc8507f110546edc9201627d235ee:tests/test_no_committed_secrets.py:generic-api-key:75
