@@ -20,8 +20,20 @@ logger = logging.getLogger('alembic.env')
 # DATABASE_URL can be a least-privilege role that cannot run DDL. It passes the
 # same db_guard rules as the app's URL, and the server is re-checked (R7) on the
 # connection the migration actually uses. Unset: the app's engine, as before.
-MIGRATION_BINDING = (db_guard.resolve(url_var='MIGRATION_DATABASE_URL')
-                     if os.environ.get('MIGRATION_DATABASE_URL') else None)
+def _refuse(exc):
+    """Same words as the app's boot refusal ("Refusing to start: R<n>: ..."),
+    so one log search finds every guard refusal, wherever it happened. Without
+    this, Flask-Migrate logged a raised refusal as "Error: R2: ..." (found
+    2026-10-14 by tests/test_pooled_url_never_reaches_production.py)."""
+    logger.critical('Refusing to start: %s', exc)
+    raise SystemExit(1) from exc
+
+
+try:
+    MIGRATION_BINDING = (db_guard.resolve(url_var='MIGRATION_DATABASE_URL')
+                         if os.environ.get('MIGRATION_DATABASE_URL') else None)
+except db_guard.DatabaseBindingError as _exc:
+    _refuse(_exc)
 _migration_engine = (create_engine(MIGRATION_BINDING.url, poolclass=NullPool)
                      if MIGRATION_BINDING else None)
 
@@ -81,7 +93,10 @@ def run_migrations_online():
     connectable = get_engine()
     with connectable.connect() as connection:
         binding = _binding()
-        reported = db_guard.verify_server(connection, binding)
+        try:
+            reported = db_guard.verify_server(connection, binding)
+        except db_guard.DatabaseBindingError as exc:
+            _refuse(exc)
         # The check's query auto-began a transaction (SQLAlchemy 2.0). End it
         # here: if it were still open, Alembic would treat it as the caller's,
         # never commit, and every migration would log "Running upgrade" and
