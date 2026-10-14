@@ -70,13 +70,20 @@ database is proven. Add the sweeper flag back only after S0.7 passes.
 1. **Staging SQL Editor, read-only.**
    `select current_setting('neon.endpoint_id', true)` must return
    `<staging endpoint>`. Expect **no tables**.
-2. **Render.** Set the environment exactly as the table above, with the
-   S0.7 Start Command. Set the service **Branch** to
-   `safety/db-environment-guards` (PR #10's tip).
+2. **Render.** Set the environment exactly as the table above. Set the service **Branch** to
+   `safety/db-environment-guards` (PR #10's tip, which includes `scripts/render_env_probe.py`). For this deploy only, set:
+   - **Pre-Deploy Command:** `python scripts/render_env_probe.py pre-deploy && flask db upgrade`
+   - **Start Command:** `python scripts/render_env_probe.py runtime && STREAKFIT_ENFORCE_DB_HEAD=1 gunicorn app:app`
+
+   The probe prints only Render's own identifiers, the *presence* of the database variables, and the endpoint ID; never a secret or the URL. It always exits 0, so it cannot change the deploy's outcome.
 3. **Resume and deploy.** Expect in the log, in this order:
-   - Pre-Deploy: `Migrating database: deployment=staging endpoint=<staging endpoint> hosted=True service=srv-…`.
-     **This line settles the open question: whether `RENDER_SERVICE_ID` exists during Pre-Deploy.** Record what `service=` shows.
+   - **The Pre-Deploy probe block (`render_env_probe phase=pre-deploy`). This is the specific test of `RENDER_SERVICE_ID` during Pre-Deploy.** Record, verbatim:
+     - `RENDER_SERVICE_ID=srv-…` or `RENDER_SERVICE_ID: MISSING`;
+     - `RENDER=…`;
+     - the final line `production-in-this-phase: PASS|FAIL (…)`. That line is db_guard's own answer to "would production's Pre-Deploy be accepted with this phase's environment?"
+   - Pre-Deploy: `Migrating database: deployment=staging endpoint=<staging endpoint> hosted=True service=srv-…`. Its `service=` must agree with the probe.
    - the migration chain from empty to `d4f1b6e2a9c3` (`Running upgrade …` lines, if Render keeps them);
+   - the runtime probe block (`phase=runtime`): `RENDER_SERVICE_ID` should match the Pre-Deploy one, and `production-in-this-phase: PASS`;
    - boot: `Database identity verified (deployment=staging endpoint=<staging endpoint> … service=srv-…, server endpoint <staging endpoint>)`, then `Database migration check passed`.
 4. **`/api/build-identity`** reports `"environment": "staging"`.
 5. **Negative test (the incident replayed safely).**
@@ -84,11 +91,12 @@ database is proven. Add the sweeper flag back only after S0.7 passes.
    - Deploy. Expect Pre-Deploy to fail at import with `Refusing to start: R2 … may not use the production database`, **before any connection** (no real credential exists, so nothing could connect anyway).
    - Restore the real staging URL, then repeat step 3's checks.
 6. **Missing URL.** Remove `DATABASE_URL` and deploy. Expect `R1 … refusing the SQLite fallback`. Restore it.
-7. Only now add `STREAKFIT_RETENTION_SWEEPER=1` back to the Start Command.
+7. Restore the plain commands: Pre-Deploy `flask db upgrade`; Start `STREAKFIT_ENFORCE_DB_HEAD=1 STREAKFIT_RETENTION_SWEEPER=1 gunicorn app:app`. Adding the sweeper flag back happens only now.
    **From here the environment must not change.**
 
-Pass criteria: every expectation above. If `service=` is empty in the
-Pre-Deploy line, **stop**. The guard release cannot go to production until
+Pass criteria: every expectation above. If the Pre-Deploy probe says
+`RENDER_SERVICE_ID: MISSING` / `production-in-this-phase: FAIL`, **stop**.
+Production is not at risk: the guard build was never deployed there. The guard release cannot go to production until
 `RENDER_SERVICE_ID` handling is revised (R2 would refuse production's own
 Pre-Deploy).
 
