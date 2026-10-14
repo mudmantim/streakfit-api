@@ -160,7 +160,13 @@ class Rehearsal:
                             'RATELIMIT_STORAGE_URI', 'ANTHROPIC_API_KEY')}
         env.update(DATABASE_URL=self.url, FLASK_APP='app', SECRET_KEY='rollback-rehearsal',
                    JWT_SECRET_KEY='rollback-rehearsal-jwt-0123456789abcdef01234567',
-                   ADMIN_SECRET='rollback-rehearsal-admin', PYTHONDONTWRITEBYTECODE='1')
+                   ADMIN_SECRET='rollback-rehearsal-admin', PYTHONDONTWRITEBYTECODE='1',
+                   # Builds with db_guard treat STREAKFIT_ENFORCE_DB_HEAD=1 as
+                   # "hosted", and an undeclared hosted process as production,
+                   # which (rule R4) must use the production database. This is a
+                   # scratch database on localhost, so say so. Older builds
+                   # ignore the variable.
+                   STREAKFIT_DEPLOYMENT='development')
         if boot:
             env['STREAKFIT_ENFORCE_DB_HEAD'] = '1'     # production's boot guard, ON
         return env

@@ -30,3 +30,21 @@ def test_refuses_non_local_servers(server):
 def test_usage_without_arguments():
     p = subprocess.run([sys.executable, str(TOOL)], capture_output=True, text=True, timeout=60)
     assert p.returncode == 2 and 'DISPOSABLE' in p.stderr
+
+
+def test_rehearsal_processes_declare_a_development_deployment():
+    """With db_guard (PR #10), STREAKFIT_ENFORCE_DB_HEAD=1 marks a process as
+    hosted, and an undeclared hosted process is production, which R4 forbids
+    on a localhost database. Found 2026-10-13 by rehearsing the merged safety
+    bundle: the deployed build refused to boot and the verdict was BROKEN."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location('rehearse_rollback', TOOL)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    r = object.__new__(mod.Rehearsal)
+    r.url = 'postgresql://postgres:x@127.0.0.1:5432/scratch'
+    for boot in (False, True):
+        env = r._env(boot=boot)
+        assert env['STREAKFIT_DEPLOYMENT'] == 'development'
+        assert ('STREAKFIT_ENFORCE_DB_HEAD' in env) is boot
+        assert 'RENDER' not in env and 'RENDER_SERVICE_ID' not in env
