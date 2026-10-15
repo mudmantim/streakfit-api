@@ -356,6 +356,71 @@ def test_output_never_contains_log_text(capsys, tmp_path):
     assert 'FAIL  NO-CREDENTIAL' in out and '[lines ' in out
 
 
+# --- how the owner will really save the logs (added 2026-10-15) -------------
+# Render shows the build and Pre-Deploy output in the deploy's log, and the
+# instance's start-up in the service's Logs tab. The operator checklist has the
+# owner paste both, in that order, into one file. These pin down what that
+# file looks like when it is right, and what the likely mistakes do.
+
+def render_shaped(lines, pre_n=None):
+    """`lines` (a good() log) wrapped in Render's own deploy and start-up lines."""
+    pre_n = N_PRE + 2 if pre_n is None else pre_n
+    return (['==> Cloning from https://github.com/mudmantim/streakfit',
+             f'==> Checking out commit {COMMIT} in branch {BRANCH}',
+             '==> Using Python version 3.12.7 (default)',
+             '==> Running build command \'pip install -r requirements.txt\'...',
+             'Successfully installed Flask-3.1.0',
+             '==> Build successful 🎉',
+             '==> Running pre-deploy command \'python scripts/render_env_probe.py pre-deploy && flask db upgrade\''
+             ] + lines[:pre_n] +
+            ['==> Pre-deploy command completed',
+             '==> Deploying...',
+             '==> Running \'python scripts/render_env_probe.py runtime && STREAKFIT_ENFORCE_DB_HEAD=1 '
+             'gunicorn app:app\''] + lines[pre_n:pre_n + len(run_block())] +
+            ['[2026-10-20 12:01:00 +0000] [1] [INFO] Starting gunicorn 23.0.0'] + lines[pre_n + len(run_block()):] +
+            ['[2026-10-20 12:01:02 +0000] [7] [INFO] Booting worker with pid: 7',
+             '==> Your service is live 🎉'])
+
+
+def test_render_shaped_log_passes():
+    assert fails(render_shaped(good())) == []
+    assert fails(stamped(render_shaped(good()))) == []
+
+
+def test_render_refusal_logs_pass():
+    for rule in ('R2', 'R1'):
+        r = refusal(rule)
+        log = ['==> Running pre-deploy command \'python scripts/render_env_probe.py pre-deploy && flask db upgrade\'',
+               *r, '==> Pre-deploy command failed with exit code 1']
+        assert fails(log, rule.lower()) == [], rule
+
+
+def test_deploy_log_without_the_runtime_part_fails():
+    """The owner saved only the deploy's log, not the Logs-tab start-up lines."""
+    assert 'ONE-DEPLOY' in fails(render_shaped(good())[:7 + N_PRE + 2])
+
+
+def test_overlapping_paste_fails():
+    """The start-up lines pasted twice (an overlapping copy) are ambiguous."""
+    g = good()
+    assert {'ONE-DEPLOY'} <= set(fails(g + g[N_PRE + 2:]))
+
+
+def test_previous_instance_lines_in_a_refusal_log_fail():
+    """A refusal log must be the failed deploy's log alone. Appending the Logs
+    tab would bring in the PREVIOUS instance's start-up, which still serves."""
+    assert 'NOT-BOOTED' in fails(refusal('R2') + run_block() + [identity(), HEAD_LINE], 'r2')
+
+
+def test_pooled_and_direct_deploys_produce_the_same_log():
+    """The log cannot prove step 8b used the pooled string: the probe and the
+    guard name the endpoint with `-pooler` removed. 8b's pooled-ness is
+    therefore owner-attested (Connect dialog showed `-pooler`, password masked)
+    and corroborated by Neon's pooler-connections chart, never claimed from the
+    checker's PASS. This test fails if that ever changes, so the docs can follow."""
+    assert good() == good(url=POOLED)
+
+
 # --- saved fixture files ----------------------------------------------------
 
 FIXTURE_EXPECT = {
@@ -372,6 +437,9 @@ FIXTURE_EXPECT = {
     'deploy_malformed_block.log': ('deploy', {'PRE-COMPLETE'}),
     'deploy_sweeper_on.log': ('deploy', {'RUN-NO-SWEEPER'}),
     'r2_without_sid_r3.log': ('r2', {'REFUSED'}),
+    'deploy_render_shaped.log': ('deploy', set()),
+    'deploy_only_no_runtime_part.log': ('deploy', {'ONE-DEPLOY'}),
+    'r2_with_previous_instance_lines.log': ('r2', {'NOT-BOOTED'}),
 }
 
 
@@ -393,6 +461,9 @@ def build_fixtures():
         'deploy_malformed_block.log': stamped(MUTATIONS['stray line inside the pre-deploy block'][0](g)),
         'deploy_sweeper_on.log': stamped(MUTATIONS['sweeper enabled at runtime'][0](g)),
         'r2_without_sid_r3.log': stamped(refusal('R2', sid=None)),
+        'deploy_render_shaped.log': render_shaped(stamped(g)),
+        'deploy_only_no_runtime_part.log': render_shaped(stamped(g))[:7 + N_PRE + 2],
+        'r2_with_previous_instance_lines.log': stamped(refusal('R2') + run_block() + [identity(), HEAD_LINE]),
     }
 
 
