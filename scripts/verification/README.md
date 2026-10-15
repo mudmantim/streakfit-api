@@ -18,7 +18,7 @@ Just one subsystem while developing — each module builds its own minimal scena
 python scripts/verification/chat.py https://streakfit.pro
 ```
 
-Every entry point accepts the base URL as a positional arg, `--base-url`, or `$SMOKE_BASE_URL`, in that precedence order, defaulting to production if none is given.
+Every entry point accepts the base URL as a positional arg, `--base-url`, or `$SMOKE_BASE_URL`, in that precedence order. With none of them the run stops (exit 2) before any request: there is no default target, because every module writes and a forgotten `--base-url` used to land on production.
 
 Exit codes: `0` all passed, `1` at least one check failed, `2` a setup step (e.g. registration) failed and the rest of the run was skipped, since nothing downstream could work without it.
 

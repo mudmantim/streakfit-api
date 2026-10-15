@@ -74,7 +74,7 @@ pytest tests/                          # 155 tests
 pytest tests/test_migrations.py
 
 # end-to-end suite against a target (safe on prod)
-python scripts/verify_all.py                 # defaults to production
+python scripts/verify_all.py --base-url https://streakfit.pro   # no default target: name it
 python scripts/verify_all.py --base-url http://localhost:5000
 
 # clean up smoke accounts (needs prod DATABASE_URL in env)
