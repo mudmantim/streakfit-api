@@ -35,7 +35,7 @@ import uuid
 from pathlib import Path
 
 PG_IMAGE = 'docker.io/library/postgres:17@sha256:5f050f770b427fbd477edee6c3968a72e5c6be97e050a7e368b2b74a9494a285'
-EP = 'ep-fake-staging-00000000'
+EP = 'ep-young-sound-b4qsoqe8'     # db_guard.STAGING_DB_ENDPOINTS (R8 refuses any other on Render); internal network only
 OTHER_EP = 'ep-fake-other-11111111'
 PROD_EP = 'ep-odd-star-ajye3lag'                     # only ever inside a refused, unresolvable URL
 HOST = f'{EP}.c-2.us-east-2.aws.neon.tech'

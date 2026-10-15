@@ -21,9 +21,9 @@ Successfully installed Flask-3.1.0
 2026-10-20T12:00:13.123Z    MIGRATION_DATABASE_URL: MISSING
 2026-10-20T12:00:14.123Z    STREAKFIT_PRODUCTION_DB_ENDPOINT: MISSING
 2026-10-20T12:00:15.123Z    STREAKFIT_ALLOW_PRODUCTION_DB_FROM_HERE: MISSING
-2026-10-20T12:00:16.123Z    DATABASE_URL endpoint=ep-fake-staging-00000000
+2026-10-20T12:00:16.123Z    DATABASE_URL endpoint=ep-young-sound-b4qsoqe8
 2026-10-20T12:00:17.123Z    hosted=True production-in-this-phase: PASS (production would be accepted in this phase)
-2026-10-20T12:00:18.123Z  INFO  [alembic.env] Migrating database: deployment=staging endpoint=ep-fake-staging-00000000 hosted=True service=srv-fakestaging000000000 (server endpoint ep-fake-staging-00000000)
+2026-10-20T12:00:18.123Z  INFO  [alembic.env] Migrating database: deployment=staging endpoint=ep-young-sound-b4qsoqe8 hosted=True service=srv-fakestaging000000000 (server endpoint ep-young-sound-b4qsoqe8)
 2026-10-20T12:00:19.123Z  INFO  [alembic.runtime.migration] Running upgrade  -> d4f1b6e2a9c3, daily mission
 ==> Pre-deploy command completed
 ==> Deploying...
@@ -44,10 +44,10 @@ Successfully installed Flask-3.1.0
 2026-10-20T12:00:33.123Z    MIGRATION_DATABASE_URL: MISSING
 2026-10-20T12:00:34.123Z    STREAKFIT_PRODUCTION_DB_ENDPOINT: MISSING
 2026-10-20T12:00:35.123Z    STREAKFIT_ALLOW_PRODUCTION_DB_FROM_HERE: MISSING
-2026-10-20T12:00:36.123Z    DATABASE_URL endpoint=ep-fake-staging-00000000
+2026-10-20T12:00:36.123Z    DATABASE_URL endpoint=ep-young-sound-b4qsoqe8
 2026-10-20T12:00:37.123Z    hosted=True production-in-this-phase: PASS (production would be accepted in this phase)
 [2026-10-20 12:01:00 +0000] [1] [INFO] Starting gunicorn 23.0.0
-2026-10-20T12:00:38.123Z  INFO in app: Database identity verified (deployment=staging endpoint=ep-fake-staging-00000000 hosted=True service=srv-fakestaging000000000, server endpoint ep-fake-staging-00000000).
+2026-10-20T12:00:38.123Z  INFO in app: Database identity verified (deployment=staging endpoint=ep-young-sound-b4qsoqe8 hosted=True service=srv-fakestaging000000000, server endpoint ep-young-sound-b4qsoqe8).
 2026-10-20T12:00:39.123Z  INFO in app: Database migration check passed (at head d4f1b6e2a9c3).
 [2026-10-20 12:01:02 +0000] [7] [INFO] Booting worker with pid: 7
 ==> Your service is live 🎉

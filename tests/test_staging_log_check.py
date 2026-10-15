@@ -27,7 +27,7 @@ probe = _load('render_env_probe_under_test', ROOT / 'scripts' / 'render_env_prob
 chk = _load('staging_log_check_under_test', ROOT / 'scripts' / 'staging_log_check.py')
 import db_guard  # noqa: E402
 
-EP = 'ep-fake-staging-00000000'
+EP = 'ep-young-sound-b4qsoqe8'         # must be in db_guard.STAGING_DB_ENDPOINTS, or R8 refuses it
 SID = 'srv-fakestaging000000000'          # srv- + 20, like real Render IDs
 COMMIT = '8c687350d70d837264ec8ffc87940c50255c21b9'
 BRANCH = 'rc/safety-b'

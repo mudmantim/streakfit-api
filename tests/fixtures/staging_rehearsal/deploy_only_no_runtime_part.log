@@ -21,7 +21,7 @@ Successfully installed Flask-3.1.0
 2026-10-20T12:00:13.123Z    MIGRATION_DATABASE_URL: MISSING
 2026-10-20T12:00:14.123Z    STREAKFIT_PRODUCTION_DB_ENDPOINT: MISSING
 2026-10-20T12:00:15.123Z    STREAKFIT_ALLOW_PRODUCTION_DB_FROM_HERE: MISSING
-2026-10-20T12:00:16.123Z    DATABASE_URL endpoint=ep-fake-staging-00000000
+2026-10-20T12:00:16.123Z    DATABASE_URL endpoint=ep-young-sound-b4qsoqe8
 2026-10-20T12:00:17.123Z    hosted=True production-in-this-phase: PASS (production would be accepted in this phase)
-2026-10-20T12:00:18.123Z  INFO  [alembic.env] Migrating database: deployment=staging endpoint=ep-fake-staging-00000000 hosted=True service=srv-fakestaging000000000 (server endpoint ep-fake-staging-00000000)
+2026-10-20T12:00:18.123Z  INFO  [alembic.env] Migrating database: deployment=staging endpoint=ep-young-sound-b4qsoqe8 hosted=True service=srv-fakestaging000000000 (server endpoint ep-young-sound-b4qsoqe8)
 2026-10-20T12:00:19.123Z  INFO  [alembic.runtime.migration] Running upgrade  -> d4f1b6e2a9c3, daily mission
