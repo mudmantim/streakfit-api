@@ -242,3 +242,28 @@ def test_a_local_process_with_only_the_head_flag_is_not_held_to_the_render_allow
                    'DATABASE_URL': 'postgresql://u:p@localhost/x'})
     assert b.hosted and b.endpoint is None
     refused({'RENDER_SERVICE_ID': NEW_SVC, 'STREAKFIT_DEPLOYMENT': 'staging', 'DATABASE_URL': url(UNKNOWN)}, 'R8')
+
+
+# Neon's other SNI-less routes (2026-10-15 evening review): the endpoint at the
+# start of the password, or key=value text in the database name. libpq passes
+# both to Neon untouched, so the hostname would not decide the endpoint.
+@pytest.mark.parametrize('password', [
+    f'endpoint={PROD};not-a-password', f'endpoint={PROD}$not-a-password',
+    f'ENDPOINT={PROD};not-a-password', f'project={PROD};not-a-password',
+    f'endpoint%3D{PROD}%3Bnot-a-password',
+])
+def test_a_password_that_selects_the_endpoint_is_refused(password):
+    u = url(STAGING).replace('not-a-password', password, 1)
+    msg = refused(hosted_staging(u), 'R9')
+    assert 'password' in msg and PROD not in msg
+    refused({'DATABASE_URL': u}, 'R9')
+
+
+@pytest.mark.parametrize('db', [f'neondb%20options%3Dendpoint%3D{PROD}', f'endpoint%3D{PROD}'])
+def test_a_database_name_that_selects_the_endpoint_is_refused(db):
+    refused(hosted_staging(url(STAGING).replace('/neondb?', f'/{db}?', 1)), 'R9')
+
+
+def test_an_ordinary_password_containing_the_word_is_allowed():
+    u = url(STAGING).replace('not-a-password', 'xendpoint=1not-a-password', 1)
+    assert G.resolve(hosted_staging(u)).endpoint == STAGING

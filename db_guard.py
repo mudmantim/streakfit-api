@@ -47,8 +47,9 @@ RULES, each one an observed failure or a near-miss:
       of the Render service, not a local process that sets the head flag.
   R9  Connection strings libpq reads differently from Python are refused: more
       than one host (libpq tries each in turn), more than one '@', a
-      percent-encoded host, and Neon's `options=endpoint=...` (or PGOPTIONS)
-      routing, which picks the endpoint without the hostname.
+      percent-encoded host, and Neon's `options=endpoint=...` (or PGOPTIONS),
+      password-prefix (`endpoint=<id>;<password>`) and database-name routing,
+      each of which picks the endpoint without the hostname.
 
 Nothing here ever puts a password in an error message: errors name the
 endpoint and the rule, never the URL.
@@ -106,6 +107,14 @@ def _url_shape_problem(url: str, env: Mapping[str, str]) -> Optional[str]:
     options = ' '.join(urllib.parse.parse_qs(parts.query).get('options', []))
     if _NEON_ROUTING_OPTION.search(options) or _NEON_ROUTING_OPTION.search(env.get('PGOPTIONS') or ''):
         return "it selects a Neon endpoint through options/PGOPTIONS rather than the host"
+    # Neon's other SNI-less routes (its "connect from old clients" docs): the
+    # endpoint at the start of the password (`endpoint=<id>;<password>`, or `$`),
+    # or key=value text in the database name. Never quoted back: it is the password.
+    password = urllib.parse.unquote(parts.password or '')
+    if password.lower().startswith(('endpoint=', 'project=')):
+        return 'its password selects a Neon endpoint rather than the host'
+    if _NEON_ROUTING_OPTION.search(urllib.parse.unquote(parts.path)):
+        return 'its database name selects a Neon endpoint rather than the host'
     return None
 
 
