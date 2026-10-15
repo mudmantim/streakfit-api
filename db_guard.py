@@ -169,6 +169,14 @@ def resolve(env: Mapping[str, str] = os.environ, url_var: str = 'DATABASE_URL') 
         rerouting = [k for k in _ROUTING_ENV_VARS if env.get(k)]
         if rerouting:
             raise DatabaseBindingError(f'R6: {", ".join(rerouting)} is set and would override the host')
+        # A URL with no host lets libpq take the host from PGHOST (or a local
+        # socket), so the endpoint checks below would judge a host the process
+        # never uses. Locally that is a legitimate socket connection; hosted, or
+        # with PGHOST set, it is a reroute (overnight audit 2026-10-15).
+        if not urllib.parse.urlsplit(url).hostname and (hosted or env.get('PGHOST')):
+            raise DatabaseBindingError(
+                f'R6: {url_var} names no host, so libpq would choose one '
+                f'({"from PGHOST" if env.get("PGHOST") else "a local socket"}); give the host in the URL')
 
     endpoint = neon_endpoint(url)
     _check_policy(endpoint, deployment, hosted, service_id, env, is_postgres, declared is not None)
@@ -188,6 +196,14 @@ def verify_server(connection, binding: Binding, env: Mapping[str, str] = os.envi
     same policy. Returns the server-reported endpoint (or None)."""
     reported = server_endpoint(connection)
     if reported is None:
+        # Off Neon there is nothing to ask. But a HOSTED process whose URL names a
+        # Neon endpoint must get an answer: Neon always sets neon.endpoint_id, so
+        # silence means the connection did not land where the URL says, and the
+        # retention sweeper must not treat this database as proven
+        # (overnight audit 2026-10-15).
+        if binding.hosted and binding.endpoint is not None:
+            raise DatabaseBindingError(
+                f'R7: the URL names endpoint {binding.endpoint} but the server did not report one')
         return None
     if binding.endpoint is not None and reported != binding.endpoint:
         raise DatabaseBindingError(

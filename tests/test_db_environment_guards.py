@@ -176,6 +176,20 @@ def test_libpq_environment_overrides_are_refused(var):
     refused({'DATABASE_URL': url(STAGING_EP), 'STREAKFIT_DEPLOYMENT': 'staging', var: 'x'}, 'R6')
 
 
+def test_a_host_less_url_cannot_borrow_the_host_from_pghost():
+    """libpq takes the host from PGHOST when the URL has none, so the endpoint
+    checks would judge a host the process never uses."""
+    prod_host = f'{PROD_EP}.c-2.us-east-2.aws.neon.tech'
+    for u in ('postgresql://u:p@/neondb', 'postgresql:///neondb'):
+        refused({'STREAKFIT_DEPLOYMENT': 'staging', 'DATABASE_URL': u, 'PGHOST': prod_host}, 'R6')
+        refused({'RENDER': 'true', 'RENDER_SERVICE_ID': STAGING_SVC, 'STREAKFIT_DEPLOYMENT': 'staging',
+                 'DATABASE_URL': u}, 'R6')
+
+
+def test_a_local_socket_url_is_still_fine_for_development():
+    assert G.resolve({'DATABASE_URL': 'postgresql:///streakfit'}).endpoint is None
+
+
 def test_the_migration_url_is_checked_by_the_same_rules():
     env = {'RENDER': 'true', 'RENDER_SERVICE_ID': STAGING_SVC, 'STREAKFIT_DEPLOYMENT': 'staging',
            'DATABASE_URL': url(STAGING_EP), 'MIGRATION_DATABASE_URL': url(PROD_EP)}
@@ -224,6 +238,20 @@ def test_a_non_neon_url_that_lands_on_production_is_refused():
 
 def test_a_server_that_reports_nothing_is_not_held_against_it():
     b = G.resolve({'DATABASE_URL': 'postgresql://u:p@localhost/db'})
+    assert G.verify_server(FakeConn(None), b) is None
+
+
+def test_a_hosted_neon_url_whose_server_reports_nothing_is_refused():
+    """Neon always reports neon.endpoint_id. A hosted process that named a Neon
+    endpoint and hears nothing back has not proved which database it is on."""
+    b = G.resolve({'RENDER': 'true', 'RENDER_SERVICE_ID': STAGING_SVC, 'STREAKFIT_DEPLOYMENT': 'staging',
+                   'DATABASE_URL': url(STAGING_EP)})
+    with pytest.raises(G.DatabaseBindingError, match='^R7: .*did not report'):
+        G.verify_server(FakeConn(None), b)
+
+
+def test_an_unhosted_neon_url_whose_server_reports_nothing_is_tolerated():
+    b = G.resolve({'STREAKFIT_DEPLOYMENT': 'staging', 'DATABASE_URL': url(STAGING_EP)})
     assert G.verify_server(FakeConn(None), b) is None
 
 
