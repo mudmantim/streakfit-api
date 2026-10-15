@@ -35,6 +35,9 @@ import re
 import sys
 
 PROD_ENDPOINT = 'ep-odd-star-ajye3lag'
+# (2026-10-15) copies of production data: the incident recovery branch br-rough-smoke-ajnojcbg.
+# Never a valid staging endpoint, and named nowhere in any rehearsal log, refusals included.
+PROD_DERIVED = ('ep-dawn-fire-aj4zfzmz', 'br-rough-smoke-ajnojcbg')
 PROD_SERVICE = 'srv-d8f1hh6rnols73ak3a10'
 SERVICE_ID = re.compile(r'srv-[a-z0-9]{20}')
 ENDPOINT = re.compile(r'ep-[a-z]+-[a-z]+-[a-z0-9]{8}')
@@ -155,7 +158,8 @@ def check_args(rep, args, need_endpoint):
     ok = True
     if need_endpoint:
         ok &= rep.check('ARG-EP', 'staging endpoint argument is well-formed and is not production',
-                        args.endpoint and ENDPOINT.fullmatch(args.endpoint) and args.endpoint != PROD_ENDPOINT)
+                        args.endpoint and ENDPOINT.fullmatch(args.endpoint) and args.endpoint != PROD_ENDPOINT
+                        and args.endpoint not in PROD_DERIVED)
         ok &= rep.check('ARG-HEAD', '(v2) expected Alembic head argument is a 12-hex revision',
                         args.head and ALEMBIC_REV.fullmatch(args.head))
     ok &= rep.check('ARG-SID', '(v2) expected service argument is well-formed and is not production',
@@ -257,8 +261,10 @@ def check_deploy(lines, args, rep):
               len(heads) == 1 and ident and heads[0][0] > ident[0], *[i for i, _ in heads])
     rep.check('HEAD-REV', '(v2) the head check names the expected Alembic head',
               len(heads) == 1 and heads[0][1].group(1) == args.head, *[i for i, _ in heads])
-    prod = [i for i, ln in enumerate(lines) if PROD_ENDPOINT in ln or PROD_SERVICE in ln]
-    rep.check('NO-PROD', 'production endpoint (v2: or service) appears nowhere in this log', not prod, *prod[:10])
+    prod = [i for i, ln in enumerate(lines) if PROD_ENDPOINT in ln or PROD_SERVICE in ln
+            or any(d in ln for d in PROD_DERIVED)]
+    rep.check('NO-PROD', 'production endpoint (v2: or service, or a copy of production data) appears nowhere in '
+              'this log', not prod, *prod[:10])
     refused = [i for i, _ in _all(lines, REFUSED)]
     rep.check('NO-REFUSAL', 'no "Refusing to start"', not refused, *refused[:10])
 
@@ -312,6 +318,9 @@ def evaluate(mode, lines, args):
     co = _all(lines, CHECKOUT)
     rep.check('CHECKOUT', '(v2) every "Checking out commit" line names the expected commit',
               all(args.commit and args.commit.startswith(m.group(1)) for _, m in co), *[i for i, _ in co])
+    derived = [i for i, ln in enumerate(lines) if any(d in ln for d in PROD_DERIVED)]
+    rep.check('NO-PROD-COPY', '(2026-10-15) no copy of production data (recovery branch) is named anywhere',
+              not derived, *derived[:10])
     leaked = [i for i, ln in enumerate(lines) if CREDENTIAL.search(ln)]
     rep.check('NO-CREDENTIAL', 'no credential-shaped text anywhere in the log', not leaked, *leaked[:10])
     return rep

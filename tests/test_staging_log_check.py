@@ -302,6 +302,7 @@ def test_r1_replay_with_url_still_set_fails():
 
 @pytest.mark.parametrize('over, fid', [
     (dict(endpoint=PROD), 'ARG-EP'), (dict(endpoint='not-an-endpoint'), 'ARG-EP'),
+    (dict(endpoint='ep-dawn-fire-aj4zfzmz'), 'ARG-EP'),
     (dict(service='srv-d8f1hh6rnols73ak3a10'), 'ARG-SID'), (dict(service='srv-x'), 'ARG-SID'),
     (dict(commit='8c68735'), 'ARG-COMMIT'), (dict(commit=None), 'ARG-COMMIT'),
     (dict(branch='main'), 'ARG-BRANCH'), (dict(branch='rc/safety b'), 'ARG-BRANCH'),
@@ -419,6 +420,20 @@ def test_pooled_and_direct_deploys_produce_the_same_log():
     and corroborated by Neon's pooler-connections chart, never claimed from the
     checker's PASS. This test fails if that ever changes, so the docs can follow."""
     assert good() == good(url=POOLED)
+
+
+
+def test_a_deploy_on_the_recovery_branch_fails_everywhere_it_shows():
+    """2026-10-15: the recovery branch is a full copy of production data."""
+    rec = 'ep-dawn-fire-aj4zfzmz'
+    got = set(fails([ln.replace(EP, rec) for ln in good()]))
+    assert {'PRE-EP', 'RUN-EP', 'MIG-STAGING', 'MIG-SERVER', 'ID-STAGING', 'NO-PROD', 'NO-PROD-COPY'} <= got
+
+
+@pytest.mark.parametrize('mode', ['deploy', 'r2', 'r1'])
+def test_a_log_that_merely_names_the_recovery_branch_fails(mode):
+    base = {'deploy': good(), 'r2': refusal('R2'), 'r1': refusal('R1')}[mode]
+    assert 'NO-PROD-COPY' in fails(base + ['note: br-rough-smoke-ajnojcbg'], mode)
 
 
 # --- saved fixture files ----------------------------------------------------
