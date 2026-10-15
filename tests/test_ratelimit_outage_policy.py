@@ -45,6 +45,9 @@ import _fake_resp
 srv = _fake_resp.FakeRedis()
 os.environ['RATELIMIT_STORAGE_URI'] = srv.uri
 fd, path = tempfile.mkstemp(suffix='.db')
+os.close(fd)
+import atexit
+atexit.register(lambda: os.path.exists(path) and os.unlink(path))
 os.environ['DATABASE_URL'] = 'sqlite:///' + path
 logging.disable(logging.CRITICAL)
 import app as A

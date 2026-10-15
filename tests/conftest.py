@@ -9,6 +9,7 @@ rate limiting so cap-boundary tests can make the request volume they need
 (e.g. creating 10+ teams to prove the free-tier cap) without tripping the
 same per-minute limits real users would hit.
 """
+import atexit
 import os
 import tempfile
 import time
@@ -26,6 +27,23 @@ os.environ.setdefault('JWT_SECRET_KEY', 'test-jwt-secret-key-not-for-production'
 
 _db_fd, _db_path = tempfile.mkstemp(suffix='.db')
 os.environ['DATABASE_URL'] = f'sqlite:///{_db_path}'
+
+
+def _remove_test_db():
+    # One file per pytest process used to stay behind in $TMPDIR forever; on a
+    # tmpfs /tmp, ~2,500 of them (~1 GB) filled the per-user quota (2026-10-15).
+    try:
+        os.close(_db_fd)
+    except OSError:
+        pass
+    for suffix in ('', '-journal', '-wal', '-shm'):
+        try:
+            os.unlink(_db_path + suffix)
+        except FileNotFoundError:
+            pass
+
+
+atexit.register(_remove_test_db)
 
 # E402: these imports must run AFTER the os.environ setup above — importing app
 # reads SECRET_KEY/DATABASE_URL at module scope, so hoisting them breaks the suite.
