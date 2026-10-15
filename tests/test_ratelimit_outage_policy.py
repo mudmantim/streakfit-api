@@ -247,6 +247,7 @@ elif name == 'degraded_is_quiet':
 out['limiter_enabled_seen'] = sorted(enabled_seen)
 print('D7RESULT ' + json.dumps(out), flush=True)
 srv.stop()
+os.path.exists(path) and os.unlink(path)   # os._exit skips atexit
 os._exit(0)
 """
 
