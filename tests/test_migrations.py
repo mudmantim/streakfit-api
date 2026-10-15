@@ -23,6 +23,8 @@ import sys
 import tempfile
 import subprocess
 
+import pytest
+
 from sqlalchemy import create_engine, inspect
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -48,10 +50,35 @@ def _introspect(url):
     return schema
 
 
+_TEMP_DBS = []
+
+
+def _temp_db():
+    """A fresh temp SQLite path, removed after this module's tests (2026-10-15:
+    these were tempfile.mktemp, never removed; 4 left per full run). mkstemp
+    rather than the deprecated, racy mktemp; SQLite treats an empty file as an
+    empty database."""
+    fd, path = tempfile.mkstemp(suffix='.db')
+    os.close(fd)
+    _TEMP_DBS.append(path)
+    return path
+
+
+@pytest.fixture(autouse=True, scope='module')
+def _remove_temp_dbs():
+    yield
+    for path in _TEMP_DBS:
+        for suffix in ('', '-journal', '-wal', '-shm'):
+            try:
+                os.unlink(path + suffix)
+            except FileNotFoundError:
+                pass
+
+
 def _build_from_migrations():
     """Empty DB -> `flask db upgrade` -> path. Fails loudly if the chain can't
     bootstrap a fresh database."""
-    path = tempfile.mktemp(suffix='.db')
+    path = _temp_db()
     env = {**os.environ,
            'DATABASE_URL': f'sqlite:///{path}',
            'FLASK_APP': 'app',
@@ -68,7 +95,7 @@ def _build_from_migrations():
 
 def _build_from_models():
     from app import db
-    path = tempfile.mktemp(suffix='.db')
+    path = _temp_db()
     db.metadata.create_all(create_engine(f'sqlite:///{path}'))
     return path
 
@@ -136,7 +163,7 @@ def test_self_check_reports_schema_currency_only_when_it_really_knows():
     assert state['appliedCount'] and state['appliedCount'] > 0
 
     # And the honest half: an unstamped database must NOT claim to be at head.
-    unstamped = tempfile.mktemp(suffix='.db')
+    unstamped = _temp_db()
     env2 = {**env, 'DATABASE_URL': f'sqlite:///{unstamped}'}
     probe2 = (
         "import json, sys; sys.path.insert(0, %r);\n"

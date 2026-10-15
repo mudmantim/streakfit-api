@@ -176,6 +176,18 @@ class Browser:
                 break
         else:
             raise EnvironmentError("no Chrome/Chromium binary found on PATH")
+        # Chrome also writes its own scratch directories (com.google.Chrome.*)
+        # into $TMPDIR, outside the profile: 20 were left by one full test run
+        # (2026-10-15). A profile this run owns gets them inside it instead, so
+        # the cleanup in close() removes them too -- but only while the socket
+        # Chrome puts there (…/com.google.Chrome.XXXXXX/SingletonSocket) stays
+        # under the Unix socket path limit (108 bytes); past it Chrome cannot
+        # start at all, so a long TMPDIR keeps Chrome's default.
+        chrome_env = None
+        chrome_tmp = os.path.join(self.profile, "t")
+        if self._owns_profile and len(chrome_tmp) + len("/com.google.Chrome.XXXXXX/SingletonSocket") < 100:
+            os.makedirs(chrome_tmp, exist_ok=True)
+            chrome_env = {**os.environ, "TMPDIR": chrome_tmp}
         self.proc = subprocess.Popen(
             [
                 binary, "--headless=new", f"--remote-debugging-port={port}",
@@ -183,7 +195,7 @@ class Browser:
                 "--no-first-run", "--no-default-browser-check",
                 "--disable-extensions", "--disable-gpu", f"--window-size={width},{height}",
             ],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=chrome_env,
         )
         target = None
         for _ in range(100):
