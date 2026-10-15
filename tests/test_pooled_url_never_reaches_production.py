@@ -24,7 +24,7 @@ REPO = Path(__file__).resolve().parent.parent
 PROD_POOLED = ('postgresql://neondb_owner:' + 'not-a-' + 'password'
                '@ep-odd-star-ajye3lag-pooler.c-2.us-east-2.aws.neon.tech/neondb?sslmode=require')
 STAGING_DIRECT = ('postgresql://neondb_owner:' + 'not-a-' + 'password'
-                  '@ep-fake-staging-00000000.c-2.us-east-2.aws.neon.tech/neondb?sslmode=require')
+                  '@ep-young-sound-b4qsoqe8.c-2.us-east-2.aws.neon.tech/neondb?sslmode=require')
 STAGING_SVC = 'srv-fakestaging000000000'
 
 SITECUSTOMIZE = '''

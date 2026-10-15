@@ -35,7 +35,20 @@ RULES, each one an observed failure or a near-miss:
       PGHOSTADDR / PGSERVICE / PGSERVICEFILE from the environment.
   R7  After connecting, the SERVER's own idea of which Neon endpoint it is
       (`neon.endpoint_id`) must match the URL, and is re-checked against
-      R2-R5. A DNS trick or a proxy cannot make the URL lie for it.
+      R2-R5 and R8. A DNS trick or a proxy cannot make the URL lie for it.
+  R8  A hosted non-production process (staging, a preview, a one-off) may use
+      ONLY an allowlisted staging endpoint (STAGING_DB_ENDPOINTS). R2 refuses
+      the one database we know is production; R8 refuses everything we have not
+      approved, including copies of production nobody listed (2026-10-15: the
+      incident's recovery branch was a full copy that R2 did not know about).
+      Production-derived copies we do know (PRODUCTION_DERIVED_DB_ENDPOINTS)
+      get production's protection everywhere (R2/R3/R5). "Hosted" here means
+      Render's own markers (RENDER / RENDER_SERVICE_ID): the threat is a copy
+      of the Render service, not a local process that sets the head flag.
+  R9  Connection strings libpq reads differently from Python are refused: more
+      than one host (libpq tries each in turn), more than one '@', a
+      percent-encoded host, and Neon's `options=endpoint=...` (or PGOPTIONS)
+      routing, which picks the endpoint without the hostname.
 
 Nothing here ever puts a password in an error message: errors name the
 endpoint and the rule, never the URL.
@@ -51,6 +64,18 @@ from typing import Mapping, Optional
 # a dashboard identifier. Changing either is a deliberate, reviewed code change.
 PRODUCTION_DB_ENDPOINTS = frozenset({'ep-odd-star-ajye3lag'})
 PRODUCTION_RENDER_SERVICE_IDS = frozenset({'srv-d8f1hh6rnols73ak3a10'})   # streakfit-api
+# Copies of production data. Never a staging database; production itself may use
+# one only through the explicit recovery override (R4).
+PRODUCTION_DERIVED_DB_ENDPOINTS = frozenset({
+    'ep-dawn-fire-aj4zfzmz',      # Neon branch br-rough-smoke-ajnojcbg, incident recovery copy 2026-10-13
+})
+# The ONLY databases a hosted non-production process may use (R8). Adding one is
+# a reviewed code change, deliberately not an environment variable: the
+# 2026-10-13 incident was one pasted value, and an allowlist the same paste
+# could widen would not have stopped it.
+STAGING_DB_ENDPOINTS = frozenset({
+    'ep-young-sound-b4qsoqe8',    # Neon project round-rain-13734596 (streakfit-staging-pw1), empty at creation
+})
 
 DEPLOYMENTS = ('production', 'staging', 'development')
 DEPLOYMENT_VAR = 'STREAKFIT_DEPLOYMENT'
@@ -60,6 +85,28 @@ SQLITE_FALLBACK = 'sqlite:///streakfit.db'
 
 _ROUTING_QUERY_KEYS = ('host', 'hostaddr', 'service')
 _ROUTING_ENV_VARS = ('PGHOSTADDR', 'PGSERVICE', 'PGSERVICEFILE')
+
+
+# Neon's SNI-less routing: `endpoint=<id>` (or the older `project=<id>`) inside the
+# startup options picks the endpoint regardless of the hostname. A GUC such as
+# `-c neon.endpoint_id=...` is not routing and is not matched.
+_NEON_ROUTING_OPTION = re.compile(r'(?<![\w.])(?:endpoint|project)\s*=', re.IGNORECASE)
+
+
+def _url_shape_problem(url: str, env: Mapping[str, str]) -> Optional[str]:
+    """R9: why libpq could read this URL differently from urlsplit, or None."""
+    parts = urllib.parse.urlsplit(url)
+    if parts.netloc.count('@') > 1:
+        return "it contains more than one '@'"
+    hostport = parts.netloc.rpartition('@')[2]
+    if ',' in hostport:
+        return 'it names more than one host (libpq would try each in turn)'
+    if '%' in hostport:
+        return 'its host is percent-encoded'
+    options = ' '.join(urllib.parse.parse_qs(parts.query).get('options', []))
+    if _NEON_ROUTING_OPTION.search(options) or _NEON_ROUTING_OPTION.search(env.get('PGOPTIONS') or ''):
+        return "it selects a Neon endpoint through options/PGOPTIONS rather than the host"
+    return None
 
 
 class DatabaseBindingError(RuntimeError):
@@ -112,27 +159,34 @@ def _check_policy(endpoint: Optional[str], deployment: str, hosted: bool,
                   declared: bool = True) -> None:
     """R2-R5 for one endpoint. Raises DatabaseBindingError naming the rule."""
     is_prod_db = endpoint in PRODUCTION_DB_ENDPOINTS
+    is_prod_data = is_prod_db or endpoint in PRODUCTION_DERIVED_DB_ENDPOINTS
+    what = 'production database' if is_prod_db else 'copy of production data'
     on_prod_service = service_id in PRODUCTION_RENDER_SERVICE_IDS
     if service_id and not on_prod_service:
-        if is_prod_db:
+        if is_prod_data:
             raise DatabaseBindingError(
                 f'R2: Render service {service_id} is not a production service and may not use the '
-                f'production database ({endpoint})')
+                f'{what} ({endpoint})')
         if deployment == 'production':
             raise DatabaseBindingError(
                 f'R4: Render service {service_id} is not a production service; set '
                 f'{DEPLOYMENT_VAR}=staging (or development) and give it its own database')
-    if is_prod_db and declared and deployment != 'production':
+    if is_prod_data and declared and deployment != 'production':
         raise DatabaseBindingError(
-            f'R3: a {deployment} deployment may not use the production database ({endpoint})')
-    if is_prod_db and hosted and not service_id:
+            f'R3: a {deployment} deployment may not use the {what} ({endpoint})')
+    if is_prod_data and hosted and not service_id:
         raise DatabaseBindingError(
-            f'R2: the production database ({endpoint}) requires a Render service ID to prove this is '
+            f'R2: the {what} ({endpoint}) requires a Render service ID to prove this is '
             'a production service; RENDER_SERVICE_ID is missing')
-    if is_prod_db and not hosted and env.get(LOCAL_PRODUCTION_OVERRIDE_VAR) != '1':
+    if is_prod_data and not hosted and env.get(LOCAL_PRODUCTION_OVERRIDE_VAR) != '1':
         raise DatabaseBindingError(
-            f'R5: this is not a hosted service but DATABASE_URL points at the production database '
+            f'R5: this is not a hosted service but DATABASE_URL points at the {what} '
             f'({endpoint}); set {LOCAL_PRODUCTION_OVERRIDE_VAR}=1 if that is really intended')
+    on_render = bool(env.get('RENDER') or env.get('RENDER_SERVICE_ID'))
+    if on_render and deployment != 'production' and is_postgres and endpoint not in STAGING_DB_ENDPOINTS:
+        raise DatabaseBindingError(
+            f'R8: a hosted {deployment} process may use only an approved staging database '
+            f'({", ".join(sorted(STAGING_DB_ENDPOINTS))}), not {endpoint or "a non-Neon host"}')
     if deployment == 'production' and hosted and is_postgres and not is_prod_db:
         recovery = (env.get(RECOVERY_ENDPOINT_VAR) or '').strip().lower()
         if not (recovery and endpoint == recovery):
@@ -169,6 +223,9 @@ def resolve(env: Mapping[str, str] = os.environ, url_var: str = 'DATABASE_URL') 
         rerouting = [k for k in _ROUTING_ENV_VARS if env.get(k)]
         if rerouting:
             raise DatabaseBindingError(f'R6: {", ".join(rerouting)} is set and would override the host')
+        problem = _url_shape_problem(url, env)
+        if problem:
+            raise DatabaseBindingError(f'R9: {url_var} is refused because {problem}')
         # A URL with no host lets libpq take the host from PGHOST (or a local
         # socket), so the endpoint checks below would judge a host the process
         # never uses. Locally that is a legitimate socket connection; hosted, or

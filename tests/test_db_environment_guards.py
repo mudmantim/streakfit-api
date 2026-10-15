@@ -20,7 +20,7 @@ import pytest
 import db_guard as G
 
 PROD_EP = 'ep-odd-star-ajye3lag'
-STAGING_EP = 'ep-fake-staging-00000000'
+STAGING_EP = 'ep-young-sound-b4qsoqe8'      # the allowlisted staging endpoint (R8); not a secret
 PROD_SVC = 'srv-d8f1hh6rnols73ak3a10'
 STAGING_SVC = 'srv-fakenonproduction0000'
 PASSWORD = 'Sup3rS3cretPassw0rd'
