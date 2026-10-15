@@ -4676,6 +4676,24 @@ def admin_stats():
 # record; this dict is just live progress for the poller.
 _verification_state = {"running": False, "current_module": None, "run_id": None}
 
+# A run row is written 'running' before its daemon thread starts, and only that
+# thread ever finishes it. If the process restarts mid-run (a deploy, a crash,
+# a Render restart) nothing is left to finish it, and the row used to say
+# 'running' forever: Project Status stuck on yellow, History showing a run that
+# would never end (known issue K6). A real run takes minutes; past this it is
+# reported as 'interrupted'. Display-time only -- a GET never rewrites history.
+VERIFICATION_RUN_MAX_AGE = timedelta(hours=1)
+
+
+def _verification_run_status(run, now=None):
+    if run.status != 'running':
+        return run.status
+    if _verification_state["running"] and _verification_state["run_id"] == run.id:
+        return 'running'
+    if ((now or datetime.utcnow()) - run.started_at) > VERIFICATION_RUN_MAX_AGE:
+        return 'interrupted'
+    return 'running'
+
 
 def _compute_system_health():
     """Real checks only -- see CLAUDE.md / scripts/verification/README.md
@@ -4790,9 +4808,10 @@ def admin_project_status():
         and (datetime.utcnow() - latest.finished_at) > timedelta(hours=24)
     )
 
-    if not system_ok or (latest is not None and latest.status == "failed"):
+    latest_status = _verification_run_status(latest) if latest is not None else None
+    if not system_ok or latest_status == "failed":
         overall = "red"
-    elif latest is None or latest.status in ("running", "error") or verification_stale:
+    elif latest is None or latest_status in ("running", "error", "interrupted") or verification_stale:
         overall = "yellow"
     else:
         overall = "green"
@@ -4808,7 +4827,7 @@ def admin_project_status():
         "last_deployment_at": _PROCESS_STARTED_AT.isoformat() + "Z",
         "last_verification": None if latest is None else {
             "run_id": latest.id,
-            "status": latest.status,
+            "status": latest_status,
             "suite_version": latest.suite_version,
             "total": latest.total,
             "passed": latest.passed,
@@ -4866,7 +4885,7 @@ def admin_verify_status():
 
     return jsonify({
         "run_id": latest.id,
-        "status": latest.status,
+        "status": _verification_run_status(latest),
         "running": _verification_state["running"],
         "current_module": _verification_state["current_module"] if _verification_state["running"] else None,
         "suite_version": latest.suite_version,
@@ -4893,7 +4912,7 @@ def admin_verify_history():
                 "finished_at": r.finished_at.isoformat() + "Z" if r.finished_at else None,
                 "suite_version": r.suite_version,
                 "commit_sha": r.commit_sha,
-                "status": r.status,
+                "status": _verification_run_status(r),
                 "total": r.total,
                 "passed": r.passed,
                 "failed": r.failed,
@@ -8812,6 +8831,15 @@ def complete_team_challenge(team_id, public_id):
     if already:
         return jsonify({"already_completed": True, "xp_awarded": 0, "acorns_awarded": 0}), 200
 
+    # A challenge that has wrapped up (its 48 hours ran out, or the person it
+    # was addressed to left) is closed to everyone, by request as well as in
+    # the product (known issue K1, 2026-10-03). The card already reads "This
+    # one has wrapped up"; this answer lets it say so instead of silently
+    # resetting the button. Asked AFTER the already-completed check, so a
+    # repeat of a completion made in time still gets its friendly answer.
+    if not _challenge_is_open(challenge):
+        return jsonify({"error": "challenge_closed"}), 409
+
     user = db.session.get(User, user_id)     # already locked and re-read above
     old_level = xp_to_level(user.xp_total)['level']
 
@@ -10440,6 +10468,15 @@ def admin_decide_appeal(public_id):
         return jsonify({"error": "The appellant deleted their account; this appeal "
                                  "can no longer be decided.",
                         "code": "appeal_withdrawn"}), 409
+    # One decision per appeal (known issue K2, 2026-10-03). Deciding a closed
+    # appeal again is not harmless: "overturned" lifts EVERY active restriction
+    # of the action's kind, so re-deciding an old appeal would quietly lift a
+    # newer suspension made after it, while the trail recorded a second,
+    # contradictory outcome. Checked under the row lock taken above, so two
+    # operators deciding at once get one decision and one refusal.
+    if appeal.status != 'open':
+        return jsonify({"error": f"This appeal was already decided ({appeal.outcome}).",
+                        "code": "appeal_closed"}), 409
     data = request.get_json(silent=True) or {}
     outcome = (data.get('outcome') or '').strip()
     if outcome not in ('upheld', 'overturned'):

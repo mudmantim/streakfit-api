@@ -359,3 +359,27 @@ def test_the_teams_list_does_not_scale_queries_with_challenges(client, team_of_t
         client.get("/api/teams", headers=auth_headers(team_of_two["kid"]))
 
     assert n[0] <= 10, f"query count {n[0]} grows with challenges"
+
+
+def test_an_expired_challenge_cannot_be_completed_by_request_either(client, team_of_two):
+    """K1 (2026-10-03): the card said "wrapped up" but the completion route never
+    looked at expires_at, so a direct request still completed it and paid XP."""
+    ch = start(client, team_of_two["parent"], team_of_two["team_id"]).get_json()["challenge"]
+    path = f"/api/teams/{team_of_two['team_id']}/challenges/{ch['public_id']}/complete"
+    # The parent completes in time; then the challenge wraps up.
+    assert client.post(path, headers=auth_headers(team_of_two["parent"])).status_code == 200
+    row = db.session.execute(
+        db.select(TeamChallenge).where(TeamChallenge.public_id == ch["public_id"])).scalar_one()
+    row.expires_at = datetime.datetime.utcnow() - datetime.timedelta(seconds=1)
+    db.session.commit()
+    xp_before = db.session.get(User, _uid("ch_kid")).xp_total
+
+    r = client.post(path, headers=auth_headers(team_of_two["kid"]))
+    assert r.status_code == 409 and r.get_json() == {"error": "challenge_closed"}
+    assert db.session.query(TeamChallengeCompletion).filter_by(challenge_id=row.id).count() == 1
+    db.session.expire_all()
+    assert db.session.get(User, _uid("ch_kid")).xp_total == xp_before
+
+    # Someone who DID complete in time still gets the friendly repeat answer.
+    again = client.post(path, headers=auth_headers(team_of_two["parent"]))
+    assert again.status_code == 200 and again.get_json()["already_completed"] is True

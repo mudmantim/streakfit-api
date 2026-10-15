@@ -2151,6 +2151,18 @@ async function _completeChallenge(ch, btn, box) {
 
     var path = '/api/teams/' + teamId + '/challenges/' + encodeURIComponent(ch.public_id) + '/complete';
     var result = await api(path, 'POST');
+    if (result && result.status === 409 && result.data && result.data.error === 'challenge_closed') {
+        // It wrapped up while this card was on screen. Say so the way an
+        // expired card already does -- a fact about the challenge, never
+        // something the person failed to do -- instead of resetting the
+        // button for another tap that cannot work.
+        btn.remove();
+        var over = document.createElement('p');
+        over.className = 'tchallenge-blurb';
+        over.textContent = 'This one has wrapped up.';
+        box.appendChild(over);
+        return;
+    }
     if (!result || result.status !== 200) {
         btn.disabled = false;
         btn.textContent = 'I did it';
