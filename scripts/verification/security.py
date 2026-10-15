@@ -109,6 +109,15 @@ def run(api, results, scenario):
     status, _ = api.request("GET", "/api/daily")  # no Authorization header at all
     results.check("security.no_token_blocked", status == 401, f"status={status}")
 
+    # A token whose signature does not verify (what every stored token becomes
+    # after a JWT_SECRET_KEY rotation) must be a 401, the status the client
+    # signs out on; it was a 422 until 2026-10. Built from a real token by
+    # replacing its signature, so no token-shaped literal lives in the repo.
+    head_and_claims = users["a"]["token"].rsplit(".", 1)[0]
+    status, body = api.request("GET", "/api/daily", token=head_and_claims + "." + "x" * 43)
+    results.check("security.bad_signature_token_is_401",
+                  status == 401 and (body or {}).get("error") == "Invalid token", f"status={status}")
+
     return scenario
 
 

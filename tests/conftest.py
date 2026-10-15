@@ -84,3 +84,24 @@ def mission_json(day=None, **extra):
     Defaults to the server's current mission day."""
     import app as appmod
     return {'mission_date': (day or appmod.server_today()).isoformat(), **extra}
+
+
+@pytest.fixture(autouse=True)
+def no_sweeper_thread_survives_its_test():
+    """A test that starts the real retention sweeper must stop it before it
+    ends. A surviving thread keeps writing retention/notification runs into
+    LATER tests' databases, so their results depend on timing (CI, 2026-10-14:
+    test_self_check_fails_when_the_sweep_has_gone_quiet saw a fresh run that it
+    had just deleted). Any survivor is stopped here and the test that leaked it
+    fails, deterministically, instead of a random later test."""
+    import threading
+    yield
+    leaked = [t for t in threading.enumerate() if t.name.startswith('streakfit-retention') and t.is_alive()]
+    for t in leaked:
+        stop = getattr(t, 'stop_event', None)
+        if stop is not None:
+            stop.set()
+            t.join(timeout=10)
+    stuck = [t.name for t in leaked if t.is_alive()]
+    assert not leaked, (f'{len(leaked)} retention sweeper thread(s) still running at the end of this test'
+                        + (f'; {len(stuck)} did not stop within 10 s: {stuck}' if stuck else ''))

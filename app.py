@@ -30,6 +30,7 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 from werkzeug.security import generate_password_hash, check_password_hash
 
 from streakfit_content import BRAIN_BOOST_LIBRARY, INSIGHT_LIBRARY, RICKIE_JOKES
+import db_guard as _db_guard
 from flask_jwt_extended import (JWTManager, create_access_token, jwt_required,
                                get_jwt_identity, verify_jwt_in_request)
 from flask_limiter import Limiter
@@ -71,12 +72,23 @@ _PROCESS_STARTED_AT = datetime.utcnow()
 # Stated by /api/build-identity. Bumped deliberately, not derived from a commit.
 APP_VERSION = "0.9.0"
 
-# Fallback to local SQLite only if Render's PostgreSQL URL isn't present
-DATABASE_URL = os.environ.get('DATABASE_URL')
-if DATABASE_URL and DATABASE_URL.startswith("postgres://"):
-    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
+# Which database this process may use is decided by db_guard BEFORE anything
+# connects (incident 2026-10-13: a staging service ran on production's
+# database). Local development without DATABASE_URL still gets SQLite; a
+# hosted service without one refuses to start instead.
+_db_guard.install_log_redaction()
+try:
+    DB_BINDING = _db_guard.resolve()
+except _db_guard.DatabaseBindingError as _exc:
+    logging.getLogger(__name__).critical('Refusing to start: %s', _exc)
+    raise SystemExit(1) from _exc
+DATABASE_URL = DB_BINDING.url
+# Set by the boot check once the SERVER has confirmed which database it is
+# (db_guard R7). The retention sweeper on a hosted service will not start
+# without it.
+_DB_IDENTITY_VERIFIED = False
 
-app.config['SQLALCHEMY_DATABASE_URI'] = DATABASE_URL or 'sqlite:///streakfit.db'
+app.config['SQLALCHEMY_DATABASE_URI'] = DATABASE_URL
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 # pool_pre_ping checks each connection before use so a connection the DB has
 # silently closed (e.g. Neon's serverless auto-suspend) is replaced instead of
@@ -3429,6 +3441,14 @@ def _detect_environment():
 
     Both markers are read here and discarded -- neither reaches the payload.
     """
+    # A declared deployment wins (db_guard, incident 2026-10-13): staging on
+    # Render used to report itself as production here, while db_guard requires
+    # it to declare STREAKFIT_DEPLOYMENT=staging. Undeclared, the markers decide
+    # exactly as before -- the live production service declares nothing. An
+    # unrecognised value is ignored here; db_guard refuses it at import.
+    declared = (os.environ.get(_db_guard.DEPLOYMENT_VAR) or '').strip().lower()
+    if declared in _db_guard.DEPLOYMENTS:
+        return declared
     if os.environ.get('RENDER') or os.environ.get('RENDER_SERVICE_ID'):
         return 'production'
     if os.environ.get('STREAKFIT_ENFORCE_DB_HEAD') == '1':
@@ -13656,7 +13676,13 @@ def missing_token_callback(reason):
 
 @jwt.invalid_token_loader
 def invalid_token_callback(error_string):
-    return jsonify({"error": "Invalid token"}), 422
+    # 401, not Flask-JWT-Extended's default 422 (RFC 6750: invalid_token is a
+    # 401). The client signs out only on 401, so with 422 a token that no
+    # longer verifies -- every stored token after a JWT_SECRET_KEY rotation --
+    # left people on a dashboard that failed to load instead of the login
+    # screen. A 401 reaches the existing "Session expired" path in every client
+    # already installed, with no new JavaScript to deliver.
+    return jsonify({"error": "Invalid token"}), 401
 
 @jwt.expired_token_loader
 def expired_token_callback(jwt_header, jwt_payload):
@@ -13746,11 +13772,17 @@ def _assert_db_at_head():
         head = ScriptDirectory.from_config(cfg).get_current_head()
         with app.app_context():
             with db.engine.connect() as conn:
+                # FIRST, before reading anything: is this the database this
+                # deployment may use, by the server's own account (db_guard R7)?
+                reported = _db_guard.verify_server(conn, DB_BINDING)
                 current = MigrationContext.configure(conn).get_current_revision()
             # This runs at import -- in gunicorn's MASTER under --preload. A
             # connection left in the pool here is inherited by every forked
             # worker: one socket, several processes (RC-B2a D37).
             db.engine.dispose()
+    except _db_guard.DatabaseBindingError as exc:
+        log.critical('Refusing to start: %s', exc)
+        raise SystemExit(1) from exc
     except Exception as exc:
         log.critical('Refusing to start: could not verify database migration state '
                      '(database unreachable?): %s', exc)
@@ -13759,6 +13791,10 @@ def _assert_db_at_head():
         log.critical('Refusing to start: database is at Alembic revision %r but the '
                      'code expects head %r. Run `flask db upgrade`.', current, head)
         raise SystemExit(1)
+    global _DB_IDENTITY_VERIFIED
+    _DB_IDENTITY_VERIFIED = True
+    log.info('Database identity verified (%s, server endpoint %s).',
+             DB_BINDING.describe(), reported or 'not reported')
     log.info('Database migration check passed (at head %s).', head)
 
 
@@ -13905,7 +13941,7 @@ def _sweeper_delivery_step():
             sent['delivered'], sent['failed'], sent['contended'])
 
 
-def _retention_sweeper_loop():
+def _retention_sweeper_loop(stop=None):
     # SETTLE, THEN WORK, THEN SLEEP -- in that order, deliberately.
     #
     # This loop used to sleep a full interval FIRST, so every deploy, restart
@@ -13925,6 +13961,16 @@ def _retention_sweeper_loop():
     # of them.
     time.sleep(min(_RETENTION_FIRST_PASS_SETTLE_S, _RETENTION_THREAD_INTERVAL_S))
     while True:
+        # `stop` exists for tests only: _start_retention_sweeper() gives every
+        # thread its own Event, and nothing in production ever sets it, so in
+        # production this is never true and the loop runs for the life of the
+        # process exactly as before (D42: nothing may END this thread by
+        # accident -- this ends it only on an explicit, test-owned request).
+        # Checked after a sleep, never instead of one: the sleeps are where
+        # tests drive the loop. A test that started a thread sets the Event and
+        # joins; the thread finishes at most its current pass and one interval.
+        if stop is not None and stop.is_set():
+            return
         # Four steps, each through `_run_sweeper_step`: its own app context,
         # its own failure record, and nothing it does -- the step, the record,
         # the logging, even entering or leaving a context -- can end this
@@ -13956,11 +14002,21 @@ def _retention_sweeper_loop():
 
 def _start_retention_sweeper():
     global _WORKER_STARTED_AT
+    # A hosted process deletes rows only after the boot check has proved, by
+    # the server's own account, which database this is (incident 2026-10-13:
+    # a staging service swept production's database for six hours). Without
+    # STREAKFIT_ENFORCE_DB_HEAD=1 nothing has proved it, so nothing is deleted.
+    if DB_BINDING.hosted and not _DB_IDENTITY_VERIFIED:
+        app.logger.critical('event=retention_sweeper_refused reason=database_identity_unverified '
+                            'hint=start_with_STREAKFIT_ENFORCE_DB_HEAD=1 %s', DB_BINDING.describe())
+        return None
     # Stamped BEFORE the thread runs, so a request served in the first seconds
     # of a new process can still distinguish "just started" from "never ran".
     _WORKER_STARTED_AT = datetime.utcnow()
-    thread = threading.Thread(target=_retention_sweeper_loop,
+    stop = threading.Event()   # never set in production; see _retention_sweeper_loop
+    thread = threading.Thread(target=_retention_sweeper_loop, args=(stop,),
                               name='streakfit-retention', daemon=True)
+    thread.stop_event = stop  # read by tests to stop and join this thread
     thread.start()
     app.logger.info('event=retention_sweeper_started interval_s=%d',
                     _RETENTION_THREAD_INTERVAL_S)
