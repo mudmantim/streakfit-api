@@ -129,12 +129,11 @@ class Sim:
         cmd = (('python scripts/render_env_probe.py runtime && ' if probe else '')
                + f'{flags}exec gunicorn app:app -b 127.0.0.1:8000 --workers 1 --timeout 120')
         name = f'sf-sim-app-{self.tag}-run-{uuid.uuid4().hex[:4]}'
-        run_env = dict(env)
-        if probe:   # the probe reports the flags too, exactly as the Start Command sets them on Render
-            run_env['STREAKFIT_ENFORCE_DB_HEAD'] = '1'
-            if sweeper:
-                run_env['STREAKFIT_RETENTION_SWEEPER'] = '1'
-        sh(*self._run_args(tree, run_env, name, detach=True), '-c', cmd)
+        # (v3, 2026-10-16) The flags are set ONLY inline on gunicorn, exactly like Render's Start Command,
+        # so the runtime probe (which runs first) prints them as MISSING. Until now the simulator also put
+        # them in the container environment, which the real Start Command cannot do; that hid the
+        # checker's RUN-HEAD-FLAG defect until the first real rehearsal deploy.
+        sh(*self._run_args(tree, env, name, detach=True), '-c', cmd)
         healthy, ident = False, None
         fetch = ("import json,urllib.request as u;"
                  "print(json.dumps(json.load(u.urlopen('http://127.0.0.1:8000/api/build-identity',timeout=3))))")

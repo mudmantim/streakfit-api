@@ -63,7 +63,9 @@ def pre_block(**kw):
 
 
 def run_env(**kw):
-    return render_env(STREAKFIT_ENFORCE_DB_HEAD='1', RENDER_INSTANCE_ID='srv-fakestaging000000000-abcde', **kw)
+    # (v3) No STREAKFIT_ENFORCE_DB_HEAD here: the Start Command sets it inline on gunicorn, AFTER the
+    # runtime probe, so the probe really prints `STREAKFIT_ENFORCE_DB_HEAD: MISSING` (2026-10-16 step 5).
+    return render_env(RENDER_INSTANCE_ID='srv-fakestaging000000000-abcde', **kw)
 
 
 def run_block(**kw):
@@ -125,6 +127,17 @@ def test_guard_messages_used_by_the_fixtures_are_the_real_ones():
 
 
 # --- good logs pass ---------------------------------------------------------
+
+def test_probe_really_cannot_see_the_inline_head_flag():
+    """(v3) The good log is shaped like the real Start Command: the probe prints MISSING."""
+    assert '  STREAKFIT_ENFORCE_DB_HEAD: MISSING' in run_block()
+
+
+def test_head_flag_visible_to_the_probe_is_also_accepted():
+    """(v3) If the flag were in the service environment the probe would show =1; still fine."""
+    g = [ln.replace('STREAKFIT_ENFORCE_DB_HEAD: MISSING', 'STREAKFIT_ENFORCE_DB_HEAD=1') for ln in good()]
+    assert fails(g) == []
+
 
 @pytest.mark.parametrize('wrap', [lambda x: x, stamped])
 def test_good_logs_pass(wrap):
@@ -214,9 +227,30 @@ MUTATIONS = {
     'sweeper enabled at runtime': (
         lambda g: [ln.replace('STREAKFIT_RETENTION_SWEEPER: MISSING', 'STREAKFIT_RETENTION_SWEEPER=1')
                    if i > N_PRE else ln for i, ln in enumerate(g)], {'RUN-NO-SWEEPER'}),
-    'head enforcement off at runtime': (
-        lambda g: [ln.replace('STREAKFIT_ENFORCE_DB_HEAD=1', 'STREAKFIT_ENFORCE_DB_HEAD: MISSING') for ln in g],
-        {'RUN-HEAD-FLAG'}),
+    # --- (v3) flags set inline on gunicorn are invisible to the probe; judge what the app did ---
+    '(v3) sweeper started by an inline flag (probe shows MISSING)': (
+        lambda g: g + ['[2026-10-20 12:01:03,000] INFO in app: event=retention_sweeper_started interval_s=3600'],
+        {'RUN-NO-SWEEPER'}),
+    '(v3) sweeper refused but was switched on (inline flag)': (
+        lambda g: g + ['[2026-10-20 12:01:03,000] CRITICAL in app: event=retention_sweeper_refused '
+                       'reason=database_identity_unverified'], {'RUN-NO-SWEEPER'}),
+    '(v3) head check absent (flag never reached gunicorn; probe MISSING is not proof)': (
+        lambda g: [ln for ln in g if 'migration check passed' not in ln], {'RUN-HEAD-FLAG', 'HEAD-ONE', 'HEAD-REV'}),
+    '(v3) head check failed: database behind head': (
+        lambda g: g[:-1] + ["CRITICAL in app: Refusing to start: database is at Alembic revision 'c7d2a9e41b30' "
+                            "but the code expects head 'd4f1b6e2a9c3'. Run `flask db upgrade`."],
+        {'RUN-HEAD-FLAG', 'HEAD-ONE'}),
+    '(v3) head check failed: state unverifiable': (
+        lambda g: g[:-1] + ['CRITICAL in app: Refusing to start: could not verify database migration state '
+                            '(database unreachable?): OperationalError'], {'RUN-HEAD-FLAG', 'HEAD-ONE'}),
+    '(v3) head check passed, then a head refusal (two processes)': (
+        lambda g: g + ["CRITICAL in app: Refusing to start: database is at Alembic revision 'c7d2a9e41b30' "
+                       "but the code expects head 'd4f1b6e2a9c3'. Run `flask db upgrade`."], {'RUN-HEAD-FLAG'}),
+    '(v3) head check before the runtime probe': (
+        lambda g: g[:N_PRE + 2] + [HEAD_LINE] + g[N_PRE + 2:-1], {'RUN-HEAD-FLAG', 'HEAD-ONE'}),
+    '(v3) probe shows the head flag with an unexpected value': (
+        lambda g: [ln.replace('STREAKFIT_ENFORCE_DB_HEAD: MISSING', 'STREAKFIT_ENFORCE_DB_HEAD=0')
+                   if i > N_PRE else ln for i, ln in enumerate(g)], {'RUN-HEAD-FLAG'}),
     'MIGRATION_DATABASE_URL set': (
         lambda g: [ln.replace('MIGRATION_DATABASE_URL: MISSING', 'MIGRATION_DATABASE_URL: set') for ln in g],
         {'PRE-NO-OVERRIDE', 'RUN-NO-OVERRIDE'}),
@@ -228,9 +262,10 @@ MUTATIONS = {
         lambda g: [ln.replace(f'DATABASE_URL endpoint={EP}', 'DATABASE_URL endpoint=ep-other-thing-11111111')
                    if i > N_PRE else ln for i, ln in enumerate(g)], {'RUN-EP'}),
     'head check names another revision': (
-        lambda g: [ln.replace(HEAD, 'aaaaaaaaaaaa') if 'check passed' in ln else ln for ln in g], {'HEAD-REV'}),
+        lambda g: [ln.replace(HEAD, 'aaaaaaaaaaaa') if 'check passed' in ln else ln for ln in g],
+        {'HEAD-REV', 'RUN-HEAD-FLAG'}),
     'head check without revision': (
-        lambda g: g[:-1] + ['INFO in app: Database migration check passed'], {'HEAD-REV'}),
+        lambda g: g[:-1] + ['INFO in app: Database migration check passed'], {'HEAD-REV', 'RUN-HEAD-FLAG'}),
     'production service mentioned anywhere': (lambda g: g + ['note srv-d8f1hh6rnols73ak3a10'], {'NO-PROD'}),
     # --- (v2) incomplete / malformed probe blocks ---
     'probe block lost a key': (lambda g: [ln for ln in g if 'RENDER_SERVICE_TYPE' not in ln],

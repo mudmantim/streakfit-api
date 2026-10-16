@@ -14,6 +14,14 @@ pass a log of the wrong build, branch or service.
 Successor of e2e-campaign/tools/staging_pw1/s07_log_check.py: every finding of
 that tool is kept with the same ID and meaning; the additions are marked (v2).
 
+v3 (2026-10-16): the runtime probe runs BEFORE gunicorn, and the Start Command
+sets STREAKFIT_ENFORCE_DB_HEAD=1 (and, if ever, STREAKFIT_RETENTION_SWEEPER=1)
+inline on gunicorn only, so the probe can never see them. The first real
+rehearsal deploy proved it (RUN-HEAD-FLAG failed on a correctly configured
+service). RUN-HEAD-FLAG and RUN-NO-SWEEPER now judge what the serving process
+DID: the enforced head check ran and named the expected head, and no
+retention sweeper event exists. The probe's view is only cross-checked.
+
 OUTPUT: predefined findings only, `PASS|FAIL <ID> <description> [lines ...]`.
 No log text is ever printed, not even identifiers; line numbers are the evidence.
 
@@ -34,6 +42,7 @@ import argparse
 import re
 import sys
 
+CHECKER_VERSION = 'v3 2026-10-16'
 PROD_ENDPOINT = 'ep-odd-star-ajye3lag'
 # (2026-10-15) copies of production data: the incident recovery branch br-rough-smoke-ajnojcbg.
 # Never a valid staging endpoint, and named nowhere in any rehearsal log, refusals included.
@@ -77,6 +86,11 @@ MIGRATING = re.compile(r'Migrating database: deployment=(\S+) endpoint=(\S+) hos
 IDENTITY = re.compile(r'Database identity verified \(deployment=(\S+) endpoint=(\S+) hosted=\S+ '
                       r'service=([^,]+), server endpoint ([^)]+)\)')
 HEAD_OK = re.compile(r'Database migration check passed(?: \(at head ([0-9a-f]+)\))?')
+# (v3) app._assert_db_at_head() refusing to boot: wrong revision, or state unverifiable
+HEAD_REFUSAL = re.compile(r'Refusing to start: (?:database is at Alembic revision|could not verify database '
+                          r'migration state)')
+# (v3) app._start_retention_sweeper() logs one of these whenever STREAKFIT_RETENTION_SWEEPER=1
+SWEEPER_EVENT = re.compile(r'event=retention_sweeper_\w+')
 REFUSED = re.compile(r'Refusing to start: (R\d)\b')
 CHECKOUT = re.compile(r'(?i)checking out commit ([0-9a-f]{7,40})')
 
@@ -221,10 +235,13 @@ def check_deploy(lines, args, rep):
               ep and ep[0] == args.endpoint, ep[1] if ep else pre['at'])
     rep.check('RUN-EP', '(v2) runtime DATABASE_URL names the staging endpoint',
               _val(run, EP_KEY) == args.endpoint, _at(run, EP_KEY))
-    rep.check('RUN-HEAD-FLAG', '(v2) runtime has STREAKFIT_ENFORCE_DB_HEAD=1',
-              _val(run, 'STREAKFIT_ENFORCE_DB_HEAD') == '1', _at(run, 'STREAKFIT_ENFORCE_DB_HEAD'))
-    rep.check('RUN-NO-SWEEPER', '(v2) the retention sweeper is NOT enabled during the rehearsal',
-              _val(run, 'STREAKFIT_RETENTION_SWEEPER') == 'MISSING', _at(run, 'STREAKFIT_RETENTION_SWEEPER'))
+    # (v3) The probe cannot see a flag set inline on gunicorn; its value proves nothing. Proof is the
+    # serving process's own behaviour: no sweeper event anywhere in the log.
+    sweeps = [i for i, ln in enumerate(lines) if SWEEPER_EVENT.search(ln)]
+    rep.check('RUN-NO-SWEEPER', '(v3) the retention sweeper is NOT enabled: the probe does not show it set and '
+              'no retention sweeper event was logged',
+              _val(run, 'STREAKFIT_RETENTION_SWEEPER') == 'MISSING' and not sweeps,
+              _at(run, 'STREAKFIT_RETENTION_SWEEPER'), *sweeps[:10])
 
     migs = _all(lines, MIGRATING)
     mig = migs[0] if len(migs) == 1 else None
@@ -261,6 +278,20 @@ def check_deploy(lines, args, rep):
               len(heads) == 1 and ident and heads[0][0] > ident[0], *[i for i, _ in heads])
     rep.check('HEAD-REV', '(v2) the head check names the expected Alembic head',
               len(heads) == 1 and heads[0][1].group(1) == args.head, *[i for i, _ in heads])
+    # (v3) Positive evidence that the serving process ran its ENFORCED head check: the only code that logs
+    # "Database migration check passed" is app._assert_db_at_head(), called only when
+    # STREAKFIT_ENFORCE_DB_HEAD == '1'. So require that line, once, naming the expected head, after the
+    # runtime probe and the identity check, and no head-check refusal. The probe's value of the flag is
+    # only cross-checked (MISSING: set inline on gunicorn, as the Start Command does; 1: set in the
+    # service environment); it is never taken as proof on its own.
+    head_refusals = [i for i, _ in _all(lines, HEAD_REFUSAL)]
+    flag = _val(run, 'STREAKFIT_ENFORCE_DB_HEAD')
+    rep.check('RUN-HEAD-FLAG', '(v3) the serving process ran its enforced head check: exactly one head check '
+              'naming the expected head, after the runtime probe and the identity check, no head-check refusal, '
+              'probe flag MISSING (inline) or 1',
+              len(heads) == 1 and heads[0][1].group(1) == args.head and heads[0][0] > run['end']
+              and ident and heads[0][0] > ident[0] and not head_refusals and flag in ('MISSING', '1'),
+              _at(run, 'STREAKFIT_ENFORCE_DB_HEAD'), *[i for i, _ in heads], *head_refusals[:10])
     prod = [i for i, ln in enumerate(lines) if PROD_ENDPOINT in ln or PROD_SERVICE in ln
             or any(d in ln for d in PROD_DERIVED)]
     rep.check('NO-PROD', 'production endpoint (v2: or service, or a copy of production data) appears nowhere in '
@@ -353,7 +384,7 @@ def main(argv):
     rep = evaluate(args.mode, lines, args)
     for fid, text, ok, at in rep.rows:
         print(f'{"PASS" if ok else "FAIL"}  {fid:17} {text}' + (f'  [lines {", ".join(map(str, at))}]' if at else ''))
-    print('rehearsal', args.mode, 'PASSED' if rep.ok else 'FAILED')
+    print('rehearsal', args.mode, 'PASSED' if rep.ok else 'FAILED', f'(checker {CHECKER_VERSION})')
     return 0 if rep.ok else 1
 
 
