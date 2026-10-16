@@ -845,12 +845,12 @@ def check_a_challenge_that_wrapped_up_while_open_says_so(b: Browser, base: str, 
     b.js("(()=>{const btn=document.querySelector('.team-card-open-btn');"
          " if(btn) btn.click(); return 1;})()")
     time.sleep(2.5)
-    # Challenge cards live in the thread, on the panel's second tab.
-    b.js("(()=>{const t=document.querySelectorAll('.team-panel-tab')[1]; if(t) t.click(); return 1;})()")
-    time.sleep(0.8)
+    # No tab switch here on purpose: "Take it on" must land where the challenge
+    # is (its card lives in the thread, on the panel's second tab).
     has_btn = b.js("(()=>{const e=document.querySelector('.tchallenge-do-btn');"
                    " return !!e && e.getBoundingClientRect().height > 0;})()")
-    if not check(bool(has_btn), "the open challenge offers its 'I did it' button"):
+    if not check(bool(has_btn), "'Take it on' opens the panel where the challenge and its "
+                 "'I did it' button are"):
         return
 
     from app import TeamChallenge, User, db

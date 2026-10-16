@@ -576,7 +576,12 @@ function _buildTeamCard(team) {
     var openBtn = document.createElement('button');
     openBtn.className = 'team-card-open-btn team-card-open-btn-active';
     openBtn.textContent = team.open_challenges > 0 ? 'Take it on' : 'Open';
-    openBtn.addEventListener('click', function () { openTeamPanel(team); });
+    // "Take it on" goes where the challenge is: its card lives in the thread,
+    // on the panel's second tab. Opening on the Campfire tab left the person
+    // looking for what the button had just promised.
+    openBtn.addEventListener('click', function () {
+        openTeamPanel(team, { showChat: team.open_challenges > 0 });
+    });
     card.appendChild(openBtn);
 
     return card;
@@ -898,7 +903,7 @@ var _teamPanelInfo     = null;
 var _teamPanelMeta     = null;
 var _teamPanelStats    = null;
 
-function openTeamPanel(team) {
+function openTeamPanel(team, opts) {
     _teamPanelTeamId = team.id;
 
     if (!_teamPanelOverlay) {
@@ -995,6 +1000,7 @@ function openTeamPanel(team) {
         t.pane.setAttribute('role', 'tabpanel');
     });
     _teamPanelChatPane = chatPane;
+    if (opts && opts.showChat && tabs.children[1]) tabs.children[1].click();
 
     var reactionRow = document.createElement('div');
     reactionRow.className = 'team-panel-reaction-row';
