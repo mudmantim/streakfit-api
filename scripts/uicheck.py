@@ -818,6 +818,63 @@ def check_team_witness(b: Browser, base: str, app) -> None:
           "and it says the thing somebody hesitating is afraid of", note[:90])
 
 
+def check_a_challenge_that_wrapped_up_while_open_says_so(b: Browser, base: str, app) -> None:
+    """K1 (2026-10-15): the card is on screen with its "I did it" button, the
+    challenge wraps up (48 hours, or the person it named left), THEN the tap.
+    The server now refuses (409 challenge_closed); the card must say it wrapped
+    up -- a fact about the challenge -- not silently reset for another tap."""
+    print("\nTeams — a challenge that wrapped up while its card was open")
+    parent, parent_token = make_user(app, "chparent")
+    kid, kid_token = make_user(app, "chkid")
+    team = _api(base, "/api/teams", "POST", parent_token, {"name": "UICheck Challenge"}).get("team")
+    if not team:
+        bad("could not create a team to check")
+        return
+    _api(base, f"/api/teams/{team['id']}/join", "POST", kid_token, {"code": team["invite_code"]})
+    ch = _api(base, f"/api/teams/{team['id']}/challenges", "POST", parent_token,
+              {"preset_key": "squats_20"}).get("challenge")
+    if not ch:
+        bad("could not start a challenge to check")
+        return
+
+    b.goto(base + "/", wait=1.0)
+    b.js(f"localStorage.setItem('streakfit_token', {json.dumps(kid_token)})")
+    b.goto(base + "/", wait=3.0)
+    go_to_pane(b, "team")
+    # With a challenge waiting the card's button says "Take it on", not "Open".
+    b.js("(()=>{const btn=document.querySelector('.team-card-open-btn');"
+         " if(btn) btn.click(); return 1;})()")
+    time.sleep(2.5)
+    # Challenge cards live in the thread, on the panel's second tab.
+    b.js("(()=>{const t=document.querySelectorAll('.team-panel-tab')[1]; if(t) t.click(); return 1;})()")
+    time.sleep(0.8)
+    has_btn = b.js("(()=>{const e=document.querySelector('.tchallenge-do-btn');"
+                   " return !!e && e.getBoundingClientRect().height > 0;})()")
+    if not check(bool(has_btn), "the open challenge offers its 'I did it' button"):
+        return
+
+    from app import TeamChallenge, User, db
+    with app.app_context():
+        row = db.session.execute(db.select(TeamChallenge)
+                                 .where(TeamChallenge.public_id == ch["public_id"])).scalar_one()
+        row.expires_at = dt.datetime.utcnow() - dt.timedelta(seconds=1)
+        db.session.commit()
+        xp_before = db.session.execute(db.select(User.xp_total).where(User.username == kid)).scalar_one()
+
+    b.js("document.querySelector('.tchallenge-do-btn').click()")
+    time.sleep(2.0)
+    card = b.js("(()=>{const e=document.querySelector('.tchallenge-card');"
+                " return e ? e.innerText : '';})()") or ""
+    check("wrapped up" in card, "the card says the challenge wrapped up", f"card was {card[:160]!r}")
+    check(not b.js("!!document.querySelector('.tchallenge-do-btn')"),
+          "and offers no button for a tap that cannot work")
+    check("did this one" not in card, "and does not claim a completion that was refused",
+          f"card was {card[:160]!r}")
+    with app.app_context():
+        xp_after = db.session.execute(db.select(User.xp_total).where(User.username == kid)).scalar_one()
+    check(xp_after == xp_before, "and paid nothing", f"xp {xp_before} -> {xp_after}")
+
+
 def check_leaving_while_a_report_is_open(b: Browser, base: str, app) -> None:
     """Account deletion waits for a report its user filed, and says so without
     naming it; a challenge to someone who left does not become 'the team'."""
@@ -3238,6 +3295,7 @@ def main() -> int:
         check_a_completion_that_did_not_save_says_so(browser, base, flask_app)
         check_celebration_stays_clear_of_the_nav(browser, base, flask_app)
         check_team_witness(browser, base, flask_app)
+        check_a_challenge_that_wrapped_up_while_open_says_so(browser, base, flask_app)
         check_photo_sharing(browser, base, flask_app)
         check_leaving_while_a_report_is_open(browser, base, flask_app)
         check_side_quests_still_work(browser, base, flask_app)
