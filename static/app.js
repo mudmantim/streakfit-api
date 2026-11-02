@@ -65,8 +65,6 @@ function _getOrCreatePromptsContainer() {
 function checkRetentionPrompts() {
     if (isGuest) return;
     updateInstallCard();
-    if (!currentUser || !currentUser.total_missions) return;
-    _maybeShowNotificationBanner();
 }
 
 // ── Install card ──────────────────────────────────────────────────────────────
@@ -129,58 +127,14 @@ function _showInstallInstructions(instructions) {
     instructions.hidden = false;
 }
 
-// ── Notification ask banner ───────────────────────────────────────────────────
-
-function _maybeShowNotificationBanner() {
-    if (!('Notification' in window) || !('serviceWorker' in navigator)) return;
-    if (localStorage.getItem('sf_notif_asked')) return;
-    if (Notification.permission !== 'default') {
-        // Already granted or denied — mark as asked so we skip the banner
-        localStorage.setItem('sf_notif_asked', '1');
-        return;
-    }
-
-    var container = _getOrCreatePromptsContainer();
-    var banner = document.createElement('div');
-    banner.className = 'retention-banner';
-    banner.id = 'notif-banner';
-
-    var text = document.createElement('p');
-    text.className = 'retention-text';
-    text.textContent = 'Would you like a daily reminder for your mission?';
-
-    var btnRow = document.createElement('div');
-    btnRow.className = 'retention-btn-row';
-
-    var yesBtn = document.createElement('button');
-    yesBtn.className = 'retention-btn';
-    yesBtn.textContent = 'Yes';
-    yesBtn.onclick = function () {
-        localStorage.setItem('sf_notif_asked', '1');
-        banner.remove();
-        Notification.requestPermission().then(function (perm) {
-            if (perm === 'granted') {
-                fireEvent('notification_permission_granted');
-            } else {
-                fireEvent('notification_permission_denied');
-            }
-        });
-    };
-
-    var notNowBtn = document.createElement('button');
-    notNowBtn.className = 'retention-btn retention-btn-ghost';
-    notNowBtn.textContent = 'Not now';
-    notNowBtn.onclick = function () {
-        localStorage.setItem('sf_notif_asked', '1');
-        banner.remove();
-    };
-
-    btnRow.appendChild(yesBtn);
-    btnRow.appendChild(notNowBtn);
-    banner.appendChild(text);
-    banner.appendChild(btnRow);
-    container.appendChild(banner);
-}
+// ── No reminder ask ───────────────────────────────────────────────────────────
+// There used to be a banner here: "Would you like a daily reminder for your
+// mission?" Saying yes asked the browser for notification permission, and then
+// nothing ever sent a reminder: there is no push subscription, no sender and
+// no scheduled job (roadmap A9). A promise the app cannot keep is worse than no
+// promise, so the ask is gone until reminder delivery exists (roadmap B4). The
+// mission-complete notification below still works for anyone who granted
+// permission before.
 
 // ── Mission complete notification ─────────────────────────────────────────────
 
