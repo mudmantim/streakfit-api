@@ -4645,7 +4645,8 @@ function missionDayLabels(daily, nowMs) {
     var left = daily && daily.day_ends_in_s;
     if (typeof left === 'number' && left > 0) {
         var at = new Date(nowMs + left * 1000);
-        var time = at.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+        // Non-breaking inside the time: on a 390px phone "7:00 / PM" split across lines.
+        var time = at.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }).replace(/\s/g, '\u00a0');
         var sameLocalDay = at.toDateString() === new Date(nowMs).toDateString();
         refresh = 'New mission ' + (sameLocalDay ? 'at ' : 'tomorrow at ') + time;
     }

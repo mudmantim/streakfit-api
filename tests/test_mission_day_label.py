@@ -44,13 +44,13 @@ def test_subtitle_is_built_from_the_servers_mission_day():
 CASES = [
     # (device TZ, now UTC, mission_date, seconds left, expected day, expected refresh)
     ('Pacific/Kiritimati', '2026-11-08T13:05:00Z', '2026-11-08', 39300,
-     'Sunday, Nov 8', 'New mission at 2:00 PM'),
+     'Sunday, Nov 8', 'New mission at 2:00\u00a0PM'),
     ('America/New_York', '2026-11-08T22:00:00Z', '2026-11-08', 7200,
-     'Sunday, Nov 8', 'New mission at 7:00 PM'),
+     'Sunday, Nov 8', 'New mission at 7:00\u00a0PM'),
     ('America/New_York', '2026-11-09T01:00:00Z', '2026-11-09', 82800,
-     'Monday, Nov 9', 'New mission tomorrow at 7:00 PM'),
+     'Monday, Nov 9', 'New mission tomorrow at 7:00\u00a0PM'),
     ('Pacific/Pago_Pago', '2026-11-08T13:05:00Z', '2026-11-08', 39300,
-     'Sunday, Nov 8', 'New mission at 1:00 PM'),
+     'Sunday, Nov 8', 'New mission at 1:00\u00a0PM'),
 ]
 
 
@@ -64,6 +64,7 @@ def test_labels_in_far_apart_zones(tz, now, mission, left, day, refresh):
                          env={'TZ': tz, 'PATH': '/usr/bin:/bin:/usr/local/bin'}, check=True)
     got = json.loads(out.stdout)
     assert got == {'day': day, 'refresh': refresh}
+    assert ' ' not in got['refresh'].rsplit('at ', 1)[1], 'the time itself must not wrap'
 
 
 @pytest.mark.skipif(shutil.which('node') is None, reason='node not installed')
