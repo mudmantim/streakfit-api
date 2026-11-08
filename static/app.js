@@ -4623,6 +4623,35 @@ function _monoNow() {
     return (window.performance && performance.now) ? performance.now() : Date.now();
 }
 
+// The subtitle names the day of the mission actually on screen, and the moment
+// it really refreshes. It used to print the DEVICE's date and "Refreshes
+// tomorrow": the mission day is the server's (UTC until Step 2), so in UTC-5
+// the mission changed at 7 PM the same evening while the label still promised
+// tomorrow, and after 7 PM it named Sunday over Monday's mission. In UTC+14 it
+// named Monday over Sunday's. Both facts come from the server's response; the
+// device clock only places the refresh in the person's own local time.
+function missionDayLabels(daily, nowMs) {
+    var day = null;
+    var iso = daily && (daily.mission_date || daily.date);
+    if (iso && /^\d{4}-\d{2}-\d{2}$/.test(iso)) {
+        // Noon UTC, formatted in UTC: the calendar date itself, never shifted by the device's zone.
+        day = new Date(iso + 'T12:00:00Z').toLocaleDateString('en-US',
+            { weekday: 'long', month: 'short', day: 'numeric', timeZone: 'UTC' });
+    }
+    if (!day) {
+        day = new Date(nowMs).toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' });
+    }
+    var refresh = 'Refreshes tomorrow';
+    var left = daily && daily.day_ends_in_s;
+    if (typeof left === 'number' && left > 0) {
+        var at = new Date(nowMs + left * 1000);
+        var time = at.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+        var sameLocalDay = at.toDateString() === new Date(nowMs).toDateString();
+        refresh = 'New mission ' + (sameLocalDay ? 'at ' : 'tomorrow at ') + time;
+    }
+    return { day: day, refresh: refresh };
+}
+
 function _rememberMissionDay(daily) {
     var prev = currentMissionDate;
     currentMissionDate = daily.mission_date || daily.date || null;
@@ -4818,14 +4847,13 @@ async function loadDailyExercises() {
         rickieModeSel.value = currentUser.rickie_mode;
     }
 
-    // Populate mission subtitle: date · skill level · Refreshes tomorrow
+    // Populate mission subtitle: the mission's day · skill level · when it refreshes
     var dateEl = document.getElementById('daily-mission-date');
     if (dateEl) {
-        var d = new Date();
-        var dateStr = d.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' });
         var tier = daily.mission_skill_level || daily.skill_level;
         var level = tier.charAt(0).toUpperCase() + tier.slice(1);
-        dateEl.textContent = dateStr + ' · ' + level + ' · Refreshes tomorrow';
+        var parts = missionDayLabels(daily, Date.now());
+        dateEl.textContent = parts.day + ' · ' + level + ' · ' + parts.refresh;
     }
 
     // Rickie's pre-mission intro line — hidden once the mission is complete,

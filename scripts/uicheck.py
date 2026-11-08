@@ -1393,6 +1393,35 @@ def check_someone_can_actually_sign_up(b: Browser, base: str, app) -> None:
           "and something to tap")
 
 
+def check_mission_day_label_is_the_servers(b: Browser, base: str, app) -> None:
+    """The subtitle names the mission on screen, wherever the phone is.
+
+    Found by the 2026-11-08 real-user journey: the subtitle printed the
+    device's date and "Refreshes tomorrow", so in UTC+14 it named Monday over
+    Sunday's mission, and in the Americas it promised tomorrow for a mission
+    that changes the same evening. Both facts now come from /api/daily.
+    """
+    print("\nThe mission's day and refresh time, in far-apart time zones")
+    username, token = make_user(app, "daylabel")
+    daily = _api(base, "/api/daily", token=token)
+    want = dt.date.fromisoformat(daily["mission_date"]).strftime("%A, %b ") + str(
+        dt.date.fromisoformat(daily["mission_date"]).day)
+    try:
+        for tz in ("Pacific/Kiritimati", "Pacific/Pago_Pago"):
+            b.call("Emulation.setTimezoneOverride", timezoneId=tz)
+            b.goto(base + "/", wait=1.0)
+            b.js(f"localStorage.setItem('streakfit_token', {json.dumps(token)}); 1")
+            b.goto(base + "/", wait=2.5)
+            label = (b.js("(document.getElementById('daily-mission-date')||{}).textContent||''") or "").strip()
+            check(label.startswith(want + " ·"),
+                  f"in {tz} the subtitle names the server's mission day", f"{label!r} vs {want!r}")
+            check("Refreshes tomorrow" not in label and "New mission" in label,
+                  f"in {tz} it says when the mission really refreshes", label)
+    finally:
+        b.call("Emulation.setTimezoneOverride", timezoneId="")
+        b.js("localStorage.removeItem('streakfit_token'); 1")
+
+
 def check_brain_boost_can_be_answered(b: Browser, base: str, app) -> None:
     """Tapping an answer, in a browser.
 
@@ -3304,6 +3333,7 @@ def main() -> int:
         check_panes_and_solo_first(browser, base, flask_app)
         check_brain_boost_can_be_answered(browser, base, flask_app)
         check_someone_can_actually_sign_up(browser, base, flask_app)
+        check_mission_day_label_is_the_servers(browser, base, flask_app)
         check_coming_back_after_a_while(browser, base, flask_app)
         check_discovery_types_reach_a_reader(browser, base, flask_app)
         check_acorns_are_spendable_without_a_team(browser, base, flask_app)
