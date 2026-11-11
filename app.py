@@ -1017,7 +1017,12 @@ def user_or_ip_key():
 # the API accepting it anyway is what made the state reachable at all.
 VALID_SKILL_LEVELS  = {'beginner', 'intermediate', 'advanced'}
 VALID_DISPLAY_MODES = {'classic', 'bright', 'game'}
-VALID_RICKIE_MODES  = {'full', 'quiet', 'minimal'}
+# 'off' (owner decision 2026-11-11): no Rickie at all for this account -- no
+# mascot, no Rickie-voiced lines, no Ask Rickie. Enforced here on the server for
+# the coach (POST /api/coach refuses with 409 rickie_off before any model call),
+# and in static/app.js for everything drawn on the page. The default for a new
+# account is still 'full'.
+VALID_RICKIE_MODES  = {'full', 'quiet', 'minimal', 'off'}
 
 EXERCISE_LIBRARY = {
     'beginner': {
@@ -5095,7 +5100,7 @@ def update_me():
 
     if 'rickie_mode' in data and (not isinstance(data['rickie_mode'], str)
                                   or data['rickie_mode'] not in VALID_RICKIE_MODES):
-        return jsonify({"error": "That Rickie setting isn't one we have. Pick full, quiet or minimal."}), 400
+        return jsonify({"error": "That Rickie setting isn't one we have. Pick full, quiet, minimal or off."}), 400
 
     user_id = int(get_jwt_identity())
     # Under the user lock: a skill change may rebuild today's stored mission,
@@ -6228,6 +6233,11 @@ def get_daily():
     ]
     readiness = tier_readiness(user_id, user.skill_level)
     insight   = get_daily_insight(today_str, user_id)
+    # A 'rickie' insight is Rickie talking in the first person ("I tried to
+    # demonstrate a burpee once..."). With Rickie Off there is no Rickie, so
+    # that day simply has no insight rather than his voice under another name.
+    if user.rickie_mode == 'off' and insight.get('type') == 'rickie':
+        insight = None
     boost     = stored.brain_boost
 
     boost_answer = db.session.execute(
@@ -13446,6 +13456,17 @@ def coach():
         return parsed
     message, ctx_type, insight_text = parsed
 
+    # Rickie Off is a promise, not a hidden button: the page stops offering
+    # Ask Rickie, and the route refuses too, so an old tab, a cached page or a
+    # hand-made request cannot reach the model for someone who turned him off.
+    # Before the provider checks, so the answer is the same whether or not the
+    # model is configured; and nothing has reached the provider, so it spends
+    # none of the day's questions.
+    user = db.session.get(User, int(get_jwt_identity()))
+    if user is not None and user.rickie_mode == 'off':
+        app.logger.info("event=coach_refused_rickie_off user_id=%s", user.id)
+        return jsonify({"error": "rickie_off"}), 409
+
     if not _anthropic_api_key:
         return jsonify({"error": "coach_unavailable"}), 503
     if _coach_breaker_open():
@@ -13460,8 +13481,8 @@ def coach():
 
     # Context-awareness: give Rickie a trustworthy, server-derived snapshot of
     # who he's talking to (name, streak, level, pre-computed milestone math).
-    # Wrapped so a stats hiccup can never take the Coach down.
-    user = db.session.get(User, int(get_jwt_identity()))
+    # Wrapped so a stats hiccup can never take the Coach down. (`user` was
+    # loaded above, for the Rickie Off check.)
     user_id = user.id if user is not None else None
     if user is not None:
         try:

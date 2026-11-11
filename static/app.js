@@ -295,7 +295,7 @@ function renderJourneyCard() {
     document.getElementById('journey-acorns-value').textContent = _acornsAvailable();
     _renderWeekStrip();
     var messageEl = document.getElementById('journey-message');
-    if (_rickieMode() === 'minimal') {
+    if (_rickieNeutral()) {
         messageEl.hidden = true;
     } else {
         messageEl.hidden = false;
@@ -608,7 +608,7 @@ function _buildTeamActionsCard(hasTeams) {
     if (!hasTeams) {
         var sub = document.createElement('p');
         sub.className = 'team-card-meta';
-        sub.textContent = (_rickieMode() === 'minimal')
+        sub.textContent = _rickieNeutral()
             ? 'Your streak is yours either way. A team just lets people you know see it.'
             : "Your streak is yours either way — this works perfectly well on your own. "
               + "A team is for people you already know: they see that you showed up, "
@@ -1828,7 +1828,7 @@ function _buildLeaveTeamRow(data) {
         // missing confirmation but the silence afterwards — the Team tab
         // simply disappeared from the nav.
         showRickieReaction('You left ' + (data.name || 'the team')
-            + '. Your streak is untouched.');
+            + '. Your streak is untouched.', { plain: true });
     });
     wrap.appendChild(leaveBtn);
     wrap.appendChild(note);
@@ -2948,7 +2948,7 @@ function _buildPhotoComposer(teamId, objectUrl, solo) {
 
     paintStrip();
     repaint();
-    note.textContent = 'Pick a look. Rickie has opinions.';
+    note.textContent = _rickieOff() ? 'Pick a look.' : 'Pick a look. Rickie has opinions.';
 }
 
 // Two taps, not one.
@@ -3118,7 +3118,7 @@ function _withName(line, dayOverride) {
 function _renderTodayStrip(daily) {
     var greetingEl = document.getElementById('today-greeting');
     if (greetingEl) {
-        if (_rickieMode() === 'minimal') {
+        if (_rickieNeutral()) {
             greetingEl.textContent = daily.completed_count >= 5
                 ? 'Today’s mission is done.'
                 : 'Today’s mission is ready.';
@@ -3395,12 +3395,47 @@ function _rickieAllowsFun() {
     return _rickieMode() === 'full';
 }
 
+// Rickie Off (owner decision 2026-11-11): no Rickie at all. No mascot image,
+// no Rickie-voiced line, no toast, no roaming, no Ask Rickie; neutral wording
+// replaces his lines and every fitness feature keeps working. The server
+// refuses /api/coach for these accounts too, so hiding the button is not the
+// only thing standing between an Off account and the model.
+function _rickieOff() {
+    return _rickieMode() === 'off';
+}
+
+// Every place that already had a plain, "just the facts" wording for Minimal
+// uses the same wording for Off.
+function _rickieNeutral() {
+    var mode = _rickieMode();
+    return mode === 'minimal' || mode === 'off';
+}
+
+// Images, the roamer, the Ask Rickie button and panel, his team chat lines
+// and the roaming setting are hidden by one class on <body> (style.css,
+// "Rickie Off"); the text is handled where it is written. Called whenever
+// the account or its mode may have changed.
+function _syncRickiePresence() {
+    var off = _rickieOff();
+    document.body.classList.toggle('rickie-off', off);
+    if (!off) return;
+    // Anything of his already on screen goes too: switching to Off from the
+    // settings menu must not leave an open coach panel or a queued toast.
+    if (_coachPanel) _coachPanel.hidden = true;
+    _rickieToastQueue = [];
+    if (_rickieReactionHideTimer) { clearTimeout(_rickieReactionHideTimer); _rickieReactionHideTimer = null; }
+    if (_rickieReactionRemoveTimer) { clearTimeout(_rickieReactionRemoveTimer); _rickieReactionRemoveTimer = null; }
+    _rickieToastPlaying = false;
+    var toast = document.getElementById('rickie-reaction');
+    if (toast) toast.hidden = true;
+}
+
 // Reaction toasts: full shows every time; quiet only for milestone-significant
 // moments (mission complete, perfect mission, first mission, level-up) and
-// never for Brain Boost or exercises 1-4; minimal shows none.
+// never for Brain Boost or exercises 1-4; minimal and off show none.
 function _rickieAllowsReaction(isMilestoneMoment) {
     var mode = _rickieMode();
-    if (mode === 'minimal') return false;
+    if (mode === 'minimal' || mode === 'off') return false;
     if (mode === 'quiet') return !!isMilestoneMoment;
     return true;
 }
@@ -3457,7 +3492,8 @@ var _expressionHoldUntil = 0;
 function _holdExpression(ms) { _expressionHoldUntil = Date.now() + (ms || 6000); }
 
 function _applyRickieExpression() {
-    var expr = (_rickieMode() === 'minimal') ? 'neutral' : currentRickieExpression;
+    _syncRickiePresence();
+    var expr = _rickieNeutral() ? 'neutral' : currentRickieExpression;
     var src = RICKIE_EXPRESSION_SVG[expr] || RICKIE_EXPRESSION_SVG.neutral;
     var avatarEls = document.querySelectorAll(
         '.journey-avatar, .rickie-avatar-sm, .rickie-reaction-avatar, .coach-avatar, '
@@ -3541,12 +3577,15 @@ var _rickieReactionRemoveTimer = null;
 var _rickieToastQueue = [];
 var _rickieToastPlaying = false;
 
+// `summary.plain`: a confirmation that is not Rickie's line (leaving a team).
+// It still shows under Off, without his face (style.css hides the avatar).
 function showRickieReaction(line, summary) {
+    if (_rickieOff() && !(summary && summary.plain)) return;
     _rickieToastQueue.push({ line: line, summary: summary || {} });
     if (!_rickieToastPlaying) _playNextRickieToast();
     // The roaming Rickie reacts too, and picks a different celebration each
     // time. Same event, same moment, two different bits of him.
-    if (window.RickieRoam) {
+    if (window.RickieRoam && !_rickieOff()) {
         window.RickieRoam.react((summary && summary.perfectMission)
             ? 'mission_done' : 'exercise_done');
     }
@@ -3876,7 +3915,9 @@ function _mbBuildMilestones(data) {
         var copy = MEMORY_MILESTONE_COPY[m.key];
         var item = _mbEl('li', 'mb-milestone-item' + (m.unlocked ? ' unlocked' : ''));
         if (m.unlocked) {
-            item.textContent = copy ? copy.unlocked : ('🎉 ' + m.label);
+            var unlockedText = copy ? copy.unlocked : ('🎉 ' + m.label);
+            if (_rickieOff()) unlockedText = unlockedText.replace(/ Rickie's impressed\./, '');
+            item.textContent = unlockedText;
         } else {
             var prefix = m.progress + ' / ' + m.target + ' — ';
             item.textContent = '🔒 ' + prefix + (copy ? copy.locked : m.label.toLowerCase());
@@ -3893,8 +3934,10 @@ function _mbBuildNotes(data) {
     var lifetime = data.lifetime;
     var favorites = data.favorites;
 
+    var off = _rickieOff();
     if (lifetime.missions_completed >= 1) {
-        notes.push("Rickie remembers your first mission — that's when this all started.");
+        notes.push(off ? "Your first mission is where this all started."
+                       : "Rickie remembers your first mission — that's when this all started.");
     }
     // "Done most often", not "your favourite". The app picks the five daily
     // moves, so the user never chose one — a preference claim was never
@@ -3912,10 +3955,11 @@ function _mbBuildNotes(data) {
             (lifetime.days_active === 1 ? ' different day.' : ' different days.') + " That's not nothing.");
     }
     if (currentUser && currentUser.level_title) {
-        notes.push("Right now, your title is " + currentUser.level_title + ". Rickie's excited to see what's next.");
+        notes.push("Right now, your title is " + currentUser.level_title + "."
+            + (off ? '' : " Rickie's excited to see what's next."));
     }
     var unlockedCount = (data.milestones || []).filter(function (m) { return m.unlocked; }).length;
-    if (unlockedCount >= 2) {
+    if (unlockedCount >= 2 && !off) {
         notes.push(_pickRickieLine('milestone'));
     }
     // A small, occasional aside — not on every visit, just often enough to
@@ -3926,7 +3970,9 @@ function _mbBuildNotes(data) {
     }
 
     if (notes.length === 0) {
-        frag.appendChild(_mbEl('p', 'mb-empty', "Rickie hasn't written anything yet — let's make a memory today."));
+        frag.appendChild(_mbEl('p', 'mb-empty', off
+            ? 'Nothing here yet — it fills in as you move.'
+            : "Rickie hasn't written anything yet — let's make a memory today."));
         return frag;
     }
 
@@ -3948,7 +3994,8 @@ function _renderMemoryBookPage() {
     if (!_mbOverlay || !_mbData) return;
     var pageDef = MEMORY_BOOK_PAGES[_mbPageIndex];
 
-    document.getElementById('mb-page-title').textContent = pageDef.title;
+    document.getElementById('mb-page-title').textContent =
+        (pageDef.key === 'notes' && _rickieOff()) ? '📖 Notes' : pageDef.title;
 
     var pageContent = document.getElementById('mb-page-content');
     pageContent.innerHTML = '';
@@ -4005,8 +4052,12 @@ async function openMemoryBook() {
         avatar.src = '/static/rickie.svg';
         avatar.alt = '';
         var headerText = _mbEl('div', 'mb-header-text');
-        headerText.appendChild(_mbEl('h2', 'mb-title', "Rickie's Memory Book"));
-        headerText.appendChild(_mbEl('p', 'mb-subtitle', "Let's remember what we've done together."));
+        var mbTitle = _mbEl('h2', 'mb-title', '');
+        mbTitle.id = 'mb-title';
+        var mbSubtitle = _mbEl('p', 'mb-subtitle', '');
+        mbSubtitle.id = 'mb-subtitle';
+        headerText.appendChild(mbTitle);
+        headerText.appendChild(mbSubtitle);
         header.appendChild(avatar);
         header.appendChild(headerText);
 
@@ -4041,15 +4092,23 @@ async function openMemoryBook() {
         document.body.appendChild(_mbOverlay);
     }
 
-    document.getElementById('mb-page-content').innerHTML = '<p class="mb-empty">Rickie is turning the pages…</p>';
+    // Set on every open, not once: the mode can change between openings.
+    var off = _rickieOff();
+    document.getElementById('mb-title').textContent = off ? 'Your Memory Book' : "Rickie's Memory Book";
+    document.getElementById('mb-subtitle').textContent = off
+        ? "What you've done so far." : "Let's remember what we've done together.";
+    document.getElementById('mb-page-content').innerHTML = off
+        ? '<p class="mb-empty">Opening the pages…</p>'
+        : '<p class="mb-empty">Rickie is turning the pages…</p>';
     _mbOverlay.classList.add('open');
     document.body.style.overflow = 'hidden';
     _applyRickieExpression();
 
     var result = await api('/api/memory-book');
     if (!result || result.status !== 200) {
-        document.getElementById('mb-page-content').innerHTML =
-            '<p class="mb-empty">🦝 Rickie couldn\'t quite find the pages — try again in a moment.</p>';
+        document.getElementById('mb-page-content').innerHTML = _rickieOff()
+            ? '<p class="mb-empty">Couldn\'t open the pages — try again in a moment.</p>'
+            : '<p class="mb-empty">🦝 Rickie couldn\'t quite find the pages — try again in a moment.</p>';
         return;
     }
 
@@ -4241,6 +4300,7 @@ function clearErrors() {
 
 function handleGuestMode() {
     isGuest = true;
+    _syncRickiePresence();    // guests are always 'full'
     guestCompleted = new Set();
     guestCompleteFired = false;
     applyTheme('game');
@@ -4416,6 +4476,7 @@ async function handleRegister(event) {
 function _resetAccountState() {
     currentUser = null;
     blockedUserIds = [];
+    document.body.classList.remove('rickie-off');
 
     isGuest = false;
     guestCompleted = new Set();
@@ -4491,6 +4552,7 @@ async function loadUserPreferences() {
     if (sel && result.data.skill_level) sel.value = result.data.skill_level;
     var rickieSel = document.getElementById('rickie-mode-select');
     if (rickieSel && result.data.rickie_mode) rickieSel.value = result.data.rickie_mode;
+    _syncRickiePresence();
     _syncDisplayNameField();
 }
 
@@ -4505,7 +4567,10 @@ function _syncDisplayNameField() {
     var help = document.getElementById('display-name-help');
     if (!help) return;
     var calls = currentUser.rickie_calls_you;
-    if (!calls) {
+    if (_rickieOff()) {
+        // No Rickie to call them anything. What the name still does.
+        help.textContent = 'Not your login. Teammates see this if you join a team.';
+    } else if (!calls) {
         help.textContent = "Not your login. Rickie isn't using a name for you.";
     } else if (!currentUser.display_name && calls === currentUser.username) {
         // The fallback IS the login, so "Not your login" contradicted the very
@@ -4605,7 +4670,9 @@ async function handleDisplayNameChange(value) {
     _syncDisplayNameField();
     // The cleared case gets its own words. "Saved" over an empty box reads as
     // though nothing happened, when in fact a name was deliberately removed.
-    _showDisplayNameSaved(currentUser.display_name
+    _showDisplayNameSaved(_rickieOff()
+        ? (currentUser.display_name ? 'Saved.' : 'Cleared — teammates see a neutral label.')
+        : currentUser.display_name
         ? 'Saved — Rickie and your teammates will use "' + currentUser.display_name + '".'
         : 'Cleared — Rickie won\'t use a name, and teammates see a neutral label.',
         false);
@@ -4620,6 +4687,8 @@ async function handleRickieModeChange(mode) {
     // so the new mode's effects show up immediately without a page refresh.
     await loadDailyExercises();
     _updateRickieMoodBadge();
+    _syncRickiePresence();
+    _syncDisplayNameField();
 }
 
 // The mission is the heart of the app — never let it fail silently. Mirrors
@@ -4769,7 +4838,9 @@ async function loadDailyExercises() {
     // Show spinner while loading
     var spinner = document.createElement('div');
     spinner.className = 'state-loading';
-    spinner.innerHTML = '<div class="spinner"></div><p>Rickie\'s getting today\'s mission ready…</p>';
+    spinner.innerHTML = _rickieOff()
+        ? '<div class="spinner"></div><p>Getting today\'s mission ready…</p>'
+        : '<div class="spinner"></div><p>Rickie\'s getting today\'s mission ready…</p>';
     list.appendChild(spinner);
 
     var daily;
@@ -4968,7 +5039,7 @@ async function loadDailyExercises() {
         // how long it's been or why.
         var rLine1 = document.createElement('p');
         rLine1.className = 'rise-again-body';
-        rLine1.textContent = _pickRickieLine('returning');
+        rLine1.textContent = _rickieOff() ? 'Welcome back.' : _pickRickieLine('returning');
 
         var rLine2 = document.createElement('p');
         rLine2.className = 'rise-again-body';
@@ -5088,13 +5159,16 @@ async function loadDailyExercises() {
         // Minimal mode drops the personality pick entirely for neutral copy.
         var rickieHandoff = document.createElement('p');
         rickieHandoff.className = 'rickie-handoff-line';
-        if (_rickieMode() === 'minimal') {
-            rickieHandoff.textContent = 'Ready for today’s insight?';
+        if (_rickieNeutral()) {
+            // An Off account has no insight on a day whose insight is one of
+            // Rickie's own asides, so the line names what actually follows.
+            rickieHandoff.textContent = daily.insight ? 'Ready for today’s insight?'
+                : (daily.brain_boost ? 'Ready for today’s Brain Boost?' : '');
         } else {
             var handoffPoolKey = (!isGuest && bannerStreak === 7) ? 'firstWeek' : 'general';
             rickieHandoff.textContent = '🦝 ' + _pickRickieLine(handoffPoolKey) + ' Ready for today’s insight?';
         }
-        list.appendChild(rickieHandoff);
+        if (rickieHandoff.textContent) list.appendChild(rickieHandoff);
 
         if (daily.insight) {
             list.appendChild(renderInsightCard(daily.insight));
@@ -5255,11 +5329,22 @@ function renderInsightCard(insight) {
         experiment: { tease: "Rickie wants you to try something.", label: 'Try this' },
         rickie:     { tease: "Rickie has an opinion.",           label: 'Rickie says' }
     };
+    // Off: the same card in plain words. (A 'rickie' insight, his own
+    // first-person aside, is not sent to an Off account at all; see /api/daily.)
+    var PLAIN_TEASE = {
+        fact:       "Today's insight is ready.",
+        movement:   "Today's insight is ready.",
+        riddle:     "Today's riddle is ready.",
+        experiment: "Something to try today.",
+        rickie:     "Today's insight is ready."
+    };
     var kind = KINDS[insight.type] || KINDS.fact;
+    var off = _rickieOff();
 
     var teaserText = document.createElement('p');
     teaserText.className = 'insight-teaser-text';
-    teaserText.textContent = '🦝 ' + kind.tease;
+    teaserText.textContent = off ? (PLAIN_TEASE[insight.type] || PLAIN_TEASE.fact)
+                                 : '🦝 ' + kind.tease;
 
     teaserTop.appendChild(teaserAvatar);
     teaserTop.appendChild(teaserText);
@@ -5277,7 +5362,7 @@ function renderInsightCard(insight) {
 
     var category = document.createElement('p');
     category.className = 'insight-category';
-    category.textContent = kind.label;
+    category.textContent = (off && insight.type === 'rickie') ? 'A thought' : kind.label;
 
     revealed.appendChild(category);
 
@@ -5311,8 +5396,9 @@ function renderInsightCard(insight) {
         revealed.appendChild(text);
     }
 
-    if (!isGuest && (insight.type === 'fact' || insight.type === 'movement'
-                     || insight.type === 'experiment')) {
+    // "Tell me more" opens Ask Rickie, which Off does not have.
+    if (!isGuest && !off && (insight.type === 'fact' || insight.type === 'movement'
+                             || insight.type === 'experiment')) {
         var tellMore = document.createElement('button');
         tellMore.className = 'insight-tell-more';
         tellMore.textContent = 'Tell me more →';
@@ -5352,7 +5438,8 @@ function renderBrainBoostCard(brainBoost) {
 
     var teaserText = document.createElement('p');
     teaserText.className = 'insight-teaser-text';
-    teaserText.textContent = '🦝 Rickie found today\'s Brain Boost...';
+    teaserText.textContent = _rickieOff() ? 'Today\'s Brain Boost is ready.'
+                                          : '🦝 Rickie found today\'s Brain Boost...';
 
     teaserTop.appendChild(teaserAvatar);
     teaserTop.appendChild(teaserText);
@@ -5411,7 +5498,9 @@ function renderBrainBoostQuestion(brainBoost) {
             if (i === correctIndex) btn.classList.add('bb-option-correct');
             else if (i === selectedIndex) btn.classList.add('bb-option-incorrect');
         });
-        feedback.textContent = correct
+        feedback.textContent = _rickieOff()
+            ? (correct ? 'You got it!' : 'Not quite — but you still learned something.')
+            : correct
             ? '🦝 Rickie\'s impressed — you got it!'
             : '🦝 Not quite — but you still learned something.';
         feedback.className = 'bb-feedback ' + (correct ? 'bb-feedback-correct' : 'bb-feedback-incorrect');
@@ -7828,7 +7917,7 @@ function getRickieMood() {
 function _updateRickieMoodBadge() {
     var badge = document.getElementById('coach-mood-badge');
     if (!badge) return;
-    if (_rickieMode() === 'minimal') {
+    if (_rickieNeutral()) {
         badge.hidden = true;
         return;
     }
@@ -7840,6 +7929,9 @@ function _updateRickieMoodBadge() {
 }
 
 function openCoach(context) {
+    // No entry point is shown under Off; this covers any that is missed, and
+    // the server refuses the question anyway (409 rickie_off).
+    if (_rickieOff()) return;
     if (!_coachPanel) {
         _coachPanel = document.createElement('section');
         _coachPanel.className = 'card coach-panel';
@@ -8020,6 +8112,9 @@ async function _sendCoachMessage(message, context) {
 
     if (!result || result.status === 0) {
         _appendCoachMsg('coach', '🦝 Rickie stepped away from his burrow for a bit — try again in a little while.');
+    } else if (result.status === 409 && result.data && result.data.error === 'rickie_off') {
+        // Turned off on another device while this panel was open.
+        _appendCoachMsg('coach', 'Rickie is turned off for this account. You can turn him back on in Settings.');
     } else if (result.status === 429) {
         _appendCoachMsg('coach', 'You’ve reached today’s question limit — come back tomorrow.');
     } else if (result.status !== 200) {

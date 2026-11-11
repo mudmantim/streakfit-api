@@ -680,13 +680,20 @@
         return Math.random() < 0.25 ? rand(3000, 8000) : rand(9000, 34000);
     }
 
+    /* Rickie Off (the account setting): app.js puts `rickie-off` on <body>
+     * and the stylesheet hides the band. He also stops doing anything, so an
+     * Off account is not running his timers and walks behind a hidden band. */
+    function rickieOff() {
+        return !!(document.body && document.body.classList.contains('rickie-off'));
+    }
+
     function schedule(ms) {
         clearTimeout(state.timer);
         state.timer = setTimeout(step, ms === undefined ? idleDelay() : ms);
     }
 
     function step() {
-        if (state.paused || state.suspended || state.busy || document.hidden) {
+        if (state.paused || state.suspended || state.busy || document.hidden || rickieOff()) {
             return schedule(6000);
         }
         var behaviour = pick(BEHAVIOURS, state.recent);
@@ -760,7 +767,7 @@
     }
 
     function react(event) {
-        if (!el || state.paused) return;
+        if (!el || state.paused || rickieOff()) return;
         var options = REACTIONS[event];
         if (!options) return;
         /* A reaction always interrupts pottering — being congratulated is the
