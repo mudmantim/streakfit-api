@@ -6810,7 +6810,9 @@ def _filters_newly_unlocked(user_id, user, old_level, events):
     gained = _unlocked_filter_keys(after, purchased) - _unlocked_filter_keys(before, purchased)
     return [
         {'key': f['key'], 'name': f['name'], 'blurb': f['blurb']}
-        for f in _filters_for_rickie_mode(PHOTO_FILTERS, user) if f['key'] in gained
+        for f in (_filter_for_day(g, server_today())
+                  for g in _filters_for_rickie_mode(PHOTO_FILTERS, user))
+        if f['key'] in gained
     ]
 
 
@@ -7155,6 +7157,10 @@ def _challenges_for_messages(messages, viewer_id):
 #   frame    - an inset border drawn as a two-stop gradient
 #   ribbon   - a text banner across a corner or edge
 #   confetti - scattered glyphs, deterministic per photo (never random rewards)
+#   mono     - full desaturation by a 'saturation' composite, so Black & White is
+#              black and white even where canvas `filter` (tint) is unsupported
+#   wash     - a flat colour laid over the photo with a blend mode
+#   glow     - a blurred, screened copy of the photo (a soft bloom)
 #
 # Unlock kinds: free | missions | streak | level | milestone | acorns.
 # `acorns` is a straight purchase of a NAMED filter at a FIXED price -- no
@@ -7323,7 +7329,219 @@ PHOTO_FILTERS = [
             'confetti': {'glyph': '\u2728', 'count': 18, 'size': 0.05},
         },
     },
+
+    # -- 2026-11-12 additions (owner: "start the branch with all of them") ------
+    # None of these has Rickie's picture or voice, so every one of them is in
+    # the Rickie Off picker unchanged. Golden Hour was already in the catalog
+    # above and is not duplicated.
+    #
+    # Looks: pure image adjustments.
+    {
+        'key': 'black_white', 'name': 'Black & White',
+        'blurb': 'No colour. All effort.',
+        'unlock': {'type': 'free'},
+        'render': {
+            'mono': True,
+            'tint': 'contrast(1.2) brightness(1.04)',
+            'vignette': {'strength': 0.32},
+        },
+    },
+    {
+        'key': 'vintage', 'name': 'Vintage',
+        'blurb': 'Faded film, without the wait.',
+        'unlock': {'type': 'acorns', 'cost': 20},
+        'render': {
+            'tint': 'sepia(0.4) saturate(0.85) contrast(0.92) brightness(1.04)',
+            # Lifted, warm shadows: what makes old prints look old.
+            'wash': {'color': '#5a3e24', 'alpha': 0.32, 'mode': 'screen'},
+            'vignette': {'strength': 0.45},
+        },
+    },
+    {
+        'key': 'bold_pop', 'name': 'Bold Pop',
+        'blurb': 'Every colour turned all the way up.',
+        'unlock': {'type': 'acorns', 'cost': 15},
+        'render': {
+            'tint': 'saturate(1.9) contrast(1.22) brightness(1.03)',
+        },
+    },
+    {
+        'key': 'soft_glow', 'name': 'Soft Glow',
+        'blurb': 'A gentle haze, like the end of a good stretch.',
+        'unlock': {'type': 'acorns', 'cost': 25},
+        'render': {
+            'tint': 'brightness(1.05) contrast(0.95)',
+            'glow': {'blur': 0.025, 'alpha': 0.45},
+        },
+    },
+
+    # Fitness and streak frames. The streak ones use the existing `streak`
+    # rule (best or current streak reached the number), so the frame's words
+    # are always something this person has actually done -- nobody gets a
+    # "100-DAY STREAK" banner without having had a 100-day streak -- and, like
+    # On Fire, a frame once earned is not taken away when a streak later ends.
+    {
+        'key': 'personal_best', 'name': 'Personal Best',
+        'blurb': 'For the day you beat your own number.',
+        'unlock': {'type': 'missions', 'value': 3},
+        'render': {
+            'burst': {'from': '#f59e0b', 'to': '#fde68a', 'rays': 22, 'alpha': 0.34},
+            'ribbon': {'text': 'PERSONAL BEST', 'position': 'top',
+                       'from': '#b45309', 'to': '#f59e0b'},
+            'frame': {'from': '#f59e0b', 'to': '#b45309', 'width': 0.03},
+        },
+    },
+    {
+        'key': 'rest_day', 'name': 'Rest Day',
+        'blurb': 'Recovery is part of the plan.',
+        'unlock': {'type': 'free'},
+        'render': {
+            'tint': 'saturate(0.9) brightness(1.05) contrast(0.96)',
+            'wash': {'color': '#99f6e4', 'alpha': 0.12, 'mode': 'soft-light'},
+            'ribbon': {'text': 'REST DAY', 'position': 'bottom',
+                       'from': '#0f766e', 'to': '#14b8a6'},
+            'frame': {'from': '#5eead4', 'to': '#0f766e', 'width': 0.022},
+        },
+    },
+    {
+        'key': 'week_complete', 'name': 'Week Complete',
+        'blurb': "Seven missions done. That's a week's worth.",
+        'unlock': {'type': 'missions', 'value': 7},
+        'render': {
+            'burst': {'from': '#3b82f6', 'to': '#bae6fd', 'rays': 14, 'alpha': 0.32},
+            'ribbon': {'text': 'WEEK COMPLETE', 'position': 'bottom',
+                       'from': '#1d4ed8', 'to': '#0ea5e9'},
+            'frame': {'from': '#38bdf8', 'to': '#1d4ed8', 'width': 0.028},
+        },
+    },
+    {
+        'key': 'streak_7', 'name': '7-Day Streak',
+        'blurb': 'A full week without missing a day.',
+        'unlock': {'type': 'streak', 'value': 7},
+        'render': {
+            'tint': 'saturate(1.2) contrast(1.05)',
+            'confetti': {'glyph': '\U0001F525', 'count': 8, 'size': 0.06},
+            'ribbon': {'text': '7-DAY STREAK', 'position': 'bottom',
+                       'from': '#dc2626', 'to': '#f97316'},
+            'frame': {'from': '#f97316', 'to': '#dc2626', 'width': 0.03},
+        },
+    },
+    {
+        'key': 'streak_30', 'name': '30-Day Streak',
+        'blurb': 'Thirty days in a row. That is a habit now.',
+        'unlock': {'type': 'streak', 'value': 30},
+        'render': {
+            'tint': 'saturate(1.2) contrast(1.06)',
+            'burst': {'from': '#a855f7', 'to': '#f5d0fe', 'rays': 20, 'alpha': 0.34},
+            'ribbon': {'text': '30-DAY STREAK', 'position': 'bottom',
+                       'from': '#7e22ce', 'to': '#db2777'},
+            'frame': {'from': '#db2777', 'to': '#7e22ce', 'width': 0.036},
+        },
+    },
+    {
+        'key': 'streak_100', 'name': '100-Day Streak',
+        'blurb': 'One hundred days. Very few people get here.',
+        'unlock': {'type': 'streak', 'value': 100},
+        'render': {
+            'tint': 'saturate(1.25) contrast(1.08) brightness(1.04)',
+            'burst': {'from': '#fbbf24', 'to': '#fef3c7', 'rays': 28, 'alpha': 0.4},
+            'confetti': {'glyph': '\u2728', 'count': 12, 'size': 0.055},
+            'ribbon': {'text': '100-DAY STREAK', 'position': 'bottom',
+                       'from': '#a16207', 'to': '#eab308'},
+            'frame': {'from': '#fde047', 'to': '#a16207', 'width': 0.05},
+        },
+    },
+    {
+        'key': 'team_shot', 'name': 'Team Shot',
+        'blurb': 'Everybody in. Nobody left out of the picture.',
+        'unlock': {'type': 'free'},
+        'render': {
+            'tint': 'saturate(1.12) contrast(1.05)',
+            'ribbon': {'text': 'TEAM SHOT', 'position': 'top',
+                       'from': '#4f46e5', 'to': '#06b6d4'},
+            'frame': {'from': '#06b6d4', 'to': '#4f46e5', 'width': 0.03},
+            'vignette': {'strength': 0.22},
+        },
+    },
+
+    # Seasonal: ONE filter whose look follows the date. One key rather than
+    # four, so it never needs unlocking again, an upload's filter_key never
+    # goes stale, and the picker never shows a season that is not now. The
+    # name, blurb and render come from SEASONAL_LOOKS for the server's mission
+    # day (server_today(), UTC -- the same day the rest of the app uses until
+    # the Step 2 local day ships). The entry here holds the fallback look.
+    {
+        'key': 'seasonal', 'name': 'Seasonal',
+        'blurb': 'Changes with the season.',
+        'unlock': {'type': 'free'},
+        'seasonal': True,
+        'render': {},
+    },
 ]
+
+# Meteorological seasons, northern hemisphere (months -> season). The app has
+# no location, so the hemisphere is a fixed choice; see the owner decisions in
+# the 2026-11-12 filters report.
+SEASON_BY_MONTH = {12: 'winter', 1: 'winter', 2: 'winter',
+                   3: 'spring', 4: 'spring', 5: 'spring',
+                   6: 'summer', 7: 'summer', 8: 'summer',
+                   9: 'fall', 10: 'fall', 11: 'fall'}
+SEASONAL_LOOKS = {
+    'winter': {
+        'name': 'Winter', 'blurb': 'Cold out. Moved anyway.',
+        'render': {
+            'tint': 'saturate(0.85) brightness(1.08) contrast(1.04) hue-rotate(-8deg)',
+            'wash': {'color': '#dbeafe', 'alpha': 0.16, 'mode': 'screen'},
+            'confetti': {'glyph': '\u2744\uFE0F', 'count': 10, 'size': 0.045},
+            'frame': {'from': '#f8fafc', 'to': '#93c5fd', 'width': 0.032},
+        },
+    },
+    'spring': {
+        'name': 'Spring', 'blurb': 'Everything is growing. Including you.',
+        'render': {
+            'tint': 'saturate(1.15) brightness(1.05)',
+            'confetti': {'glyph': '\U0001F338', 'count': 12, 'size': 0.05},
+            'frame': {'from': '#f9a8d4', 'to': '#4ade80', 'width': 0.03},
+        },
+    },
+    'summer': {
+        'name': 'Summer', 'blurb': 'Long days, more light to move in.',
+        'render': {
+            'tint': 'saturate(1.25) brightness(1.05) contrast(1.05)',
+            # Sun rays from the top edge.
+            'burst': {'from': '#fde047', 'to': '#fb923c', 'rays': 16, 'alpha': 0.3, 'cy': 0},
+            'frame': {'from': '#facc15', 'to': '#f97316', 'width': 0.03},
+        },
+    },
+    'fall': {
+        'name': 'Fall', 'blurb': 'Crunchy leaves, steady habits.',
+        'render': {
+            'tint': 'sepia(0.18) saturate(1.3) contrast(1.05) hue-rotate(-8deg)',
+            'confetti': {'glyph': '\U0001F342', 'count': 12, 'size': 0.055},
+            'frame': {'from': '#f59e0b', 'to': '#9a3412', 'width': 0.03},
+            'vignette': {'strength': 0.3},
+        },
+    },
+}
+
+
+def season_for(day):
+    """'winter' | 'spring' | 'summer' | 'fall' for a calendar date."""
+    return SEASON_BY_MONTH[day.month]
+
+
+def _filter_for_day(spec, day):
+    """The catalog entry as it looks on `day`: a seasonal filter takes that
+    season's name, blurb and render. A copy; the shared catalog is never
+    changed. Every other filter is returned as is."""
+    if not spec.get('seasonal'):
+        return spec
+    season = season_for(day)
+    look = SEASONAL_LOOKS[season]
+    out = dict(spec)
+    out.update(name=look['name'], blurb=look['blurb'], render=look['render'],
+               season=season)
+    return out
 
 PHOTO_FILTERS_BY_KEY = {f['key']: f for f in PHOTO_FILTERS}
 
@@ -7430,8 +7648,10 @@ def _filter_unlock_state(user, stats, purchased_keys):
                           stats['best_streak'], user.xp_total, user.acorns_total,
                           stats['brain_boost_answers'])
     level = ctx['level']
+    today = server_today()
     out = []
     for spec in PHOTO_FILTERS:
+        spec = _filter_for_day(spec, today)
         rule = spec['unlock']
         kind = rule['type']
         unlocked = _filter_is_unlocked(spec, ctx, purchased_keys)
@@ -7453,7 +7673,7 @@ def _filter_unlock_state(user, stats, purchased_keys):
         elif kind == 'acorns':
             requirement = f"{rule['cost']} acorns"
 
-        out.append({
+        row = {
             'key': spec['key'],
             'name': spec['name'],
             'blurb': spec['blurb'],
@@ -7464,7 +7684,10 @@ def _filter_unlock_state(user, stats, purchased_keys):
             'progress': progress,
             'target': rule.get('value'),
             'cost': rule.get('cost'),
-        })
+        }
+        if 'season' in spec:
+            row['season'] = spec['season']
+        out.append(row)
     return out
 
 

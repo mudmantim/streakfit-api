@@ -1656,7 +1656,7 @@ def check_acorns_are_spendable_without_a_team(b: Browser, base: str, app) -> Non
     buyable = b.js("(()=>{const c=window.__cat; if(!c) return 'no catalogue';"
                    " const f=(c.filters||c).filter(x=>x.unlock_type==='acorns');"
                    " return f.length;})()")
-    check(buyable == 4, "four filters are buyable with acorns", str(buyable))
+    check(buyable == 7, "seven filters are buyable with acorns", str(buyable))
     del cat
 
     afford = b.js("(()=>{const c=window.__cat; const f=(c.filters||c)"

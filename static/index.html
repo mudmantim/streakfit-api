@@ -113,6 +113,27 @@
                             <option value="advanced">Advanced</option>
                         </select>
                     </div>
+                    <!-- Rickie mode sits directly under Difficulty, ABOVE his
+                         roaming (owner report 2026-11-12: on a phone the roaming
+                         button was found and Off was not, because it sat below
+                         the roaming row and the name field). -->
+                    <div class="settings-row" id="settings-row-rickie">
+                        <label class="settings-label" for="rickie-mode-select">Rickie</label>
+                        <select id="rickie-mode-select" class="skill-select" title="How much of Rickie you want, or none" aria-describedby="rickie-mode-help"
+                                onchange="handleRickieModeChange(this.value)">
+                            <option value="full">🦝 Full — jokes and celebrations</option>
+                            <option value="quiet">🦝 Quiet — fewer interruptions</option>
+                            <option value="minimal">🦝 Minimal — just the facts</option>
+                            <option value="off">Off — no Rickie</option>
+                        </select>
+                    </div>
+                    <p class="settings-help" id="rickie-mode-help">
+                        Full, Quiet and Minimal change how often Rickie speaks up
+                        on his own; Ask Rickie stays available in all three.
+                        Off removes him completely: no pictures, no messages and
+                        no Ask Rickie. Missions, streaks, XP, acorns and teams
+                        work the same either way.
+                    </p>
                     <!-- Pausing his roaming leaves everything else about him
                          intact: he still reacts, still talks, still has a face.
                          An accessible way to stop the movement without removing
@@ -121,10 +142,17 @@
                         <label class="settings-label" for="rickie-roam-toggle">Rickie's roaming</label>
                         <button id="rickie-roam-toggle" type="button" class="btn-secondary"
                                 aria-pressed="false"
+                                aria-describedby="rickie-roam-help"
                                 onclick="window.RickieRoam &amp;&amp; window.RickieRoam.setPaused(!window.RickieRoam.isPaused())">
                             Ask Rickie to settle
                         </button>
                     </div>
+                    <!-- Hidden with the roaming row under Off, and for guests
+                         (who have no Rickie mode row to point at). -->
+                    <p class="settings-help" id="rickie-roam-help">
+                        This only stops him moving around. To turn Rickie off
+                        completely, use Rickie &rarr; Off above.
+                    </p>
 
                     <!-- Your StreakFit name. Separate from the login on purpose:
                          a username is a credential people fill with email
@@ -156,23 +184,6 @@
                     </p>
                     <p class="settings-saved" id="display-name-saved" role="status" aria-live="polite"></p>
 
-                    <div class="settings-row" id="settings-row-rickie">
-                        <label class="settings-label" for="rickie-mode-select">Rickie</label>
-                        <select id="rickie-mode-select" class="skill-select" title="How much of Rickie you want, or none" aria-describedby="rickie-mode-help"
-                                onchange="handleRickieModeChange(this.value)">
-                            <option value="full">🦝 Full — jokes and celebrations</option>
-                            <option value="quiet">🦝 Quiet — fewer interruptions</option>
-                            <option value="minimal">🦝 Minimal — just the facts</option>
-                            <option value="off">Off — no Rickie</option>
-                        </select>
-                    </div>
-                    <p class="settings-help" id="rickie-mode-help">
-                        Full, Quiet and Minimal change how often Rickie speaks up
-                        on his own; Ask Rickie stays available in all three.
-                        Off removes him completely: no pictures, no messages and
-                        no Ask Rickie. Missions, streaks, XP, acorns and teams
-                        work the same either way.
-                    </p>
                     <div class="settings-row" id="settings-row-forget">
                         <span class="settings-label">Memory</span>
                         <button id="btn-forget-coach" class="btn-forget-coach"
