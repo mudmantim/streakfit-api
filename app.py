@@ -12919,6 +12919,176 @@ def _delete_user_account_once(user_id, allow_team_owner=False, dry_run=True):
     return report
 
 
+# ── QA smoke-team deletion (cleanup_qa_smoke --team-owner-policy=delete-qa-team) ─
+# The app has no way to delete a team, and this is not that feature: no route
+# calls it and it deletes ONLY a team that nobody but `qa_smoke_` test accounts
+# ever touched. scripts/verify_all.py creates one such team per run, and its
+# owner then cannot be deleted (team_owned blocks; `team.created_by_user_id` is
+# NOT NULL, so allow_team_owner=True would only fail later on the foreign key).
+#
+# Refuses unless: the team name starts with "Smoke Test " (what verify_all
+# names its teams); the owner AND every person linked to the team in any way
+# is a qa_smoke_ account (exact Python prefix match, as in the cleanup script --
+# never a SQL LIKE, whose '_' is a wildcard); and no report about the team is
+# pending or under legal hold. One transaction per team: everything or nothing.
+#
+# What happens to each table with a foreign key into the team is listed below,
+# in the same shape as the account-deletion lists above, and a test checks
+# that every such key has exactly one rule.
+
+QA_SMOKE_PREFIX = "qa_smoke_"
+QA_SMOKE_TEAM_NAME_PREFIX = "Smoke Test "
+
+# Rows that exist only because the team does. Deleted in THIS order: messages
+# point at photos and challenges, completions point at challenges, so those
+# go first. Completions have no team_id and are found through their challenge.
+_TEAM_ROW_DELETES = [
+    ("team_challenge_completion", TeamChallengeCompletion, None),
+    ("team_message",     TeamMessage,     "team_id"),
+    ("team_photo",       TeamPhoto,       "team_id"),
+    ("team_challenge",   TeamChallenge,   "team_id"),
+    ("team_moment",      TeamMoment,      "team_id"),
+    ("team_campfire",    TeamCampfire,    "team_id"),
+    ("team_invite_code", TeamInviteCode,  "team_id"),
+    ("team_membership",  TeamMembership,  "team_id"),
+]
+
+# Moderation records outlive the team, with the link to it cut -- the same
+# "minimal audit record" rule account deletion applies to people. Their
+# evidence snapshots stay on their own retention clock.
+_TEAM_LINK_NULLS = [
+    ("report_team",            Report,           "team_id"),
+    ("moderation_action_team", ModerationAction, "team_id"),
+]
+
+
+def _team_fk_classification():
+    """{(table, column): 'delete' | 'null'} for every foreign key into `team`."""
+    out = {}
+    for kind, rows in (("delete", _TEAM_ROW_DELETES), ("null", _TEAM_LINK_NULLS)):
+        for _label, model, attr in rows:
+            if attr is not None:
+                out[(model.__tablename__, attr)] = kind
+    return out
+
+
+def _qa_team_rows(model, attr, team_id):
+    if attr is None:   # team_challenge_completion, through its challenge
+        return model.query.filter(model.challenge_id.in_(
+            db.select(TeamChallenge.id).where(TeamChallenge.team_id == team_id)))
+    return model.query.filter(getattr(model, attr) == team_id)
+
+
+def _qa_team_linked_user_ids(team_id):
+    """Everybody the team's rows point at, as a set of ids (None = a link an
+    earlier account deletion already cut). Owner, members, message and photo
+    senders, moment subjects, challenge creators, targets and completers,
+    report parties, evidence authors, moderation targets and appellants."""
+    def ids(column, *where):
+        return set(db.session.execute(db.select(column).where(*where).distinct()).scalars())
+
+    team_reports = db.select(Report.id).where(Report.team_id == team_id)
+    team_actions = db.select(ModerationAction.id).where(ModerationAction.team_id == team_id)
+    team_challenges = db.select(TeamChallenge.id).where(TeamChallenge.team_id == team_id)
+    people = set()
+    people |= ids(Team.created_by_user_id, Team.id == team_id)
+    people |= ids(TeamMembership.user_id, TeamMembership.team_id == team_id)
+    people |= ids(TeamMessage.sender_user_id, TeamMessage.team_id == team_id)
+    people |= ids(TeamMoment.subject_user_id, TeamMoment.team_id == team_id)
+    people |= ids(TeamPhoto.sender_user_id, TeamPhoto.team_id == team_id)
+    people |= ids(TeamChallenge.created_by_user_id, TeamChallenge.team_id == team_id)
+    people |= ids(TeamChallenge.target_user_id, TeamChallenge.team_id == team_id)
+    people |= ids(TeamChallengeCompletion.user_id,
+                  TeamChallengeCompletion.challenge_id.in_(team_challenges))
+    people |= ids(Report.reporter_user_id, Report.team_id == team_id)
+    people |= ids(Report.reported_user_id, Report.team_id == team_id)
+    people |= ids(ReportEvidence.author_user_id, ReportEvidence.report_id.in_(team_reports))
+    people |= ids(ModerationAction.target_user_id, ModerationAction.team_id == team_id)
+    people |= ids(Appeal.user_id, Appeal.action_id.in_(team_actions))
+    return people
+
+
+def _qa_team_plan(team):
+    """The refusal codes and row counts for deleting `team` (read-only)."""
+    refusals = []
+    if not team.name.startswith(QA_SMOKE_TEAM_NAME_PREFIX):
+        refusals.append("team_name_not_smoke_test")
+    people = {p for p in _qa_team_linked_user_ids(team.id) if p is not None}
+    names = dict(db.session.execute(
+        db.select(User.id, User.username).where(User.id.in_(people))).all()) if people else {}
+    # A linked id with no user row counts as NOT a QA account: refuse, don't guess.
+    non_qa = sorted(p for p in people if not (names.get(p) or "").startswith(QA_SMOKE_PREFIX))
+    if not (names.get(team.created_by_user_id) or "").startswith(QA_SMOKE_PREFIX):
+        refusals.append("owner_not_qa_smoke")
+    if non_qa:
+        refusals.append("non_qa_smoke_person_linked")
+    open_or_held = Report.query.filter(
+        Report.team_id == team.id,
+        db.or_(Report.status == 'pending', Report.legal_hold.is_(True))).count()
+    if open_or_held:
+        refusals.append("report_pending_or_held")
+    counts = {label: _qa_team_rows(model, attr, team.id).count()
+              for label, model, attr in _TEAM_ROW_DELETES + _TEAM_LINK_NULLS}
+    return refusals, counts, len(people), len(non_qa), open_or_held
+
+
+def delete_qa_smoke_team(team_id, dry_run=True):
+    """Delete one all-QA smoke-test team and every row that exists only for it,
+    in ONE transaction. Returns a report dict of ids and counts only:
+        {team_id, found, owner_user_id, refused, refusals, counts,
+         linked_people, non_qa_people, open_or_held_reports, dry_run, executed}
+
+    - dry_run=True (default) changes nothing.
+    - Any refusal (see the section comment) changes nothing.
+    - The owner and members are NOT deleted here: the caller deletes accounts
+      through delete_user_account, which keeps every one of its own rules.
+    - Any DB failure rolls the whole team back and re-raises.
+    """
+    if dry_run:
+        team = db.session.get(Team, team_id)
+    else:
+        # FOR UPDATE on the team row before anything is checked. A join, a
+        # message or a new report all insert a row referencing the team and
+        # so wait on this lock; what the plan below sees cannot change under it.
+        team = db.session.execute(
+            db.select(Team).where(Team.id == team_id).with_for_update()
+            .execution_options(populate_existing=True)).scalar_one_or_none()
+    report = {"team_id": team_id, "found": team is not None, "owner_user_id": None,
+              "refused": True, "refusals": [], "counts": {}, "linked_people": 0,
+              "non_qa_people": 0, "open_or_held_reports": 0,
+              "dry_run": dry_run, "executed": False}
+    if team is None:
+        report["refusals"] = ["team_not_found"]
+        if not dry_run:
+            db.session.rollback()
+        return report
+
+    refusals, counts, linked, non_qa, open_or_held = _qa_team_plan(team)
+    report.update(owner_user_id=team.created_by_user_id, refused=bool(refusals),
+                  refusals=refusals, counts=counts, linked_people=linked,
+                  non_qa_people=non_qa, open_or_held_reports=open_or_held)
+    if dry_run or refusals:
+        if not dry_run:
+            db.session.rollback()     # release the row lock
+        return report
+
+    try:
+        for _label, model, attr in _TEAM_LINK_NULLS:
+            model.query.filter(getattr(model, attr) == team.id).update(
+                {getattr(model, attr): None}, synchronize_session=False)
+        for _label, model, attr in _TEAM_ROW_DELETES:
+            _qa_team_rows(model, attr, team.id).delete(synchronize_session=False)
+        db.session.delete(team)
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+        raise
+
+    report["executed"] = True
+    app.logger.info("event=qa_smoke_team_deleted team_id=%s", team_id)
+    return report
+
+
 # ── Weather: Rickie's first and only tool ────────────────────────────────────
 # This exists so Rickie can stay in character when someone asks about the weather,
 # not to be a forecast service. Provider is Open-Meteo (free, no API key). There is
