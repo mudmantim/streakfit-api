@@ -7166,7 +7166,7 @@ def _challenges_for_messages(messages, viewer_id):
 # `acorns` is a straight purchase of a NAMED filter at a FIXED price -- no
 # randomised or chance-based unlocks anywhere, by design.
 
-PHOTO_FILTERS = [
+PHOTO_FILTERS: list[dict[str, Any]] = [
     {
         'key': 'none', 'name': 'No filter',
         'blurb': 'Just the photo.',
@@ -7486,7 +7486,7 @@ SEASON_BY_MONTH = {12: 'winter', 1: 'winter', 2: 'winter',
                    3: 'spring', 4: 'spring', 5: 'spring',
                    6: 'summer', 7: 'summer', 8: 'summer',
                    9: 'fall', 10: 'fall', 11: 'fall'}
-SEASONAL_LOOKS = {
+SEASONAL_LOOKS: dict[str, dict[str, Any]] = {
     'winter': {
         'name': 'Winter', 'blurb': 'Cold out. Moved anyway.',
         'render': {
@@ -7542,6 +7542,7 @@ def _filter_for_day(spec, day):
     out.update(name=look['name'], blurb=look['blurb'], render=look['render'],
                season=season)
     return out
+
 
 PHOTO_FILTERS_BY_KEY = {f['key']: f for f in PHOTO_FILTERS}
 
