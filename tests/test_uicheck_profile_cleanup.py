@@ -38,8 +38,16 @@ class _Page(http.server.BaseHTTPRequestHandler):
         pass
 
 
-def test_no_profile_survives_close():
+def test_no_profile_survives_close(monkeypatch):
+    import tempfile
     import uicheck
+    # A private, SHORT TMPDIR (Chrome's socket path must stay under 108 bytes),
+    # so Chrome's own scratch directories (com.google.Chrome.*) can be counted
+    # too; they used to land in $TMPDIR and stay (2026-10-15).
+    private = tempfile.mkdtemp(prefix="uic-")
+    monkeypatch.setenv("TMPDIR", private)
+    monkeypatch.setattr(tempfile, "tempdir", None)
+    redirected = len(f"{private}/streakfit-uicheck-65535/t/com.google.Chrome.XXXXXX/SingletonSocket") < 100
     server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _Page)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     url = f"http://127.0.0.1:{server.server_address[1]}/"
@@ -57,3 +65,7 @@ def test_no_profile_survives_close():
     finally:
         server.shutdown()
     assert left == [], f"{len(left)} of 10 profiles survived close(): {left}"
+    stray = sorted(os.listdir(private))
+    shutil.rmtree(private, ignore_errors=True)
+    if redirected:
+        assert stray == [], f"Chrome left {len(stray)} entries in TMPDIR: {stray[:5]}"

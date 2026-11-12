@@ -259,6 +259,34 @@ def check_app_imports() -> None:
     (ROOT / "instance" / "build_check_import_only.db").unlink(missing_ok=True)
 
 
+# ── 5b. The migration chain is one straight line ──────────────────────────────
+def check_migration_chain() -> None:
+    """Exactly one head, every revision reachable from it, no merge or branch
+    point. Two heads make `flask db upgrade` and the boot head check fail -- at
+    deploy time, on the server. Caught here, it fails in CI instead. (A
+    staging-only failure migration on a release branch is the realistic way to
+    get here; see the staging/predeploy-fails rehearsal.)"""
+    global checks_run
+    checks_run += 1
+    from alembic.config import Config
+    from alembic.script import ScriptDirectory
+    cfg = Config()
+    cfg.set_main_option("script_location", str(ROOT / "migrations"))
+    script = ScriptDirectory.from_config(cfg)
+    heads = script.get_heads()
+    if len(heads) != 1:
+        fail(f"migration chain has {len(heads)} heads ({', '.join(sorted(heads))}); expected exactly 1")
+        return
+    revisions = list(script.walk_revisions())
+    branched = [r.revision for r in revisions if len(r.nextrev) > 1]
+    merges = [r.revision for r in revisions if isinstance(r.down_revision, (tuple, list))]
+    if branched or merges:
+        fail(f"migration chain is not linear: branch points {branched}, merge points {merges}")
+    files = list((ROOT / "migrations" / "versions").glob("*.py"))
+    if len(files) != len(revisions):
+        fail(f"{len(files)} migration files but {len(revisions)} revisions reachable from head {heads[0]}")
+
+
 # ── 6. Server-generated exercise illustrations exist ─────────────────────────
 def check_exercise_illustrations() -> None:
     """The API promises /static/exercises/{key}.svg for every exercise it serves.
@@ -463,6 +491,7 @@ def main() -> int:
         check_api_client_guard,
         check_json_files,
         check_app_imports,
+        check_migration_chain,
         check_exercise_illustrations,
         check_api_routes_are_reachable,
     ):

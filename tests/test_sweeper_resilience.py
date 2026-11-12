@@ -474,3 +474,43 @@ def test_equal_timestamps_resolve_to_the_newer_row(client, monkeypatch):
                                     error_type=None if outcome == 'ok' else 'X'))
     db.session.commit()
     assert checks(client)['retention.moderation']['status'] == 'FAIL'
+
+
+# ── The test-only stop request cannot change production behaviour ────────────
+
+def test_an_unset_stop_event_never_ends_the_loop(monkeypatch):
+    """Production: _start_retention_sweeper() hands the loop an Event nothing
+    ever sets. The loop must keep passing exactly as with no event at all;
+    only the fake clock's sentinel ends it here, after 5 full passes."""
+    clock = _Clock(passes=5)
+    monkeypatch.setattr(appmod, 'time', clock)
+    for step in ('_sweeper_coach_step', '_sweeper_moderation_step', '_sweeper_notice_step',
+                 '_sweeper_delivery_step'):
+        monkeypatch.setattr(appmod, step, lambda: None)
+    with pytest.raises(_Stop):
+        appmod._retention_sweeper_loop(threading.Event())
+    assert clock.done == 5
+
+
+def test_a_set_stop_event_ends_the_loop_after_the_current_sleep(monkeypatch):
+    clock = _Clock(passes=3)   # bounded: a loop that ignores the stop fails fast, not by hanging
+    monkeypatch.setattr(appmod, 'time', clock)
+    for step in ('_sweeper_coach_step', '_sweeper_moderation_step', '_sweeper_notice_step',
+                 '_sweeper_delivery_step'):
+        monkeypatch.setattr(appmod, step, lambda: None)
+    stop = threading.Event()
+    stop.set()
+    try:
+        returned = appmod._retention_sweeper_loop(stop) is None     # returns, no pass run
+    except _Stop:
+        returned = False                                             # ran passes instead
+    assert returned and clock.done == 0, 'a set stop event did not end the loop'
+
+
+def test_production_code_never_requests_a_stop():
+    """Only tests may stop the sweeper: no `.set()` on its Event in app.py."""
+    import inspect
+    src = inspect.getsource(appmod)
+    assert 'stop_event.set(' not in src and 'stop.set(' not in src
+    thread_start = inspect.getsource(appmod._start_retention_sweeper)
+    assert 'threading.Event()' in thread_start and 'args=(stop,)' in thread_start

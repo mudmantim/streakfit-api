@@ -10,9 +10,9 @@ limiting under real config, sustained health over a watch window).
 Standard library only, same as the verification suite.
 
 Usage:
-    python scripts/post_deploy_check.py                        # against streakfit.pro
-    python scripts/post_deploy_check.py --expect-sw v0748      # also assert the deployed SW version
-    python scripts/post_deploy_check.py --watch-minutes 20     # sustained health watch
+    python scripts/post_deploy_check.py --base-url https://streakfit.pro                    # production
+    python scripts/post_deploy_check.py --base-url https://streakfit.pro --expect-sw v0748  # + SW version
+    python scripts/post_deploy_check.py --base-url https://streakfit.pro --watch-minutes 20 # health watch
     python scripts/post_deploy_check.py --base-url http://localhost:5000 --skip-suite
 
 Exit 0 = deploy verified. 1 = at least one check failed.
@@ -35,7 +35,7 @@ import urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from verification._client import ApiClient  # noqa: E402  (path setup must precede)
+from verification._client import NO_TARGET_MESSAGE, ApiClient  # noqa: E402  (path setup must precede)
 
 results: list[tuple[bool, str, str]] = []   # (passed, name, detail)
 warnings: list[str] = []
@@ -335,15 +335,19 @@ def check_watch(base: str, minutes: float) -> None:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description="StreakFit post-deploy verification")
-    ap.add_argument("--base-url", default=os.environ.get("SMOKE_BASE_URL", "https://streakfit.pro"))
+    ap.add_argument("--base-url", default=os.environ.get("SMOKE_BASE_URL"),
+                    help="required (or SMOKE_BASE_URL): there is no default target")
     ap.add_argument("--expect-sw", default=None, help="assert the deployed sw.js cache version, e.g. v0748")
     ap.add_argument("--watch-minutes", type=float, default=0, help="sustained health watch after the checks")
     ap.add_argument("--skip-suite", action="store_true", help="skip the full verify_all suite")
     ap.add_argument("--cooldown", type=float, default=65,
                     help="seconds to wait before the suite so the 5/min register limit clears")
     args = ap.parse_args()
+    if not (args.base_url or "").strip():
+        print(NO_TARGET_MESSAGE.replace("verify_all.py", "post_deploy_check.py"), file=sys.stderr)
+        return 2
 
-    base = args.base_url.rstrip("/")
+    base = args.base_url.strip().rstrip("/")
     tag = secrets.token_hex(3)
     api = ApiClient(base)
     started = time.time()

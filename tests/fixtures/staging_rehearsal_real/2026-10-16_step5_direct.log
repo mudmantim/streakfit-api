@@ -1,0 +1,273 @@
+2026-10-16T10:18:49.137892439Z ==> Downloading cache...
+2026-10-16T10:18:49.162774398Z ==> Cloning from https://github.com/mudmantim/streakfit-api
+2026-10-16T10:18:49.793028696Z ==> Checking out commit 8c687350d70d837264ec8ffc87940c50255c21b9 in branch rc/safety-b
+2026-10-16T10:18:50.22786632Z ==> Downloaded 25MB in 0s. Extraction took 0s.
+2026-10-16T10:18:50.422035958Z ==> Using Python version 3.12.7 via /opt/render/project/src/.python-version
+2026-10-16T10:18:50.422047149Z ==> Docs on specifying a Python version: https://render.com/docs/python-version
+2026-10-16T10:18:50.422135429Z ==> Installing Python version 3.12.7...
+2026-10-16T10:18:55.562289209Z ==> Using Poetry version 2.1.3 (default)
+2026-10-16T10:18:55.600619509Z ==> Docs on specifying a Poetry version: https://render.com/docs/poetry-version
+2026-10-16T10:18:55.648634957Z ==> Running build command 'pip install -r requirements.txt'...
+2026-10-16T10:18:56.076509071Z Collecting Flask==3.0.2 (from -r requirements.txt (line 1))
+2026-10-16T10:18:56.077658924Z   Using cached flask-3.0.2-py3-none-any.whl.metadata (3.6 kB)
+2026-10-16T10:18:56.09100337Z Collecting Flask-SQLAlchemy==3.1.1 (from -r requirements.txt (line 2))
+2026-10-16T10:18:56.091955605Z   Using cached flask_sqlalchemy-3.1.1-py3-none-any.whl.metadata (3.4 kB)
+2026-10-16T10:18:56.107459339Z Collecting Flask-JWT-Extended==4.6.0 (from -r requirements.txt (line 3))
+2026-10-16T10:18:56.108351194Z   Using cached Flask_JWT_Extended-4.6.0-py2.py3-none-any.whl.metadata (3.9 kB)
+2026-10-16T10:18:56.131255552Z Collecting Flask-Limiter==3.5.0 (from -r requirements.txt (line 4))
+2026-10-16T10:18:56.132219342Z   Using cached Flask_Limiter-3.5.0-py3-none-any.whl.metadata (6.3 kB)
+2026-10-16T10:18:56.155886247Z Collecting limits==5.8.0 (from -r requirements.txt (line 9))
+2026-10-16T10:18:56.156804815Z   Using cached limits-5.8.0-py3-none-any.whl.metadata (10 kB)
+2026-10-16T10:18:56.195530149Z Collecting redis==5.0.8 (from -r requirements.txt (line 14))
+2026-10-16T10:18:56.196491885Z   Using cached redis-5.0.8-py3-none-any.whl.metadata (9.2 kB)
+2026-10-16T10:18:56.20908328Z Collecting Flask-Migrate==4.0.5 (from -r requirements.txt (line 15))
+2026-10-16T10:18:56.210020259Z   Using cached Flask_Migrate-4.0.5-py3-none-any.whl.metadata (3.1 kB)
+2026-10-16T10:18:56.52155218Z Collecting SQLAlchemy==2.0.27 (from -r requirements.txt (line 16))
+2026-10-16T10:18:56.522677989Z   Using cached SQLAlchemy-2.0.27-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (9.6 kB)
+2026-10-16T10:18:56.587135023Z Collecting psycopg2-binary==2.9.9 (from -r requirements.txt (line 17))
+2026-10-16T10:18:56.588196388Z   Using cached psycopg2_binary-2.9.9-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (4.4 kB)
+2026-10-16T10:18:56.605097273Z Collecting gunicorn==23.0.0 (from -r requirements.txt (line 21))
+2026-10-16T10:18:56.606014144Z   Using cached gunicorn-23.0.0-py3-none-any.whl.metadata (4.4 kB)
+2026-10-16T10:18:56.631212967Z Collecting Werkzeug==3.0.6 (from -r requirements.txt (line 24))
+2026-10-16T10:18:56.632172833Z   Using cached werkzeug-3.0.6-py3-none-any.whl.metadata (3.7 kB)
+2026-10-16T10:18:56.692743863Z Collecting anthropic==0.120.0 (from -r requirements.txt (line 29))
+2026-10-16T10:18:56.693793518Z   Using cached anthropic-0.120.0-py3-none-any.whl.metadata (3.3 kB)
+2026-10-16T10:18:56.727139014Z Collecting alembic==1.18.5 (from -r requirements.txt (line 32))
+2026-10-16T10:18:56.728081801Z   Using cached alembic-1.18.5-py3-none-any.whl.metadata (7.2 kB)
+2026-10-16T10:18:56.773550973Z Collecting pytest==9.1.1 (from -r requirements.txt (line 35))
+2026-10-16T10:18:56.774519968Z   Using cached pytest-9.1.1-py3-none-any.whl.metadata (7.6 kB)
+2026-10-16T10:18:57.001227878Z Collecting cryptography==50.0.1 (from -r requirements.txt (line 44))
+2026-10-16T10:18:57.002350419Z   Using cached cryptography-50.0.1-cp311-abi3-manylinux_2_34_x86_64.whl.metadata (4.3 kB)
+2026-10-16T10:18:57.024631605Z Collecting httpx==0.28.1 (from -r requirements.txt (line 49))
+2026-10-16T10:18:57.025573172Z   Using cached httpx-0.28.1-py3-none-any.whl.metadata (7.1 kB)
+2026-10-16T10:18:57.044157335Z Collecting httpcore==1.0.9 (from -r requirements.txt (line 50))
+2026-10-16T10:18:57.045070728Z   Using cached httpcore-1.0.9-py3-none-any.whl.metadata (21 kB)
+2026-10-16T10:18:57.063703754Z Collecting Jinja2>=3.1.2 (from Flask==3.0.2->-r requirements.txt (line 1))
+2026-10-16T10:18:57.06462657Z   Using cached jinja2-3.1.6-py3-none-any.whl.metadata (2.9 kB)
+2026-10-16T10:18:57.074699287Z Collecting itsdangerous>=2.1.2 (from Flask==3.0.2->-r requirements.txt (line 1))
+2026-10-16T10:18:57.075624599Z   Using cached itsdangerous-2.2.0-py3-none-any.whl.metadata (1.9 kB)
+2026-10-16T10:18:57.09227528Z Collecting click>=8.1.3 (from Flask==3.0.2->-r requirements.txt (line 1))
+2026-10-16T10:18:57.0931931Z   Using cached click-8.5.0-py3-none-any.whl.metadata (2.6 kB)
+2026-10-16T10:18:57.101247247Z Collecting blinker>=1.6.2 (from Flask==3.0.2->-r requirements.txt (line 1))
+2026-10-16T10:18:57.102244647Z   Using cached blinker-1.9.0-py3-none-any.whl.metadata (1.6 kB)
+2026-10-16T10:18:57.137556427Z Collecting PyJWT<3.0,>=2.0 (from Flask-JWT-Extended==4.6.0->-r requirements.txt (line 3))
+2026-10-16T10:18:57.138498631Z   Using cached pyjwt-2.15.1-py3-none-any.whl.metadata (3.5 kB)
+2026-10-16T10:18:57.151643525Z Collecting ordered-set<5,>4 (from Flask-Limiter==3.5.0->-r requirements.txt (line 4))
+2026-10-16T10:18:57.152544155Z   Using cached ordered_set-4.1.0-py3-none-any.whl.metadata (5.3 kB)
+2026-10-16T10:18:57.21038487Z Collecting rich<14,>=12 (from Flask-Limiter==3.5.0->-r requirements.txt (line 4))
+2026-10-16T10:18:57.211428909Z   Using cached rich-13.9.4-py3-none-any.whl.metadata (18 kB)
+2026-10-16T10:18:57.229075935Z Collecting typing-extensions>=4 (from Flask-Limiter==3.5.0->-r requirements.txt (line 4))
+2026-10-16T10:18:57.230041051Z   Using cached typing_extensions-4.16.0-py3-none-any.whl.metadata (3.3 kB)
+2026-10-16T10:18:57.247400613Z Collecting deprecated>=1.2 (from limits==5.8.0->-r requirements.txt (line 9))
+2026-10-16T10:18:57.248306263Z   Using cached deprecated-3.0.0-py3-none-any.whl.metadata (6.5 kB)
+2026-10-16T10:18:57.266314301Z Collecting packaging>=21 (from limits==5.8.0->-r requirements.txt (line 9))
+2026-10-16T10:18:57.267250524Z   Using cached packaging-26.3-py3-none-any.whl.metadata (3.5 kB)
+2026-10-16T10:18:57.42128871Z Collecting greenlet!=0.4.17 (from SQLAlchemy==2.0.27->-r requirements.txt (line 16))
+2026-10-16T10:18:57.42239908Z   Using cached greenlet-3.5.6-cp312-cp312-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl.metadata (3.8 kB)
+2026-10-16T10:18:57.474014073Z Collecting MarkupSafe>=2.1.1 (from Werkzeug==3.0.6->-r requirements.txt (line 24))
+2026-10-16T10:18:57.475071325Z   Using cached markupsafe-3.0.4-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (2.7 kB)
+2026-10-16T10:18:57.497965306Z Collecting anyio<5,>=3.5.0 (from anthropic==0.120.0->-r requirements.txt (line 29))
+2026-10-16T10:18:57.498935637Z   Using cached anyio-4.15.1-py3-none-any.whl.metadata (4.7 kB)
+2026-10-16T10:18:57.507499883Z Collecting distro<2,>=1.7.0 (from anthropic==0.120.0->-r requirements.txt (line 29))
+2026-10-16T10:18:57.50842462Z   Using cached distro-1.9.0-py3-none-any.whl.metadata (6.8 kB)
+2026-10-16T10:18:57.517669675Z Collecting docstring-parser<1,>=0.15 (from anthropic==0.120.0->-r requirements.txt (line 29))
+2026-10-16T10:18:57.518593326Z   Using cached docstring_parser-0.18.0-py3-none-any.whl.metadata (3.5 kB)
+2026-10-16T10:18:57.607480564Z Collecting jiter<1,>=0.4.0 (from anthropic==0.120.0->-r requirements.txt (line 29))
+2026-10-16T10:18:57.608603833Z   Using cached jiter-0.17.0-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (5.2 kB)
+2026-10-16T10:18:57.758058967Z Collecting pydantic<3,>=1.9.0 (from anthropic==0.120.0->-r requirements.txt (line 29))
+2026-10-16T10:18:57.759139299Z   Using cached pydantic-2.14.1-py3-none-any.whl.metadata (133 kB)
+2026-10-16T10:18:57.769773183Z Collecting sniffio (from anthropic==0.120.0->-r requirements.txt (line 29))
+2026-10-16T10:18:57.770723431Z   Using cached sniffio-1.3.1-py3-none-any.whl.metadata (3.9 kB)
+2026-10-16T10:18:57.797139632Z Collecting Mako (from alembic==1.18.5->-r requirements.txt (line 32))
+2026-10-16T10:18:57.798060261Z   Using cached mako-1.4.3-py3-none-any.whl.metadata (2.9 kB)
+2026-10-16T10:18:57.809813818Z Collecting iniconfig>=1.0.1 (from pytest==9.1.1->-r requirements.txt (line 35))
+2026-10-16T10:18:57.81072275Z   Using cached iniconfig-2.3.1-py3-none-any.whl.metadata (2.8 kB)
+2026-10-16T10:18:57.825516751Z Collecting pluggy<2,>=1.5 (from pytest==9.1.1->-r requirements.txt (line 35))
+2026-10-16T10:18:57.826414586Z   Using cached pluggy-1.7.0-py3-none-any.whl.metadata (5.0 kB)
+2026-10-16T10:18:57.845305225Z Collecting pygments>=2.7.2 (from pytest==9.1.1->-r requirements.txt (line 35))
+2026-10-16T10:18:57.846218642Z   Using cached pygments-2.21.0-py3-none-any.whl.metadata (2.5 kB)
+2026-10-16T10:18:57.942923335Z Collecting cffi>=2.0.0 (from cryptography==50.0.1->-r requirements.txt (line 44))
+2026-10-16T10:18:57.944007081Z   Using cached cffi-2.1.1-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.whl.metadata (2.5 kB)
+2026-10-16T10:18:57.961960475Z Collecting certifi (from httpx==0.28.1->-r requirements.txt (line 49))
+2026-10-16T10:18:57.962927418Z   Using cached certifi-2026.7.22-py3-none-any.whl.metadata (2.5 kB)
+2026-10-16T10:18:57.979295377Z Collecting idna (from httpx==0.28.1->-r requirements.txt (line 49))
+2026-10-16T10:18:57.980235096Z   Using cached idna-3.20-py3-none-any.whl.metadata (7.2 kB)
+2026-10-16T10:18:57.989523485Z Collecting h11>=0.16 (from httpcore==1.0.9->-r requirements.txt (line 50))
+2026-10-16T10:18:57.990443842Z   Using cached h11-0.16.0-py3-none-any.whl.metadata (8.3 kB)
+2026-10-16T10:18:58.006232211Z Collecting pycparser (from cffi>=2.0.0->cryptography==50.0.1->-r requirements.txt (line 44))
+2026-10-16T10:18:58.007154968Z   Using cached pycparser-3.11-py3-none-any.whl.metadata (8.2 kB)
+2026-10-16T10:18:58.326922635Z Collecting wrapt<3,>=1.16 (from deprecated>=1.2->limits==5.8.0->-r requirements.txt (line 9))
+2026-10-16T10:18:58.328076234Z   Using cached wrapt-2.5.1-cp312-cp312-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl.metadata (7.6 kB)
+2026-10-16T10:18:58.3491276Z Collecting annotated-types>=0.6.0 (from pydantic<3,>=1.9.0->anthropic==0.120.0->-r requirements.txt (line 29))
+2026-10-16T10:18:58.350099149Z   Using cached annotated_types-0.8.0-py3-none-any.whl.metadata (15 kB)
+2026-10-16T10:18:59.055478069Z Collecting pydantic-core==2.50.1 (from pydantic<3,>=1.9.0->anthropic==0.120.0->-r requirements.txt (line 29))
+2026-10-16T10:18:59.05662343Z   Using cached pydantic_core-2.50.1-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (6.5 kB)
+2026-10-16T10:18:59.133454699Z Collecting typing-inspection>=0.4.4 (from pydantic<3,>=1.9.0->anthropic==0.120.0->-r requirements.txt (line 29))
+2026-10-16T10:18:59.134578196Z   Using cached typing_inspection-0.4.4-py3-none-any.whl.metadata (2.6 kB)
+2026-10-16T10:18:59.15513466Z Collecting markdown-it-py>=2.2.0 (from rich<14,>=12->Flask-Limiter==3.5.0->-r requirements.txt (line 4))
+2026-10-16T10:18:59.156217797Z   Using cached markdown_it_py-4.2.0-py3-none-any.whl.metadata (7.4 kB)
+2026-10-16T10:18:59.176523538Z Collecting mdurl~=0.1 (from markdown-it-py>=2.2.0->rich<14,>=12->Flask-Limiter==3.5.0->-r requirements.txt (line 4))
+2026-10-16T10:18:59.177493124Z   Using cached mdurl-0.1.2-py3-none-any.whl.metadata (1.6 kB)
+2026-10-16T10:18:59.187068412Z Using cached flask-3.0.2-py3-none-any.whl (101 kB)
+2026-10-16T10:18:59.188089619Z Using cached flask_sqlalchemy-3.1.1-py3-none-any.whl (25 kB)
+2026-10-16T10:18:59.189054164Z Using cached Flask_JWT_Extended-4.6.0-py2.py3-none-any.whl (22 kB)
+2026-10-16T10:18:59.190013443Z Using cached Flask_Limiter-3.5.0-py3-none-any.whl (28 kB)
+2026-10-16T10:18:59.191022746Z Using cached limits-5.8.0-py3-none-any.whl (60 kB)
+2026-10-16T10:18:59.191990963Z Using cached redis-5.0.8-py3-none-any.whl (255 kB)
+2026-10-16T10:18:59.193071813Z Using cached Flask_Migrate-4.0.5-py3-none-any.whl (21 kB)
+2026-10-16T10:18:59.194037837Z Using cached SQLAlchemy-2.0.27-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (3.2 MB)
+2026-10-16T10:18:59.196095552Z Using cached psycopg2_binary-2.9.9-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (3.0 MB)
+2026-10-16T10:18:59.198038227Z Using cached gunicorn-23.0.0-py3-none-any.whl (85 kB)
+2026-10-16T10:18:59.199041784Z Using cached werkzeug-3.0.6-py3-none-any.whl (227 kB)
+2026-10-16T10:18:59.200047748Z Using cached anthropic-0.120.0-py3-none-any.whl (1.0 MB)
+2026-10-16T10:18:59.201324484Z Using cached alembic-1.18.5-py3-none-any.whl (264 kB)
+2026-10-16T10:18:59.202380148Z Using cached pytest-9.1.1-py3-none-any.whl (386 kB)
+2026-10-16T10:18:59.203493988Z Using cached cryptography-50.0.1-cp311-abi3-manylinux_2_34_x86_64.whl (4.7 MB)
+2026-10-16T10:18:59.206030534Z Using cached httpx-0.28.1-py3-none-any.whl (73 kB)
+2026-10-16T10:18:59.206998422Z Using cached httpcore-1.0.9-py3-none-any.whl (78 kB)
+2026-10-16T10:18:59.207970654Z Using cached anyio-4.15.1-py3-none-any.whl (132 kB)
+2026-10-16T10:18:59.208944116Z Using cached blinker-1.9.0-py3-none-any.whl (8.5 kB)
+2026-10-16T10:18:59.20990325Z Using cached cffi-2.1.1-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.whl (221 kB)
+2026-10-16T10:18:59.210948762Z Using cached click-8.5.0-py3-none-any.whl (125 kB)
+2026-10-16T10:18:59.211918938Z Using cached deprecated-3.0.0-py3-none-any.whl (21 kB)
+2026-10-16T10:18:59.212869827Z Using cached distro-1.9.0-py3-none-any.whl (20 kB)
+2026-10-16T10:18:59.213810023Z Using cached docstring_parser-0.18.0-py3-none-any.whl (22 kB)
+2026-10-16T10:18:59.214777841Z Using cached greenlet-3.5.6-cp312-cp312-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl (621 kB)
+2026-10-16T10:18:59.215961689Z Using cached h11-0.16.0-py3-none-any.whl (37 kB)
+2026-10-16T10:18:59.216907398Z Using cached idna-3.20-py3-none-any.whl (69 kB)
+2026-10-16T10:18:59.217882245Z Using cached iniconfig-2.3.1-py3-none-any.whl (7.6 kB)
+2026-10-16T10:18:59.218835212Z Using cached itsdangerous-2.2.0-py3-none-any.whl (16 kB)
+2026-10-16T10:18:59.219763603Z Using cached jinja2-3.1.6-py3-none-any.whl (134 kB)
+2026-10-16T10:18:59.22074825Z Using cached jiter-0.17.0-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (345 kB)
+2026-10-16T10:18:59.221841895Z Using cached markupsafe-3.0.4-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (22 kB)
+2026-10-16T10:18:59.222811611Z Using cached ordered_set-4.1.0-py3-none-any.whl (7.6 kB)
+2026-10-16T10:18:59.223761404Z Using cached packaging-26.3-py3-none-any.whl (129 kB)
+2026-10-16T10:18:59.224762751Z Using cached pluggy-1.7.0-py3-none-any.whl (27 kB)
+2026-10-16T10:18:59.225691506Z Using cached pydantic-2.14.1-py3-none-any.whl (488 kB)
+2026-10-16T10:18:59.226839165Z Using cached pydantic_core-2.50.1-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (2.2 MB)
+2026-10-16T10:18:59.228544173Z Using cached pygments-2.21.0-py3-none-any.whl (1.3 MB)
+2026-10-16T10:18:59.229904877Z Using cached pyjwt-2.15.1-py3-none-any.whl (33 kB)
+2026-10-16T10:18:59.230860553Z Using cached rich-13.9.4-py3-none-any.whl (242 kB)
+2026-10-16T10:18:59.231891333Z Using cached typing_extensions-4.16.0-py3-none-any.whl (45 kB)
+2026-10-16T10:18:59.232855667Z Using cached certifi-2026.7.22-py3-none-any.whl (136 kB)
+2026-10-16T10:18:59.23384411Z Using cached mako-1.4.3-py3-none-any.whl (80 kB)
+2026-10-16T10:18:59.234837257Z Using cached sniffio-1.3.1-py3-none-any.whl (10 kB)
+2026-10-16T10:18:59.235790683Z Using cached annotated_types-0.8.0-py3-none-any.whl (13 kB)
+2026-10-16T10:18:59.236744531Z Using cached markdown_it_py-4.2.0-py3-none-any.whl (91 kB)
+2026-10-16T10:18:59.237716146Z Using cached typing_inspection-0.4.4-py3-none-any.whl (14 kB)
+2026-10-16T10:18:59.238653916Z Using cached wrapt-2.5.1-cp312-cp312-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl (250 kB)
+2026-10-16T10:18:59.2396974Z Using cached pycparser-3.11-py3-none-any.whl (51 kB)
+2026-10-16T10:18:59.240646276Z Using cached mdurl-0.1.2-py3-none-any.whl (10.0 kB)
+2026-10-16T10:18:59.3592098Z Installing collected packages: wrapt, typing-extensions, sniffio, redis, PyJWT, pygments, pycparser, psycopg2-binary, pluggy, packaging, ordered-set, mdurl, MarkupSafe, jiter, itsdangerous, iniconfig, idna, h11, greenlet, docstring-parser, distro, click, certifi, blinker, annotated-types, Werkzeug, typing-inspection, SQLAlchemy, pytest, pydantic-core, markdown-it-py, Mako, Jinja2, httpcore, gunicorn, deprecated, cffi, anyio, rich, pydantic, limits, httpx, Flask, cryptography, alembic, Flask-SQLAlchemy, Flask-Limiter, Flask-JWT-Extended, anthropic, Flask-Migrate
+2026-10-16T10:19:03.634584196Z Successfully installed Flask-3.0.2 Flask-JWT-Extended-4.6.0 Flask-Limiter-3.5.0 Flask-Migrate-4.0.5 Flask-SQLAlchemy-3.1.1 Jinja2-3.1.6 Mako-1.4.3 MarkupSafe-3.0.4 PyJWT-2.15.1 SQLAlchemy-2.0.27 Werkzeug-3.0.6 alembic-1.18.5 annotated-types-0.8.0 anthropic-0.120.0 anyio-4.15.1 blinker-1.9.0 certifi-2026.7.22 cffi-2.1.1 click-8.5.0 cryptography-50.0.1 deprecated-3.0.0 distro-1.9.0 docstring-parser-0.18.0 greenlet-3.5.6 gunicorn-23.0.0 h11-0.16.0 httpcore-1.0.9 httpx-0.28.1 idna-3.20 iniconfig-2.3.1 itsdangerous-2.2.0 jiter-0.17.0 limits-5.8.0 markdown-it-py-4.2.0 mdurl-0.1.2 ordered-set-4.1.0 packaging-26.3 pluggy-1.7.0 psycopg2-binary-2.9.9 pycparser-3.11 pydantic-2.14.1 pydantic-core-2.50.1 pygments-2.21.0 pytest-9.1.1 redis-5.0.8 rich-13.9.4 sniffio-1.3.1 typing-extensions-4.16.0 typing-inspection-0.4.4 wrapt-2.5.1
+2026-10-16T10:19:03.664450449Z 
+2026-10-16T10:19:03.664462543Z [notice] A new release of pip is available: 24.2 -> 26.2.1
+2026-10-16T10:19:03.664471578Z [notice] To update, run: pip install --upgrade pip
+2026-10-16T10:19:05.422073404Z ==> Uploading build...
+2026-10-16T10:19:09.474564618Z ==> Uploaded in 2.3s. Compression took 1.7s
+2026-10-16T10:19:09.477767475Z ==> Build successful 🎉
+2026-10-16T10:19:10.759878162Z ==> Starting pre-deploy: python scripts/render_env_probe.py pre-deploy && flask db upgrade
+2026-10-16T10:19:25.401832966Z ==> Running 'python scripts/render_env_probe.py pre-deploy && flask db upgrade'
+2026-10-16T10:19:25.663258865Z render_env_probe phase=pre-deploy
+2026-10-16T10:19:25.663282245Z   RENDER=true
+2026-10-16T10:19:25.663286585Z   RENDER_SERVICE_ID=srv-db8bna2j9qps73ccc3e0
+2026-10-16T10:19:25.663290025Z   RENDER_SERVICE_NAME=streakfit-staging-rcb
+2026-10-16T10:19:25.663293525Z   RENDER_SERVICE_TYPE=web
+2026-10-16T10:19:25.663296905Z   RENDER_INSTANCE_ID=dce-db8vk1qvcj2c73bcptrg-c8wcm-5djgg
+2026-10-16T10:19:25.663299926Z   RENDER_GIT_COMMIT=8c687350d70d837264ec8ffc87940c50255c21b9
+2026-10-16T10:19:25.663303026Z   RENDER_GIT_BRANCH=rc/safety-b
+2026-10-16T10:19:25.663306666Z   IS_PULL_REQUEST=false
+2026-10-16T10:19:25.663309886Z   STREAKFIT_DEPLOYMENT=staging
+2026-10-16T10:19:25.663312836Z   STREAKFIT_ENFORCE_DB_HEAD: MISSING
+2026-10-16T10:19:25.663315826Z   STREAKFIT_RETENTION_SWEEPER: MISSING
+2026-10-16T10:19:25.663318976Z   DATABASE_URL: set
+2026-10-16T10:19:25.663322046Z   MIGRATION_DATABASE_URL: MISSING
+2026-10-16T10:19:25.663324936Z   STREAKFIT_PRODUCTION_DB_ENDPOINT: MISSING
+2026-10-16T10:19:25.663328096Z   STREAKFIT_ALLOW_PRODUCTION_DB_FROM_HERE: MISSING
+2026-10-16T10:19:25.663331046Z   DATABASE_URL endpoint=ep-young-sound-b4qsoqe8
+2026-10-16T10:19:25.663335206Z   hosted=True production-in-this-phase: PASS (production would be accepted in this phase)
+2026-10-16T10:19:29.811668724Z [2026-10-16 10:19:29,811] INFO in app: coach configured: model=claude-sonnet-5 max_tokens=768
+2026-10-16T10:19:30.598117866Z INFO  [alembic.env] Migrating database: deployment=staging endpoint=ep-young-sound-b4qsoqe8 hosted=True service=srv-db8bna2j9qps73ccc3e0 (server endpoint ep-young-sound-b4qsoqe8)
+2026-10-16T10:19:30.598654498Z INFO  [alembic.runtime.migration] Context impl PostgresqlImpl.
+2026-10-16T10:19:30.598670848Z INFO  [alembic.runtime.migration] Will assume transactional DDL.
+2026-10-16T10:19:30.766200312Z INFO  [alembic.runtime.migration] Running upgrade  -> a3f8b1c2d4e5, baseline
+2026-10-16T10:19:30.804923079Z INFO  [alembic.runtime.migration] Running upgrade a3f8b1c2d4e5 -> f9e2a1b3c8d7, v0.6.1 add skill_level to user and create daily_completion table
+2026-10-16T10:19:30.82735366Z INFO  [alembic.runtime.migration] Running upgrade f9e2a1b3c8d7 -> g6h7i8j9k0l1, add display_mode to user
+2026-10-16T10:19:30.833812721Z INFO  [alembic.runtime.migration] Running upgrade g6h7i8j9k0l1 -> h2j3k4l5m6n7, add analytics_event table
+2026-10-16T10:19:30.854572655Z INFO  [alembic.runtime.migration] Running upgrade h2j3k4l5m6n7 -> i3k4l5m6n7o8, add push_subscription table
+2026-10-16T10:19:30.874999032Z INFO  [alembic.runtime.migration] Running upgrade i3k4l5m6n7o8 -> j4l5m6n7o8p9, drop push_subscription table (web push deferred)
+2026-10-16T10:19:30.88588549Z INFO  [alembic.runtime.migration] Running upgrade j4l5m6n7o8p9 -> k5l6m7n8o9p0, add brain_boost_answer table
+2026-10-16T10:19:30.897642667Z INFO  [alembic.runtime.migration] Running upgrade k5l6m7n8o9p0 -> l6m7n8o9p0q1, add xp_total and acorns_total to user
+2026-10-16T10:19:30.90691726Z INFO  [alembic.runtime.migration] Running upgrade l6m7n8o9p0q1 -> m7n8o9p0q1r2, add progress_event table
+2026-10-16T10:19:30.918111015Z INFO  [alembic.runtime.migration] Running upgrade m7n8o9p0q1r2 -> n8o9p0q1r2s3, add rickie_mode to user
+2026-10-16T10:19:30.92382607Z INFO  [alembic.runtime.migration] Running upgrade n8o9p0q1r2s3 -> o9p0q1r2s3t4, add team tables (R2.1 Team Foundations)
+2026-10-16T10:19:30.990480058Z INFO  [alembic.runtime.migration] Running upgrade o9p0q1r2s3t4 -> p0q1r2s3t4u5, add verification_run table (R3.0 StreakFit Control / Mission Control)
+2026-10-16T10:19:31.002042751Z INFO  [alembic.runtime.migration] Running upgrade p0q1r2s3t4u5 -> q1r2s3t4u5v6, add coach_turn and coach_note tables (Rickie cross-session memory)
+2026-10-16T10:19:31.025647957Z INFO  [alembic.runtime.migration] Running upgrade q1r2s3t4u5v6 -> r2s3t4u5v6w7, Add team photo sharing and StreakFit photo filters.
+2026-10-16T10:19:31.071078111Z INFO  [alembic.runtime.migration] Running upgrade r2s3t4u5v6w7 -> s3t4u5v6w7x8, Add team challenges.
+2026-10-16T10:19:31.116782501Z INFO  [alembic.runtime.migration] Running upgrade s3t4u5v6w7x8 -> t4u5v6w7x8y9, Coach Notes become an allow-list of canonical tokens instead of free text.
+2026-10-16T10:19:31.135237324Z INFO  [alembic.runtime.migration] Running upgrade t4u5v6w7x8y9 -> u5v6w7x8y9z0, How hard a person asked today to be.
+2026-10-16T10:19:31.145519829Z INFO  [alembic.runtime.migration] Running upgrade u5v6w7x8y9z0 -> v6w7x8y9z0a1, Add user.display_name — what Rickie calls somebody, separate from their login.
+2026-10-16T10:19:31.150612461Z INFO  [alembic.runtime.migration] Running upgrade v6w7x8y9z0a1 -> w7x8y9z0a1b2, Add retention_run — evidence that the conversation sweep actually happened.
+2026-10-16T10:19:31.163280078Z INFO  [alembic.runtime.migration] Running upgrade w7x8y9z0a1b2 -> 08681a9bd9f9, Age band, guardian links, per-capability consent, permission audit
+2026-10-16T10:19:31.215228794Z INFO  [alembic.runtime.migration] Running upgrade 08681a9bd9f9 -> ee93cb7a23d9, moderation: blocks, reports, evidence, actions, restrictions
+2026-10-16T10:19:31.326799845Z INFO  [alembic.runtime.migration] Running upgrade ee93cb7a23d9 -> 1279c12c6691, moderation ops: review deadlines, photo evidence, appeals, retention
+2026-10-16T10:19:31.417361305Z INFO  [alembic.runtime.migration] Running upgrade 1279c12c6691 -> 476bd58c9925, moderation notices: noticing a review obligation exactly once
+2026-10-16T10:19:31.437605078Z INFO  [alembic.runtime.migration] Running upgrade 476bd58c9925 -> c50e9d7b2fd8, retention runs know which promise, notices know their delivery
+2026-10-16T10:19:31.4665015Z INFO  [alembic.runtime.migration] Running upgrade c50e9d7b2fd8 -> 47f7dc9962e3, notice leases and a record that delivery ran
+2026-10-16T10:19:31.492731864Z INFO  [alembic.runtime.migration] Running upgrade 47f7dc9962e3 -> 08920334bccd, a reporter or appellant can delete their account; the record stays
+2026-10-16T10:19:31.505048824Z INFO  [alembic.runtime.migration] Running upgrade 08920334bccd -> c7d2a9e41b30, economy backstops: the mission award row and the user balance checks
+2026-10-16T10:19:31.523731152Z INFO  [alembic.runtime.migration] Running upgrade c7d2a9e41b30 -> d4f1b6e2a9c3, daily mission: the day's five exercises and Brain Boost, decided once
+2026-10-16T10:19:42.642451338Z ==> Pre-deploy complete!
+2026-10-16T10:19:43.862648323Z ==> Deploying...
+2026-10-16T10:19:44.003646338Z ==> Setting WEB_CONCURRENCY=1 by default, based on available CPUs in the instance
+2026-10-16T10:19:57.932451059Z ==> Running 'python scripts/render_env_probe.py runtime && STREAKFIT_ENFORCE_DB_HEAD=1 gunicorn app:app'
+2026-10-16T10:19:58.414423733Z render_env_probe phase=runtime
+2026-10-16T10:19:58.414447643Z   RENDER=true
+2026-10-16T10:19:58.414451673Z   RENDER_SERVICE_ID=srv-db8bna2j9qps73ccc3e0
+2026-10-16T10:19:58.414457364Z   RENDER_SERVICE_NAME=streakfit-staging-rcb
+2026-10-16T10:19:58.414460044Z   RENDER_SERVICE_TYPE=web
+2026-10-16T10:19:58.414462524Z   RENDER_INSTANCE_ID=srv-db8bna2j9qps73ccc3e0-6565c454db-v5wfw
+2026-10-16T10:19:58.414465044Z   RENDER_GIT_COMMIT=8c687350d70d837264ec8ffc87940c50255c21b9
+2026-10-16T10:19:58.414467444Z   RENDER_GIT_BRANCH=rc/safety-b
+2026-10-16T10:19:58.414470344Z   IS_PULL_REQUEST=false
+2026-10-16T10:19:58.414472774Z   STREAKFIT_DEPLOYMENT=staging
+2026-10-16T10:19:58.414475224Z   STREAKFIT_ENFORCE_DB_HEAD: MISSING
+2026-10-16T10:19:58.414477974Z   STREAKFIT_RETENTION_SWEEPER: MISSING
+2026-10-16T10:19:58.414480324Z   DATABASE_URL: set
+2026-10-16T10:19:58.414482734Z   MIGRATION_DATABASE_URL: MISSING
+2026-10-16T10:19:58.414485134Z   STREAKFIT_PRODUCTION_DB_ENDPOINT: MISSING
+2026-10-16T10:19:58.414487564Z   STREAKFIT_ALLOW_PRODUCTION_DB_FROM_HERE: MISSING
+2026-10-16T10:19:58.414490034Z   DATABASE_URL endpoint=ep-young-sound-b4qsoqe8
+2026-10-16T10:19:58.414493094Z   hosted=True production-in-this-phase: PASS (production would be accepted in this phase)
+2026-10-16T10:20:05.421637811Z [2026-10-16 10:20:05,421] INFO in app: coach configured: model=claude-sonnet-5 max_tokens=768
+2026-10-16T10:20:05.7892792Z [2026-10-16 10:20:05,789] INFO in app: Database identity verified (deployment=staging endpoint=ep-young-sound-b4qsoqe8 hosted=True service=srv-db8bna2j9qps73ccc3e0, server endpoint ep-young-sound-b4qsoqe8).
+2026-10-16T10:20:05.789393393Z [2026-10-16 10:20:05,789] INFO in app: Database migration check passed (at head d4f1b6e2a9c3).
+2026-10-16T10:20:05.789747581Z [2026-10-16 10:20:05 +0000] [59] [INFO] Starting gunicorn 23.0.0
+2026-10-16T10:20:05.790297985Z [2026-10-16 10:20:05 +0000] [59] [INFO] Listening at: http://0.0.0.0:10000 (59)
+2026-10-16T10:20:05.790364716Z [2026-10-16 10:20:05 +0000] [59] [INFO] Using worker: sync
+2026-10-16T10:20:05.799460495Z [2026-10-16 10:20:05 +0000] [65] [INFO] Booting worker with pid: 65
+2026-10-16T10:20:06.35908563Z 127.0.0.1 - - [16/Oct/2026:10:20:06 +0000] "HEAD / HTTP/1.1" 200 0 "-" "Go-http-client/1.1"
+2026-10-16T10:20:13.99453344Z 10.206.25.188 - - [16/Oct/2026:10:20:13 +0000] "GET /health HTTP/1.1" 200 16 "-" "Render/1.0"
+2026-10-16T10:20:13.997174734Z 10.206.25.188 - - [16/Oct/2026:10:20:13 +0000] "GET /health HTTP/1.1" 200 16 "-" "Render/1.0"
+2026-10-16T10:20:15.100811705Z ==> Your service is live 🎉
+2026-10-16T10:20:15.295073404Z ==> 
+2026-10-16T10:20:15.297975558Z ==> ///////////////////////////////////////////////////////////
+2026-10-16T10:20:15.300701131Z ==> 
+2026-10-16T10:20:15.303482588Z ==> Available at your primary URL https://streakfit-staging-rcb.onrender.com
+2026-10-16T10:20:15.308545751Z ==> 
+2026-10-16T10:20:15.312222052Z ==> ///////////////////////////////////////////////////////////
+2026-10-16T10:20:18.997630038Z 10.206.25.188 - - [16/Oct/2026:10:20:18 +0000] "GET /health HTTP/1.1" 200 16 "-" "Render/1.0"
+2026-10-16T10:20:23.998242717Z 10.206.25.188 - - [16/Oct/2026:10:20:23 +0000] "GET /health HTTP/1.1" 200 16 "-" "Render/1.0"
+2026-10-16T10:20:28.998303553Z 10.206.25.188 - - [16/Oct/2026:10:20:28 +0000] "GET /health HTTP/1.1" 200 16 "-" "Render/1.0"
+2026-10-16T10:20:33.99715796Z 10.206.25.188 - - [16/Oct/2026:10:20:33 +0000] "GET /health HTTP/1.1" 200 16 "-" "Render/1.0"
+2026-10-16T10:20:38.997165176Z 10.206.25.188 - - [16/Oct/2026:10:20:38 +0000] "GET /health HTTP/1.1" 200 16 "-" "Render/1.0"
+2026-10-16T10:20:43.993845223Z 10.206.25.188 - - [16/Oct/2026:10:20:43 +0000] "GET /health HTTP/1.1" 200 16 "-" "Render/1.0"
+2026-10-16T10:20:43.996844215Z 10.206.25.188 - - [16/Oct/2026:10:20:43 +0000] "GET /health HTTP/1.1" 200 16 "-" "Render/1.0"
+2026-10-16T10:20:48.997692472Z 10.206.25.188 - - [16/Oct/2026:10:20:48 +0000] "GET /health HTTP/1.1" 200 16 "-" "Render/1.0"
+2026-10-16T10:20:54.00223243Z 10.206.25.188 - - [16/Oct/2026:10:20:53 +0000] "GET /health HTTP/1.1" 200 16 "-" "Render/1.0"
+2026-10-16T10:20:58.99733833Z 10.206.25.188 - - [16/Oct/2026:10:20:58 +0000] "GET /health HTTP/1.1" 200 16 "-" "Render/1.0"
+2026-10-16T10:21:03.99698944Z 10.206.25.188 - - [16/Oct/2026:10:21:03 +0000] "GET /health HTTP/1.1" 200 16 "-" "Render/1.0"
+2026-10-16T10:21:08.998200248Z 10.206.25.188 - - [16/Oct/2026:10:21:08 +0000] "GET /health HTTP/1.1" 200 16 "-" "Render/1.0"
+2026-10-16T10:21:13.993881134Z 10.206.25.188 - - [16/Oct/2026:10:21:13 +0000] "GET /health HTTP/1.1" 200 16 "-" "Render/1.0"
+2026-10-16T10:21:13.997693455Z 10.206.25.188 - - [16/Oct/2026:10:21:13 +0000] "GET /health HTTP/1.1" 200 16 "-" "Render/1.0"

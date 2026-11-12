@@ -45,6 +45,9 @@ import _fake_resp
 srv = _fake_resp.FakeRedis()
 os.environ['RATELIMIT_STORAGE_URI'] = srv.uri
 fd, path = tempfile.mkstemp(suffix='.db')
+os.close(fd)
+import atexit
+atexit.register(lambda: os.path.exists(path) and os.unlink(path))
 os.environ['DATABASE_URL'] = 'sqlite:///' + path
 logging.disable(logging.CRITICAL)
 import app as A
@@ -244,6 +247,7 @@ elif name == 'degraded_is_quiet':
 out['limiter_enabled_seen'] = sorted(enabled_seen)
 print('D7RESULT ' + json.dumps(out), flush=True)
 srv.stop()
+os.path.exists(path) and os.unlink(path)   # os._exit skips atexit
 os._exit(0)
 """
 

@@ -18,7 +18,7 @@ Just one subsystem while developing — each module builds its own minimal scena
 python scripts/verification/chat.py https://streakfit.pro
 ```
 
-Every entry point accepts the base URL as a positional arg, `--base-url`, or `$SMOKE_BASE_URL`, in that precedence order, defaulting to production if none is given.
+Every entry point accepts the base URL as a positional arg, `--base-url`, or `$SMOKE_BASE_URL`, in that precedence order. With none of them the run stops (exit 2) before any request: there is no default target, because every module writes and a forgotten `--base-url` used to land on production.
 
 Exit codes: `0` all passed, `1` at least one check failed, `2` a setup step (e.g. registration) failed and the rest of the run was skipped, since nothing downstream could work without it.
 
@@ -33,8 +33,8 @@ Exit codes: `0` all passed, `1` at least one check failed, `2` a setup step (e.g
 | `moments.py` | Team Moments history (`team_created`, `member_joined`, `campfire_log_added`, ordering) |
 | `chat.py` | Team Chat post/read, empty/over-length rejection, emoji reactions as plain messages |
 | `rickie.py` | Rickie's team reactions (welcome, first-log) — fixed templates, `sender_user_id` null |
-| `coach.py` | Ask Rickie's boundaries (D48/D53), all refusals so no AI call is ever made: login required, a non-object body is a 400, an over-long insight and unstorable text are refused, and the provider deadline is reported in force by the self-check |
-| `photos.py` | Private team photos: filter catalog and lock state, upload, who can read the bytes (member 200 / non-member 403 / anonymous 401), non-JPEG and locked-filter rejection, the thread entry and history moment. Deletes what it uploads. |
+| `coach.py` | Ask Rickie's boundaries (D48/D53), all refusals so no AI call is ever made: login required, a non-object body is a 400, an over-long insight and unstorable text are refused, the provider deadline is reported in force by the self-check, and an account with Rickie Off is refused (409 `rickie_off`) |
+| `photos.py` | Private team photos: filter catalog and lock state, the Rickie Off catalog (no Rickie-only filters, no Rickie art), upload, who can read the bytes (member 200 / non-member 403 / anonymous 401), non-JPEG and locked-filter rejection, the thread entry and history moment. Deletes what it uploads. |
 | `security.py` | Invite rotation, remove member, leave team, unauthorized access — mutates membership |
 | `moderation.py` | Blocking and reporting end to end, the operator boundary (queue and appeals reject a non-operator), the appeals UI being reachable in the served markup, and the honesty of the monitoring: retention answered separately per promise, delivery split into configuration / observed execution / outstanding work, no check greener than the capability it depends on, and no identifiers in a payload served without a credential |
 | `body_limits.py` | The request-body size boundary (D64): a chunked body one byte over the 256 KB limit is refused for size (413) before authentication, and a small chunked body reaches the route. Unauthenticated, no side effects |

@@ -24,6 +24,8 @@ Behavior:
 Run where the target DATABASE_URL is set (e.g. production):
   DATABASE_URL=... SECRET_KEY=... JWT_SECRET_KEY=... python scripts/cleanup_qa_smoke.py            # dry run
   DATABASE_URL=... SECRET_KEY=... JWT_SECRET_KEY=... python scripts/cleanup_qa_smoke.py --execute  # delete safe
+Against PRODUCTION from a laptop, also set STREAKFIT_ALLOW_PRODUCTION_DB_FROM_HERE=1 for that one command
+(db_guard R5); without it the app refuses to connect.
 """
 import argparse
 import os

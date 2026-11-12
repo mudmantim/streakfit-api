@@ -10,7 +10,17 @@ import sys
 import urllib.error
 import urllib.request
 
-DEFAULT_BASE_URL = "https://streakfit.pro"
+# There is deliberately no default target. Every module WRITES (throwaway
+# qa_smoke_* accounts, a disposable team), and until 2026-10-15 a forgotten
+# --base-url during staging work silently landed on production (security
+# review P4). Production is one explicit argument away: https://streakfit.pro
+PRODUCTION_BASE_URL = "https://streakfit.pro"
+NO_TARGET_MESSAGE = (
+    "no target given: name it explicitly, e.g.\n"
+    "  python scripts/verify_all.py --base-url http://localhost:5000\n"
+    f"  python scripts/verify_all.py --base-url {PRODUCTION_BASE_URL}\n"
+    "(or set SMOKE_BASE_URL). There is no default target."
+)
 
 
 class ApiClient:
@@ -166,8 +176,13 @@ class Results:
 
 def resolve_base_url(positional, flag, env_value):
     """One consistent precedence order for every module's CLI entry point:
-    positional arg > --base-url flag > $SMOKE_BASE_URL > production default."""
-    return positional or flag or env_value or DEFAULT_BASE_URL
+    positional arg > --base-url flag > $SMOKE_BASE_URL. With none of them the
+    run stops (exit 2) before any request: there is no default target."""
+    target = (positional or flag or env_value or "").strip()
+    if not target:
+        print(NO_TARGET_MESSAGE, file=sys.stderr)
+        raise SystemExit(2)
+    return target
 
 
 def run_module_standalone(description, build_scenario, run_checks):

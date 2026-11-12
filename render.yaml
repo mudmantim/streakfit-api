@@ -106,6 +106,13 @@ services:
 
   # ══ CRON JOBS ══════════════════════════════════════════════════════════
   #
+  # DATABASE BINDING (db_guard.py, incident 2026-10-13): a cron job is a
+  # separate Render service with its own RENDER_SERVICE_ID, and the app refuses
+  # the production database from any service ID not listed in
+  # db_guard.PRODUCTION_RENDER_SERVICE_IDS (rule R2). After creating a cron in
+  # the dashboard, add its srv-... ID there in a reviewed release BEFORE its
+  # first scheduled run, or every run exits 1 with "Refusing to start: R2".
+  #
   # STATUS: NONE OF THESE EXIST YET. Render does not read this file for the
   # live service (it was created in the dashboard, not from a Blueprint), so
   # every block below is a specification to be typed into New Cron Job — not

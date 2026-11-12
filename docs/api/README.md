@@ -38,7 +38,7 @@ All three are JSON `{"error": ...}`:
 | Situation | Status | Body |
 |-----------|--------|------|
 | Missing / malformed `Authorization` header | `401` | `{"error":"Missing or invalid token"}` |
-| Invalid token (bad signature, undecodable) | `422` | `{"error":"Invalid token"}` |
+| Invalid token (bad signature, undecodable) | `401` | `{"error":"Invalid token"}` (was `422` before 2026-10) |
 | Expired token | `401` | `{"error":"Token has expired"}` |
 
 ### Which routes are public

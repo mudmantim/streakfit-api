@@ -21,10 +21,11 @@ team; never touches an existing user, team, or the database directly.
 Safe to run against production at any time.
 
 Usage:
-    python scripts/verify_all.py
+    python scripts/verify_all.py --base-url http://localhost:5000
     python scripts/verify_all.py https://streakfit.pro
     python scripts/verify_all.py --base-url https://streakfit.pro
     SMOKE_BASE_URL=http://localhost:5000 python scripts/verify_all.py
+    (no target at all: refused with exit 2 -- there is no default)
 
 Exit code 0 = every check passed. 1 = at least one check failed.
 2 = a setup step (e.g. registration) failed and the run was aborted,

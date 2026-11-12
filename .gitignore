@@ -35,3 +35,6 @@ eval_spend.json
 # tracked: they are the record of who decided what, and why.
 content/reviews/packets/
 rickie_scenarios_results.json
+
+# Browser/session state from manual UI runs: holds bearer tokens (photostate.json was committed 2026-09-18).
+photostate.json

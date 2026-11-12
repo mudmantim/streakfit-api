@@ -999,3 +999,40 @@ def test_one_failing_sweep_does_not_cancel_the_other(client, team, admin_env,
 
     assert [n.kind for n in _notices()] == ['urgent_filed'], \
         'notice generation was taken down by an unrelated failure'
+
+
+def test_a_closed_appeal_cannot_be_decided_again(client, team, admin_env):
+    """K2 (2026-10-03): one decision per appeal. Re-overturning an old appeal
+    would lift EVERY active suspension of the user, including one made after
+    the first decision -- the trail claiming a reversal nobody chose."""
+    owner, member, t = team
+    _suspend(client, owner, member, t)
+    decisions = client.get('/api/moderation/decisions',
+                           headers=auth_headers(member)).get_json()
+    client.post('/api/appeals', json={'decision_id': decisions[0]['decision_id']},
+                headers=auth_headers(member))
+    ap = db.session.query(Appeal).one()
+    assert client.post(f'/api/admin/appeals/{ap.public_id}/decide',
+                       json={'outcome': 'overturned'}, headers=ADMIN).status_code == 200
+    assert say(client, member, t['id'], 'back').status_code == 201
+
+    # A NEW suspension, for something new, after the appeal was decided.
+    client.post('/api/reports', json={
+        'category': 'threats', 'subject_type': 'user',
+        'reported_user_id': uid(client, member), 'team_id': t['id']},
+        headers=auth_headers(owner))
+    rep = db.session.query(Report).order_by(Report.id.desc()).first()
+    assert client.post(f'/api/admin/reports/{rep.public_id}/action',
+                       json={'action': 'suspend_social'}, headers=ADMIN).status_code == 200
+    assert say(client, member, t['id'], 'out again').status_code == 403
+
+    for outcome in ('overturned', 'upheld'):
+        r = client.post(f'/api/admin/appeals/{ap.public_id}/decide',
+                        json={'outcome': outcome, 'note': 'again'}, headers=ADMIN)
+        assert r.status_code == 409 and r.get_json()['code'] == 'appeal_closed'
+    # The newer suspension stands, and the trail holds exactly one decision.
+    assert say(client, member, t['id'], 'still out').status_code == 403
+    assert db.session.query(ModerationAction).filter(
+        ModerationAction.action.like('appeal_%')).count() == 1
+    db.session.refresh(ap)
+    assert (ap.status, ap.outcome, ap.outcome_note) == ('closed', 'overturned', None)

@@ -158,16 +158,20 @@
 
                     <div class="settings-row" id="settings-row-rickie">
                         <label class="settings-label" for="rickie-mode-select">Rickie</label>
-                        <select id="rickie-mode-select" class="skill-select" title="How much of Rickie's personality you want" aria-describedby="rickie-mode-help"
+                        <select id="rickie-mode-select" class="skill-select" title="How much of Rickie you want, or none" aria-describedby="rickie-mode-help"
                                 onchange="handleRickieModeChange(this.value)">
                             <option value="full">🦝 Full — jokes and celebrations</option>
                             <option value="quiet">🦝 Quiet — fewer interruptions</option>
                             <option value="minimal">🦝 Minimal — just the facts</option>
+                            <option value="off">Off — no Rickie</option>
                         </select>
                     </div>
                     <p class="settings-help" id="rickie-mode-help">
-                        How chatty Rickie is. He never stops being available — this
-                        only changes how often he speaks up on his own.
+                        Full, Quiet and Minimal change how often Rickie speaks up
+                        on his own; Ask Rickie stays available in all three.
+                        Off removes him completely: no pictures, no messages and
+                        no Ask Rickie. Missions, streaks, XP, acorns and teams
+                        work the same either way.
                     </p>
                     <div class="settings-row" id="settings-row-forget">
                         <span class="settings-label">Memory</span>

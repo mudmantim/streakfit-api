@@ -176,6 +176,18 @@ class Browser:
                 break
         else:
             raise EnvironmentError("no Chrome/Chromium binary found on PATH")
+        # Chrome also writes its own scratch directories (com.google.Chrome.*)
+        # into $TMPDIR, outside the profile: 20 were left by one full test run
+        # (2026-10-15). A profile this run owns gets them inside it instead, so
+        # the cleanup in close() removes them too -- but only while the socket
+        # Chrome puts there (…/com.google.Chrome.XXXXXX/SingletonSocket) stays
+        # under the Unix socket path limit (108 bytes); past it Chrome cannot
+        # start at all, so a long TMPDIR keeps Chrome's default.
+        chrome_env = None
+        chrome_tmp = os.path.join(self.profile, "t")
+        if self._owns_profile and len(chrome_tmp) + len("/com.google.Chrome.XXXXXX/SingletonSocket") < 100:
+            os.makedirs(chrome_tmp, exist_ok=True)
+            chrome_env = {**os.environ, "TMPDIR": chrome_tmp}
         self.proc = subprocess.Popen(
             [
                 binary, "--headless=new", f"--remote-debugging-port={port}",
@@ -183,7 +195,7 @@ class Browser:
                 "--no-first-run", "--no-default-browser-check",
                 "--disable-extensions", "--disable-gpu", f"--window-size={width},{height}",
             ],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=chrome_env,
         )
         target = None
         for _ in range(100):
@@ -806,6 +818,63 @@ def check_team_witness(b: Browser, base: str, app) -> None:
           "and it says the thing somebody hesitating is afraid of", note[:90])
 
 
+def check_a_challenge_that_wrapped_up_while_open_says_so(b: Browser, base: str, app) -> None:
+    """K1 (2026-10-15): the card is on screen with its "I did it" button, the
+    challenge wraps up (48 hours, or the person it named left), THEN the tap.
+    The server now refuses (409 challenge_closed); the card must say it wrapped
+    up -- a fact about the challenge -- not silently reset for another tap."""
+    print("\nTeams — a challenge that wrapped up while its card was open")
+    parent, parent_token = make_user(app, "chparent")
+    kid, kid_token = make_user(app, "chkid")
+    team = _api(base, "/api/teams", "POST", parent_token, {"name": "UICheck Challenge"}).get("team")
+    if not team:
+        bad("could not create a team to check")
+        return
+    _api(base, f"/api/teams/{team['id']}/join", "POST", kid_token, {"code": team["invite_code"]})
+    ch = _api(base, f"/api/teams/{team['id']}/challenges", "POST", parent_token,
+              {"preset_key": "squats_20"}).get("challenge")
+    if not ch:
+        bad("could not start a challenge to check")
+        return
+
+    b.goto(base + "/", wait=1.0)
+    b.js(f"localStorage.setItem('streakfit_token', {json.dumps(kid_token)})")
+    b.goto(base + "/", wait=3.0)
+    go_to_pane(b, "team")
+    # With a challenge waiting the card's button says "Take it on", not "Open".
+    b.js("(()=>{const btn=document.querySelector('.team-card-open-btn');"
+         " if(btn) btn.click(); return 1;})()")
+    time.sleep(2.5)
+    # No tab switch here on purpose: "Take it on" must land where the challenge
+    # is (its card lives in the thread, on the panel's second tab).
+    has_btn = b.js("(()=>{const e=document.querySelector('.tchallenge-do-btn');"
+                   " return !!e && e.getBoundingClientRect().height > 0;})()")
+    if not check(bool(has_btn), "'Take it on' opens the panel where the challenge and its "
+                 "'I did it' button are"):
+        return
+
+    from app import TeamChallenge, User, db
+    with app.app_context():
+        row = db.session.execute(db.select(TeamChallenge)
+                                 .where(TeamChallenge.public_id == ch["public_id"])).scalar_one()
+        row.expires_at = dt.datetime.utcnow() - dt.timedelta(seconds=1)
+        db.session.commit()
+        xp_before = db.session.execute(db.select(User.xp_total).where(User.username == kid)).scalar_one()
+
+    b.js("document.querySelector('.tchallenge-do-btn').click()")
+    time.sleep(2.0)
+    card = b.js("(()=>{const e=document.querySelector('.tchallenge-card');"
+                " return e ? e.innerText : '';})()") or ""
+    check("wrapped up" in card, "the card says the challenge wrapped up", f"card was {card[:160]!r}")
+    check(not b.js("!!document.querySelector('.tchallenge-do-btn')"),
+          "and offers no button for a tap that cannot work")
+    check("did this one" not in card, "and does not claim a completion that was refused",
+          f"card was {card[:160]!r}")
+    with app.app_context():
+        xp_after = db.session.execute(db.select(User.xp_total).where(User.username == kid)).scalar_one()
+    check(xp_after == xp_before, "and paid nothing", f"xp {xp_before} -> {xp_after}")
+
+
 def check_leaving_while_a_report_is_open(b: Browser, base: str, app) -> None:
     """Account deletion waits for a report its user filed, and says so without
     naming it; a challenge to someone who left does not become 'the team'."""
@@ -1322,6 +1391,35 @@ def check_someone_can_actually_sign_up(b: Browser, base: str, app) -> None:
     check(bool(b.js("(()=>{const btn=[...document.querySelectorAll('button')]"
                     ".find(e=>e.textContent.trim()==='I did this'); return !!btn;})()")),
           "and something to tap")
+
+
+def check_mission_day_label_is_the_servers(b: Browser, base: str, app) -> None:
+    """The subtitle names the mission on screen, wherever the phone is.
+
+    Found by the 2026-11-08 real-user journey: the subtitle printed the
+    device's date and "Refreshes tomorrow", so in UTC+14 it named Monday over
+    Sunday's mission, and in the Americas it promised tomorrow for a mission
+    that changes the same evening. Both facts now come from /api/daily.
+    """
+    print("\nThe mission's day and refresh time, in far-apart time zones")
+    username, token = make_user(app, "daylabel")
+    daily = _api(base, "/api/daily", token=token)
+    want = dt.date.fromisoformat(daily["mission_date"]).strftime("%A, %b ") + str(
+        dt.date.fromisoformat(daily["mission_date"]).day)
+    try:
+        for tz in ("Pacific/Kiritimati", "Pacific/Pago_Pago"):
+            b.call("Emulation.setTimezoneOverride", timezoneId=tz)
+            b.goto(base + "/", wait=1.0)
+            b.js(f"localStorage.setItem('streakfit_token', {json.dumps(token)}); 1")
+            b.goto(base + "/", wait=2.5)
+            label = (b.js("(document.getElementById('daily-mission-date')||{}).textContent||''") or "").strip()
+            check(label.startswith(want + " ·"),
+                  f"in {tz} the subtitle names the server's mission day", f"{label!r} vs {want!r}")
+            check("Refreshes tomorrow" not in label and "New mission" in label,
+                  f"in {tz} it says when the mission really refreshes", label)
+    finally:
+        b.call("Emulation.setTimezoneOverride", timezoneId="")
+        b.js("localStorage.removeItem('streakfit_token'); 1")
 
 
 def check_brain_boost_can_be_answered(b: Browser, base: str, app) -> None:
@@ -3226,6 +3324,7 @@ def main() -> int:
         check_a_completion_that_did_not_save_says_so(browser, base, flask_app)
         check_celebration_stays_clear_of_the_nav(browser, base, flask_app)
         check_team_witness(browser, base, flask_app)
+        check_a_challenge_that_wrapped_up_while_open_says_so(browser, base, flask_app)
         check_photo_sharing(browser, base, flask_app)
         check_leaving_while_a_report_is_open(browser, base, flask_app)
         check_side_quests_still_work(browser, base, flask_app)
@@ -3234,6 +3333,7 @@ def main() -> int:
         check_panes_and_solo_first(browser, base, flask_app)
         check_brain_boost_can_be_answered(browser, base, flask_app)
         check_someone_can_actually_sign_up(browser, base, flask_app)
+        check_mission_day_label_is_the_servers(browser, base, flask_app)
         check_coming_back_after_a_while(browser, base, flask_app)
         check_discovery_types_reach_a_reader(browser, base, flask_app)
         check_acorns_are_spendable_without_a_team(browser, base, flask_app)

@@ -23,7 +23,7 @@ import pytest
 import app as appmod
 
 
-ENV_MARKERS = ("RENDER", "RENDER_SERVICE_ID", "STREAKFIT_ENV",
+ENV_MARKERS = ("RENDER", "RENDER_SERVICE_ID", "STREAKFIT_ENV", "STREAKFIT_DEPLOYMENT",
                "STREAKFIT_ENFORCE_DB_HEAD", "RATELIMIT_STORAGE_URI")
 
 
@@ -173,3 +173,22 @@ def test_a_critical_production_failure_reaches_the_roll_up(client, monkeypatch):
     monkeypatch.setenv("RENDER", "true")
     body = client.get("/api/verification/self").get_json()
     assert body["status"] == "FAIL"
+
+
+# -- declared deployment (db_guard, incident 2026-10-13) -------------------------
+
+def test_declared_staging_on_render_reports_staging(client, monkeypatch):
+    monkeypatch.setenv("RENDER", "true")
+    monkeypatch.setenv("STREAKFIT_DEPLOYMENT", "staging")
+    assert client.get("/api/build-identity").get_json()["environment"] == "staging"
+
+
+def test_undeclared_render_still_reports_production(client, monkeypatch):
+    monkeypatch.setenv("RENDER", "true")
+    monkeypatch.delenv("STREAKFIT_DEPLOYMENT", raising=False)
+    assert client.get("/api/build-identity").get_json()["environment"] == "production"
+
+
+def test_declared_production_is_still_held_to_production_rules(client, monkeypatch):
+    monkeypatch.setenv("STREAKFIT_DEPLOYMENT", "production")
+    assert rl_check(client)["status"] == "FAIL"        # memory:// limiter is critical in production

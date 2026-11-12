@@ -9,6 +9,7 @@ rate limiting so cap-boundary tests can make the request volume they need
 (e.g. creating 10+ teams to prove the free-tier cap) without tripping the
 same per-minute limits real users would hit.
 """
+import atexit
 import os
 import tempfile
 import time
@@ -26,6 +27,23 @@ os.environ.setdefault('JWT_SECRET_KEY', 'test-jwt-secret-key-not-for-production'
 
 _db_fd, _db_path = tempfile.mkstemp(suffix='.db')
 os.environ['DATABASE_URL'] = f'sqlite:///{_db_path}'
+
+
+def _remove_test_db():
+    # One file per pytest process used to stay behind in $TMPDIR forever; on a
+    # tmpfs /tmp, ~2,500 of them (~1 GB) filled the per-user quota (2026-10-15).
+    try:
+        os.close(_db_fd)
+    except OSError:
+        pass
+    for suffix in ('', '-journal', '-wal', '-shm'):
+        try:
+            os.unlink(_db_path + suffix)
+        except FileNotFoundError:
+            pass
+
+
+atexit.register(_remove_test_db)
 
 # E402: these imports must run AFTER the os.environ setup above — importing app
 # reads SECRET_KEY/DATABASE_URL at module scope, so hoisting them breaks the suite.
@@ -84,3 +102,24 @@ def mission_json(day=None, **extra):
     Defaults to the server's current mission day."""
     import app as appmod
     return {'mission_date': (day or appmod.server_today()).isoformat(), **extra}
+
+
+@pytest.fixture(autouse=True)
+def no_sweeper_thread_survives_its_test():
+    """A test that starts the real retention sweeper must stop it before it
+    ends. A surviving thread keeps writing retention/notification runs into
+    LATER tests' databases, so their results depend on timing (CI, 2026-10-14:
+    test_self_check_fails_when_the_sweep_has_gone_quiet saw a fresh run that it
+    had just deleted). Any survivor is stopped here and the test that leaked it
+    fails, deterministically, instead of a random later test."""
+    import threading
+    yield
+    leaked = [t for t in threading.enumerate() if t.name.startswith('streakfit-retention') and t.is_alive()]
+    for t in leaked:
+        stop = getattr(t, 'stop_event', None)
+        if stop is not None:
+            stop.set()
+            t.join(timeout=10)
+    stuck = [t.name for t in leaked if t.is_alive()]
+    assert not leaked, (f'{len(leaked)} retention sweeper thread(s) still running at the end of this test'
+                        + (f'; {len(stuck)} did not stop within 10 s: {stuck}' if stuck else ''))
