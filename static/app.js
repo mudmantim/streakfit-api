@@ -2787,7 +2787,9 @@ async function openPhotoComposer(file, opts) {
     });
     if (!loaded) {
         URL.revokeObjectURL(objectUrl);
-        alertlessPhotoError("That file didn't look like a photo Rickie can use.");
+        alertlessPhotoError(_rickieOff()
+            ? "That file didn't look like a photo that can be used."
+            : "That file didn't look like a photo Rickie can use.");
         return;
     }
     _composerImage = img;
@@ -2798,6 +2800,12 @@ async function openPhotoComposer(file, opts) {
     }
 
     await _refreshPhotoFilters();
+    // A suggested filter the picker does not offer (Rickie Off leaves out the
+    // filters that are only his picture) falls back to no filter rather than
+    // being sent unseen.
+    if (!_photoFilters.some(function (f) { return f.key === _composerFilterKey; })) {
+        _composerFilterKey = 'none';
+    }
     _buildPhotoComposer(teamId, objectUrl, solo);
 }
 

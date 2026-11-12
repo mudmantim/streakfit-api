@@ -57,6 +57,25 @@ def run(api, results, scenario):
         results.check("photos.catalog_reports_a_spendable_balance",
                       isinstance(catalog.get("acorns_available"), int))
 
+    # --- Rickie Off: the picker has no Rickie in it -------------------------
+    # As the throwaway "outsider" (in no team, so nothing else in this module
+    # depends on its setting), restored to 'full' straight after.
+    s_off, _ = api.request("PATCH", "/api/me", token=outsider["token"],
+                           body={"rickie_mode": "off"})
+    status, off_catalog = api.request("GET", "/api/photo-filters", token=outsider["token"])
+    api.request("PATCH", "/api/me", token=outsider["token"], body={"rickie_mode": "full"})
+    off_filters = (off_catalog or {}).get("filters") or []
+    off_keys = {f.get("key") for f in off_filters}
+    rickie_art = [o.get("src") for f in off_filters
+                  for o in (f.get("render") or {}).get("overlays", [])
+                  if "rickie" in str(o.get("src", ""))]
+    results.check("photos.rickie_off_catalog_has_no_rickie",
+                  s_off == 200 and status == 200 and "none" in off_keys
+                  and "golden_hour" in off_keys
+                  and not ({"rickie_peek", "rickie_crew"} & off_keys)
+                  and not rickie_art,
+                  f"patch={s_off} status={status} keys={sorted(off_keys)} art={rickie_art}")
+
     # --- Upload -------------------------------------------------------------
     body, content_type = _multipart(
         {"caption": "smoke test photo", "filter_key": "rickie_peek"}, "smoke.jpg", SMOKE_JPEG)

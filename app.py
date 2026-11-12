@@ -6771,7 +6771,7 @@ def _filters_newly_unlocked(user_id, user, old_level, events):
     gained = _unlocked_filter_keys(after, purchased) - _unlocked_filter_keys(before, purchased)
     return [
         {'key': f['key'], 'name': f['name'], 'blurb': f['blurb']}
-        for f in PHOTO_FILTERS if f['key'] in gained
+        for f in _filters_for_rickie_mode(PHOTO_FILTERS, user) if f['key'] in gained
     ]
 
 
@@ -7287,6 +7287,50 @@ PHOTO_FILTERS = [
 ]
 
 PHOTO_FILTERS_BY_KEY = {f['key']: f for f in PHOTO_FILTERS}
+
+# Rickie Off (owner decision 2026-11-11: no Rickie at all for that account).
+# Filters are drawn on the phone from the render spec the server sends, so the
+# Off view is made here:
+#   - a filter that IS Rickie (its only content is his picture) is left out;
+#   - every other filter keeps its look and loses only his picture, so nothing
+#     earned or bought with acorns goes away;
+#   - a blurb in his voice gets a plain one.
+# The upload check (_filter_is_usable) is deliberately unchanged: it decides
+# what a person HAS, not what the picker shows, and a photo is already rendered
+# on the phone before it is sent.
+_RICKIE_ART_PREFIX = '/static/rickie'
+RICKIE_ONLY_FILTERS = frozenset({'rickie_peek', 'rickie_crew'})
+RICKIE_OFF_FILTER_BLURBS = {
+    'acorn_shower': 'It is raining acorns.',
+    'sweat_mode': 'This counts as glowing.',
+    'night_owl': 'Moved after dark. That counts.',
+}
+
+
+def _filter_without_rickie(entry):
+    """A copy of one filter entry (catalog spec or unlock-state row) with
+    Rickie's picture and voice taken out. Never mutates the shared catalog."""
+    out = dict(entry)
+    render = dict(entry.get('render') or {})
+    if 'overlays' in render:
+        kept = [o for o in render['overlays']
+                if not str(o.get('src', '')).startswith(_RICKIE_ART_PREFIX)]
+        if kept:
+            render['overlays'] = kept
+        else:
+            del render['overlays']
+    if 'render' in entry:
+        out['render'] = render
+    if entry['key'] in RICKIE_OFF_FILTER_BLURBS:
+        out['blurb'] = RICKIE_OFF_FILTER_BLURBS[entry['key']]
+    return out
+
+
+def _filters_for_rickie_mode(entries, user):
+    if user is None or user.rickie_mode != 'off':
+        return entries
+    return [_filter_without_rickie(e) for e in entries
+            if e['key'] not in RICKIE_ONLY_FILTERS]
 
 
 def _acorns_available(user):
@@ -8861,7 +8905,8 @@ def list_photo_filters():
     stats = get_user_stats(user_id)
     return jsonify({
         "acorns_available": _acorns_available(user),
-        "filters": _filter_unlock_state(user, stats, _purchased_filter_keys(user_id)),
+        "filters": _filters_for_rickie_mode(
+            _filter_unlock_state(user, stats, _purchased_filter_keys(user_id)), user),
     }), 200
 
 

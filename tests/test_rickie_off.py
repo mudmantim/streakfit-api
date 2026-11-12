@@ -318,3 +318,87 @@ def test_rickie_voiced_copy_has_an_off_branch():
     for signature in ('function renderJourneyCard()', 'function _renderTodayStrip(daily)',
                       'function _updateRickieMoodBadge()'):
         assert '_rickieNeutral()' in _function_body(js, signature), signature
+
+
+# ── Photo filters under Off (follow-up to d7a1294) ───────────────────────────
+#
+# The filter picker draws from the render spec the server sends, so the Off
+# view is made on the server: filters that are only his picture are left out,
+# every other filter keeps its look without him, and his voice in a blurb is
+# replaced. Earned and purchased filters do not go away.
+
+def _rickie_art(filters):
+    return [o.get('src') for f in filters
+            for o in (f.get('render') or {}).get('overlays', [])
+            if 'rickie' in str(o.get('src', '')).lower()]
+
+
+def _filters(client, token):
+    r = client.get('/api/photo-filters', headers=auth_headers(token))
+    assert r.status_code == 200, r.get_json()
+    return r.get_json()['filters']
+
+
+def test_off_photo_filters_have_no_rickie_picture_name_or_voice(client):
+    token = register_and_login(client, 'rk_filters_off')
+    _set_mode(client, token, 'off')
+    filters = _filters(client, token)
+    keys = [f['key'] for f in filters]
+    assert not (appmod.RICKIE_ONLY_FILTERS & set(keys))
+    assert _rickie_art(filters) == []
+    for f in filters:
+        assert 'rickie' not in (f['name'] + ' ' + f['blurb']).lower(), f['key']
+
+
+def test_off_keeps_every_other_filter_and_its_look(client):
+    token = register_and_login(client, 'rk_filters_keep')
+    full = {f['key']: f for f in _filters(client, token)}
+    _set_mode(client, token, 'off')
+    off = {f['key']: f for f in _filters(client, token)}
+    assert set(off) == set(full) - appmod.RICKIE_ONLY_FILTERS
+    for key, f in off.items():
+        assert f['unlocked'] == full[key]['unlocked'], key
+        assert f['cost'] == full[key]['cost'], key
+        # Everything but his picture is still drawn.
+        expect = {k: v for k, v in full[key]['render'].items() if k != 'overlays'}
+        got = {k: v for k, v in f['render'].items() if k != 'overlays'}
+        assert got == expect, key
+    assert off['mission_complete']['render']['ribbon']['text'] == 'MISSION COMPLETE'
+    assert off['golden_hour'] == full['golden_hour']
+
+
+def test_the_catalog_itself_is_not_changed_by_an_off_request(client):
+    token = register_and_login(client, 'rk_filters_shared')
+    _set_mode(client, token, 'off')
+    _filters(client, token)
+    assert appmod.PHOTO_FILTERS_BY_KEY['mission_complete']['render']['overlays']
+    assert 'Rickie' in appmod.PHOTO_FILTERS_BY_KEY['acorn_shower']['blurb']
+    other = register_and_login(client, 'rk_filters_other')
+    keys = {f['key'] for f in _filters(client, other)}
+    assert appmod.RICKIE_ONLY_FILTERS <= keys
+    assert _rickie_art(_filters(client, other))
+
+
+@pytest.mark.parametrize('mode', ['full', 'quiet', 'minimal'])
+def test_other_modes_still_get_the_whole_catalog(client, mode):
+    token = register_and_login(client, f'rk_filters_{mode}')
+    _set_mode(client, token, mode)
+    keys = [f['key'] for f in _filters(client, token)]
+    assert keys == [f['key'] for f in appmod.PHOTO_FILTERS]
+
+
+def test_newly_unlocked_filters_are_described_without_rickie_under_off():
+    class _U:
+        rickie_mode = 'off'
+    out = appmod._filters_for_rickie_mode(appmod.PHOTO_FILTERS, _U())
+    assert {f['key'] for f in out} == set(appmod.PHOTO_FILTERS_BY_KEY) - appmod.RICKIE_ONLY_FILTERS
+    assert all('rickie' not in f['blurb'].lower() for f in out)
+    _U.rickie_mode = 'full'
+    assert appmod._filters_for_rickie_mode(appmod.PHOTO_FILTERS, _U()) is appmod.PHOTO_FILTERS
+
+
+def test_the_composer_drops_a_suggested_filter_the_picker_does_not_offer():
+    js = _code(APP_JS, block_comments=False)
+    assert re.search(r"if \(!_photoFilters\.some\(function \(f\) \{ return f\.key === _composerFilterKey; \}\)\) \{\s*"
+                     r"_composerFilterKey = 'none';", js)
+    assert "That file didn't look like a photo that can be used." in js
