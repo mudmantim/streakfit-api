@@ -15,9 +15,13 @@ bad input away from the provider:
   a reply that is silently never saved.
 
 The coach is limited to 3 questions a minute per person and every refusal
-counts, so this module makes exactly three authenticated calls. The fourth
-check reads the self-verification payload: the provider deadline that stops a
-stalled model from freezing the one worker is reported there.
+counts, so this module makes exactly three authenticated calls as user "a".
+The fourth check reads the self-verification payload: the provider deadline
+that stops a stalled model from freezing the one worker is reported there.
+
+The last check is Rickie Off, as user "b" (its own per-minute allowance): an
+account that has turned Rickie off is refused with 409 rickie_off before the
+model, whatever the page shows. b is a throwaway qa_smoke_* account.
 """
 import os
 import sys
@@ -58,6 +62,15 @@ def run(api, results, scenario):
     results.check("coach.provider_deadline_in_force",
                   bounds.get("status") == "PASS" and "0 retries" in (bounds.get("observed") or ""),
                   f"status={bounds.get('status')!r} observed={bounds.get('observed')!r}")
+
+    token_b = scenario.users["b"]["token"]
+    s_off, _ = api.request("PATCH", "/api/me", token=token_b, body={"rickie_mode": "off"})
+    status, payload = api.request("POST", "/api/coach", token=token_b, body={"message": "hi"})
+    results.check("coach.refused_when_rickie_off",
+                  s_off == 200 and status == 409
+                  and (payload or {}).get("error") == "rickie_off",
+                  f"patch={s_off} status={status} payload={payload}")
+    api.request("PATCH", "/api/me", token=token_b, body={"rickie_mode": "full"})
 
     return scenario
 

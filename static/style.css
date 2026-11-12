@@ -4563,3 +4563,25 @@ body.theme-classic .theme-btn.active { background: rgba(79,70,229,.2); }
     cursor: pointer;
 }
 .moderation-appeal-btn:hover { background: var(--gray-100); }
+
+/* ── Rickie Off ─────────────────────────────────────────────────────────────
+   `body.rickie-off` is set by _syncRickiePresence() in app.js for an account
+   whose Rickie setting is Off. Everything of his that is drawn rather than
+   written goes here: every picture of him, the roamer, the Ask Rickie button
+   and panel, his lines in team chat, and the roaming setting (which has
+   nothing left to control). Text he would have said is replaced where it is
+   written, in app.js. The reaction toast is not listed: under Off it shows
+   only plain confirmations, and only its avatar is hidden. */
+body.rickie-off .today-rickie,
+body.rickie-off .journey-avatar,
+body.rickie-off .rickie-avatar-sm,
+body.rickie-off .rickie-reaction-avatar,
+body.rickie-off .coach-avatar,
+body.rickie-off .mb-avatar,
+body.rickie-off #rickie-roam-band,
+body.rickie-off #coach-ask-btn,
+body.rickie-off .coach-panel,
+body.rickie-off .team-msg-rickie,
+body.rickie-off #settings-row-roam {
+    display: none !important;
+}
