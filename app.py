@@ -7480,8 +7480,10 @@ PHOTO_FILTERS: list[dict[str, Any]] = [
 ]
 
 # Meteorological seasons, northern hemisphere (months -> season). The app has
-# no location, so the hemisphere is a fixed choice; see the owner decisions in
-# the 2026-11-12 filters report.
+# no location, so the hemisphere is a fixed choice for Auto; see the owner
+# decisions in the 2026-11-12 filters report. Anyone it is wrong for (the
+# southern hemisphere, the tropics) picks their own in Settings -> "Season for
+# photos" (chosen_season below).
 SEASON_BY_MONTH = {12: 'winter', 1: 'winter', 2: 'winter',
                    3: 'spring', 4: 'spring', 5: 'spring',
                    6: 'summer', 7: 'summer', 8: 'summer',
@@ -7530,13 +7532,25 @@ def season_for(day):
     return SEASON_BY_MONTH[day.month]
 
 
-def _filter_for_day(spec, day):
+def chosen_season(value):
+    """A season the person picked for their photos ("Season for photos" in
+    Settings), or None for Auto. Anything that is not exactly one of the four
+    season keys -- missing, 'auto', junk -- is Auto, so the default never
+    changes and a bad value can only ever fall back to the date."""
+    return value if isinstance(value, str) and value in SEASONAL_LOOKS else None
+
+
+def _filter_for_day(spec, day, season=None):
     """The catalog entry as it looks on `day`: a seasonal filter takes that
     season's name, blurb and render. A copy; the shared catalog is never
-    changed. Every other filter is returned as is."""
+    changed. Every other filter is returned as is.
+
+    `season` is the person's own choice (chosen_season); None means Auto, the
+    northern-hemisphere season of `day`. The filter KEY stays 'seasonal'
+    either way, so the choice needs no unlock and never touches uploads."""
     if not spec.get('seasonal'):
         return spec
-    season = season_for(day)
+    season = chosen_season(season) or season_for(day)
     look = SEASONAL_LOOKS[season]
     out = dict(spec)
     out.update(name=look['name'], blurb=look['blurb'], render=look['render'],
@@ -7638,7 +7652,7 @@ def _unlocked_filter_keys(ctx, purchased_keys):
     return {f['key'] for f in PHOTO_FILTERS if _filter_is_unlocked(f, ctx, purchased_keys)}
 
 
-def _filter_unlock_state(user, stats, purchased_keys):
+def _filter_unlock_state(user, stats, purchased_keys, season=None):
     """Resolve every filter's availability for this user.
 
     Earned unlocks are evaluated live from the user's own stats rather than
@@ -7652,7 +7666,7 @@ def _filter_unlock_state(user, stats, purchased_keys):
     today = server_today()
     out = []
     for spec in PHOTO_FILTERS:
-        spec = _filter_for_day(spec, today)
+        spec = _filter_for_day(spec, today, season)
         rule = spec['unlock']
         kind = rule['type']
         unlocked = _filter_is_unlocked(spec, ctx, purchased_keys)
@@ -9175,10 +9189,15 @@ def list_photo_filters():
         return jsonify({"error": "User not found"}), 404
 
     stats = get_user_stats(user_id)
+    # ?season=spring|summer|fall|winter: the person's "Season for photos"
+    # choice, kept on their device (like Rickie's roaming) and sent with the
+    # request, so it needs no schema change. Absent or anything else = Auto.
+    season = chosen_season(request.args.get('season'))
     return jsonify({
         "acorns_available": _acorns_available(user),
         "filters": _filters_for_rickie_mode(
-            _filter_unlock_state(user, stats, _purchased_filter_keys(user_id)), user),
+            _filter_unlock_state(user, stats, _purchased_filter_keys(user_id),
+                                 season=season), user),
     }), 200
 
 

@@ -154,6 +154,31 @@
                         completely, use Rickie &rarr; Off above.
                     </p>
 
+                    <!-- Season for photos: what the Seasonal photo filter shows.
+                         Auto is the northern-hemisphere season by date (the app
+                         has no location), so anyone south of the equator, or
+                         anywhere it doesn't fit, can pick their own. Kept on this
+                         device per account, like Rickie's roaming; nothing to do
+                         with Rickie, so it stays visible under Rickie Off.
+                         Hidden for guests, who have no photo filters. -->
+                    <div class="settings-row" id="settings-row-season">
+                        <label class="settings-label" for="photo-season-select">Season for photos</label>
+                        <select id="photo-season-select" class="skill-select"
+                                aria-describedby="photo-season-help"
+                                onchange="handlePhotoSeasonChange(this.value)">
+                            <option value="auto">Auto (by date)</option>
+                            <option value="spring">Spring</option>
+                            <option value="summer">Summer</option>
+                            <option value="fall">Fall</option>
+                            <option value="winter">Winter</option>
+                        </select>
+                    </div>
+                    <p class="settings-help" id="photo-season-help">
+                        Sets the look of the Seasonal photo filter. Auto follows
+                        the date for the northern hemisphere; pick your own if
+                        that isn't your season. Saved on this device.
+                    </p>
+
                     <!-- Your StreakFit name. Separate from the login on purpose:
                          a username is a credential people fill with email
                          addresses, and this one is both said aloud by Rickie AND

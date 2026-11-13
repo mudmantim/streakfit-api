@@ -297,7 +297,7 @@ def test_the_season_is_the_utc_mission_day_not_the_wall_clock():
     src = Path(appmod.__file__).read_text(encoding='utf-8')
     body = re.search(r'def _filter_unlock_state\(.*?\n(?=def )', src, re.S).group(0)
     assert 'today = server_today()' in body
-    assert '_filter_for_day(spec, today)' in body
+    assert '_filter_for_day(spec, today, season)' in body
 
 
 def test_resolving_a_season_never_changes_the_shared_catalog(client, clock):

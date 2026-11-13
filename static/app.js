@@ -2764,8 +2764,45 @@ function _specForKey(key) {
     return f ? f.render : {};
 }
 
+// "Season for photos" (Settings). The Seasonal filter's look comes from the
+// server; Auto is the northern-hemisphere season by date. A person's own pick
+// is kept on this device, per account (the key carries the user id so two
+// accounts on one phone never share it), the same way Rickie's roaming is,
+// and sent as ?season= -- so it needs no schema change. Auto sends nothing,
+// which is exactly the old request.
+var PHOTO_SEASONS = ['spring', 'summer', 'fall', 'winter'];
+
+function _photoSeasonKey() {
+    return (currentUser && currentUser.id) ? 'sf_photo_season_' + currentUser.id : null;
+}
+
+function _photoSeasonPref() {
+    var key = _photoSeasonKey();
+    if (!key) return 'auto';
+    var v = null;
+    try { v = localStorage.getItem(key); } catch (e) { /* private mode */ }
+    return PHOTO_SEASONS.indexOf(v) >= 0 ? v : 'auto';
+}
+
+function _syncPhotoSeasonSelect() {
+    var sel = document.getElementById('photo-season-select');
+    if (sel) sel.value = _photoSeasonPref();
+}
+
+function handlePhotoSeasonChange(value) {
+    var key = _photoSeasonKey();
+    if (!key) return;
+    try {
+        if (PHOTO_SEASONS.indexOf(value) >= 0) localStorage.setItem(key, value);
+        else localStorage.removeItem(key);
+    } catch (e) { /* private mode: the choice lasts until the page closes */ }
+    _syncPhotoSeasonSelect();
+}
+
 async function _refreshPhotoFilters() {
-    var result = await api('/api/photo-filters');
+    var season = _photoSeasonPref();
+    var result = await api('/api/photo-filters'
+        + (season === 'auto' ? '' : '?season=' + encodeURIComponent(season)));
     if (result && result.status === 200) {
         _photoFilters = result.data.filters || [];
         _photoAcorns = result.data.acorns_available || 0;
@@ -4297,6 +4334,7 @@ function toggleSettings(forceOpen) {
     menu.hidden = !open;
     btn.setAttribute('aria-expanded', String(open));
     btn.classList.toggle('active', open);
+    if (open) _syncPhotoSeasonSelect();
 }
 
 // Close the settings menu on any outside click / Escape.
@@ -4384,6 +4422,13 @@ function setGuestUI(guest) {
 
     var rickieRow = document.getElementById('settings-row-rickie');
     if (rickieRow) rickieRow.hidden = guest;
+
+    // Photo filters are an account thing (the filter list needs a login), so
+    // the season pick and its help go too.
+    var seasonRow = document.getElementById('settings-row-season');
+    if (seasonRow) seasonRow.hidden = guest;
+    var seasonHelp = document.getElementById('photo-season-help');
+    if (seasonHelp) seasonHelp.hidden = guest;
     // Both help lines describe that registered-only row (the roaming hint
     // points at "Rickie -> Off"), so they go with it.
     ['rickie-mode-help', 'rickie-roam-help'].forEach(function (id) {
@@ -4593,6 +4638,7 @@ async function loadUserPreferences() {
     if (rickieSel && result.data.rickie_mode) rickieSel.value = result.data.rickie_mode;
     _syncRickiePresence();
     _syncDisplayNameField();
+    _syncPhotoSeasonSelect();
 }
 
 // The field shows what the USER set, which is not the same as what Rickie

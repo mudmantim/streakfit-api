@@ -3182,6 +3182,94 @@ def check_moderation_operator_can_close_a_report(b: Browser, base: str, app) -> 
                     f"{c['ratio']}:1 on {c['bg']}" for c in weak))
 
 
+def check_photo_season_can_be_picked(b: Browser, base: str, app) -> None:
+    """Season for photos (2026-11-13): the Seasonal filter's season can be set.
+
+    Auto (the default) is the northern-hemisphere season by date. Driven
+    through the real Settings select: the choice is remembered per account on
+    the device, the filter list the composer loads follows it, Auto goes back
+    to the date, it stays visible under Rickie Off, and guests never see it.
+    """
+    print("\nSeason for photos: Settings picks the Seasonal filter's season")
+    from app import User, db
+    username, token = make_user(app, "season")
+    b.reset_storage()
+    b.goto(base + "/", wait=1.0)
+    b.js(f"localStorage.setItem('streakfit_token', {json.dumps(token)})")
+    b.goto(base + "/", wait=2.5)
+    b.js("document.getElementById('settings-toggle').click()")
+    time.sleep(0.5)
+    row = b.js("""(()=>{const r=document.getElementById('settings-row-season');
+        const s=document.getElementById('photo-season-select');
+        const l=document.querySelector('label[for=photo-season-select]');
+        return JSON.stringify({visible: !!(r && !r.hidden && r.getClientRects().length),
+            value: s && s.value, label: l && l.textContent.trim(),
+            described: s && s.getAttribute('aria-describedby')});})()""")
+    row = json.loads(row or "{}")
+    check(row.get("visible") is True, "the Season for photos row is in Settings", str(row))
+    check(row.get("value") == "auto", "and starts on Auto", str(row.get("value")))
+    check(row.get("label") == "Season for photos"
+          and row.get("described") == "photo-season-help",
+          "with a real label and a description", str(row))
+
+    def seasonal():
+        b.js("window.__ps=null; _refreshPhotoFilters().then(function(f){"
+             "window.__ps=(f.find(function(x){return x.key==='seasonal';})||{}).season;}); 1")
+        time.sleep(1.0)
+        return b.js("window.__ps")
+
+    auto_season = seasonal()
+    check(auto_season in ("winter", "spring", "summer", "fall"),
+          "Auto gives the date's season", str(auto_season))
+    picked = "summer" if auto_season != "summer" else "winter"
+    b.js(f"(()=>{{const s=document.getElementById('photo-season-select'); s.value={json.dumps(picked)};"
+         " s.dispatchEvent(new Event('change')); return 1;})()")
+    time.sleep(0.3)
+    with app.app_context():
+        uid = db.session.execute(db.select(User.id).where(User.username == username)).scalar()
+    stored = b.js(f"localStorage.getItem('sf_photo_season_{uid}')")
+    check(stored == picked, "the choice is kept on the device, for this account", str(stored))
+    check(seasonal() == picked, "and the composer's filter list follows it", picked)
+    b.goto(base + "/", wait=2.5)
+    b.js("document.getElementById('settings-toggle').click()")
+    time.sleep(0.5)
+    check(b.js("document.getElementById('photo-season-select').value") == picked,
+          "it is still chosen after a reload")
+
+    # Rickie Off has nothing to do with it: the row stays, the choice holds.
+    b.js("""(async()=>{await fetch('/api/me',{method:'PATCH',headers:{'Content-Type':'application/json',
+        Authorization:'Bearer '+localStorage.getItem('streakfit_token')},body:JSON.stringify({rickie_mode:'off'})});
+        window.__off=1;})()""")
+    time.sleep(0.8)
+    b.goto(base + "/", wait=2.5)
+    b.js("document.getElementById('settings-toggle').click()")
+    time.sleep(0.5)
+    off_row = b.js("(()=>{const r=document.getElementById('settings-row-season');"
+                   " return document.body.classList.contains('rickie-off') && !!(r && r.getClientRects().length);})()")
+    check(off_row is True, "under Rickie Off the row is still there")
+    check(seasonal() == picked, "and the choice still applies")
+
+    b.js("(()=>{const s=document.getElementById('photo-season-select'); s.value='auto';"
+         " s.dispatchEvent(new Event('change')); return 1;})()")
+    time.sleep(0.3)
+    check(b.js(f"localStorage.getItem('sf_photo_season_{uid}')") is None,
+          "Auto clears the stored choice")
+    check(seasonal() == auto_season, "and goes back to the date's season")
+
+    # A guest has no photo filters and no row.
+    b.reset_storage()
+    b.goto(base + "/", wait=2.0)
+    b.js("handleGuestMode()")
+    time.sleep(2.0)
+    b.js("(()=>{const m=document.getElementById('settings-menu'); if(m) m.hidden=false; return 1;})()")
+    time.sleep(0.3)
+    check(b.js("(()=>{const r=document.getElementById('settings-row-season');"
+               " const h=document.getElementById('photo-season-help');"
+               " return (!r||r.hidden) && (!h||h.hidden);})()") is True,
+          "a guest is not offered it")
+    b.reset_storage()
+
+
 def check_settings_menu_reaches_every_control(b: Browser, base: str, app) -> None:
     """Log Out and Delete my account must be reachable on a phone.
 
@@ -3342,6 +3430,7 @@ def main() -> int:
         check_rickie_is_never_left_on_content(browser, base, flask_app)
         check_appeals_are_reachable(browser, base, flask_app)
         check_appeals_stay_hidden_for_everybody_else(browser, base, flask_app)
+        check_photo_season_can_be_picked(browser, base, flask_app)
         check_settings_menu_reaches_every_control(browser, base, flask_app)
         check_accessibility_basics(browser, base, flask_app)
         check_page_is_clean(browser, base, flask_app)
