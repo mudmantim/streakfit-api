@@ -37,6 +37,7 @@ from app import (db, NotificationChannel, NotificationRun, RetentionRun,
                  RETENTION_COACH, RETENTION_MODERATION)
 
 STEPS = ('_sweep_expired_coach_turns', '_sweep_moderation_evidence',
+         '_sweep_expired_team_photos',
          '_generate_moderation_notices', '_deliver_pending_notices')
 
 
@@ -237,7 +238,7 @@ def test_a_notice_generation_failure_is_not_masked_by_a_good_delivery_pass(loop,
 def test_a_healthy_pass_passes_every_worker_check(loop, client):
     loop(1)
     c = checks(client)
-    for check_id in ('retention.recent', 'retention.moderation',
+    for check_id in ('retention.recent', 'retention.moderation', 'retention.team_photos',
                      'moderation.notice_generation', 'moderation.delivery_worker',
                      'moderation.notices_delivered'):
         assert c[check_id]['status'] == 'PASS', (check_id, c[check_id])
@@ -255,6 +256,7 @@ def test_a_delivery_failure_is_recorded_and_fails_the_worker_check(loop, client)
 @pytest.mark.parametrize('step,check_id', [
     ('_sweep_expired_coach_turns', 'retention.recent'),
     ('_sweep_moderation_evidence', 'retention.moderation'),
+    ('_sweep_expired_team_photos', 'retention.team_photos'),
     ('_generate_moderation_notices', 'moderation.notice_generation'),
     ('_deliver_pending_notices', 'moderation.delivery_worker'),
 ])
@@ -267,6 +269,7 @@ def test_repeated_failures_stay_failed_however_long_the_thread_lives(loop, clien
 @pytest.mark.parametrize('step,check_id', [
     ('_sweep_expired_coach_turns', 'retention.recent'),
     ('_sweep_moderation_evidence', 'retention.moderation'),
+    ('_sweep_expired_team_photos', 'retention.team_photos'),
     ('_generate_moderation_notices', 'moderation.notice_generation'),
     ('_deliver_pending_notices', 'moderation.delivery_worker'),
 ])
@@ -285,6 +288,9 @@ def test_a_later_success_of_the_same_step_clears_it(loop, client, step, check_id
                                       'moderation.delivery_worker']),
     ('_deliver_pending_notices', ['retention.recent', 'retention.moderation',
                                   'moderation.notice_generation']),
+    ('_sweep_expired_team_photos', ['retention.recent', 'retention.moderation',
+                                    'moderation.notice_generation',
+                                    'moderation.delivery_worker']),
 ])
 def test_success_elsewhere_never_erases_an_unresolved_failure(loop, client, failing, other_checks):
     """The failing step fails on its LAST pass, after earlier successes, while
@@ -297,7 +303,8 @@ def test_success_elsewhere_never_erases_an_unresolved_failure(loop, client, fail
     own = {'_sweep_expired_coach_turns': 'retention.recent',
            '_sweep_moderation_evidence': 'retention.moderation',
            '_generate_moderation_notices': 'moderation.notice_generation',
-           '_deliver_pending_notices': 'moderation.delivery_worker'}[failing]
+           '_deliver_pending_notices': 'moderation.delivery_worker',
+           '_sweep_expired_team_photos': 'retention.team_photos'}[failing]
     assert c[own]['status'] == 'FAIL', c[own]
     for other in other_checks:
         assert c[other]['status'] == 'PASS', (other, c[other])
@@ -485,7 +492,7 @@ def test_an_unset_stop_event_never_ends_the_loop(monkeypatch):
     clock = _Clock(passes=5)
     monkeypatch.setattr(appmod, 'time', clock)
     for step in ('_sweeper_coach_step', '_sweeper_moderation_step', '_sweeper_notice_step',
-                 '_sweeper_delivery_step'):
+                 '_sweeper_delivery_step', '_sweeper_team_photo_step'):
         monkeypatch.setattr(appmod, step, lambda: None)
     with pytest.raises(_Stop):
         appmod._retention_sweeper_loop(threading.Event())
@@ -496,7 +503,7 @@ def test_a_set_stop_event_ends_the_loop_after_the_current_sleep(monkeypatch):
     clock = _Clock(passes=3)   # bounded: a loop that ignores the stop fails fast, not by hanging
     monkeypatch.setattr(appmod, 'time', clock)
     for step in ('_sweeper_coach_step', '_sweeper_moderation_step', '_sweeper_notice_step',
-                 '_sweeper_delivery_step'):
+                 '_sweeper_delivery_step', '_sweeper_team_photo_step'):
         monkeypatch.setattr(appmod, step, lambda: None)
     stop = threading.Event()
     stop.set()

@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>StreakFit privacy (draft)</title>
+<!--
+  DRAFT FOR OWNER REVIEW (2026-11-13). Not legal text and not yet the
+  published policy. Drafted from docs/operations/privacy-retention.md, the
+  data export (GET /api/me/data) and the 2026-11-10 PRIVACY_POLICY_DRAFT.md /
+  DATA_INVENTORY.txt. Every "Owner to confirm" marker is a fact or decision
+  the code cannot supply. Numbers written as placeholders come from app.py
+  constants at request time, so the page cannot drift from the code.
+-->
+<style>
+:root { --bg:#fffaf3; --fg:#2b2118; --muted:#6b5b4b; --line:#e8dccb; --accent:#c2410c; --warn-bg:#fff1d6; --warn-fg:#7a4a00; }
+@media (prefers-color-scheme: dark) {
+  :root { --bg:#1b1612; --fg:#f3ece3; --muted:#bfae9b; --line:#3a2f26; --accent:#fb923c; --warn-bg:#3a2a12; --warn-fg:#ffd28a; }
+}
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--fg); font:16px/1.55 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; }
+main { max-width: 44rem; margin: 0 auto; padding: 24px 16px 48px; }
+h1 { font-size: 1.6rem; margin: 0 0 4px; }
+h2 { font-size: 1.15rem; margin: 28px 0 8px; border-top: 1px solid var(--line); padding-top: 18px; }
+p, li { color: var(--fg); }
+.muted { color: var(--muted); font-size: .92rem; }
+.draft { background: var(--warn-bg); color: var(--warn-fg); border-radius: 10px; padding: 12px 14px; margin: 12px 0 20px; font-weight: 600; }
+.todo { background: var(--warn-bg); color: var(--warn-fg); border-radius: 4px; padding: 0 4px; font-size: .92rem; }
+a { color: var(--accent); }
+ul { padding-left: 1.2rem; }
+</style>
+</head>
+<body>
+<main>
+<h1>How StreakFit handles your data</h1>
+<p class="draft" id="privacy-draft-banner">DRAFT — pending owner and legal review. This is not yet StreakFit's published privacy policy.</p>
+
+<h2>The short version</h2>
+<ul>
+  <li>You sign up with a <strong>username and password only</strong>. We don't ask for your email, real name, phone number, date of birth or location.</li>
+  <li>We store what you do in the app: your daily exercises, streaks and levels, and anything you choose to write or share.</li>
+  <li><strong>Ask Rickie</strong> messages are sent to our AI provider, Anthropic, so Rickie can answer.</li>
+  <li>No ads. We don't sell or rent your data, and we use no advertising or analytics trackers.</li>
+  <li>You can download your data, clear your Rickie conversations and delete your account from <strong>Settings</strong>.</li>
+</ul>
+
+<h2>What we store</h2>
+<ul>
+  <li><strong>Account:</strong> your username, your password stored only as a one-way hash, an optional display name and your settings.</li>
+  <li><strong>Activity:</strong> which daily exercises you completed and when, your effort choices, missions, Brain Boost answers and any personal challenges you create.</li>
+  <li><strong>Ask Rickie:</strong> the text of your messages and Rickie's replies, plus a few preference tags picked from a fixed list (never your own words).</li>
+  <li><strong>Teams:</strong> teams you create or join, messages you post, photos you share and their captions, and challenges.</li>
+  <li><strong>Safety tools:</strong> people you block, reports you file and appeals you make.</li>
+</ul>
+<p>Before a team photo is stored, our server strips hidden metadata, including GPS location. Pictures you make outside a team stay on your device and are not uploaded.</p>
+
+<h2>How long we keep it</h2>
+<ul>
+  <li><strong>Rickie conversations:</strong> deleted automatically <span id="privacy-coach-days">$coach_days</span> days after they were written. Rickie sees at most your last $coach_turns messages and replies. You can clear them sooner with Settings → Forget our conversations.</li>
+  <li><strong>Team photos:</strong> shown for <span id="privacy-photo-days">$photo_days</span> days after they are shared. After that the picture and its caption are erased. You, or the team's creator, can delete a photo sooner.</li>
+  <li><strong>Team messages:</strong> kept in the team with no time limit. <span class="todo">Owner to confirm: a message retention period.</span></li>
+  <li><strong>Reported content:</strong> text is deleted $evidence_text_days days after the report is closed. Reported photos are kept encrypted and deleted $evidence_photo_days days after capture. A legal hold can pause deletion. The basic record that a report existed, and what was decided, is kept.</li>
+  <li><strong>Everything else in your account:</strong> kept while the account exists, and deleted with it.</li>
+  <li><strong>Backups:</strong> deleting removes data from the live database immediately. Copies inside routine encrypted backups last until those backups are deleted. <span class="todo">Owner to confirm: the backup and provider point-in-time windows.</span></li>
+</ul>
+
+<h2>Deleting your account</h2>
+<p>Settings → Delete my account permanently deletes your account and private data after you re-enter your password. The pictures and captions of photos you shared are removed. Some shared things stay in your teams, <strong>without your name</strong>:</p>
+<ul>
+  <li>messages you posted;</li>
+  <li>team history, such as "a member joined", challenges, and "a photo was shared";</li>
+  <li>safety reports and moderation records, with the link to your account removed.</li>
+</ul>
+<p><strong>Teams you created.</strong> A team that only you are in is deleted with your account, along with its chat, photos and history. If other people are still in it, open the team and choose who looks after it (Hand over the team, or Leave Team), then you can delete your account.</p>
+<p>Deletion has to wait while a safety report that involves you is still being reviewed or is under a legal hold.</p>
+
+<h2>Who we share it with</h2>
+<ul>
+  <li><strong>Anthropic</strong> receives your Ask Rickie message, up to $coach_turns earlier messages and replies, your display name if it reads like a name, and your streak and level numbers, to write Rickie's reply. <span class="todo">Owner to confirm: Anthropic's retention and training terms for this account.</span></li>
+  <li><strong>Open-Meteo</strong> receives a city name, only when you ask Rickie about the weather and name one.</li>
+  <li><strong>Our hosting and database providers</strong> run the service and so hold the data. <span class="todo">Owner to confirm: providers, regions and log retention.</span></li>
+  <li><strong>Your teammates</strong> see your display name (or a neutral label), whether you moved today, your current streak, and what you post in the team. There are no public profiles.</li>
+</ul>
+
+<h2>Children</h2>
+<p><span class="todo">Owner decision pending: the age policy (who may use StreakFit and how parental consent works) is not decided, so this section is not written yet.</span></p>
+
+<h2>Contact</h2>
+<p><span class="todo">Owner to confirm: operator name and a privacy contact.</span></p>
+
+<p class="muted">Draft generated from the app's own retention settings. Effective date: <span class="todo">owner to set</span>.</p>
+<p><a href="/">Back to StreakFit</a></p>
+</main>
+</body>
+</html>

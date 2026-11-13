@@ -122,7 +122,14 @@ def build_tangled_user(A, client, tag):
 def _blocker_rows(A, code, user_id, other_id, team_id):
     """The smallest row that makes `code` block deletion of user_id."""
     if code == 'team_owned':
-        return [A.Team(name='mine', created_by_user_id=user_id)]
+        # Owner decision 2026-11-13: only a team the owner is still in WITH
+        # someone else blocks (they must pick who looks after it). An empty or
+        # sole-member team is deleted with the account instead.
+        team = A.Team(name='mine', created_by_user_id=user_id)
+        A.db.session.add(team)
+        A.db.session.flush()
+        return [A.TeamMembership(team_id=team.id, user_id=user_id),
+                A.TeamMembership(team_id=team.id, user_id=other_id)]
     if code == 'guardian_link_child':
         return [A.GuardianLink(child_user_id=user_id, guardian_user_id=other_id,
                                method='test')]

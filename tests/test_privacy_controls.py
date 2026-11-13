@@ -104,9 +104,15 @@ def test_the_deletion_report_counts_photos(client):
 
 def test_a_team_creator_is_told_why_they_cannot_delete_yet(client):
     """Blocked, not broken: tearing down a team other people are using is the
-    one thing account deletion must never do on its own (ADR-0007)."""
+    one thing account deletion must never do on its own (ADR-0007). Since the
+    owner decision of 2026-11-13 that means a team somebody ELSE is still in;
+    a team only the owner is in is deleted with them (test_team_owner_rules)."""
     owner = register_and_login(client, "team_owner_leaving")
-    client.post("/api/teams", json={"name": "Still In Use"}, headers=auth_headers(owner))
+    team = client.post("/api/teams", json={"name": "Still In Use"},
+                       headers=auth_headers(owner)).get_json()["team"]
+    mate = register_and_login(client, "team_owner_mate")
+    client.post(f"/api/teams/{team['id']}/join", json={"code": team["invite_code"]},
+                headers=auth_headers(mate))
 
     resp = client.delete("/api/me", json={"password": PASSWORD}, headers=auth_headers(owner))
 

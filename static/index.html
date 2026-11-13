@@ -85,7 +85,8 @@
 
             <div class="auth-guest-divider"><span>or</span></div>
             <button class="btn-guest" onclick="handleGuestMode()">Peek at today's mission first — no signup</button>
-            <p class="auth-trust-line">No email, no ads, no selling your data. Your streak is yours.</p>
+            <p class="auth-trust-line">No email, no ads, no selling your data. Your streak is yours.
+                <a id="auth-privacy-link" href="/privacy" target="_blank" rel="noopener">How we handle your data</a></p>
         </div>
     </div>
 
@@ -219,6 +220,14 @@
                                 title="Download everything StreakFit holds about you">
                             Download my data
                         </button>
+                    </div>
+                    <div class="settings-row" id="settings-row-privacy">
+                        <span class="settings-label">Privacy</span>
+                        <a id="link-privacy" class="btn-forget-coach" href="/privacy"
+                           target="_blank" rel="noopener"
+                           title="What StreakFit keeps, for how long, and who sees it">
+                            How we handle data
+                        </a>
                     </div>
                     <!-- Moderation decisions about you, and the appeal route.
                          Hidden entirely when there are none: most people will

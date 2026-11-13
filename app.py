@@ -3044,7 +3044,11 @@ class VerificationRun(db.Model):
 # the wrong one. A string literal at a call site is how these get mixed up.
 RETENTION_COACH = 'coach'
 RETENTION_MODERATION = 'moderation'
-RETENTION_KINDS = (RETENTION_COACH, RETENTION_MODERATION)
+# Expired team photos: the image bytes and caption are erased once a photo
+# passes PHOTO_RETENTION_DAYS. Its own kind, so neither of the checks above can
+# be satisfied by it, nor it by them.
+RETENTION_TEAM_PHOTO = 'team_photo'
+RETENTION_KINDS = (RETENTION_COACH, RETENTION_MODERATION, RETENTION_TEAM_PHOTO)
 # Not a retention promise, but the same kind of evidence, so it shares the table
 # (kind is a free string column; no migration). One row per notice-generation
 # pass, ok or failed. Without it a generation step that failed every hour was
@@ -3390,6 +3394,33 @@ def frontend():
     resp.headers['Content-Type'] = 'text/html; charset=utf-8'
     # Stay revalidated so new asset URLs reach clients at once; the SW already
     # treats `/` as network-only (make_response drops Flask's auto headers).
+    resp.headers['Cache-Control'] = 'no-cache'
+    return resp
+
+
+_PRIVACY_PAGE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'pages', 'privacy.html')
+
+
+@app.route('/privacy')
+def privacy_page():
+    """How StreakFit handles data: a DRAFT page for owner review (2026-11-13).
+
+    Signed out, static, linked from sign-up and Settings. The retention numbers
+    are filled from the same constants the code enforces, so the page cannot
+    say 30 while the code does 31. The wording is a draft marked as such on
+    the page; the owner decides when, and in what words, it is published.
+    """
+    from string import Template
+    with open(_PRIVACY_PAGE, encoding='utf-8') as fh:
+        html = Template(fh.read()).substitute(
+            coach_days=_COACH_TURN_MAX_AGE_DAYS,
+            coach_turns=_COACH_MEMORY_WINDOW,
+            photo_days=PHOTO_RETENTION_DAYS,
+            evidence_text_days=EVIDENCE_RETENTION_DAYS_AFTER_CLOSURE,
+            evidence_photo_days=PHOTO_EVIDENCE_MAX_AGE_DAYS,
+        )
+    resp = app.make_response(html)
+    resp.headers['Content-Type'] = 'text/html; charset=utf-8'
     resp.headers['Cache-Control'] = 'no-cache'
     return resp
 
@@ -3862,6 +3893,43 @@ def verification_self():
             "Read the most recent retention_run of kind 'moderation'.",
             "UNKNOWN", "UNKNOWN", f"{type(exc).__name__}",
             failure_reason="The moderation retention record could not be read."))
+
+    # The THIRD retention promise: an expired team photo's image and caption
+    # are erased, not merely hidden. Its own kind, checked by its own row.
+    try:
+        verdict = _run_verdict(
+            RETENTION_TEAM_PHOTO, RETENTION_STALE_AFTER_HOURS,
+            lambda last, age_h: (f"last unattended sweep {age_h:.1f}h ago via "
+                                 f"{last.source} ({last.detail or 'no counts'})"))
+        if verdict is None:
+            any_run = _last_retention_run(RETENTION_TEAM_PHOTO)
+            state, evidence = "UNKNOWN", "UNKNOWN"
+            observed = "no unattended team photo sweep has ever been recorded"
+            if any_run is not None:
+                observed += (f" (a {any_run.source} run exists, which proves "
+                             f"somebody swept once, not that anything sweeps "
+                             f"on its own)")
+        else:
+            state, evidence, observed, _failed = verdict
+        checks.append(_self_check(
+            "retention.team_photos", "Expired team photos are being erased",
+            f"Team photos older than {PHOTO_RETENTION_DAYS} days have their "
+            f"image and caption erased on schedule.",
+            "Read the most recent UNATTENDED retention_run of kind "
+            "'team_photo' and check its age and outcome. A manual run never "
+            "satisfies this.",
+            state, evidence, observed,
+            failure_reason=None if state == "PASS" else
+            "Expired team photos are not being erased on the stated schedule.",
+            limitations="Says a sweep ran, not that every expired row is gone; "
+                        "deletion does not reach database backups."))
+    except Exception as exc:
+        checks.append(_self_check(
+            "retention.team_photos", "Expired team photos are being erased",
+            "Expired team photos are being erased on schedule.",
+            "Read the most recent retention_run of kind 'team_photo'.",
+            "UNKNOWN", "UNKNOWN", f"{type(exc).__name__}",
+            failure_reason="The team photo retention record could not be read."))
 
     # EVIDENCE SEALED WITH A KEY THIS BUILD NO LONGER HAS.
     #
@@ -5277,11 +5345,14 @@ def _resolve_exercise_meta(exercise_key):
     return exercise_key, None
 
 
-def _mark_reports_holding_deletion(user_id):
+def _mark_reports_holding_deletion(user_id, team_ids=()):
     """Tell the operator -- not the person -- that a report is now holding up
     an account deletion. Sets `deletion_requested_at` on each pending or held
     report that links this person, the first time only. It records no user id
     and no role; the person's response is the same with or without it.
+
+    `team_ids`: teams that would be deleted with the account but for a report
+    about them (blocker 'team_report_open'); those reports are marked too.
     """
     if user_id is None:
         return
@@ -5290,7 +5361,8 @@ def _mark_reports_holding_deletion(user_id):
         Report.reporter_user_id == user_id,
         Report.reported_user_id == user_id,
         Report.id.in_(db.select(ReportEvidence.report_id).where(
-            ReportEvidence.author_user_id == user_id)))
+            ReportEvidence.author_user_id == user_id)),
+        Report.team_id.in_(list(team_ids) or [-1]))
     try:
         Report.query.filter(open_or_held, linked,
                             Report.deletion_requested_at.is_(None)).update(
@@ -5319,16 +5391,23 @@ def _account_deletion_refusal(plan):
         # an owner -- who is refused either way and so loses nothing by asking
         # -- poll this route to learn when a report about them is filed and
         # closed. Only the team's own blocker text is returned.
+        # Points at controls that exist (owner decision 2026-11-13): the
+        # team panel's "Hand over the team", or Leave Team, which asks who
+        # should look after it. A team only they are in is not a blocker.
         return jsonify({
             "error": "account_deletion_blocked",
-            "message": ("You created a team that other people are still using. "
-                        "Hand it over or remove the team first, then you can "
-                        "delete your account."),
+            "message": ("You created a team that other people are still in. "
+                        "Open that team and use \u201cHand over the team\u201d "
+                        "(or Leave Team) to choose who looks after it, then you "
+                        "can delete your account."),
             "blockers": [b for b, c in zip(plan.get("blockers", []), codes)
                          if c == "team_owned"],
             "blocker_codes": ["team_owned"],
         }), 409
-    _mark_reports_holding_deletion(plan.get("user_id"))
+    _mark_reports_holding_deletion(
+        plan.get("user_id"),
+        [t["team_id"] for t in plan.get("owned_teams", [])
+         if t["action"] == TEAM_OWNER_DELETE and t["refusals"]])
     # No "from the app": there is no other route, and the wording must not
     # suggest one. "For now" is true of every case behind this answer -- a
     # report being decided, or a hold that will be released.
@@ -5451,7 +5530,26 @@ def export_my_data():
             "coach_conversation_days": _COACH_TURN_MAX_AGE_DAYS,
             "coach_conversation_turns": _COACH_MEMORY_WINDOW,
             "coach_notes": "kept until you clear them; canonical tags only, never your words",
-            "everything_else": "kept while the account exists",
+            # Team content is shared with other people, so it does not follow
+            # the account-lifetime rule below. Said separately, because
+            # "everything else: kept while the account exists" used to cover
+            # team messages too, and they outlive the account.
+            "team_photo_days": PHOTO_RETENTION_DAYS,
+            "team_photos": ("a photo you share with a team is shown for %d days; "
+                            "then its picture and caption are erased. You can "
+                            "delete it sooner." % PHOTO_RETENTION_DAYS),
+            # OWNER DECISION pending: no retention window for team messages
+            # exists yet, so none is promised.
+            "team_messages": ("kept in the team with no time limit, including "
+                              "after you delete your account, when they stay "
+                              "without your name"),
+            "team_history": ("team history (who joined or left, challenges, "
+                             "that a photo was shared) stays in the team "
+                             "without your name if you delete your account"),
+            "teams_you_created": ("a team only you are in is deleted with your "
+                                  "account or when you leave it; one with other "
+                                  "people in it is handed to the member you choose"),
+            "everything_else": "kept while the account exists, and deleted with it",
             "clear_conversations": "Settings → Forget our conversations",
             "delete_everything": "Settings → Delete my account",
             # Deleting a row deletes it from the live database. It does not
@@ -8231,23 +8329,84 @@ def join_team(team_id):
     return jsonify({"message": "Joined team", "team_id": team_id}), 200
 
 
+def _new_owner_from_body(data):
+    """(user_id or None, error response or None) for `new_owner_user_id`."""
+    raw = (data or {}).get('new_owner_user_id')
+    if raw is None:
+        return None, None
+    if isinstance(raw, bool) or not isinstance(raw, int) or raw <= 0:
+        return None, (jsonify({"error": "invalid_request",
+                               "message": "Choose a member of this team."}), 400)
+    return raw, None
+
+
 @app.route('/api/teams/<int:team_id>/leave', methods=['POST'])
 @jwt_required()
 def leave_team(team_id):
+    """Leave a team. For the person who created it (owner decision 2026-11-13):
+
+    * other people still in it: they choose who looks after it first --
+      `new_owner_user_id` (a current member) hands it over in the same
+      transaction as the leave. Without it: 409 `owner_must_choose`.
+    * nobody else in it: leaving deletes the team (its chat, photos and
+      history) through the same guarded path as account deletion. Because
+      that cannot be undone it needs `delete_team: true`; without it: 409
+      `team_will_be_deleted`. If a report about the team is pending or under
+      legal hold the team is kept, closed, for the review -- the response is
+      the same either way, so it says nothing about a report.
+    """
     user_id = int(get_jwt_identity())
+    data = request.get_json(silent=True) or {}
+    new_owner, bad = _new_owner_from_body(data)
+    if bad:
+        return bad
     # Same order as join (person, then team): a leave waits for the person's
     # in-flight completion or join instead of landing in the middle of it, so
     # team history never shows a member_left followed by that member's own
-    # campfire log or challenge (RC-B2a review RV-FIRE-1 / teams R2).
-    if _lock_user(user_id) is None:
+    # campfire log or challenge (RC-B2a review RV-FIRE-1 / teams R2). With a
+    # new owner named, both people in ascending id order, as remove-member.
+    people = sorted({user_id, new_owner} - {None})
+    locked = {uid: _lock_user(uid) for uid in people}
+    if locked[user_id] is None:
         abort(404)
-    _lock_team(team_id)
+    team = _lock_team(team_id)
 
     membership = db.session.execute(
         db.select(TeamMembership).where(TeamMembership.team_id == team_id, TeamMembership.user_id == user_id)
     ).scalar_one_or_none()
     if not membership:
         return jsonify({"error": "Not a member of this team"}), 404
+
+    if team is not None and team.created_by_user_id == user_id:
+        others = [m for m in _team_member_ids_in_order(team_id) if m != user_id]
+        if others:
+            if new_owner is None:
+                return jsonify({
+                    "error": "owner_must_choose",
+                    "message": ("You created this team. Choose who looks after "
+                                "it before you leave."),
+                }), 409
+            if new_owner not in others or locked.get(new_owner) is None:
+                return jsonify({"error": "new_owner_not_a_member",
+                                "message": "Choose someone who is in this team."}), 400
+            _stage_team_owner_change(team, new_owner, "owner_left_picked")
+        else:
+            if data.get('delete_team') is not True:
+                return jsonify({
+                    "error": "team_will_be_deleted",
+                    "message": ("You're the only one in this team, so leaving "
+                                "deletes it: its chat, photos and history. "
+                                "Your own streak, XP and acorns stay."),
+                }), 409
+            _lock_team_for_deletion(team_id)
+            if not _team_deletion_refusals(team_id):
+                _stage_team_deletion(team)
+                db.session.commit()
+                app.logger.info("event=team_deleted_on_leave team_id=%s", team_id)
+                return jsonify({"message": "Left team"}), 200
+            # Kept for a review: an empty team is closed (lookup and join
+            # refuse it), and it is deleted once the owner deletes their
+            # account after the review ends.
 
     db.session.delete(membership)
     create_team_moment(team_id, 'member_left', subject_user_id=user_id)
@@ -8290,6 +8449,45 @@ def remove_team_member(team_id, member_user_id):
     db.session.commit()
 
     return jsonify({"message": "Member removed"}), 200
+
+
+@app.route('/api/teams/<int:team_id>/owner', methods=['POST'])
+@jwt_required()
+@limiter.limit("10 per minute", key_func=user_or_ip_key)
+def transfer_team_ownership(team_id):
+    """The creator hands the team to another current member.
+
+    Owner decision 2026-11-13: the owner picks the next owner. The new owner
+    gets the creator's two safety powers (remove member, rotate code) and the
+    right to delete any photo in the team. Not gated on social privileges:
+    handing a team on is never the harmful direction.
+    """
+    user_id = int(get_jwt_identity())
+    new_owner, bad = _new_owner_from_body(request.get_json(silent=True))
+    if bad:
+        return bad
+    if new_owner is None or new_owner == user_id:
+        return jsonify({"error": "invalid_request",
+                        "message": "Choose another member of this team."}), 400
+
+    # Both people (ascending id), then the team -- the order every other
+    # team write uses.
+    locked = {uid: _lock_user(uid) for uid in sorted((user_id, new_owner))}
+    if locked[user_id] is None:
+        abort(404)
+    team = _lock_team(team_id)
+    if not team:
+        abort(404)
+    if team.created_by_user_id != user_id:
+        return jsonify({"error": "Forbidden"}), 403
+    if locked[new_owner] is None or new_owner not in _team_member_ids_in_order(team_id):
+        return jsonify({"error": "new_owner_not_a_member",
+                        "message": "Choose someone who is in this team."}), 400
+
+    _stage_team_owner_change(team, new_owner, "owner_picked")
+    db.session.commit()
+    return jsonify({"message": "Team handed over", "team_id": team_id,
+                    "created_by_user_id": new_owner}), 200
 
 
 @app.route('/api/teams/<int:team_id>/rotate-invite', methods=['POST'])
@@ -9285,9 +9483,15 @@ def upload_team_photo(team_id):
     if filter_key and not _filter_is_usable(user, user_id, filter_key):
         return jsonify({"error": "filter_not_unlocked"}), 403
 
+    # Live means not deleted AND not expired. An expired photo is erased by
+    # the retention sweep (_sweep_expired_team_photos), but it stops counting
+    # the moment it expires, not when the sweep next runs -- otherwise "older
+    # photos free up space as they expire" would depend on the sweeper.
     live_bytes = db.session.execute(
         db.select(db.func.coalesce(db.func.sum(TeamPhoto.byte_size), 0))
-        .where(TeamPhoto.team_id == team_id, TeamPhoto.deleted_at.is_(None))
+        .where(TeamPhoto.team_id == team_id, TeamPhoto.deleted_at.is_(None),
+               db.or_(TeamPhoto.expires_at.is_(None),
+                      TeamPhoto.expires_at > datetime.utcnow()))
     ).scalar() or 0
     if live_bytes + len(clean) > PHOTO_TEAM_QUOTA_BYTES:
         return jsonify({
@@ -11563,7 +11767,7 @@ def _sweep_expired_coach_turns(force=False, source='request'):
     The honest limitation: this sweeps when SOMEBODY uses the app. If nothing
     touches the coach for a month, nothing expires for a month. For a hard
     guarantee independent of traffic, run `flask coach-prune` from a scheduler
-    — see docs/operations/privacy.md.
+    — see docs/operations/privacy-retention.md.
     """
     global _coach_sweep_last
     now = datetime.utcnow()
@@ -11755,6 +11959,58 @@ def _record_retention_failure(kind, source, exc):
         app.logger.error('could not record %s retention failure', kind)
 
 
+_TEAM_PHOTO_SWEEP_BATCH = 500
+
+
+def _team_photo_sweep_detail(result):
+    """Counts only, fixed shape, no identifiers. Read by an HTTP endpoint."""
+    return f"erased={result['erased']} held={result['held_by_legal_hold']}"
+
+
+def _sweep_expired_team_photos(now=None):
+    """Erase expired team photos. Returns {'erased': n, 'held_by_legal_hold': n}.
+
+    A team photo expires PHOTO_RETENTION_DAYS after it was shared. Until this
+    existed the photo stopped being SERVED (410) but its bytes and caption
+    stayed in the database forever, and still counted against the team's
+    quota. Now, for every expired photo that still has anything in it:
+
+      * `image_data` -> NULL and `byte_size` -> 0: the pixels are gone;
+      * the caption goes from every place upload copied it
+        (_scrub_photo_captions: the row, the photo's chat message body, and
+        any old photo_shared moment that carried it).
+
+    The row stays, with `deleted_at` left as it was, so the thread keeps
+    reading "This photo has expired" rather than "Photo removed", and history
+    keeps the fact that a photo was shared.
+
+    Skipped: a photo named by a report under LEGAL HOLD -- a hold suppresses
+    every deletion, as in the moderation sweep. A reported photo otherwise
+    goes on its own clock; its sealed evidence copy (photo_evidence) is
+    separate and is purged by the moderation sweep.
+
+    Stages only, in batches; the caller records the run and commits.
+    """
+    now = now or datetime.utcnow()
+    held_refs = db.select(Report.subject_ref).where(
+        Report.subject_type == 'photo', Report.legal_hold.is_(True),
+        Report.subject_ref.isnot(None))
+    expired = db.and_(
+        TeamPhoto.expires_at.isnot(None), TeamPhoto.expires_at <= now,
+        db.or_(TeamPhoto.image_data.isnot(None), TeamPhoto.caption.isnot(None),
+               TeamPhoto.byte_size != 0))
+    held = TeamPhoto.query.filter(expired, TeamPhoto.public_id.in_(held_refs)).count()
+    photos = TeamPhoto.query.filter(
+        expired, TeamPhoto.public_id.notin_(held_refs)
+    ).order_by(TeamPhoto.id).limit(_TEAM_PHOTO_SWEEP_BATCH).all()
+    _scrub_photo_captions(photos)
+    for photo in photos:
+        photo.image_data = None
+        photo.byte_size = 0
+    db.session.flush()
+    return {"erased": len(photos), "held_by_legal_hold": held}
+
+
 def _sweep_moderation_evidence(now=None):
     """Delete evidence that has aged out. Returns a dict of what went.
 
@@ -11831,6 +12087,31 @@ def _sweep_moderation_evidence(now=None):
     return {"text_evidence_purged": purged_text,
             "photo_evidence_purged": purged_photos,
             "held_by_legal_hold": held}
+
+
+@app.cli.command("team-photo-prune")
+@click.option('--scheduled', is_flag=True, default=False,
+              help='Record this run as UNATTENDED. Pass it only from a real '
+                   'scheduler: monitoring treats it as proof that retention '
+                   'runs without anybody present.')
+def team_photo_prune_command(scheduled):
+    """Erase expired team photos (bytes and caption). For a scheduled run.
+
+    The in-process retention thread runs the same sweep hourly; this is for
+    when that thread is not running. One batch per run; run it again (or let
+    the thread do it) if more remain.
+    """
+    source = SOURCE_CRON if scheduled else SOURCE_MANUAL
+    try:
+        result = _sweep_expired_team_photos()
+        _record_retention_run(RETENTION_TEAM_PHOTO, source, deleted=result['erased'],
+                              detail=_team_photo_sweep_detail(result))
+        db.session.commit()
+    except Exception as exc:
+        _record_retention_failure(RETENTION_TEAM_PHOTO, source, exc)
+        raise
+    print(f"erased {result['erased']} expired team photo(s); "
+          f"{result['held_by_legal_hold']} skipped under legal hold")
 
 
 @app.cli.command("moderation-prune")
@@ -12717,9 +12998,11 @@ def _forget_coach_memory(user_id):
 # ── Account deletion service ─────────────────────────────────────────────────
 # Reusable, transactional deletion of a user and their PRIVATE data. Shared team
 # data authored by / about the user (team messages, team moments) is preserved by
-# nulling the author/subject link, not deleted. Team OWNERSHIP is a hard blocker
-# (teams are shared; tearing one down affects other members) unless an explicit
-# policy is supplied. Reusable by scripts (cleanup_qa_smoke) and a future endpoint.
+# nulling the author/subject link, not deleted. Team OWNERSHIP follows the owner
+# decision of 2026-11-13 (_owned_team_plan): a team nobody else is in is deleted
+# with the account, one the owner already left is handed to the fallback owner,
+# and one the owner is still in with other people blocks until the owner picks
+# who looks after it. Used by DELETE /api/me and scripts/cleanup_qa_smoke.py.
 
 # Private, user-owned rows — deleted outright when the account is deleted.
 _USER_PRIVATE_DELETES = [
@@ -12800,6 +13083,7 @@ _SELF_DELETION_COUNTS = (
     "team_membership", "coach_turn", "coach_note", "user_filter_unlock",
     "daily_effort", "team_challenge_completion", "user_block_made",
     "team_message_authored", "team_photo_shared",
+    "team_owned_deleted", "team_owned_transferred",
 )
 
 
@@ -12816,8 +13100,12 @@ def _user_fk_classification():
     return out
 
 
-def _account_dependent_counts(user_id):
-    """Everything a deletion of this user would touch, by table (read-only)."""
+def _account_dependent_counts(user_id, team_plan=None):
+    """Everything a deletion of this user would touch, by table (read-only).
+
+    `team_plan` is _owned_team_plan(user_id), passed in when the caller already
+    has it (so the plan and the execution read the same answer under one lock).
+    """
     counts = {}
     for label, model, attr in _USER_PRIVATE_DELETES + _USER_LINK_NULLS:
         counts[label] = model.query.filter(getattr(model, attr) == user_id).count()
@@ -12846,12 +13134,29 @@ def _account_dependent_counts(user_id):
     counts["report_pending_filed"] = Report.query.filter(
         Report.status == 'pending', Report.reporter_user_id == user_id).count()
     for label, model, attr in _USER_DELETION_BLOCKERS:
+        if label == "team_owned":
+            continue      # below: owning a team blocks only when a pick is needed
         counts[label] = model.query.filter(getattr(model, attr) == user_id).count()
+    # Team ownership (owner decision 2026-11-13; see _owned_team_plan). Only a
+    # team the person is still in WITH other people blocks: they choose who
+    # looks after it. A team nobody else is in is deleted with them; one they
+    # already left is handed to the fallback owner.
+    if team_plan is None:
+        team_plan = _owned_team_plan(user_id)
+    counts["team_owned"] = sum(1 for t in team_plan if t["action"] == TEAM_OWNER_PICK)
+    counts["team_owned_deleted"] = sum(
+        1 for t in team_plan if t["action"] == TEAM_OWNER_DELETE and not t["refusals"])
+    counts["team_owned_transferred"] = sum(
+        1 for t in team_plan if t["action"] == TEAM_OWNER_TRANSFER)
+    # A team that would be deleted, but a report about it is still being
+    # decided or is under legal hold. A moderation blocker: never named.
+    counts["team_report_open"] = sum(
+        1 for t in team_plan if t["action"] == TEAM_OWNER_DELETE and t["refusals"])
     return counts
 
 
 _ACCOUNT_DELETION_BLOCKER_TEXT = {
-    "team_owned": "owns {n} team(s) — supply an explicit team-owner policy to delete",
+    "team_owned": "owns {n} team(s) that other members are still in — hand each one to a member first",
     "guardian_link_child": "has {n} guardian link(s) as a child — child-safety records need an owner decision",
     "guardian_link_guardian": "has {n} guardian link(s) as a guardian — child-safety records need an owner decision",
     "consent_child": "has {n} consent record(s) — child-safety records need an owner decision",
@@ -12859,6 +13164,7 @@ _ACCOUNT_DELETION_BLOCKER_TEXT = {
     "report_open_about": "named in {n} pending or legally held report(s) — decide or release them first",
     "report_held_filed": "filed {n} report(s) under legal hold — release the hold first",
     "report_pending_filed": "filed {n} report(s) still pending — decide them first",
+    "team_report_open": "owns {n} team(s) with nobody else in them that a pending or legally held report names — decide or release it first",
 }
 
 
@@ -13014,7 +13320,7 @@ def _remove_closed_report_notes_of(user_id):
 # Blockers that are conditions on moderation records rather than a foreign key
 # existing. NEVER shown to the person by name: see delete_my_account.
 _MODERATION_DELETION_BLOCKERS = ("report_open_about", "report_held_filed",
-                                 "report_pending_filed")
+                                 "report_pending_filed", "team_report_open")
 
 
 def _account_deletion_blockers(counts, allow_team_owner=False):
@@ -13058,9 +13364,13 @@ def _delete_user_account_once(user_id, allow_team_owner=False, dry_run=True):
         {user_id, found, username, counts, blocked, blockers, dry_run, executed}
 
     - dry_run=True (default) changes nothing — just reports the plan.
-    - Team ownership BLOCKS deletion unless allow_team_owner=True is passed as an
-      explicit policy (and the caller has already dealt with the owned teams — this
-      service never tears down a shared team on its own).
+    - Team ownership (_owned_team_plan): a team nobody else is in is deleted
+      with the account (unless a report about it is pending or held, which
+      blocks as 'team_report_open'); a team the owner already left is handed
+      to the fallback owner; a team the owner is still in WITH other people
+      blocks as 'team_owned' unless allow_team_owner=True (the caller has
+      already dealt with it). This service never tears down a team that
+      anybody else is still in.
     - Private rows (_USER_PRIVATE_DELETES) are deleted; team messages, moments and
       the rows in _USER_LINK_NULLS keep existing with the link to the user cut.
     - Anything in _USER_DELETION_BLOCKERS refuses the deletion with a reason;
@@ -13086,7 +13396,16 @@ def _delete_user_account_once(user_id, allow_team_owner=False, dry_run=True):
         return {"user_id": user_id, "found": False, "blocked": False,
                 "blockers": [], "dry_run": dry_run, "executed": False, "counts": {}}
 
-    counts = _account_dependent_counts(user_id)
+    if not dry_run:
+        # FOR UPDATE on every team they created, ascending, after the person
+        # (global lock order: users, then teams). A join to a team about to be
+        # deleted, or a report about it, waits and then sees the outcome.
+        for owned_id in db.session.execute(
+                db.select(Team.id).where(Team.created_by_user_id == user_id)
+                .order_by(Team.id)).scalars().all():
+            _lock_team_for_deletion(owned_id)
+    team_plan = _owned_team_plan(user_id)
+    counts = _account_dependent_counts(user_id, team_plan)
     blocker_codes = _account_deletion_blockers(counts, allow_team_owner)
     blockers = [_ACCOUNT_DELETION_BLOCKER_TEXT[code].format(n=counts[code])
                 for code in blocker_codes]
@@ -13094,6 +13413,7 @@ def _delete_user_account_once(user_id, allow_team_owner=False, dry_run=True):
     report = {"user_id": user_id, "found": True, "username": user.username,
               "counts": counts, "blocked": bool(blockers), "blockers": blockers,
               "blocker_codes": blocker_codes,
+              "owned_teams": team_plan,
               "dry_run": dry_run, "executed": False}
     if dry_run or blockers:
         if not dry_run:
@@ -13101,6 +13421,10 @@ def _delete_user_account_once(user_id, allow_team_owner=False, dry_run=True):
         return report
 
     try:
+        # Teams they created first: one nobody else is in is deleted (with
+        # everything in it), one they already left is handed on. Done before
+        # the per-row rules below, which then find nothing in a deleted team.
+        _stage_owned_teams_for_account_deletion(user_id, team_plan)
         # Their captions go with their photos -- before the author link is cut,
         # because the link is how they are found (R1 D4).
         _scrub_photo_captions(TeamPhoto.query.filter(TeamPhoto.sender_user_id == user_id).all())
@@ -13297,12 +13621,7 @@ def delete_qa_smoke_team(team_id, dry_run=True):
         return report
 
     try:
-        for _label, model, attr in _TEAM_LINK_NULLS:
-            model.query.filter(getattr(model, attr) == team.id).update(
-                {getattr(model, attr): None}, synchronize_session=False)
-        for _label, model, attr in _TEAM_ROW_DELETES:
-            _qa_team_rows(model, attr, team.id).delete(synchronize_session=False)
-        db.session.delete(team)
+        _stage_team_deletion(team)
         db.session.commit()
     except Exception:
         db.session.rollback()
@@ -13311,6 +13630,170 @@ def delete_qa_smoke_team(team_id, dry_run=True):
     report["executed"] = True
     app.logger.info("event=qa_smoke_team_deleted team_id=%s", team_id)
     return report
+
+
+def _stage_team_deletion(team):
+    """Stage the deletion of `team` and every row that exists only for it.
+
+    The one safe team-deletion path, shared by delete_qa_smoke_team and by the
+    owner rules below. Moderation records outlive the team with the link cut
+    (_TEAM_LINK_NULLS); everything in _TEAM_ROW_DELETES goes, in that order.
+    Every caller has already locked the team FOR UPDATE and checked that no
+    report about it is pending or under legal hold. Stages only; the caller
+    commits (or rolls back everything).
+    """
+    for _label, model, attr in _TEAM_LINK_NULLS:
+        model.query.filter(getattr(model, attr) == team.id).update(
+            {getattr(model, attr): None}, synchronize_session=False)
+    for _label, model, attr in _TEAM_ROW_DELETES:
+        _qa_team_rows(model, attr, team.id).delete(synchronize_session=False)
+    db.session.delete(team)
+
+
+# ── Team ownership when the owner leaves or deletes their account ────────────
+# OWNER DECISION 2026-11-13 (Tim, verbatim): "delete the team when the owner is
+# its only member, plus automatic ownership transfer ... Owner can pick the new
+# owner if the owner decides to leave."
+#
+# What that means for each team a person created, decided in ONE place so the
+# leave route, the transfer route and account deletion cannot drift apart:
+#
+#   * 'delete'   -- nobody else is in it (the owner is its only member, or it is
+#                   already empty). It is deleted through _stage_team_deletion,
+#                   unless a report about it is pending or under legal hold:
+#                   then nothing is deleted and the refusal is a safety record.
+#   * 'pick'     -- the owner is still in it with other people. The owner must
+#                   choose the next owner (POST /api/teams/<id>/owner, or leave
+#                   with new_owner_user_id). Account deletion refuses until then.
+#   * 'transfer' -- the FALLBACK, used only when no pick is possible: the owner
+#                   already left (before this rule existed) and other people are
+#                   still in it, so the owner cannot see the team to choose.
+#                   Account deletion hands it to _fallback_team_owner's choice.
+
+TEAM_OWNER_DELETE = 'delete'
+TEAM_OWNER_PICK = 'pick'
+TEAM_OWNER_TRANSFER = 'transfer'
+
+
+def _team_member_ids_in_order(team_id):
+    """Member ids, longest-standing first (joined_at, then membership id)."""
+    return list(db.session.execute(
+        db.select(TeamMembership.user_id).where(TeamMembership.team_id == team_id)
+        .order_by(TeamMembership.joined_at.asc(), TeamMembership.id.asc())).scalars())
+
+
+def _team_deletion_refusals(team_id):
+    """Why this team may not be deleted right now; [] when it may.
+
+    The same rule delete_qa_smoke_team applies: a report about the team that
+    is still being decided, or is under legal hold, keeps every row it might
+    need. Evidence snapshots of closed reports stay on their own clock.
+    """
+    open_or_held = Report.query.filter(
+        Report.team_id == team_id,
+        db.or_(Report.status == 'pending', Report.legal_hold.is_(True))).count()
+    return ["report_pending_or_held"] if open_or_held else []
+
+
+def _fallback_team_owner(member_ids, exclude=()):
+    """The automatic choice, for when the owner cannot pick (OWNER DECISION).
+
+    Rule: the longest-standing member whose age band is recorded as adult;
+    if nobody is recorded as adult, the longest-standing member. "Longest-
+    standing" is the earliest joined_at (ties: the earlier membership row).
+    An unknown age band is NOT adult (see _age_band), so the adult preference
+    only ever moves the choice toward somebody known to be an adult.
+    """
+    candidates = [m for m in member_ids if m not in set(exclude)]
+    if not candidates:
+        return None
+    bands = dict(db.session.execute(
+        db.select(User.id, User.age_band).where(User.id.in_(candidates))).all())
+    for uid in candidates:
+        if uid in bands and (bands[uid] or '').strip().lower() == AGE_ADULT:
+            return uid
+    for uid in candidates:
+        if uid in bands:
+            return uid
+    return None
+
+
+def _owned_team_plan(user_id):
+    """What happens to each team this person created, if they leave for good.
+
+    [{team_id, action, new_owner_user_id, refusals}] in team-id order. Read-only.
+    """
+    plan = []
+    team_ids = db.session.execute(
+        db.select(Team.id).where(Team.created_by_user_id == user_id)
+        .order_by(Team.id)).scalars().all()
+    for team_id in team_ids:
+        members = _team_member_ids_in_order(team_id)
+        others = [m for m in members if m != user_id]
+        entry = {"team_id": team_id, "action": TEAM_OWNER_DELETE,
+                 "new_owner_user_id": None, "refusals": []}
+        if not others:
+            entry["refusals"] = _team_deletion_refusals(team_id)
+        elif user_id in members:
+            entry["action"] = TEAM_OWNER_PICK
+        else:
+            new_owner = _fallback_team_owner(others)
+            # No live account behind any membership: nobody to hand it to,
+            # so it waits for a person rather than being guessed at.
+            entry["action"] = TEAM_OWNER_TRANSFER if new_owner else TEAM_OWNER_PICK
+            entry["new_owner_user_id"] = new_owner
+        plan.append(entry)
+    return plan
+
+
+def _lock_team_for_deletion(team_id):
+    """FOR UPDATE on a team row: a join, a message or a new report inserts a
+    row referencing the team and so waits on this lock (as in
+    delete_qa_smoke_team). _lock_team's FOR NO KEY UPDATE would not stop them."""
+    return db.session.execute(
+        db.select(Team).where(Team.id == team_id).with_for_update()
+        .execution_options(populate_existing=True)).scalar_one_or_none()
+
+
+def _stage_team_owner_change(team, new_owner_user_id, reason):
+    """Hand `team` to another member. Stages only; the caller commits.
+
+    Silent in the team, like remove-member: no moment, no chat line. The
+    roster's "(Creator)" label is how the team sees it.
+    """
+    team.created_by_user_id = new_owner_user_id
+    app.logger.info("event=team_owner_changed team_id=%s reason=%s", team.id, reason)
+
+
+def _stage_owned_teams_for_account_deletion(user_id, team_plan):
+    """Apply _owned_team_plan inside account deletion's transaction.
+
+    'pick' teams never get here (they block), except when a caller passed
+    allow_team_owner=True -- that caller has dealt with them itself.
+    """
+    deleted = transferred = 0
+    for entry in team_plan:
+        team = db.session.get(Team, entry["team_id"])
+        if team is None:
+            continue
+        if entry["action"] == TEAM_OWNER_DELETE and not entry["refusals"]:
+            _stage_team_deletion(team)
+            deleted += 1
+        elif entry["action"] == TEAM_OWNER_TRANSFER:
+            new_owner = entry["new_owner_user_id"]
+            tried = []
+            # Key-share on the new owner, so a deletion of THEM in flight
+            # finishes first; if it won, the next-longest-standing member.
+            while new_owner is not None and not _lock_moderation_subject(new_owner):
+                tried.append(new_owner)
+                new_owner = _fallback_team_owner(
+                    _team_member_ids_in_order(team.id), exclude=tried + [user_id])
+            if new_owner is None:
+                raise RuntimeError("team owner fallback found nobody")
+            _stage_team_owner_change(team, new_owner, "owner_deleted_fallback")
+            transferred += 1
+    db.session.flush()
+    return deleted, transferred
 
 
 # ── Weather: Rickie's first and only tool ────────────────────────────────────
@@ -14408,6 +14891,18 @@ def _sweeper_moderation_step():
             result['held_by_legal_hold'])
 
 
+def _sweeper_team_photo_step():
+    result = _sweep_expired_team_photos()
+    # Same transaction as the erasures, recorded even when nothing expired.
+    _record_retention_run(RETENTION_TEAM_PHOTO, SOURCE_THREAD,
+                          deleted=result['erased'],
+                          detail=_team_photo_sweep_detail(result))
+    db.session.commit()
+    if result['erased']:
+        app.logger.info('event=team_photo_sweep erased=%d held=%d',
+                        result['erased'], result['held_by_legal_hold'])
+
+
 def _notice_generation_detail(made):
     """Counts only, fixed shape, no identifiers. Read by an HTTP endpoint."""
     return (f"urgent={made['urgent_filed']} filed={made['report_filed']} "
@@ -14468,7 +14963,7 @@ def _retention_sweeper_loop(stop=None):
         # joins; the thread finishes at most its current pass and one interval.
         if stop is not None and stop.is_set():
             return
-        # Four steps, each through `_run_sweeper_step`: its own app context,
+        # Five steps, each through `_run_sweeper_step`: its own app context,
         # its own failure record, and nothing it does -- the step, the record,
         # the logging, even entering or leaving a context -- can end this
         # thread (D42). Each answers to a different promise, so none may be
@@ -14479,6 +14974,10 @@ def _retention_sweeper_loop(stop=None):
         _run_sweeper_step('moderation evidence sweep', _sweeper_moderation_step,
                           lambda exc: _record_retention_failure(
                               RETENTION_MODERATION, SOURCE_THREAD, exc))
+        # Expired team photos: their own promise, their own record.
+        _run_sweeper_step('team photo sweep', _sweeper_team_photo_step,
+                          lambda exc: _record_retention_failure(
+                              RETENTION_TEAM_PHOTO, SOURCE_THREAD, exc))
         # Noticing an overdue report is independent of purging expired
         # evidence: the owner finding out a child_safety report is sitting
         # unreviewed must not depend on the retention sweep having succeeded.
