@@ -69,6 +69,22 @@ def run(api, results, scenario):
                       and seasonal.get("season") in {"winter", "spring", "summer", "fall"}
                       and seasonal.get("name") == str(seasonal.get("season")).title(),
                       f"season={seasonal.get('season')} name={seasonal.get('name')}")
+        # Season for photos (2026-11-13): a chosen season wins over the date,
+        # and anything that is not a season is Auto -- the date's season.
+        picked = "summer" if seasonal.get("season") != "summer" else "winter"
+        s_pick, pick_cat = api.request("GET", f"/api/photo-filters?season={picked}",
+                                       token=member["token"])
+        s_junk, junk_cat = api.request("GET", "/api/photo-filters?season=monsoon",
+                                       token=member["token"])
+        pick_seasonal = {f["key"]: f for f in (pick_cat or {}).get("filters", [])}.get("seasonal", {})
+        junk_seasonal = {f["key"]: f for f in (junk_cat or {}).get("filters", [])}.get("seasonal", {})
+        results.check("photos.chosen_season_overrides_the_date",
+                      s_pick == 200 and s_junk == 200
+                      and pick_seasonal.get("season") == picked
+                      and pick_seasonal.get("name") == picked.title()
+                      and junk_seasonal.get("season") == seasonal.get("season"),
+                      f"picked={picked}->{pick_seasonal.get('season')} "
+                      f"junk->{junk_seasonal.get('season')} auto={seasonal.get('season')}")
 
     # --- Rickie Off: the picker has no Rickie in it -------------------------
     # As the throwaway "outsider" (in no team, so nothing else in this module
