@@ -2530,6 +2530,47 @@ async function renderPhotoToCanvas(canvas, img, spec) {
     ctx.drawImage(img, 0, 0, w, h);
     ctx.restore();
 
+    // Glow: a blurred copy of the photo screened over itself -- a soft bloom.
+    // Where canvas `filter` is unsupported the copy cannot be blurred, so a
+    // plain light screen stands in rather than a sharp double image.
+    if (spec.glow) {
+        var gr = Math.max(2, Math.round(Math.min(w, h) * (spec.glow.blur || 0.025)));
+        ctx.save();
+        ctx.globalCompositeOperation = 'screen';
+        ctx.globalAlpha = spec.glow.alpha === undefined ? 0.45 : spec.glow.alpha;
+        if (_canvasFilterWorks(ctx)) {
+            ctx.filter = 'blur(' + gr + 'px)' + (spec.tint ? ' ' + spec.tint : '');
+            ctx.drawImage(img, 0, 0, w, h);
+        } else {
+            ctx.globalAlpha *= 0.35;
+            ctx.fillStyle = '#ffffff';
+            ctx.fillRect(0, 0, w, h);
+        }
+        ctx.restore();
+    }
+
+    // Mono: the 'saturation' blend takes every pixel's saturation from a grey
+    // fill, so Black & White is truly black and white on every browser --
+    // including ones that ignore `tint` (canvas `filter`).
+    if (spec.mono) {
+        ctx.save();
+        ctx.globalCompositeOperation = 'saturation';
+        ctx.fillStyle = '#808080';
+        ctx.fillRect(0, 0, w, h);
+        ctx.restore();
+    }
+
+    // Wash: one flat colour over the whole photo with a blend mode (warm
+    // lifted shadows for Vintage, a cool haze for Winter).
+    if (spec.wash) {
+        ctx.save();
+        ctx.globalCompositeOperation = spec.wash.mode || 'soft-light';
+        ctx.globalAlpha = spec.wash.alpha === undefined ? 0.2 : spec.wash.alpha;
+        ctx.fillStyle = spec.wash.color || '#ffffff';
+        ctx.fillRect(0, 0, w, h);
+        ctx.restore();
+    }
+
     if (spec.confetti) {
         var c = spec.confetti;
         var size = Math.round(Math.min(w, h) * (c.size || 0.07));
@@ -2670,11 +2711,23 @@ async function renderPhotoToCanvas(canvas, img, spec) {
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         ctx.letterSpacing = '2px';
-        ctx.fillText(r.text || '', w / 2, bandY + bandH / 2);
+        // maxWidth: a long banner on a tall, narrow photo squeezes, never clips.
+        ctx.fillText(r.text || '', w / 2, bandY + bandH / 2, w * 0.92);
         ctx.restore();
     }
 
     return canvas;
+}
+
+var _canvasFilterSupport = null;
+function _canvasFilterWorks(ctx) {
+    if (_canvasFilterSupport === null) {
+        var prev = ctx.filter;
+        try { ctx.filter = 'blur(1px)'; } catch (e) { /* unsupported */ }
+        _canvasFilterSupport = ctx.filter === 'blur(1px)';
+        if (_canvasFilterSupport) ctx.filter = prev;
+    }
+    return _canvasFilterSupport;
 }
 
 function _roundRect(ctx, x, y, w, h, r) {
@@ -4331,6 +4384,12 @@ function setGuestUI(guest) {
 
     var rickieRow = document.getElementById('settings-row-rickie');
     if (rickieRow) rickieRow.hidden = guest;
+    // Both help lines describe that registered-only row (the roaming hint
+    // points at "Rickie -> Off"), so they go with it.
+    ['rickie-mode-help', 'rickie-roam-help'].forEach(function (id) {
+        var help = document.getElementById(id);
+        if (help) help.hidden = guest;
+    });
 
     // Coach memory is per-account server state — guests have none, so hide it.
     var forgetRow = document.getElementById('settings-row-forget');

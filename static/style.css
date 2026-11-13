@@ -4582,6 +4582,7 @@ body.rickie-off #rickie-roam-band,
 body.rickie-off #coach-ask-btn,
 body.rickie-off .coach-panel,
 body.rickie-off .team-msg-rickie,
-body.rickie-off #settings-row-roam {
+body.rickie-off #settings-row-roam,
+body.rickie-off #rickie-roam-help {
     display: none !important;
 }

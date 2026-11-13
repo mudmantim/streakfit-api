@@ -247,10 +247,13 @@ def test_filter_render_specs_only_use_known_primitives():
     import app as appmod
 
     known = {"tint", "overlays", "frame", "ribbon", "confetti",
-             "vignette", "burst", "stat"}
-    for spec in appmod.PHOTO_FILTERS:
-        assert set(spec["render"]) <= known, f"{spec['key']}: {set(spec['render']) - known}"
-        for overlay in spec["render"].get("overlays", []):
+             "vignette", "burst", "stat", "mono", "wash", "glow"}
+    renders = [(spec["key"], spec["render"]) for spec in appmod.PHOTO_FILTERS]
+    renders += [(f"seasonal:{season}", look["render"])
+                for season, look in appmod.SEASONAL_LOOKS.items()]
+    for key, render in renders:
+        assert set(render) <= known, f"{key}: {set(render) - known}"
+        for overlay in render.get("overlays", []):
             assert overlay["src"].startswith("/static/")
 
 

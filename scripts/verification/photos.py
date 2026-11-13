@@ -56,6 +56,19 @@ def run(api, results, scenario):
                       (by_key.get("golden_hour", {}).get("cost") or 0) > 0)
         results.check("photos.catalog_reports_a_spendable_balance",
                       isinstance(catalog.get("acorns_available"), int))
+        # 2026-11-12 filters. A streak frame only for a streak that happened:
+        # a throwaway account has no 7-day streak, so all three are locked.
+        streak_frames = [by_key.get(k, {}) for k in ("streak_7", "streak_30", "streak_100")]
+        results.check("photos.streak_frames_locked_without_the_streak",
+                      all(f.get("unlocked") is False and f.get("unlock_type") == "streak"
+                          for f in streak_frames),
+                      str([(f.get("key"), f.get("unlocked")) for f in streak_frames]))
+        seasonal = by_key.get("seasonal", {})
+        results.check("photos.seasonal_filter_names_its_season",
+                      seasonal.get("unlocked") is True
+                      and seasonal.get("season") in {"winter", "spring", "summer", "fall"}
+                      and seasonal.get("name") == str(seasonal.get("season")).title(),
+                      f"season={seasonal.get('season')} name={seasonal.get('name')}")
 
     # --- Rickie Off: the picker has no Rickie in it -------------------------
     # As the throwaway "outsider" (in no team, so nothing else in this module
@@ -72,6 +85,7 @@ def run(api, results, scenario):
     results.check("photos.rickie_off_catalog_has_no_rickie",
                   s_off == 200 and status == 200 and "none" in off_keys
                   and "golden_hour" in off_keys
+                  and {"black_white", "streak_7", "team_shot", "seasonal"} <= off_keys
                   and not ({"rickie_peek", "rickie_crew"} & off_keys)
                   and not rickie_art,
                   f"patch={s_off} status={status} keys={sorted(off_keys)} art={rickie_art}")
