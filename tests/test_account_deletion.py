@@ -77,16 +77,20 @@ def test_team_owner_with_members_is_blocked(app):
     assert db.session.get(User, owner.id) is not None                  # not deleted
 
 
-def test_team_owner_with_no_other_members_still_blocked_in_ws5(app):
+def test_team_owner_with_no_other_members_is_deleted_with_their_team(app):
+    """CHANGED by owner decision 2026-11-13. WS5 blocked every owner; a team
+    only its owner is in is now deleted with the account. A team other people
+    are in still blocks (tests/test_team_owner_rules.py)."""
     owner = _mk("owner_c")
     t = Team(name="T3", created_by_user_id=owner.id)
     db.session.add(t)
     db.session.commit()
     db.session.add(TeamMembership(team_id=t.id, user_id=owner.id))
     db.session.commit()
-    # WS5 blocks all owners; QA-only-team teardown is WS6.
+    tid = t.id
     rep = appmod.delete_user_account(owner.id, dry_run=False)
-    assert rep["blocked"]
+    assert not rep["blocked"] and rep["executed"]
+    assert db.session.get(Team, tid) is None
 
 
 def test_authored_messages_preserved_and_anonymized(app):

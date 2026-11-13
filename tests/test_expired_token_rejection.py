@@ -45,7 +45,7 @@ PROTECTED = {
     'list_teams', 'get_team', 'get_team_campfire', 'create_team_challenge', 'complete_team_challenge',
     'join_team', 'leave_team', 'remove_team_member', 'get_team_messages', 'post_team_message',
     'get_team_moments', 'upload_team_photo', 'get_team_photo', 'delete_team_photo', 'rotate_team_invite',
-    'lookup_team_by_code',
+    'lookup_team_by_code', 'transfer_team_ownership',
 }
 ADMIN = {
     'admin_list_appeals', 'admin_decide_appeal', 'admin_project_status', 'admin_list_reports',
@@ -56,6 +56,7 @@ PUBLIC = {
     'frontend', 'admin_dashboard',      # HTML shells; /admin's data comes only from ADMIN routes
     'service_worker', 'health', 'api_health', 'build_identity', 'verification_self',
     'get_demo_daily', 'record_event', 'register', 'login',
+    'privacy_page',                     # static draft policy page, no user data
 }
 DENIED = {401}       # an invalid token was 422 until fix/invalid-token-401
 # GET /api/daily creates the caller's mission for today. The only accepted
