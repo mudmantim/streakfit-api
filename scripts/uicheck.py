@@ -1032,7 +1032,8 @@ def check_team_creator_can_hand_over_leave_and_delete(b: Browser, base: str, app
           str(refused)[:140])
     open_team(owner_token)
     section = b.js("(()=>{const e=document.querySelector('.team-panel-handover');"
-                   " return e ? e.innerText : '';})()") or ""
+                   " if(!e) return ''; return e.textContent + ' | ' +"
+                   " [...e.querySelectorAll('option')].map(o=>o.textContent).join(',');})()") or ""
     check("Hand over the team" in section and "Robin" in section,
           "the creator sees 'Hand over the team' with the member to pick", section[:120])
 

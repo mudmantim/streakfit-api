@@ -695,6 +695,7 @@ a.btn-forget-coach {
     margin-top: .5rem;
 }
 .team-handover label { font-size: .85rem; font-weight: 600; width: 100%; }
+.team-handover-status { font-size: .8rem; color: var(--gray-600); margin: .4rem 0 0; }
 .team-handover select {
     min-height: 44px;
     flex: 1 1 10rem;

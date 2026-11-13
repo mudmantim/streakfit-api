@@ -1898,7 +1898,7 @@ function _buildHandOverSection(data) {
     wrap.appendChild(picker.wrap);
 
     var status = document.createElement('p');
-    status.className = 'team-panel-leave-note';
+    status.className = 'team-handover-status';
     status.setAttribute('role', 'status');
     status.textContent = 'They get Remove and Rotate Code. You stay in the team.';
     wrap.appendChild(status);
