@@ -1106,6 +1106,9 @@ async function _loadTeamInfo(teamId) {
         if (rosterSection.parentNode) rosterSection.replaceWith(fresh);
     });
     _teamPanelInfo.appendChild(_buildInviteSection(data));
+    if (data.is_creator && _teamOtherMembers(data).length) {
+        _teamPanelInfo.appendChild(_buildHandOverSection(data));
+    }
     _teamPanelInfo.appendChild(_buildLeaveTeamRow(data));
 
     // Moments last: it is history, not news. Loaded separately so a slow or
@@ -1755,31 +1758,74 @@ function _buildLeaveTeamRow(data) {
     note.className = 'team-panel-leave-note';
     note.hidden = true;
 
+    // Owner decision 2026-11-13. The person who created the team cannot just
+    // walk away from it: with other people in it they choose who looks after
+    // it (the picker below, sent with the leave), and alone in it, leaving
+    // deletes it -- so the confirmation says exactly that.
+    var others = _teamOtherMembers(data);
+    var mustPick = !!data.is_creator && others.length > 0;
+    var deletesTeam = !!data.is_creator && others.length === 0;
+    var picker = mustPick ? _buildTeamMemberPicker(data, 'leave', 'Before you leave, hand the team to') : null;
+    if (picker) picker.wrap.hidden = true;
+
     var pending = false;
     var leaveBtn = document.createElement('button');
     leaveBtn.type = 'button';
     leaveBtn.className = 'retention-btn retention-btn-ghost';
     leaveBtn.textContent = 'Leave Team';
+    function reset() {
+        pending = false;
+        leaveBtn.disabled = false;
+        leaveBtn.textContent = 'Leave Team';
+        leaveBtn.classList.remove('is-confirming');
+    }
     leaveBtn.addEventListener('click', async function () {
         if (!pending) {
             pending = true;
-            leaveBtn.textContent = 'Tap again to leave ' + (data.name || 'this team');
             leaveBtn.classList.add('is-confirming');
             note.hidden = false;
-            note.textContent = 'Your streak, XP and acorns stay exactly as they '
-                + 'are. You would need a new invite to come back.';
+            if (mustPick) {
+                picker.wrap.hidden = false;
+                leaveBtn.textContent = 'Tap again to hand over and leave';
+                note.textContent = 'You created this team, so choose who looks after '
+                    + 'it. Your streak, XP and acorns stay exactly as they are.';
+            } else if (deletesTeam) {
+                leaveBtn.textContent = 'Tap again to leave and delete ' + (data.name || 'this team');
+                note.textContent = "You're the only one in this team, so leaving deletes "
+                    + 'it: its chat, photos and history. Your streak, XP and acorns stay.';
+            } else {
+                leaveBtn.textContent = 'Tap again to leave ' + (data.name || 'this team');
+                note.textContent = 'Your streak, XP and acorns stay exactly as they '
+                    + 'are. You would need a new invite to come back.';
+            }
             return;
         }
+        var body;
+        if (mustPick) {
+            if (!picker.select.value) {
+                note.textContent = 'Choose who looks after the team first.';
+                picker.select.focus();
+                return;
+            }
+            body = { new_owner_user_id: Number(picker.select.value) };
+        } else if (deletesTeam) {
+            body = { delete_team: true };
+        }
         leaveBtn.disabled = true;
-        var result = await api('/api/teams/' + data.id + '/leave', 'POST');
+        var result = await api('/api/teams/' + data.id + '/leave', 'POST', body);
         if (!result || result.status !== 200) {
-            leaveBtn.disabled = false;
-            pending = false;
-            leaveBtn.textContent = 'Leave Team';
-            leaveBtn.classList.remove('is-confirming');
+            reset();
+            if (picker) picker.wrap.hidden = true;
             note.hidden = false;
-            note.textContent = (result && result.data && result.data.error)
+            var d = (result && result.data) || {};
+            note.textContent = d.message || d.error
                 || 'Could not leave just now — try again in a moment.';
+            // The roster changed under us (someone joined or left): reload
+            // the panel so the next attempt asks the right question.
+            if (d.error === 'owner_must_choose' || d.error === 'team_will_be_deleted'
+                    || d.error === 'new_owner_not_a_member') {
+                if (_teamPanelTeamId === data.id) _loadTeamInfo(data.id);
+            }
             return;
         }
         closeTeamPanel();
@@ -1791,8 +1837,107 @@ function _buildLeaveTeamRow(data) {
             + '. Your streak is untouched.', { plain: true });
     });
     wrap.appendChild(leaveBtn);
+    if (picker) wrap.appendChild(picker.wrap);
     wrap.appendChild(note);
 
+    return wrap;
+}
+
+// Everybody on the roster except you.
+function _teamOtherMembers(data) {
+    return (data.members || []).filter(function (m) {
+        return !(currentUser && m.user_id === currentUser.id);
+    });
+}
+
+// A labelled <select> of the other members, for handing the team over.
+// Names are the roster's own labels (display name or "Member N"), never logins.
+function _buildTeamMemberPicker(data, idSuffix, labelText) {
+    var wrap = document.createElement('div');
+    wrap.className = 'team-handover';
+    var id = 'team-handover-' + idSuffix + '-' + data.id;
+    var label = document.createElement('label');
+    label.setAttribute('for', id);
+    label.textContent = labelText;
+    var select = document.createElement('select');
+    select.id = id;
+    var blank = document.createElement('option');
+    blank.value = '';
+    blank.textContent = 'Choose a member';
+    select.appendChild(blank);
+    _teamOtherMembers(data).forEach(function (m) {
+        var opt = document.createElement('option');
+        opt.value = String(m.user_id);
+        opt.textContent = m.name || 'Member';
+        select.appendChild(opt);
+    });
+    wrap.appendChild(label);
+    wrap.appendChild(select);
+    return { wrap: wrap, select: select };
+}
+
+// "Hand over the team": the creator gives the team (and its Remove / Rotate
+// Code powers) to another member and stays in it. Two taps, like every other
+// action here that cannot be taken back by the person doing it.
+function _buildHandOverSection(data) {
+    var wrap = document.createElement('div');
+    wrap.className = 'team-panel-info-section team-panel-handover';
+
+    var title = document.createElement('p');
+    title.className = 'team-panel-section-label';
+    title.textContent = 'Hand over the team';
+    wrap.appendChild(title);
+
+    var picker = _buildTeamMemberPicker(data, 'owner', 'New team creator');
+    var btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'retention-btn retention-btn-ghost';
+    btn.id = 'team-handover-btn-' + data.id;
+    btn.textContent = 'Hand over';
+    picker.wrap.appendChild(btn);
+    wrap.appendChild(picker.wrap);
+
+    var status = document.createElement('p');
+    status.className = 'team-panel-leave-note';
+    status.setAttribute('role', 'status');
+    status.textContent = 'They get Remove and Rotate Code. You stay in the team.';
+    wrap.appendChild(status);
+
+    var pending = false;
+    picker.select.addEventListener('change', function () {
+        pending = false;
+        btn.textContent = 'Hand over';
+        btn.classList.remove('is-confirming');
+    });
+    btn.addEventListener('click', async function () {
+        if (!picker.select.value) {
+            status.textContent = 'Choose who should look after the team.';
+            picker.select.focus();
+            return;
+        }
+        var chosen = picker.select.options[picker.select.selectedIndex].textContent;
+        if (!pending) {
+            pending = true;
+            btn.classList.add('is-confirming');
+            btn.textContent = 'Tap again to hand over to ' + chosen;
+            return;
+        }
+        btn.disabled = true;
+        var result = await api('/api/teams/' + data.id + '/owner', 'POST',
+                               { new_owner_user_id: Number(picker.select.value) });
+        btn.disabled = false;
+        pending = false;
+        btn.classList.remove('is-confirming');
+        btn.textContent = 'Hand over';
+        if (!result || result.status !== 200) {
+            var d = (result && result.data) || {};
+            status.textContent = d.message || d.error || "Couldn't hand it over just now.";
+            return;
+        }
+        status.textContent = chosen + ' now looks after the team.';
+        if (_teamPanelTeamId === data.id) _loadTeamInfo(data.id);
+        loadTeams();
+    });
     return wrap;
 }
 
@@ -2402,8 +2547,17 @@ function openDeleteAccount() {
 
     var keepNote = document.createElement('p');
     keepNote.className = 'danger-note';
-    keepNote.textContent = 'Messages you sent to a team stay in that team, without your name on them.';
+    keepNote.textContent = 'Messages you sent to a team, and team history (joined, '
+        + 'challenges, "a photo was shared"), stay in that team without your name on them.';
     sheet.appendChild(keepNote);
+
+    // Owner decision 2026-11-13: say what happens to a team you created
+    // BEFORE the button, not only in the refusal after it.
+    var teamNote = document.createElement('p');
+    teamNote.className = 'danger-note';
+    teamNote.textContent = 'A team only you are in is deleted too. If you created a '
+        + 'team other people are in, hand it over first (open the team → Hand over the team).';
+    sheet.appendChild(teamNote);
 
     var pw = document.createElement('input');
     pw.type = 'password';

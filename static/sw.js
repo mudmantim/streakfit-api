@@ -1,4 +1,4 @@
-const CACHE = 'streakfit-v1016';
+const CACHE = 'streakfit-v1018';
 // Executable/style assets (app.js, rickie-roam.js, style.css) are intentionally
 // NOT precached here: the document now requests them with a content-hash query
 // (`?v=...`, see app.py), so they are cache-first at runtime under version-tied
@@ -32,8 +32,10 @@ self.addEventListener('activate', function (e) {
 self.addEventListener('fetch', function (e) {
   var url = new URL(e.request.url);
 
-  // Always go to network for API and HTML — never serve stale auth/data
-  if (url.pathname.startsWith('/api/') || url.pathname === '/') {
+  // Always go to network for API and HTML — never serve stale auth/data.
+  // /privacy too: a cached copy of a policy page is an out-of-date promise.
+  if (url.pathname.startsWith('/api/') || url.pathname === '/'
+      || url.pathname === '/privacy') {
     e.respondWith(fetch(e.request));
     return;
   }

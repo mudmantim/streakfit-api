@@ -46,8 +46,28 @@ def run(api, results, scenario):
     )
     results.check("auth.malformed_login_is_400", status == 400, f"status={status}")
 
+    check_privacy_disclosures(api, results, scenario)
     check_account_deletion(api, results, scenario)
     return scenario
+
+
+def check_privacy_disclosures(api, results, scenario):
+    """The privacy page and the export say what outlives an account
+    (privacy remediation 2026-11-13). Read-only; production-safe."""
+    status, page = api.request("GET", "/privacy", text=True)
+    results.check("auth.privacy_page_signed_out", status == 200 and "<html" in (page or ""),
+                  f"status={status}")
+    results.check("auth.privacy_page_is_marked_draft",
+                  'id="privacy-draft-banner"' in (page or ""),
+                  "the draft banner is missing: has the owner published final wording?")
+    status, data = api.request("GET", "/api/me/data", token=scenario.users["a"]["token"])
+    retention = (data or {}).get("retention", {}) if status == 200 else {}
+    results.check("auth.export_discloses_message_retention",
+                  "no time limit" in (retention.get("team_messages") or ""),
+                  f"status={status} keys={sorted(retention)}")
+    results.check("auth.export_discloses_team_history",
+                  "without your name" in (retention.get("team_history") or ""),
+                  f"keys={sorted(retention)}")
 
 
 def check_account_deletion(api, results, scenario):

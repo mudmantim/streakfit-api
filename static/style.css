@@ -672,6 +672,40 @@ input:focus {
     border-color: #f3b4ae;
 }
 .btn-forget-coach:disabled { opacity: .6; cursor: default; }
+/* The Privacy row's control is a link (it opens a page), styled like its
+   neighbours. */
+a.btn-forget-coach {
+    display: inline-flex;
+    align-items: center;
+    text-decoration: none;
+}
+.auth-trust-line a {
+    display: block;
+    margin-top: .35rem;
+    color: inherit;
+    text-decoration: underline;
+}
+
+/* Team creator: hand the team to another member (owner decision 2026-11-13). */
+.team-handover {
+    display: flex;
+    flex-wrap: wrap;
+    gap: .5rem;
+    align-items: center;
+    margin-top: .5rem;
+}
+.team-handover label { font-size: .85rem; font-weight: 600; width: 100%; }
+.team-handover select {
+    min-height: 44px;
+    flex: 1 1 10rem;
+    max-width: 100%;
+    font: inherit;
+    padding: .3rem .5rem;
+    border-radius: 8px;
+    border: 1.5px solid var(--gray-200);
+    background: var(--gray-100);
+    color: inherit;
+}
 
 /* ── Dashboard container ──────────────────────────────────────────────────── */
 .container {

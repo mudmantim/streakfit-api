@@ -460,3 +460,50 @@ flask moderation-prune     # prints purged text rows, photo rows, and holds
 It prints how many it skipped under legal hold as well as how many it deleted,
 because a sweep that deleted nothing and a sweep that was blocked on everything
 are different events.
+
+---
+
+# Team photo retention (added 2026-11-13, branch `fix/privacy-deletion`)
+
+The third promise: a photo shared into a team is shown for `PHOTO_RETENTION_DAYS`
+(30) days from upload, and **then its image and caption are erased**, not merely
+hidden. Before this branch an expired photo returned 410 but its bytes and
+caption stayed in the database indefinitely and still counted against the
+team's 150 MB quota.
+
+| What | Erased by | When |
+|---|---|---|
+| `team_photo.image_data`, `byte_size` → 0 | `_sweep_expired_team_photos` | first sweep after `expires_at` |
+| the caption (row, the photo's chat message body, old `photo_shared` moments) | `_scrub_photo_captions`, called by the sweep | same |
+
+- **Runs from:** the retention thread (`STREAKFIT_RETENTION_SWEEPER=1`, hourly,
+  its own step, so a failure here cannot stop the other sweeps) and
+  `flask team-photo-prune [--scheduled]`.
+- **Recorded:** every pass writes a `retention_run` of kind `team_photo`
+  (`detail` = `erased=N held=M`), even when nothing expired.
+- **Monitored:** `GET /api/verification/self` → `retention.team_photos`. As with
+  the other promises, only an UNATTENDED run (thread or `--scheduled`) can PASS.
+- **Not erased:** a photo named by a report under **legal hold**. A reported
+  photo otherwise keeps its own sealed copy in `photo_evidence`, purged by the
+  moderation sweep on its own clock.
+- **Kept on purpose:** the row and `deleted_at` (unchanged), so the thread still
+  reads "This photo has expired" rather than "Photo removed", and team history
+  keeps the fact that a photo was shared.
+- **Quota:** an expired photo stops counting the moment it expires, whether or
+  not the sweep has run yet.
+
+# What outlives an account (disclosed 2026-11-13)
+
+Deleting an account keeps, **without the person's name**: team messages (no
+time limit; a retention window is an OWNER DECISION still open), team history
+(moments: joined, left, challenges, "a photo was shared"), challenges they
+created, "Photo removed" stubs, and moderation records. The export
+(`retention.team_messages`, `retention.team_history`), the delete screen and the
+draft `/privacy` page say so.
+
+Teams the person created follow the owner decision of 2026-11-13
+(`_owned_team_plan` in app.py): a team only they are in is deleted with the
+account (refused, as a generic safety record, while a report about it is
+pending or held); a team they are still in with others must be handed over
+first; a team they already left is handed to the longest-standing adult member,
+else the longest-standing member.

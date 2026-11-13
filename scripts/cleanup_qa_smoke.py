@@ -7,8 +7,12 @@ Classification:
     (Exact Python prefix match — never a SQL LIKE, whose '_' is a wildcard.)
   * SAFE to delete: a QA account the app's deletion service would delete.
   * BLOCKED (requires manual cleanup): whatever that service refuses — a QA account
-    that created a team (tearing a team down would touch other users' data), or one
-    with guardian/consent/permission-audit rows. Left untouched here.
+    still in a team it created WITH other people (tearing that team down would
+    touch other users' data), or one with guardian/consent/permission-audit rows.
+    Left untouched here. Since the owner decision of 2026-11-13 the service itself
+    deletes a team its owner is the only member of (or that is empty) together
+    with the owner, and hands a team the owner already left to another member --
+    so such owners are SAFE, and --execute removes those teams with them.
   * NOTE: deleting an account that FILED a report or an appeal cuts the link to it
     (the report stays). Once any such link is cut, migration 08920334bccd can no
     longer be downgraded -- see docs/operations/deploy-account-deletion-2026-09.md.
@@ -105,8 +109,8 @@ def _print_group(title, entries, counts_by_id, with_reason=False):
 
 def execute(safe, counts_by_id):
     """Delete each safe account via the app's account-deletion service (one
-    transaction per account, shared team data preserved). Safe accounts own no
-    team, so none will be blocked."""
+    transaction per account, shared team data preserved). A safe account owns
+    no team that anybody else is still in; a team only it is in goes with it."""
     deleted = 0
     for u in safe:
         report = A.delete_user_account(u.id, dry_run=False)

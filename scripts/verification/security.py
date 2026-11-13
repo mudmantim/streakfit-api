@@ -19,6 +19,48 @@ from verification._client import run_module_standalone
 from verification._fixtures import build_team_scenario, fetch_user_id
 
 
+def check_team_ownership(api, results, scenario, team_id, code):
+    """Owner decision 2026-11-13: the creator picks the next owner before
+    leaving a team other people are in; alone in it, leaving deletes it and
+    needs an explicit confirmation. Runs after "b" has left, so the smoke
+    team holds only "a"; "c" joins to be handed the team. Ends with the smoke
+    team deleted (or, if a report about it is still open, kept closed), so a
+    production run no longer leaves a QA team behind."""
+    users = scenario.users
+    if not code or not fetch_user_id(api, results, users, "a", check_name="security.fetch_owner_id") \
+            or not fetch_user_id(api, results, users, "c", check_name="security.fetch_heir_id"):
+        return
+    status, body = api.request("POST", f"/api/teams/{team_id}/leave", token=users["a"]["token"])
+    results.check("security.sole_owner_leave_needs_confirmation",
+                  status == 409 and body.get("error") == "team_will_be_deleted",
+                  f"status={status} error={body.get('error')!r}")
+
+    status, _ = api.request("POST", f"/api/teams/{team_id}/join", token=users["c"]["token"],
+                            body={"code": code})
+    if not results.check("security.heir_joins", status == 200, f"status={status}"):
+        return
+    status, body = api.request("POST", f"/api/teams/{team_id}/leave", token=users["a"]["token"])
+    results.check("security.owner_must_choose_before_leaving",
+                  status == 409 and body.get("error") == "owner_must_choose",
+                  f"status={status} error={body.get('error')!r}")
+    status, _ = api.request("POST", f"/api/teams/{team_id}/owner", token=users["c"]["token"],
+                            body={"new_owner_user_id": users["a"]["id"]})
+    results.check("security.non_owner_cannot_hand_over", status == 403, f"status={status}")
+    status, _ = api.request("POST", f"/api/teams/{team_id}/owner", token=users["a"]["token"],
+                            body={"new_owner_user_id": users["c"]["id"]})
+    results.check("security.owner_hands_over", status == 200, f"status={status}")
+    status, team = api.request("GET", f"/api/teams/{team_id}", token=users["c"]["token"])
+    results.check("security.new_owner_is_creator",
+                  status == 200 and team.get("is_creator") is True, f"status={status}")
+    status, _ = api.request("POST", f"/api/teams/{team_id}/leave", token=users["a"]["token"])
+    results.check("security.former_owner_leaves_plainly", status == 200, f"status={status}")
+    status, _ = api.request("POST", f"/api/teams/{team_id}/leave", token=users["c"]["token"],
+                            body={"delete_team": True})
+    results.check("security.sole_owner_leaves_and_deletes", status == 200, f"status={status}")
+    status, _ = api.request("GET", f"/api/teams/{team_id}", token=users["c"]["token"])
+    results.check("security.deleted_team_unreachable", status in (403, 404), f"status={status}")
+
+
 def run(api, results, scenario):
     team_id = scenario.team_id
     users = scenario.users
@@ -105,6 +147,8 @@ def run(api, results, scenario):
 
     status, _ = api.request("GET", f"/api/teams/{team_id}", token=users["c"]["token"])
     results.check("security.non_member_team_detail_blocked", status == 403, f"status={status}")
+
+    check_team_ownership(api, results, scenario, team_id, new_code)
 
     status, _ = api.request("GET", "/api/daily")  # no Authorization header at all
     results.check("security.no_token_blocked", status == 401, f"status={status}")

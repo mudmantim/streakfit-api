@@ -245,7 +245,7 @@ def run(api, results, scenario):
                   f"status={status}")
     by_id = {c.get("id"): c for c in (payload or {}).get("checks", [])}
 
-    for name in ("retention.recent", "retention.moderation",
+    for name in ("retention.recent", "retention.moderation", "retention.team_photos",
                  "moderation.delivery_configured", "moderation.delivery_worker",
                  "moderation.notice_generation", "moderation.notices_delivered"):
         results.check(f"moderation.check_present::{name}", name in by_id,
@@ -287,8 +287,8 @@ def run(api, results, scenario):
 
     # A check may say PASS, FAIL or UNKNOWN. What it must never do is report a
     # promise as kept without having looked -- UNKNOWN exists for that.
-    for name in ("retention.moderation", "moderation.notice_generation",
-                 "moderation.notices_delivered"):
+    for name in ("retention.moderation", "retention.team_photos",
+                 "moderation.notice_generation", "moderation.notices_delivered"):
         c = by_id.get(name) or {}
         results.check(f"moderation.check_state_is_legible::{name}",
                       c.get("status") in ("PASS", "FAIL", "UNKNOWN"),

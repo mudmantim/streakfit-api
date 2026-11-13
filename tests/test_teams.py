@@ -81,13 +81,18 @@ def test_leave_team(client):
 
 
 def test_creator_can_leave_own_team(client):
-    """No admin succession logic in R2.1 (TEAM_SYSTEM_BASELINE Section 4) —
-    the creator can leave freely, same as anyone else; the team just keeps
-    existing without an active safety-power-holder until someone addresses it."""
+    """CHANGED by owner decision 2026-11-13. R2.1 let the creator leave freely
+    and the team kept existing with nobody holding its safety powers. Now a
+    creator who is the only member may leave, and leaving deletes the team --
+    so it takes an explicit confirmation (tests/test_team_owner_rules.py)."""
     creator_token = register_and_login(client, 'creator')
     team = create_team(client, creator_token, 'Hill Family').get_json()['team']
 
     resp = client.post(f"/api/teams/{team['id']}/leave", headers=auth_headers(creator_token))
+    assert resp.status_code == 409
+    assert resp.get_json()['error'] == 'team_will_be_deleted'
+    resp = client.post(f"/api/teams/{team['id']}/leave", json={'delete_team': True},
+                       headers=auth_headers(creator_token))
     assert resp.status_code == 200
 
 
