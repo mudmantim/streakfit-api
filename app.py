@@ -3303,14 +3303,31 @@ def _lock_open_team(team_id):
     rotate the code, remove someone) tells the two apart, and nobody holds
     creator powers over a closed team. Lookup already treats an empty team
     as an unknown code for the same reason.
+
+    DEF-1 timing (PR #23 round-2 review): "is anybody in it?" is asked FIRST,
+    before the team row is touched, so a deleted team and a kept-empty one run
+    the same single statement and stop there. (It used to lock the team first:
+    a deleted team stopped after one statement, a kept one ran a second.)
+    Unlocked is safe because EMPTY IS ABSORBING: a team's first membership is
+    only ever written in the transaction that creates it (create_team), and
+    join needs this function to succeed, so a committed empty team can never
+    gain a member. Any new path that adds a member to an existing team breaks
+    that and must change this. Non-empty -> empty can still happen at any
+    moment (the last member leaves), so the answer is checked again under
+    the lock.
     """
+    if not _team_has_members(team_id):
+        return None
     team = _lock_team(team_id)
     if team is None:
         return None
-    anyone = db.session.execute(
+    return team if _team_has_members(team_id) else None
+
+
+def _team_has_members(team_id):
+    return db.session.execute(
         db.select(TeamMembership.id).where(TeamMembership.team_id == team_id).limit(1)
-    ).first()
-    return team if anyone is not None else None
+    ).first() is not None
 
 
 def _claim_mission_award(user_id, mission_date):
@@ -8020,6 +8037,8 @@ def create_team():
     db.session.add(team)
     db.session.flush()
 
+    # The team's first membership, in the transaction that creates it: the
+    # only way a team ever goes from no members to some (_lock_open_team).
     db.session.add(TeamMembership(team_id=team.id, user_id=user_id))
     db.session.add(TeamCampfire(team_id=team.id, total_team_missions=0))
     invite = TeamInviteCode(team_id=team.id, code=_generate_team_invite_code())
@@ -8142,15 +8161,24 @@ def list_teams():
 # reaches a child. Those are not close.
 @sensitive_when_degraded("refuse")
 def lookup_team_by_code(code):
-    invite = db.session.execute(
-        db.select(TeamInviteCode).where(TeamInviteCode.code == code.strip().upper())
+    # ONE statement decides "a code to an open team": a deleted team's code, a
+    # never-issued code and an empty (closed) team's code all stop here after
+    # the same single query (DEF-1 timing, PR #23 round-2 review). It used to
+    # resolve the code first and count the members second, so a kept-empty
+    # team's code ran two more statements than a deleted one's before the same
+    # 404 -- measurable from outside. The empty-team rule itself is unchanged
+    # (see below).
+    open_team_id = db.session.execute(
+        db.select(TeamInviteCode.team_id).where(
+            TeamInviteCode.code == code.strip().upper(),
+            db.exists().where(TeamMembership.team_id == TeamInviteCode.team_id))
     ).scalar_one_or_none()
-    if not invite:
+    if open_team_id is None:
         return jsonify({"error": "Invalid invite code"}), 404
 
-    team = db.session.get(Team, invite.team_id)
+    team = db.session.get(Team, open_team_id)
     member_count = db.session.execute(
-        db.select(db.func.count(TeamMembership.id)).where(TeamMembership.team_id == team.id)
+        db.select(db.func.count(TeamMembership.id)).where(TeamMembership.team_id == open_team_id)
     ).scalar()
     # An abandoned team is not a team, and its code is not a key.
     #
@@ -8169,7 +8197,9 @@ def lookup_team_by_code(code):
     #
     # The same 404 as an unknown code, deliberately: a distinct error would
     # tell a prober that the code was once real.
-    if not member_count:
+    # (Checked again here: the team may have emptied, or gone, since the
+    # first statement.)
+    if team is None or not member_count:
         return jsonify({"error": "Invalid invite code"}), 404
 
     campfire = db.session.execute(
@@ -8340,6 +8370,8 @@ def join_team(team_id):
     if current_member_count >= member_cap:
         return jsonify({"error": f"This team is at its {member_cap}-member limit"}), 403
 
+    # Only reached through _lock_open_team: nobody joins an empty team, which
+    # _lock_open_team relies on (it reads "empty" before taking the lock).
     db.session.add(TeamMembership(team_id=team_id, user_id=user_id))
     create_team_moment(team_id, 'member_joined', subject_user_id=user_id)
     create_rickie_team_message(team_id, 'member_joined')

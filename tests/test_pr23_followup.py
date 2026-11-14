@@ -675,3 +675,80 @@ def test_a_real_person_who_joined_left_and_deleted_keeps_the_qa_team(fk_client):
     assert qa not in {u.id for u in safe} and qa in {u.id for u, _r in blocked}
     C.execute(safe, counts)
     assert _snapshot(tid) == before and db.session.get(A.User, qa) is not None
+
+
+# ── DEF-1 timing (round-2 review): the same SQL, kept or deleted ─────────────
+
+class _SQL:
+    """The SQL text of every statement sent inside the block (parameters
+    dropped, whitespace collapsed)."""
+
+    def __init__(self):
+        self.seen = []
+
+    def _on(self, _conn, _cursor, statement, _params, _context, _many):
+        self.seen.append(' '.join(statement.split()))
+
+    def __enter__(self):
+        event.listen(db.engine, 'before_cursor_execute', self._on)
+        return self
+
+    def __exit__(self, *exc):
+        event.remove(db.engine, 'before_cursor_execute', self._on)
+
+
+def _parity_requests(w):
+    t = w['tid']
+    return [
+        ('lookup', 'get', f"/api/teams/lookup/{w['code']}", None),
+        ('rotate', 'post', f'/api/teams/{t}/rotate-invite', None),
+        ('join', 'post', f'/api/teams/{t}/join', {'code': w['code']}),
+        ('owner', 'post', f'/api/teams/{t}/owner', {'new_owner_user_id': w['m']}),
+        ('remove', 'delete', f"/api/teams/{t}/members/{w['m']}", None),
+    ]
+
+
+def _traced(c, verb, path, body, tok):
+    with _SQL() as sql:
+        r = getattr(c, verb)(path, json=body, headers=auth_headers(tok))
+    return r.status_code, r.get_json(silent=True), sql.seen
+
+
+@pytest.mark.parametrize('report', ['pending', 'hold'])
+def test_d1_query_parity_a_kept_team_runs_the_same_sql_as_a_deleted_one(fk_client, report):
+    """DEF-1 timing (PR #23 round-2 review), the CI gate. A former sole owner
+    must not be able to tell "kept for a report" from "deleted" by TIMING
+    either: each of these endpoints sends exactly the same sequence of SQL
+    statements in both worlds (and lookup the same as for a code that never
+    existed), so no extra round trip separates them. Deterministic, cannot
+    flake, and catches any later query added to one branch only. The timing
+    itself is measured by the opt-in tests/d1_timing_benchmark.py."""
+    c = fk_client
+    deleted = _world(c, 'qpgone', None)
+    kept = _world(c, 'qpkept', report)
+    for (name, verb, path_d, body_d), (_n, _v, path_k, body_k) in zip(
+            _parity_requests(deleted), _parity_requests(kept)):
+        sd, bd, qd = _traced(c, verb, path_d, body_d, deleted['otok'])
+        sk, bk, qk = _traced(c, verb, path_k, body_k, kept['otok'])
+        assert (sd, bd) == (sk, bk) and sd == 404, (name, sd, bd, sk, bk)
+        assert qd == qk, (name, len(qd), len(qk), qd, qk)
+    never = _traced(c, 'get', '/api/teams/lookup/QQ' + uuid.uuid4().hex[:4].upper(), None,
+                    deleted['otok'])
+    gone = _traced(c, 'get', f"/api/teams/lookup/{deleted['code']}", None, deleted['otok'])
+    assert never == gone, (never, gone)
+
+
+def test_d1_parity_leaves_an_open_team_working(client):
+    """Control: the reordered checks still let a real team be looked up,
+    joined and administered."""
+    o, otok = _person(client, 'qpo')
+    m, mtok = _person(client, 'qpm')
+    tid, code = _team(client, otok)
+    look = client.get(f'/api/teams/lookup/{code}', headers=auth_headers(mtok))
+    assert look.status_code == 200 and look.get_json()['member_count'] == 1
+    _join(client, mtok, tid, code)
+    assert client.post(f'/api/teams/{tid}/rotate-invite',
+                       headers=auth_headers(otok)).status_code == 200
+    assert client.delete(f'/api/teams/{tid}/members/{m}',
+                         headers=auth_headers(otok)).status_code == 200
+
