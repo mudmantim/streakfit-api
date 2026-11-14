@@ -572,3 +572,106 @@ def test_decision_pending_the_fallback_skips_a_suspended_member(app):
     db.session.commit()
     _suspend(sus)
     assert A._owned_team_plan(owner)[0]['new_owner_user_id'] == ok
+
+
+# ── Follow-up review DEF-4: every cut person link fails the QA guard closed ──
+
+def _cut_challenge_creator(tid, qa):
+    db.session.add(A.TeamChallenge(public_id=uuid.uuid4().hex, team_id=tid,
+                                   created_by_user_id=None, target_user_id=qa,
+                                   preset_key='squats_10'))
+
+
+def _cut_challenge_target(tid, qa):
+    # What _expire_challenges_addressed_to leaves when the named person deletes.
+    db.session.add(A.TeamChallenge(public_id=uuid.uuid4().hex, team_id=tid,
+                                   created_by_user_id=qa, target_user_id=None,
+                                   target_left_at=datetime.datetime.utcnow(),
+                                   preset_key='squats_10'))
+
+
+def _cut_moment_subject(tid, qa):
+    db.session.add_all([
+        A.TeamMoment(team_id=tid, moment_type='member_joined', subject_user_id=None),
+        A.TeamMoment(team_id=tid, moment_type='member_left', subject_user_id=None)])
+
+
+def _cut_reporter(tid, qa):
+    _report(tid=tid, status='closed', about=qa, by=None)
+
+
+def _cut_appellant(tid, qa):
+    rid = _report(tid=tid, status='closed', about=qa, by=qa)
+    act = A.ModerationAction(report_id=rid, action='dismiss', target_user_id=qa, team_id=tid)
+    db.session.add(act)
+    db.session.flush()
+    db.session.add(A.Appeal(public_id=uuid.uuid4().hex, user_id=None, action_id=act.id,
+                            status='withdrawn'))
+
+
+@pytest.mark.parametrize('cut', [_cut_challenge_creator, _cut_challenge_target,
+                                 _cut_moment_subject, _cut_reporter, _cut_appellant],
+                         ids=['challenge_creator', 'challenge_target', 'moment_subject',
+                              'reporter', 'appellant'])
+def test_any_row_whose_person_link_was_cut_keeps_a_qa_team(fk_client, cut):
+    """The review's four uncounted link types (and appeals): each one alone,
+    in a team where every live link is a qa_smoke_ account, must stop
+    `--execute` deleting the team, because the cut link may have been a real
+    person's."""
+    qa = _u(f'qa_smoke_r2_{cut.__name__}')
+    tid = _qa_team(qa, [])
+    cut(tid, qa)
+    db.session.commit()
+    before = _snapshot(tid)
+    safe, blocked, counts = C.survey()
+    assert qa not in {u.id for u in safe}
+    assert qa in {u.id for u, _r in blocked}
+    C.execute(safe, counts)
+    rep = A.delete_user_account(qa, dry_run=False, qa_teams_only=True)
+    assert rep['blocker_codes'] == ['team_not_qa_only']
+    assert _snapshot(tid) == before and db.session.get(A.User, qa) is not None
+
+
+def test_rows_with_no_person_by_design_do_not_keep_a_qa_team(fk_client):
+    """Control: NULLs that are not cut links -- Rickie's message, a challenge
+    to the whole team, a campfire stage moment -- leave an all-QA team
+    deletable, as before."""
+    qa = _u('qa_smoke_r2_by_design')
+    tid = _qa_team(qa, [])
+    db.session.add_all([
+        A.TeamMessage(team_id=tid, sender_type='rickie', sender_user_id=None, body='hi'),
+        A.TeamChallenge(public_id=uuid.uuid4().hex, team_id=tid, created_by_user_id=qa,
+                        target_user_id=None, preset_key='squats_10'),
+        A.TeamMoment(team_id=tid, moment_type='campfire_stage_reached', subject_user_id=None),
+        A.TeamMoment(team_id=tid, moment_type='team_created', subject_user_id=qa)])
+    db.session.commit()
+    safe, _blocked, counts = C.survey()
+    assert qa in {u.id for u in safe}
+    C.execute(safe, counts)
+    db.session.expire_all()
+    assert db.session.get(A.Team, tid) is None and db.session.get(A.User, qa) is None
+
+
+def test_a_real_person_who_joined_left_and_deleted_keeps_the_qa_team(fk_client):
+    """The review's app-reachable path, end to end through the API: a QA
+    account creates a smoke-test team, a real person joins with the code,
+    leaves and deletes their account. Only author-less moments are left of
+    them, and `--execute` must leave the team (and its owner) alone."""
+    qa, qa_tok = _person(fk_client, 'qa_smoke_r2api')
+    tid, code = _team(fk_client, qa_tok, name='Smoke Test run api')
+    real, real_tok = _person(fk_client, 'realr2api')
+    _join(fk_client, real_tok, tid, code)
+    left = fk_client.post(f'/api/teams/{tid}/leave', json={}, headers=auth_headers(real_tok))
+    assert left.status_code == 200, left.get_json()
+    gone = fk_client.delete('/api/me', json={'password': PW}, headers=auth_headers(real_tok))
+    assert gone.status_code == 200, gone.get_json()
+    db.session.expire_all()
+    assert db.session.get(A.User, real) is None
+    moments = sorted((m.moment_type, m.subject_user_id)
+                     for m in A.TeamMoment.query.filter_by(team_id=tid))
+    assert ('member_joined', None) in moments and ('member_left', None) in moments
+    before = _snapshot(tid)
+    safe, blocked, counts = C.survey()
+    assert qa not in {u.id for u in safe} and qa in {u.id for u, _r in blocked}
+    C.execute(safe, counts)
+    assert _snapshot(tid) == before and db.session.get(A.User, qa) is not None

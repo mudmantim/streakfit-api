@@ -13627,26 +13627,56 @@ def _qa_team_plan(team):
     return refusals, counts, len(people), len(non_qa), open_or_held
 
 
+# Moment types written with no person at all (create_team_moment(...,
+# subject_user_id=None)): their NULL subject is by design, not a cut link.
+# Every other type always names somebody when it is written.
+_TEAM_MOMENTS_WITHOUT_A_PERSON = ('campfire_stage_reached',)
+
+
+def _team_cut_author_links(team_id):
+    """How many of the team's rows lost the person who made them, or whom
+    they were about, to an earlier account deletion (a NULL where a person
+    always stands when the row is written). By-design NULLs are not counted:
+    Rickie's messages, a challenge to the whole team (target NULL and
+    target_left_at NULL), and the moment types above."""
+    team_actions = db.select(ModerationAction.id).where(ModerationAction.team_id == team_id)
+    return (
+        TeamMessage.query.filter(TeamMessage.team_id == team_id,
+                                 TeamMessage.sender_type == 'user',
+                                 TeamMessage.sender_user_id.is_(None)).count()
+        + TeamPhoto.query.filter(TeamPhoto.team_id == team_id,
+                                 TeamPhoto.sender_user_id.is_(None)).count()
+        + TeamChallenge.query.filter(TeamChallenge.team_id == team_id,
+                                     TeamChallenge.created_by_user_id.is_(None)).count()
+        # A named person who deleted: the target is cut and target_left_at set.
+        + TeamChallenge.query.filter(TeamChallenge.team_id == team_id,
+                                     TeamChallenge.target_left_at.isnot(None)).count()
+        + TeamMoment.query.filter(
+            TeamMoment.team_id == team_id, TeamMoment.subject_user_id.is_(None),
+            TeamMoment.moment_type.notin_(_TEAM_MOMENTS_WITHOUT_A_PERSON)).count()
+        + Report.query.filter(Report.team_id == team_id,
+                              Report.reporter_user_id.is_(None)).count()
+        + Appeal.query.filter(Appeal.action_id.in_(team_actions),
+                              Appeal.user_id.is_(None)).count())
+
+
 def _team_involves_non_qa(team_id):
     """True unless every person the team's rows point at is a qa_smoke_ account.
 
     Fail closed, for the QA cleanup (PR #23 review D8): a linked id with no
-    live account counts as NOT QA, and so does user-sent content whose author
-    link an earlier deletion already cut -- it may have been a real person's.
-    (Rickie's messages carry no author by design and are not counted.)
+    live account counts as NOT QA, and so does any row whose person link an
+    earlier deletion already cut (_team_cut_author_links) -- it may have been
+    a real person's. PR #23 follow-up review DEF-4: only messages and photos
+    used to be counted, so a real person who joined a QA team, left and
+    deleted their account left only author-less moments behind, and the
+    cleanup deleted the team.
     """
     people = {p for p in _qa_team_linked_user_ids(team_id) if p is not None}
     names = dict(db.session.execute(
         db.select(User.id, User.username).where(User.id.in_(people))).all()) if people else {}
     if any(not (names.get(p) or "").startswith(QA_SMOKE_PREFIX) for p in people):
         return True
-    orphaned = (
-        TeamMessage.query.filter(TeamMessage.team_id == team_id,
-                                 TeamMessage.sender_type == 'user',
-                                 TeamMessage.sender_user_id.is_(None)).count()
-        + TeamPhoto.query.filter(TeamPhoto.team_id == team_id,
-                                 TeamPhoto.sender_user_id.is_(None)).count())
-    return orphaned > 0
+    return _team_cut_author_links(team_id) > 0
 
 
 def delete_qa_smoke_team(team_id, dry_run=True):
