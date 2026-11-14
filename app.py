@@ -13860,6 +13860,17 @@ def _team_member_ids_in_order(team_id):
         .order_by(TeamMembership.joined_at.asc(), TeamMembership.id.asc())).scalars())
 
 
+def _team_members_with_accounts(team_id):
+    """[(user id, has a live account, age band)] for the team's members,
+    longest-standing first (as _team_member_ids_in_order), in one statement."""
+    return [(uid, alive is not None, band) for uid, alive, band in db.session.execute(
+        db.select(TeamMembership.user_id, User.id, User.age_band)
+        .select_from(TeamMembership)
+        .outerjoin(User, User.id == TeamMembership.user_id)
+        .where(TeamMembership.team_id == team_id)
+        .order_by(TeamMembership.joined_at.asc(), TeamMembership.id.asc())).all()]
+
+
 def _team_deletion_refusals(team_id):
     """Why this team may not be deleted right now; [] when it may.
 
@@ -13873,7 +13884,7 @@ def _team_deletion_refusals(team_id):
     return ["report_pending_or_held"] if open_or_held else []
 
 
-def _fallback_team_owner(member_ids, exclude=()):
+def _fallback_team_owner(member_ids, exclude=(), bands=None):
     """The automatic choice, for when the owner cannot pick (OWNER DECISION).
 
     Rule: the longest-standing member whose age band is recorded as adult;
@@ -13881,12 +13892,17 @@ def _fallback_team_owner(member_ids, exclude=()):
     standing" is the earliest joined_at (ties: the earlier membership row).
     An unknown age band is NOT adult (see _age_band), so the adult preference
     only ever moves the choice toward somebody known to be an adult.
+
+    `bands` ({user id: age band} of the members with a live account), when
+    the caller read it together with `member_ids` in one statement
+    (_team_members_with_accounts); otherwise it is read here.
     """
     candidates = [m for m in member_ids if m not in set(exclude)]
     if not candidates:
         return None
-    bands = dict(db.session.execute(
-        db.select(User.id, User.age_band).where(User.id.in_(candidates))).all())
+    if bands is None:
+        bands = dict(db.session.execute(
+            db.select(User.id, User.age_band).where(User.id.in_(candidates))).all())
     for uid in candidates:
         if uid in bands and (bands[uid] or '').strip().lower() == AGE_ADULT:
             return uid
@@ -13906,7 +13922,14 @@ def _owned_team_plan(user_id):
         db.select(Team.id).where(Team.created_by_user_id == user_id)
         .order_by(Team.id)).scalars().all()
     for team_id in team_ids:
-        members = _team_member_ids_in_order(team_id)
+        # Members and their accounts in ONE statement (one snapshot). Read in
+        # two, a member whose own deletion committed in between was still a
+        # member but no longer an account, and the unlocked dry run planned
+        # "nobody to hand it to" -> a spurious 409 team_owned (PR #23 round-2
+        # review, R2-NOTE-S1).
+        rows = _team_members_with_accounts(team_id)
+        members = [uid for uid, _alive, _band in rows]
+        bands = {uid: band for uid, alive, band in rows if alive}
         others = [m for m in members if m != user_id]
         entry = {"team_id": team_id, "action": TEAM_OWNER_DELETE,
                  "new_owner_user_id": None, "refusals": []}
@@ -13915,7 +13938,7 @@ def _owned_team_plan(user_id):
         elif user_id in members:
             entry["action"] = TEAM_OWNER_PICK
         else:
-            new_owner = _fallback_team_owner(others)
+            new_owner = _fallback_team_owner(others, bands=bands)
             # No live account behind any membership: nobody to hand it to,
             # so it waits for a person rather than being guessed at.
             entry["action"] = TEAM_OWNER_TRANSFER if new_owner else TEAM_OWNER_PICK

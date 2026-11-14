@@ -145,13 +145,16 @@ def test_team_ownership_races_answer_cleanly_on_postgres(migrated_pg):
     assert not failed and result.returncode == 0, failed
 
 
-@pytest.mark.parametrize('scenario', ['S5', 'S5c', 'S6'])
+@pytest.mark.parametrize('scenario', ['S5', 'S5c', 'S6', 'S1'])
 def test_account_deletion_takes_its_user_locks_in_one_ascending_pass(migrated_pg, scenario):
     """PR #23 follow-up review DEF-2 and DEF-3, the paused interleavings that
     deadlocked on b365d16: a late joiner the fallback prefers (S5: recorded as
     adult; S5c: every older member deleted meanwhile) leaving while the
     legacy owner's deletion holds the team, and a lower-id member reporting
-    the deleting person (S6). See tests/team_owner_race.py."""
+    the deleting person (S6). Also the round-2 review's S1: the unlocked dry
+    run must read a team's members and their accounts as one snapshot, or a
+    member deleting at that instant gives a spurious 409 (409 on 3b143a1).
+    See tests/team_owner_race.py."""
     _engine, env = migrated_pg
     result = subprocess.run(
         [sys.executable, os.path.join('tests', 'team_owner_race.py'), 'lock-order', scenario],

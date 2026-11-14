@@ -32,6 +32,10 @@ deadlocked on b365d16 (10/10 in the review):
        deletion is paused at its first user lock.
                                      -> report 201, deletion 409 (that report
                                         is pending), no deadlock
+  S1   R2-NOTE-S1 (round-2 review): legacy owner A's unlocked dry run is
+       paused right after reading the members [B]; B, the only member,
+       deletes meanwhile.            -> 200 / 200, the empty team is deleted
+                                        (3b143a1: A got 409 team_owned)
 
 "No deadlock" is checked from the app's own log lines (deadlock retry in the
 deletion service, or the 40P01 handler on a route), not just from the final
@@ -76,6 +80,21 @@ def _install_hooks(A):
 
     A._lock_team_for_deletion = lock_deletion_team
     A._lock_moderation_subject = lock_subject
+
+    # S1: a pause right after the plan's FIRST read of a team's members, the
+    # unlocked dry run's. Wraps whichever reader this version has (3b143a1:
+    # _team_member_ids_in_order, with the accounts read separately after it;
+    # since round 3: _team_members_with_accounts, one statement).
+    for reader in ('_team_members_with_accounts', '_team_member_ids_in_order'):
+        orig = getattr(A, reader, None)
+        if orig is None:
+            continue
+
+        def read_members(team_id, _orig=orig):
+            out = _orig(team_id)
+            hold_at('after_members')
+            return out
+        setattr(A, reader, read_members)
 
     def hold_here():
         gate = getattr(_pause, 'gate', None)
@@ -419,6 +438,35 @@ def _lock_order(A, name, check, person, team, delete_me, deadlocks_since,
             check('S6 the report names A, who is still there',
                   alive and rep is not None and rep.reported_user_id == a,
                   (alive, rep and rep.reported_user_id))
+        return
+
+    if name == 'S1':
+        # R2-NOTE-S1, the reviewer's deterministic repro: A (a legacy owner
+        # who already left) deletes; A's unlocked dry run is paused right after
+        # reading the members [B]; B, the only member, deletes and commits;
+        # A resumes. 3b143a1 read B's account in a second statement, found
+        # nobody, planned "pick" and answered 409 team_owned.
+        a, ah = person('own')
+        b, bh = person('mem')
+        tid, _code = team(a, [b], owner_in_team=False)
+        gate = _gate()
+        t1, b1 = _run(A, delete_me(ah), points={'after_members': gate})
+        if not wait(gate, 'A\'s dry run paused after reading the members'):
+            gate['go'].set()
+            t1.join(40)
+            return
+        gone = call(delete_me(bh))
+        check('S1 B deleted (200) while A was paused', gone.status_code == 200,
+              gone.status_code)
+        gate['go'].set()
+        t1.join(40)
+        owner, members, exists = team_state(tid)
+        check('S1 A 200 (no spurious 409 team_owned)', _status(b1) == 200,
+              (_status(b1), _body(b1)))
+        check('S1 the team, left with nobody, is gone', not exists, (owner, members))
+        check('S1 no deadlock', not deadlocks_since(mark), deadlocks_since(mark))
+        with A.app.app_context():
+            check('S1 A is gone', db.session.get(A.User, a) is None)
         return
 
     check(f'unknown scenario {name}', False)
