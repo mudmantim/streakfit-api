@@ -3254,6 +3254,66 @@ def _for_key_share_skip_locked(stmt, model):
     return stmt.with_for_update(read=True, key_share=True, skip_locked=True, of=model)
 
 
+def _update_rows_in_id_order(model, criterion, values):
+    """UPDATE <model> SET values WHERE id IN (SELECT id ... WHERE criterion
+    ORDER BY id FOR NO KEY UPDATE): one statement, whose rows are locked in
+    ascending id order whatever order they sit in on disk.
+
+    A plain multi-row UPDATE locks rows in heap (scan) order, which is not
+    id order once deletes and VACUUM have reused early pages. Two
+    transactions writing overlapping rows in different heap orders deadlock
+    (PR #23 round-3 review NEW-1). Multi-row writes to team photos, messages
+    and moments that can overlap the photo sweep go through here, so they
+    queue in one order. Stages only; returns the row count.
+    """
+    ids = _for_no_key_update(
+        db.select(model.id).where(criterion).order_by(model.id), model)
+    return db.session.execute(
+        db.update(model).where(model.id.in_(ids)).values(values)
+        .execution_options(synchronize_session=False)).rowcount
+
+
+# Advisory lock key of the legal-hold fence (below). Any fixed int8 works;
+# this one is "LEGALHLD" in ASCII, so it is recognisable in pg_locks.
+_LEGAL_HOLD_FENCE_KEY = 0x4C4547414C484C44
+
+
+def _legal_hold_fence(exclusive):
+    """The legal-hold fence: placing a hold and erasing expired team photos
+    are never in progress at the same time (PR #23 round-3 review: "a hold
+    landing mid-batch").
+
+    A transaction-scoped PostgreSQL advisory lock, released at commit or
+    rollback. Placing a hold (admin_legal_hold) takes it EXCLUSIVE; every
+    erase transaction of the photo sweep takes it SHARED as its first
+    statement, before it reads which photos are held. Under READ COMMITTED
+    (a fresh snapshot per statement) the erase's hold check therefore sees
+    every hold that committed before it, and a hold that has not committed
+    by then waits until the erase has committed. The guarantee this gives is
+    written out in _sweep_expired_team_photos. Sweeps share it with each
+    other and never wait on one another here.
+
+    Taken while the transaction holds no row lock, so it cannot close a
+    deadlock cycle. The exclusive side waits for at most the erase
+    transactions in progress (each is one team, at most
+    _TEAM_PHOTO_SWEEP_CHUNK photos), bounded by a 5 s lock_timeout like
+    _lock_user's (a JSON 503 past it). SQLite has no advisory locks; it runs
+    one writer at a time.
+    """
+    if db.engine.dialect.name != 'postgresql':
+        return
+    if exclusive:
+        # The bound applies to this wait only; the rest of the transaction
+        # keeps the timeout it had (admin_legal_hold sets none).
+        db.session.execute(db.text("SET LOCAL lock_timeout = '5s'"))
+        db.session.execute(db.text('SELECT pg_advisory_xact_lock(:k)'),
+                           {'k': _LEGAL_HOLD_FENCE_KEY})
+        db.session.execute(db.text('SET LOCAL lock_timeout TO DEFAULT'))
+    else:
+        db.session.execute(db.text('SELECT pg_advisory_xact_lock_shared(:k)'),
+                           {'k': _LEGAL_HOLD_FENCE_KEY})
+
+
 def _lock_user(user_id):
     """Lock the acting person's row for the rest of this request's transaction.
 
@@ -8688,12 +8748,14 @@ def _scrub_photo_caption_copies(photo, caption):
     if caption and photo.sender_user_id is not None:
         # Rows written before the moment stopped carrying a caption. The
         # moment has no photo id, so match the exact metadata upload wrote.
-        TeamMoment.query.filter(
+        # Several moments can match (the same caption twice), and the photo
+        # sweep writes the same ones: id order, never heap order (NEW-1).
+        _update_rows_in_id_order(TeamMoment, db.and_(
             TeamMoment.team_id == photo.team_id,
             TeamMoment.moment_type == 'photo_shared',
             TeamMoment.subject_user_id == photo.sender_user_id,
             TeamMoment.moment_metadata == json.dumps({"caption": caption[:60]}),
-        ).update({TeamMoment.moment_metadata: None}, synchronize_session=False)
+        ), {TeamMoment.moment_metadata: None})
 
 
 def _removed_photo_caption_residue(execute=False):
@@ -8719,9 +8781,18 @@ def _removed_photo_caption_residue(execute=False):
     counts = {"photo_captions": photos.count(), "message_bodies": bodies.count(),
               "moment_captions": moments.count()}
     if execute:
-        photos.update({TeamPhoto.caption: None}, synchronize_session=False)
-        bodies.update({TeamMessage.body: ''}, synchronize_session=False)
-        moments.update({TeamMoment.moment_metadata: None}, synchronize_session=False)
+        # Photos, then messages, then moments, each in id order: the order
+        # the photo sweep and account deletion lock them in (NEW-1).
+        _update_rows_in_id_order(TeamPhoto, db.and_(
+            TeamPhoto.deleted_at.isnot(None), TeamPhoto.caption.isnot(None)),
+            {TeamPhoto.caption: None})
+        _update_rows_in_id_order(TeamMessage, db.and_(
+            TeamMessage.photo_id.in_(removed_ids), TeamMessage.body != ''),
+            {TeamMessage.body: ''})
+        _update_rows_in_id_order(TeamMoment, db.and_(
+            TeamMoment.moment_type == 'photo_shared',
+            TeamMoment.moment_metadata.isnot(None)),
+            {TeamMoment.moment_metadata: None})
     return counts
 
 
@@ -10649,6 +10720,11 @@ def admin_legal_hold(public_id):
     sweep, which is how "we kept everything forever" happens by accident.
     """
     _require_admin_secret()
+    # First, before any row lock: no expired-photo erase is in progress
+    # while this transaction runs, so the hold either commits before an
+    # erase checks for holds or after it has committed -- never in between
+    # (_legal_hold_fence; the guarantee is in _sweep_expired_team_photos).
+    _legal_hold_fence(exclusive=True)
     report = _load_report_for_action(public_id)
     if report is None:
         abort(404)
@@ -12023,7 +12099,9 @@ def _record_retention_run(kind, source, deleted=0, detail=None, now=None):
     deletions it describes, so that a sweep which raises after deleting some
     rows rolls back the deletions AND the record that claimed success. A
     record committed separately could outlive the work it attests to, which is
-    the one thing this table must never do.
+    the one thing this table must never do. (The team photo sweep commits
+    per team, so its record follows its last commit instead: still never
+    ahead of the work. See _sweeper_team_photo_step.)
     """
     db.session.add(RetentionRun(
         ran_at=now or datetime.utcnow(), deleted=deleted, source=source,
@@ -12055,7 +12133,12 @@ def _record_retention_failure(kind, source, exc):
         app.logger.error('could not record %s retention failure', kind)
 
 
+# Most photos one pass erases. The retention thread runs a pass an hour, and
+# the CLI one pass per run.
 _TEAM_PHOTO_SWEEP_BATCH = 500
+# Most photos one erase TRANSACTION touches. Each transaction is one team, so
+# this bounds how long the sweep holds any team (NEW-2, below).
+_TEAM_PHOTO_SWEEP_CHUNK = 50
 
 
 def _team_photo_sweep_detail(result):
@@ -12063,42 +12146,20 @@ def _team_photo_sweep_detail(result):
     return f"erased={result['erased']} held={result['held_by_legal_hold']}"
 
 
-def _sweep_expired_team_photos(now=None):
-    """Erase expired team photos. Returns {'erased': n, 'held_by_legal_hold': n}.
+def _team_photo_under_hold():
+    """SQL truth value: this team photo is covered by a report under LEGAL HOLD.
 
-    A team photo expires PHOTO_RETENTION_DAYS after it was shared. Until this
-    existed the photo stopped being SERVED (410) but its bytes and caption
-    stayed in the database forever, and still counted against the team's
-    quota. Now, for every expired photo that still has anything in it:
-
-      * `image_data` -> NULL and `byte_size` -> 0: the pixels are gone;
-      * the caption goes from every place upload copied it
-        (_scrub_photo_captions: the row, the photo's chat message body, and
-        any old photo_shared moment that carried it).
-
-    The row stays, with `deleted_at` left as it was, so the thread keeps
-    reading "This photo has expired" rather than "Photo removed", and history
-    keeps the fact that a photo was shared.
-
-    Skipped: a photo covered by a report under LEGAL HOLD -- about the
-    photo, its message, its sender or its team (below) -- since a hold
-    suppresses every deletion, as in the moderation sweep. A reported photo
-    otherwise goes on its own clock; its sealed evidence copy (photo_evidence) is
-    separate and is purged by the moderation sweep.
-
-    Stages only, in batches; the caller records the run and commits.
+    A legal hold means PRESERVE. It covers a photo when the held report is
+    about (PR #23 review D3, matching _team_deletion_refusals, which treats
+    any held report on a team as keeping all of it):
+      * the photo itself;
+      * the chat message that carried the photo;
+      * the person who sent it;
+      * the team it was shared in.
+    Only a HOLD protects here. Whether a merely pending report should also
+    stop the clock is owner decision #4 (see test_team_photo_expiry).
     """
-    now = now or datetime.utcnow()
     held = Report.legal_hold.is_(True)
-    # A legal hold means PRESERVE. It covers this photo when the held report
-    # is about (PR #23 review D3, matching _team_deletion_refusals, which
-    # treats any held report on a team as keeping all of it):
-    #   * the photo itself;
-    #   * the chat message that carried the photo;
-    #   * the person who sent it;
-    #   * the team it was shared in.
-    # Only a HOLD protects here. Whether a merely pending report should also
-    # stop the clock is owner decision #4 (see test_team_photo_expiry).
     photo_held = db.select(Report.subject_ref).where(
         held, Report.subject_type == 'photo', Report.subject_ref.isnot(None))
     message_held = db.select(TeamMessage.photo_id).where(
@@ -12110,59 +12171,171 @@ def _sweep_expired_team_photos(now=None):
     team_held = db.select(Report.team_id).where(held, Report.team_id.isnot(None))
     # Each arm is NULL-safe (and_ with IS NOT NULL), so NOT(under_hold) is
     # never NULL for a row whose sender link was already cut.
-    under_hold = db.or_(
+    return db.or_(
         db.and_(TeamPhoto.public_id.isnot(None), TeamPhoto.public_id.in_(photo_held)),
         TeamPhoto.id.in_(message_held),
         db.and_(TeamPhoto.sender_user_id.isnot(None),
                 TeamPhoto.sender_user_id.in_(sender_held)),
         TeamPhoto.team_id.in_(team_held))
-    expired = db.and_(
+
+
+def _team_photo_expired(now):
+    """SQL truth value: expired, and still has something in it to erase."""
+    return db.and_(
         TeamPhoto.expires_at.isnot(None), TeamPhoto.expires_at <= now,
         db.or_(TeamPhoto.image_data.isnot(None), TeamPhoto.caption.isnot(None),
                TeamPhoto.byte_size != 0))
+
+
+def _sweep_expired_team_photos(now=None):
+    """Erase expired team photos. Returns {'erased': n, 'held_by_legal_hold': n}.
+
+    A team photo expires PHOTO_RETENTION_DAYS after it was shared. Until this
+    existed the photo stopped being SERVED (410) but its bytes and caption
+    stayed in the database forever, and still counted against the team's
+    quota. Now, for every expired photo that still has anything in it:
+
+      * `image_data` -> NULL and `byte_size` -> 0: the pixels are gone;
+      * the caption goes from every place upload copied it (the row, the
+        photo's chat message body, and any old photo_shared moment that
+        carried it).
+
+    The row stays, with `deleted_at` left as it was, so the thread keeps
+    reading "This photo has expired" rather than "Photo removed", and history
+    keeps the fact that a photo was shared.
+
+    Skipped: a photo covered by a report under LEGAL HOLD
+    (_team_photo_under_hold), since a hold suppresses every deletion, as in
+    the moderation sweep. A reported photo otherwise goes on its own clock;
+    its sealed evidence copy (photo_evidence) is separate and is purged by
+    the moderation sweep.
+
+    COMMITS, one team at a time (PR #23 round-3 review NEW-2). Each erase is
+    its own transaction (_erase_expired_photos_of_team): one team, at most
+    _TEAM_PHOTO_SWEEP_CHUNK of its photos, every copy of their captions, then
+    COMMIT. A pass erases at most _TEAM_PHOTO_SWEEP_BATCH photos. So:
+      * a team deletion (leave with delete_team, DELETE /api/me) waits for at
+        most the one transaction working on ITS team, never for the pass;
+        teams not being erased at that instant are not locked at all;
+      * a failure part-way loses nothing: every committed transaction erased
+        whole photos (pixels, caption and its copies together), the failing
+        one rolls back whole, and the next pass selects whatever is still
+        expired-with-data. No photo is ever left half-erased;
+      * a team being deleted right now is skipped (SKIP LOCKED) without
+        stopping the pass: the pass goes on to the next team (the old
+        single-batch head-of-line stall is gone), and the skipped team is
+        erased by a later pass or deleted whole.
+
+    LEGAL HOLD CONSISTENCY GUARANTEE. For every photo P and every legal hold
+    H that covers P, placed by admin_legal_hold (the only code that sets a
+    hold), exactly one of these is true:
+      (a) H's transaction committed BEFORE the hold check of the erase
+          transaction that would erase P. Then P is not erased, by this or
+          any later transaction, while H stands.
+      (b) H's transaction committed AFTER that erase transaction COMMITTED.
+          Then P was already erased when H took effect: too late, by
+          definition.
+    There is no third case, "H committed while the erase was in progress":
+    the legal-hold fence (_legal_hold_fence) makes them mutually exclusive,
+    so a hold that tries to commit during an erase waits for the erase's
+    commit, and an erase that starts during a hold waits for the hold's
+    commit and then sees it. The hold check is the FOR NO KEY UPDATE photo
+    SELECT in _erase_expired_photos_of_team, in the same transaction as the
+    erase, after the fence and the team lock; its candidate list, read
+    earlier and unlocked, only decides which teams to visit, never what is
+    erased. The guarantee needs READ COMMITTED (PostgreSQL's default, and
+    the app's), where every statement reads a fresh snapshot.
+
+    The caller records the run (_record_retention_run) and commits that.
+    """
+    now = now or datetime.utcnow()
+    expired = _team_photo_expired(now)
+    under_hold = _team_photo_under_hold()
     held_count = TeamPhoto.query.filter(expired, under_hold).count()
-    # R2-DEF-A (PR #23 round-2 review): the sweep and a team deletion used to
-    # lock the same rows in opposite orders and deadlock (40P01) -- the sweep
-    # wrote a team's photos and messages first, the deletion takes the team
-    # row FOR UPDATE first. So, like every team deletion, take the TEAM rows
-    # first: FOR KEY SHARE on every team in this batch, ascending, before any
-    # photo is read or written.
-    #   * KEY SHARE conflicts only with FOR UPDATE and DELETE (team deletion,
-    #     _lock_team_for_deletion). Joins, leaves, messages and handovers
-    #     (FOR NO KEY UPDATE, foreign-key checks) never wait on the sweep.
-    #   * SKIP LOCKED: a team being deleted at this moment is left out of
-    #     this pass. Its photos stay "expired AND still has data", which is
-    #     what the next pass selects, so a skipped team is retried every
-    #     pass and never dropped (it is erased next time, or deleted whole).
-    #   * A locked team cannot be deleted under the batch, so the UPDATEs
-    #     below always find their rows (no StaleDataError mid-batch).
-    candidate_teams = db.select(TeamPhoto.team_id).where(
-        expired, db.not_(under_hold)
-    ).order_by(TeamPhoto.id).limit(_TEAM_PHOTO_SWEEP_BATCH).subquery()
-    locked_teams = db.session.execute(
-        _for_key_share_skip_locked(
-            db.select(Team.id).where(Team.id.in_(db.select(candidate_teams.c.team_id)))
-            .order_by(Team.id), Team)).scalars().all()
-    photos = TeamPhoto.query.filter(
-        expired, db.not_(under_hold), TeamPhoto.team_id.in_(locked_teams)
-    ).order_by(TeamPhoto.id).limit(_TEAM_PHOTO_SWEEP_BATCH).all() if locked_teams else []
-    # Each photo row is written ONCE (R2-DEF-A): caption, pixels and size in
-    # one UPDATE per row, flushed before any message or moment is touched.
-    # PostgreSQL re-checks a row's foreign keys (KEY SHARE on its team and on
-    # its sender's user row) when the same transaction updates it a second
-    # time; that late lock on the sender closed a cycle with the sender's own
-    # account deletion. _scrub_photo_captions would write the caption first
-    # (its next query autoflushes it) and the pixels later, so the caption is
-    # read here and the copies are scrubbed from it afterwards.
-    captions = [(photo, photo.caption) for photo in photos]
-    for photo in photos:
-        photo.caption = None
-        photo.image_data = None
-        photo.byte_size = 0
-    db.session.flush()
-    for photo, caption in captions:
-        _scrub_photo_caption_copies(photo, caption)
-    return {"erased": len(photos), "held_by_legal_hold": held_count}
+    # Teams to visit, oldest due photo first. Unlocked and read once: a team
+    # whose photos become held, erased or deleted before its turn is simply
+    # found to have nothing to erase when its transaction re-reads them.
+    teams = db.session.execute(
+        db.select(TeamPhoto.team_id)
+        .where(expired, db.not_(under_hold), TeamPhoto.team_id.isnot(None))
+        .group_by(TeamPhoto.team_id)
+        .order_by(db.func.min(TeamPhoto.id))
+        .limit(_TEAM_PHOTO_SWEEP_BATCH)).scalars().all()
+    db.session.commit()          # hold nothing between teams
+    erased = 0
+    for team_id in teams:
+        while erased < _TEAM_PHOTO_SWEEP_BATCH:
+            limit = min(_TEAM_PHOTO_SWEEP_CHUNK, _TEAM_PHOTO_SWEEP_BATCH - erased)
+            n = _erase_expired_photos_of_team(team_id, now, limit)
+            db.session.commit()
+            erased += n
+            if n < limit:
+                break            # this team is done (or skipped)
+        if erased >= _TEAM_PHOTO_SWEEP_BATCH:
+            break
+    return {"erased": erased, "held_by_legal_hold": held_count}
+
+
+def _erase_expired_photos_of_team(team_id, now, limit):
+    """One erase transaction of the photo sweep: up to `limit` expired,
+    unheld photos of ONE team. Returns how many it erased. Stages only; the
+    caller commits at once.
+
+    Lock order (every row in ascending id within its table):
+      1. the legal-hold fence, SHARED (_legal_hold_fence);
+      2. the team row, FOR KEY SHARE SKIP LOCKED. Taken first, like every
+         team deletion takes its team first (R2-DEF-A). KEY SHARE conflicts
+         only with FOR UPDATE and DELETE, so joins, leaves, messages and
+         handovers never wait on the sweep; a team being deleted right now
+         is skipped (returns 0);
+      3. the photos, FOR NO KEY UPDATE, ORDER BY id, re-reading "expired and
+         not held" under the fence and the team lock: the HOLD CHECK of the
+         guarantee in _sweep_expired_team_photos. A photo another
+         transaction erased meanwhile (its sender's account deletion) is
+         re-checked on its new version and dropped;
+      4. their chat messages, then their old caption-carrying moments, each
+         in id order (_update_rows_in_id_order).
+    Every row is written once in the transaction (R2-DEF-A: a second write
+    re-checks the row's foreign keys and takes late locks). Account
+    deletion locks the sender's photos the same way, all of them in id order
+    before any message or moment (NEW-1), so the two never wait on each
+    other in a cycle.
+    """
+    _legal_hold_fence(exclusive=False)
+    team = db.session.execute(
+        _for_key_share_skip_locked(db.select(Team.id).where(Team.id == team_id), Team)
+    ).scalar_one_or_none()
+    if team is None:
+        return 0
+    rows = db.session.execute(
+        _for_no_key_update(
+            db.select(TeamPhoto.id, TeamPhoto.sender_user_id, TeamPhoto.caption)
+            .where(TeamPhoto.team_id == team_id, _team_photo_expired(now),
+                   db.not_(_team_photo_under_hold()))
+            .order_by(TeamPhoto.id).limit(limit), TeamPhoto)).all()
+    if not rows:
+        return 0
+    ids = [r.id for r in rows]
+    db.session.execute(
+        db.update(TeamPhoto).where(TeamPhoto.id.in_(ids))
+        .values(caption=None, image_data=None, byte_size=0)
+        .execution_options(synchronize_session=False))
+    _update_rows_in_id_order(TeamMessage, TeamMessage.photo_id.in_(ids),
+                             {TeamMessage.body: ''})
+    # Rows written before the moment stopped carrying a caption: the moment
+    # has no photo id, so match the exact metadata upload wrote (as
+    # _scrub_photo_caption_copies does, for every photo here at once).
+    copies = sorted({(r.sender_user_id, json.dumps({"caption": r.caption[:60]}))
+                     for r in rows if r.caption and r.sender_user_id is not None})
+    if copies:
+        _update_rows_in_id_order(TeamMoment, db.and_(
+            TeamMoment.team_id == team_id,
+            TeamMoment.moment_type == 'photo_shared',
+            db.or_(*[db.and_(TeamMoment.subject_user_id == sender,
+                             TeamMoment.moment_metadata == metadata)
+                     for sender, metadata in copies])),
+            {TeamMoment.moment_metadata: None})
+    return len(ids)
 
 
 def _sweep_moderation_evidence(now=None):
@@ -12252,8 +12425,9 @@ def team_photo_prune_command(scheduled):
     """Erase expired team photos (bytes and caption). For a scheduled run.
 
     The in-process retention thread runs the same sweep hourly; this is for
-    when that thread is not running. One batch per run; run it again (or let
-    the thread do it) if more remain.
+    when that thread is not running. One pass (at most 500 photos, committed
+    one team at a time) per run; run it again (or let the thread do it) if
+    more remain.
     """
     source = SOURCE_CRON if scheduled else SOURCE_MANUAL
     try:
@@ -13585,8 +13759,16 @@ def _delete_user_account_once(user_id, allow_team_owner=False, dry_run=True,
         # the per-row rules below, which then find nothing in a deleted team.
         _stage_owned_teams_for_account_deletion(user_id, team_plan)
         # Their captions go with their photos -- before the author link is cut,
-        # because the link is how they are found (R1 D4).
-        _scrub_photo_captions(TeamPhoto.query.filter(TeamPhoto.sender_user_id == user_id).all())
+        # because the link is how they are found (R1 D4). Every photo they
+        # sent is locked first, in id order, before any message or moment is
+        # written: the photo sweep locks photos the same way, so the two can
+        # no longer take two of this person's photos in opposite orders
+        # (PR #23 round-3 review NEW-1: heap order != id order deadlocked).
+        _scrub_photo_captions(db.session.execute(
+            _for_no_key_update(db.select(TeamPhoto)
+                               .where(TeamPhoto.sender_user_id == user_id)
+                               .order_by(TeamPhoto.id), TeamPhoto)
+        ).scalars().all())
         # Preserve shared team data: keep the message/moment, drop the author link.
         TeamMessage.query.filter(TeamMessage.sender_user_id == user_id).update(
             {TeamMessage.sender_user_id: None}, synchronize_session=False)
@@ -15230,7 +15412,11 @@ def _sweeper_moderation_step():
 
 def _sweeper_team_photo_step():
     result = _sweep_expired_team_photos()
-    # Same transaction as the erasures, recorded even when nothing expired.
+    # Recorded even when nothing expired. The sweep commits one team at a
+    # time (NEW-2), so this success record is written only after every erase
+    # it counts has committed: it never claims work that did not happen. A
+    # pass that fails part-way is recorded as failed; the teams it had
+    # already finished stay erased (whole), and the next pass goes on.
     _record_retention_run(RETENTION_TEAM_PHOTO, SOURCE_THREAD,
                           deleted=result['erased'],
                           detail=_team_photo_sweep_detail(result))

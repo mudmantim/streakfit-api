@@ -170,13 +170,19 @@ def test_account_deletion_takes_its_user_locks_in_one_ascending_pass(migrated_pg
 
 
 @pytest.mark.parametrize('scenario', ['SW1', 'SW1L', 'SW2', 'SW3', 'SW4', 'SW5',
-                                      'SK1', 'SK2', 'LH1', 'ORD'])
+                                      'SK1', 'SK2', 'LH1', 'ORD',
+                                      'HEAP', 'NB', 'CRM', 'CRR', 'CRT',
+                                      'LHM1', 'LHM2', 'LHM3', 'LHM4', 'LHM5'])
 def test_the_photo_sweep_never_deadlocks_with_team_or_account_deletion(migrated_pg, scenario):
     """PR #23 round-2 review R2-DEF-A: the expired-photo sweep vs a sole owner's
     team deletion (leave or account), a photo sender's account deletion, a team
     deleted mid-batch -- each paused at the statement that deadlocked or failed
     on 3b143a1 -- plus SKIP LOCKED never dropping a due photo, legal holds, and
-    the sweep's statement order. See tests/team_photo_sweep_race.py."""
+    the sweep's statement order. Round 3 review: the sender's photos stored out
+    of id order (HEAP, NEW-1), a deletion never waiting for the whole pass (NB,
+    NEW-2), failures mid-team and mid-run (CRM, CRR, CRT), and a legal hold
+    placed at every point of an erase transaction (LHM1-5). See
+    tests/team_photo_sweep_race.py."""
     _engine, env = migrated_pg
     result = subprocess.run(
         [sys.executable, os.path.join('tests', 'team_photo_sweep_race.py'), scenario],

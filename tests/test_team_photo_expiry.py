@@ -211,15 +211,21 @@ class _Statements:
 
 
 def _photo_ids_updated(seen):
-    """Photo ids written by each UPDATE of team_photo, one entry per row write."""
+    """Photo ids written by each UPDATE of team_photo, one entry per row write.
+    Per-row ORM UPDATEs (`WHERE team_photo.id = ?`) and, since round 4, the
+    sweep's one UPDATE per erase transaction (`WHERE team_photo.id IN (?, ...)`,
+    the ids being the last parameters)."""
     import re
     writes = []
     for sql, params, many in seen:
         if not sql.upper().startswith('UPDATE TEAM_PHOTO'):
             continue
-        assert re.search(r'WHERE team_photo\.id = \?$', sql), sql   # ORM per-row UPDATEs only
+        one = re.search(r'WHERE team_photo\.id = \?$', sql)
+        bulk = re.search(r'WHERE team_photo\.id IN \(((?:\?, )*\?)\)$', sql)
+        assert one or bulk, sql
+        n = 1 if one else bulk.group(1).count('?')
         for p in (params if many else [params]):
-            writes.append(p[-1])
+            writes.extend(p[-n:])
     return writes
 
 
@@ -273,5 +279,8 @@ def test_the_team_lock_is_part_of_the_sweep_on_postgresql():
     SKIP LOCKED (the PostgreSQL scenarios in tests/team_photo_sweep_race.py
     prove what it does)."""
     import inspect
-    src = inspect.getsource(A._sweep_expired_team_photos)
+    # Since round 4 each team is erased in its own transaction, which takes
+    # the lock (_erase_expired_photos_of_team, called by the sweep).
+    src = inspect.getsource(A._erase_expired_photos_of_team)
     assert '_for_key_share_skip_locked(' in src
+    assert '_erase_expired_photos_of_team(' in inspect.getsource(A._sweep_expired_team_photos)
