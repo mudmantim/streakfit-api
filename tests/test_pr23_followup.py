@@ -752,3 +752,54 @@ def test_d1_parity_leaves_an_open_team_working(client):
     assert client.delete(f'/api/teams/{tid}/members/{m}',
                          headers=auth_headers(otok)).status_code == 200
 
+
+# ── R2-DEF-C: the 409 for a legacy owner who already left ───────────────────
+
+def _legacy_owner_world(client, tag):
+    """A created a team, B joined, A left before the owner rules existed."""
+    a, atok = _person(client, f'lg_a{tag}')
+    b, btok = _person(client, f'lg_b{tag}')
+    tid, code = _team(client, atok, f'Legacy {tag}')
+    _join(client, btok, tid, code)
+    A.TeamMembership.query.filter_by(team_id=tid, user_id=a).delete()
+    db.session.commit()
+    return a, atok, b, tid
+
+
+def test_a_legacy_owner_who_already_left_is_not_told_to_open_the_team(client, monkeypatch):
+    """R2-DEF-C. When a team the person created and has ALREADY LEFT blocks
+    for a moment (the re-plan ran out -- forced here, as in the review -- or
+    the S1 race), the 409 must not send them to "Open that team and use Hand
+    over the team": they are not in it and cannot. Wording only: still 409
+    team_owned, nothing changed."""
+    a, atok, b, tid = _legacy_owner_world(client, 'c')
+    real = A._lock_people_for_deletion
+    monkeypatch.setattr(A, '_lock_people_for_deletion',
+                        lambda uid, others: (real(uid, set())[0], set()))
+    r = client.delete('/api/me', json={'password': PW}, headers=auth_headers(atok))
+    body = r.get_json()
+    assert r.status_code == 409 and body['blocker_codes'] == ['team_owned'], body
+    assert 'Open that team' not in body['message'] and 'Hand over' not in body['message']
+    assert 'already left' in body['message'] and 'try again' in body['message'].lower()
+    assert not any('hand each one' in t for t in body['blockers']), body
+    db.session.expire_all()
+    assert db.session.get(A.User, a) is not None
+    assert db.session.get(A.Team, tid).created_by_user_id == a
+    monkeypatch.undo()
+    assert client.delete('/api/me', json={'password': PW},
+                         headers=auth_headers(atok)).status_code == 200
+    db.session.expire_all()
+    assert db.session.get(A.Team, tid).created_by_user_id == b
+
+
+def test_an_owner_still_in_the_team_keeps_the_hand_over_message(client):
+    """Control for R2-DEF-C: the owner who IS in the team with others is still
+    pointed at "Hand over the team"."""
+    o, otok = _person(client, 'lg_in_o')
+    m, mtok = _person(client, 'lg_in_m')
+    tid, code = _team(client, otok)
+    _join(client, mtok, tid, code)
+    r = client.delete('/api/me', json={'password': PW}, headers=auth_headers(otok))
+    assert r.status_code == 409 and r.get_json()['blocker_codes'] == ['team_owned']
+    assert 'Open that team' in r.get_json()['message']
+    assert 'hand each one' in r.get_json()['blockers'][0]

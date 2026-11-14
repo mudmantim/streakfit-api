@@ -5421,6 +5421,24 @@ def _mark_reports_holding_deletion(user_id, team_ids=()):
         app.logger.exception("event=deletion_hold_mark_failed")
 
 
+_TEAM_LEFT_BLOCKER_TEXT = ("created a team they have already left that could not be "
+                           "handed on just now -- try again")
+
+
+def _team_owned_only_by_teams_already_left(plan):
+    """True when every team behind a `team_owned` refusal is one the person
+    created but is no longer in (so they cannot hand it over themselves)."""
+    picks = [t["team_id"] for t in plan.get("owned_teams", [])
+             if t["action"] == TEAM_OWNER_PICK]
+    if not picks or plan.get("user_id") is None:
+        return False
+    still_in = db.session.execute(
+        db.select(TeamMembership.id).where(
+            TeamMembership.user_id == plan["user_id"],
+            TeamMembership.team_id.in_(picks)).limit(1)).first()
+    return still_in is None
+
+
 def _account_deletion_refusal(plan):
     """409 for a blocked self-deletion, saying no more than the person may know.
 
@@ -5439,6 +5457,21 @@ def _account_deletion_refusal(plan):
         # Points at controls that exist (owner decision 2026-11-13): the
         # team panel's "Hand over the team", or Leave Team, which asks who
         # should look after it. A team only they are in is not a blocker.
+        if _team_owned_only_by_teams_already_left(plan):
+            # PR #23 round-2 review R2-DEF-C. A team they created and have
+            # already LEFT is normally handed on automatically, so it only
+            # blocks for a moment (a member's own deletion or leave landing
+            # at the same instant, or the bounded re-plan running out). They
+            # cannot open that team, so "Hand over the team" is not theirs to
+            # use: say what is true. Same code and status -- wording only.
+            return jsonify({
+                "error": "account_deletion_blocked",
+                "message": ("A team you created and have already left couldn't be "
+                            "passed on to one of its members just now. Nothing has "
+                            "been changed. Please try again in a moment."),
+                "blockers": [_TEAM_LEFT_BLOCKER_TEXT],
+                "blocker_codes": ["team_owned"],
+            }), 409
         return jsonify({
             "error": "account_deletion_blocked",
             "message": ("You created a team that other people are still in. "
