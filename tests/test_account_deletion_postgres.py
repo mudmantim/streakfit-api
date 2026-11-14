@@ -124,3 +124,22 @@ def test_deletion_races_answer_cleanly_on_postgres(migrated_pg):
                     f'\nSTDERR:\n{result.stderr[-3000:]}')
     failed = {k: v['detail'] for k, v in out.items() if not v['ok']}
     assert not failed and result.returncode == 0, failed
+
+
+def test_team_ownership_races_answer_cleanly_on_postgres(migrated_pg):
+    """PR #23 follow-up: the owner fallback when its candidate deletes at the
+    same moment (D2, never a 500), a member leaving while the legacy owner
+    deletes in both orders (D4, no deadlock), a join during a sole owner's
+    deletion (404) and two hand-overs at once (they serialize)."""
+    _engine, env = migrated_pg
+    result = subprocess.run(
+        [sys.executable, os.path.join('tests', 'team_owner_race.py')],
+        cwd=REPO, env={**env, 'PYTHONPATH': REPO}, capture_output=True, text=True,
+        timeout=300)
+    try:
+        out = json.loads(result.stdout[result.stdout.index('{'):])
+    except ValueError:
+        pytest.fail(f'no result from the race script\nSTDOUT:\n{result.stdout[-2000:]}'
+                    f'\nSTDERR:\n{result.stderr[-3000:]}')
+    failed = {k: v['detail'] for k, v in out.items() if not v['ok']}
+    assert not failed and result.returncode == 0, failed

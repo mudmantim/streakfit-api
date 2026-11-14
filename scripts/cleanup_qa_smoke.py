@@ -12,7 +12,12 @@ Classification:
     Left untouched here. Since the owner decision of 2026-11-13 the service itself
     deletes a team its owner is the only member of (or that is empty) together
     with the owner, and hands a team the owner already left to another member --
-    so such owners are SAFE, and --execute removes those teams with them.
+    so such owners are SAFE, and --execute removes those teams with them --
+    but ONLY when every person linked to such a team is a qa_smoke_ account
+    (fail closed, PR #23 review D8). A QA-owned team that a non-QA person ever
+    touched -- a real former member's chat or photos, a real member who would
+    be handed the team, or user content whose author link is already cut --
+    puts its owner in the BLOCKED group ("team_not_qa_only") and is left alone.
   * NOTE: deleting an account that FILED a report or an appeal cuts the link to it
     (the report stays). Once any such link is cut, migration 08920334bccd can no
     longer be downgraded -- see docs/operations/deploy-account-deletion-2026-09.md.
@@ -86,7 +91,7 @@ def survey():
         # Belt-and-suspenders: never operate on anything not exactly prefixed.
         if not u.username.startswith(PREFIX):
             continue
-        plan = A.delete_user_account(u.id, dry_run=True)
+        plan = A.delete_user_account(u.id, dry_run=True, qa_teams_only=True)
         counts_by_id[u.id] = plan["counts"]
         if plan["blocked"]:
             blocked.append((u, "; ".join(plan["blockers"])))
@@ -113,7 +118,7 @@ def execute(safe, counts_by_id):
     no team that anybody else is still in; a team only it is in goes with it."""
     deleted = 0
     for u in safe:
-        report = A.delete_user_account(u.id, dry_run=False)
+        report = A.delete_user_account(u.id, dry_run=False, qa_teams_only=True)
         if report.get("executed"):
             deleted += 1
         elif report.get("blocked"):
@@ -131,7 +136,7 @@ def plan_team_owners(blocked):
     for u, _reason in sorted(blocked, key=lambda e: e[0].id):
         if not u.username.startswith(PREFIX):
             continue
-        plan = A.delete_user_account(u.id, dry_run=True)
+        plan = A.delete_user_account(u.id, dry_run=True, qa_teams_only=True)
         codes = plan.get("blocker_codes", [])
         if codes != ["team_owned"]:
             refused.append((u.id, ["account:" + c for c in codes]))
@@ -179,7 +184,7 @@ def execute_team_policy(candidates):
                 break
         if not ok:
             continue
-        rep = A.delete_user_account(uid, dry_run=False)
+        rep = A.delete_user_account(uid, dry_run=False, qa_teams_only=True)
         if rep.get("executed"):
             deleted_owners.append(uid)
         else:

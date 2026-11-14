@@ -15,6 +15,7 @@ revoke it.
 These tests pin both halves: an empty team refuses entry, and a team that
 still has somebody in it carries on working normally.
 """
+import app as A
 from conftest import auth_headers, register_and_login
 
 
@@ -71,7 +72,10 @@ def test_a_stranger_cannot_join_an_abandoned_team(client):
     stranger = _t(client, "aban_stranger2")
     r = client.post(f"/api/teams/{tid}/join", json={"code": code},
                     headers=auth_headers(stranger))
-    assert r.status_code == 403
+    # 404, as for a deleted team (PR #23 review D1): a 403 here told a sole
+    # owner who left whether a report had kept the team instead of deleting it.
+    assert r.status_code == 404
+    assert not A.TeamMembership.query.filter_by(team_id=tid).count()
 
 
 def test_join_is_guarded_even_when_lookup_is_skipped(client):
@@ -89,7 +93,8 @@ def test_join_is_guarded_even_when_lookup_is_skipped(client):
     # Never calls /lookup at all.
     r = client.post(f"/api/teams/{tid}/join", json={"code": code},
                     headers=auth_headers(stranger))
-    assert r.status_code == 403
+    assert r.status_code == 404     # as for a deleted team (PR #23 review D1)
+    assert not A.TeamMembership.query.filter_by(team_id=tid).count()
 
 
 def test_a_stranger_who_cannot_join_cannot_read_anything(client):

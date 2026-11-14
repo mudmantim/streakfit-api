@@ -3285,6 +3285,27 @@ def _lock_team(team_id):
     ).scalar_one_or_none()
 
 
+def _lock_open_team(team_id):
+    """_lock_team, but a team nobody is in reads as not found (None).
+
+    PR #23 review D1. A sole owner who leaves a team that a report is still
+    about leaves it kept, empty and closed for the review; without a report
+    the same leave deletes it. Every route a former creator can still call
+    answers an empty team exactly as it answers a deleted one -- the same
+    404 from the same place -- so no follow-up request (join, hand over,
+    rotate the code, remove someone) tells the two apart, and nobody holds
+    creator powers over a closed team. Lookup already treats an empty team
+    as an unknown code for the same reason.
+    """
+    team = _lock_team(team_id)
+    if team is None:
+        return None
+    anyone = db.session.execute(
+        db.select(TeamMembership.id).where(TeamMembership.team_id == team_id).limit(1)
+    ).first()
+    return team if anyone is not None else None
+
+
 def _claim_mission_award(user_id, mission_date):
     """True the first time a person's mission on `mission_date` is paid."""
     try:
@@ -8275,7 +8296,13 @@ def join_team(team_id):
     if suspended:
         return suspended
 
-    team = _lock_team(team_id)
+    # An empty team is refused HERE as well as in lookup, not instead of it.
+    # This route takes a team_id in the path, so a caller who already knows
+    # the id never has to ask lookup anything -- guarding only the preview
+    # would leave the door open and the doorbell disconnected. The same 404
+    # as a deleted team, before the code is even compared (PR #23 D1: it was
+    # 403, which told a sole owner who left whether a report kept the team).
+    team = _lock_open_team(team_id)
     if not team:
         abort(404)
 
@@ -8283,16 +8310,6 @@ def join_team(team_id):
         db.select(TeamInviteCode).where(TeamInviteCode.team_id == team_id)
     ).scalar_one_or_none()
     if not invite or invite.code != code:
-        return jsonify({"error": "Invalid invite code"}), 403
-
-    # Checked HERE as well as in lookup, not instead of it. This route takes a
-    # team_id in the path, so a caller who already knows the id never has to
-    # ask lookup anything — guarding only the preview would leave the door
-    # open and the doorbell disconnected.
-    members_now = db.session.execute(
-        db.select(db.func.count(TeamMembership.id)).where(TeamMembership.team_id == team_id)
-    ).scalar()
-    if not members_now:
         return jsonify({"error": "Invalid invite code"}), 403
 
     existing = db.session.execute(
@@ -8433,7 +8450,7 @@ def remove_team_member(team_id, member_user_id):
     # is never answered before something of theirs lands (RC-B2a review).
     for uid in sorted((user_id, member_user_id)):
         _lock_user(uid)
-    team = _lock_team(team_id)
+    team = _lock_open_team(team_id)     # empty reads as deleted (PR #23 D1)
     if not team:
         abort(404)
     if team.created_by_user_id != user_id:
@@ -8475,7 +8492,7 @@ def transfer_team_ownership(team_id):
     locked = {uid: _lock_user(uid) for uid in sorted((user_id, new_owner))}
     if locked[user_id] is None:
         abort(404)
-    team = _lock_team(team_id)
+    team = _lock_open_team(team_id)     # empty reads as deleted (PR #23 D1)
     if not team:
         abort(404)
     if team.created_by_user_id != user_id:
@@ -8501,7 +8518,7 @@ def rotate_team_invite(team_id):
     # without it a join paused after reading the code got in AFTER the creator
     # was told the code was dead).
     _lock_user(user_id)
-    team = _lock_team(team_id)
+    team = _lock_open_team(team_id)     # empty reads as deleted (PR #23 D1)
     if not team:
         abort(404)
     if team.created_by_user_id != user_id:
@@ -11984,31 +12001,56 @@ def _sweep_expired_team_photos(now=None):
     reading "This photo has expired" rather than "Photo removed", and history
     keeps the fact that a photo was shared.
 
-    Skipped: a photo named by a report under LEGAL HOLD -- a hold suppresses
-    every deletion, as in the moderation sweep. A reported photo otherwise
-    goes on its own clock; its sealed evidence copy (photo_evidence) is
+    Skipped: a photo covered by a report under LEGAL HOLD -- about the
+    photo, its message, its sender or its team (below) -- since a hold
+    suppresses every deletion, as in the moderation sweep. A reported photo
+    otherwise goes on its own clock; its sealed evidence copy (photo_evidence) is
     separate and is purged by the moderation sweep.
 
     Stages only, in batches; the caller records the run and commits.
     """
     now = now or datetime.utcnow()
-    held_refs = db.select(Report.subject_ref).where(
-        Report.subject_type == 'photo', Report.legal_hold.is_(True),
-        Report.subject_ref.isnot(None))
+    held = Report.legal_hold.is_(True)
+    # A legal hold means PRESERVE. It covers this photo when the held report
+    # is about (PR #23 review D3, matching _team_deletion_refusals, which
+    # treats any held report on a team as keeping all of it):
+    #   * the photo itself;
+    #   * the chat message that carried the photo;
+    #   * the person who sent it;
+    #   * the team it was shared in.
+    # Only a HOLD protects here. Whether a merely pending report should also
+    # stop the clock is owner decision #4 (see test_team_photo_expiry).
+    photo_held = db.select(Report.subject_ref).where(
+        held, Report.subject_type == 'photo', Report.subject_ref.isnot(None))
+    message_held = db.select(TeamMessage.photo_id).where(
+        TeamMessage.photo_id.isnot(None),
+        TeamMessage.public_id.in_(db.select(Report.subject_ref).where(
+            held, Report.subject_type == 'message', Report.subject_ref.isnot(None))))
+    sender_held = db.select(Report.reported_user_id).where(
+        held, Report.reported_user_id.isnot(None))
+    team_held = db.select(Report.team_id).where(held, Report.team_id.isnot(None))
+    # Each arm is NULL-safe (and_ with IS NOT NULL), so NOT(under_hold) is
+    # never NULL for a row whose sender link was already cut.
+    under_hold = db.or_(
+        db.and_(TeamPhoto.public_id.isnot(None), TeamPhoto.public_id.in_(photo_held)),
+        TeamPhoto.id.in_(message_held),
+        db.and_(TeamPhoto.sender_user_id.isnot(None),
+                TeamPhoto.sender_user_id.in_(sender_held)),
+        TeamPhoto.team_id.in_(team_held))
     expired = db.and_(
         TeamPhoto.expires_at.isnot(None), TeamPhoto.expires_at <= now,
         db.or_(TeamPhoto.image_data.isnot(None), TeamPhoto.caption.isnot(None),
                TeamPhoto.byte_size != 0))
-    held = TeamPhoto.query.filter(expired, TeamPhoto.public_id.in_(held_refs)).count()
+    held_count = TeamPhoto.query.filter(expired, under_hold).count()
     photos = TeamPhoto.query.filter(
-        expired, TeamPhoto.public_id.notin_(held_refs)
+        expired, db.not_(under_hold)
     ).order_by(TeamPhoto.id).limit(_TEAM_PHOTO_SWEEP_BATCH).all()
     _scrub_photo_captions(photos)
     for photo in photos:
         photo.image_data = None
         photo.byte_size = 0
     db.session.flush()
-    return {"erased": len(photos), "held_by_legal_hold": held}
+    return {"erased": len(photos), "held_by_legal_hold": held_count}
 
 
 def _sweep_moderation_evidence(now=None):
@@ -13165,6 +13207,7 @@ _ACCOUNT_DELETION_BLOCKER_TEXT = {
     "report_held_filed": "filed {n} report(s) under legal hold — release the hold first",
     "report_pending_filed": "filed {n} report(s) still pending — decide them first",
     "team_report_open": "owns {n} team(s) with nobody else in them that a pending or legally held report names — decide or release it first",
+    "team_not_qa_only": "owns {n} team(s) that involve a non-qa_smoke_ person — the QA cleanup never deletes or hands on such a team",
 }
 
 
@@ -13338,7 +13381,7 @@ def _is_deadlock(exc):
     return getattr(getattr(exc, 'orig', None), 'pgcode', None) == '40P01'
 
 
-def delete_user_account(user_id, allow_team_owner=False, dry_run=True):
+def delete_user_account(user_id, allow_team_owner=False, dry_run=True, qa_teams_only=False):
     """delete_user_account, retried when PostgreSQL breaks a deadlock.
 
     Two people deleting at the same moment who share rows -- blocks of each
@@ -13349,7 +13392,8 @@ def delete_user_account(user_id, allow_team_owner=False, dry_run=True):
     """
     for attempt in range(_DELETION_DEADLOCK_ATTEMPTS):
         try:
-            return _delete_user_account_once(user_id, allow_team_owner, dry_run)
+            return _delete_user_account_once(user_id, allow_team_owner, dry_run,
+                                             qa_teams_only)
         except DBAPIError as exc:
             if dry_run or not _is_deadlock(exc) or attempt == _DELETION_DEADLOCK_ATTEMPTS - 1:
                 raise
@@ -13358,7 +13402,8 @@ def delete_user_account(user_id, allow_team_owner=False, dry_run=True):
             time.sleep(0.05 + random.random() * 0.2)
 
 
-def _delete_user_account_once(user_id, allow_team_owner=False, dry_run=True):
+def _delete_user_account_once(user_id, allow_team_owner=False, dry_run=True,
+                              qa_teams_only=False):
     """Delete a user and their private data in ONE transaction, preserving shared
     team data. Returns a report dict:
         {user_id, found, username, counts, blocked, blockers, dry_run, executed}
@@ -13396,17 +13441,21 @@ def _delete_user_account_once(user_id, allow_team_owner=False, dry_run=True):
         return {"user_id": user_id, "found": False, "blocked": False,
                 "blockers": [], "dry_run": dry_run, "executed": False, "counts": {}}
 
-    if not dry_run:
-        # FOR UPDATE on every team they created, ascending, after the person
-        # (global lock order: users, then teams). A join to a team about to be
-        # deleted, or a report about it, waits and then sees the outcome.
-        for owned_id in db.session.execute(
-                db.select(Team.id).where(Team.created_by_user_id == user_id)
-                .order_by(Team.id)).scalars().all():
-            _lock_team_for_deletion(owned_id)
-    team_plan = _owned_team_plan(user_id)
+    if dry_run:
+        team_plan = _owned_team_plan(user_id)
+    else:
+        team_plan = _lock_and_plan_owned_teams(user_id)
     counts = _account_dependent_counts(user_id, team_plan)
     blocker_codes = _account_deletion_blockers(counts, allow_team_owner)
+    if qa_teams_only:
+        # scripts/cleanup_qa_smoke.py (PR #23 review D8): decided HERE, under
+        # the same locks as the deletion, so nothing can join in between.
+        counts["team_not_qa_only"] = sum(
+            1 for t in team_plan
+            if t["action"] in (TEAM_OWNER_DELETE, TEAM_OWNER_TRANSFER)
+            and _team_involves_non_qa(t["team_id"]))
+        if counts["team_not_qa_only"]:
+            blocker_codes = blocker_codes + ["team_not_qa_only"]
     blockers = [_ACCOUNT_DELETION_BLOCKER_TEXT[code].format(n=counts[code])
                 for code in blocker_codes]
 
@@ -13578,6 +13627,28 @@ def _qa_team_plan(team):
     counts = {label: _qa_team_rows(model, attr, team.id).count()
               for label, model, attr in _TEAM_ROW_DELETES + _TEAM_LINK_NULLS}
     return refusals, counts, len(people), len(non_qa), open_or_held
+
+
+def _team_involves_non_qa(team_id):
+    """True unless every person the team's rows point at is a qa_smoke_ account.
+
+    Fail closed, for the QA cleanup (PR #23 review D8): a linked id with no
+    live account counts as NOT QA, and so does user-sent content whose author
+    link an earlier deletion already cut -- it may have been a real person's.
+    (Rickie's messages carry no author by design and are not counted.)
+    """
+    people = {p for p in _qa_team_linked_user_ids(team_id) if p is not None}
+    names = dict(db.session.execute(
+        db.select(User.id, User.username).where(User.id.in_(people))).all()) if people else {}
+    if any(not (names.get(p) or "").startswith(QA_SMOKE_PREFIX) for p in people):
+        return True
+    orphaned = (
+        TeamMessage.query.filter(TeamMessage.team_id == team_id,
+                                 TeamMessage.sender_type == 'user',
+                                 TeamMessage.sender_user_id.is_(None)).count()
+        + TeamPhoto.query.filter(TeamPhoto.team_id == team_id,
+                                 TeamPhoto.sender_user_id.is_(None)).count())
+    return orphaned > 0
 
 
 def delete_qa_smoke_team(team_id, dry_run=True):
@@ -13755,6 +13826,72 @@ def _lock_team_for_deletion(team_id):
         .execution_options(populate_existing=True)).scalar_one_or_none()
 
 
+_OWNED_TEAM_LOCK_ROUNDS = 5
+
+
+def _lock_and_plan_owned_teams(user_id):
+    """_owned_team_plan for account deletion, decided under every lock it needs.
+
+    The caller already holds the person's row FOR UPDATE. Then, in the global
+    order (users ascending, then teams ascending):
+
+      1. every member of each team the person created but is no longer in --
+         the only teams the fallback can hand on -- is locked like a
+         moderation subject. A deletion or a leave of one of THEM in flight
+         finishes first; afterwards none of them can leave or be deleted
+         until this transaction ends;
+      2. every team they created, FOR UPDATE (a join, a message or a report
+         about a team that is about to go waits and then sees the outcome);
+      3. the plan is read under those locks.
+
+    PR #23 review D4: the teams used to be locked first and the new owner
+    after, the reverse of every route (person, then team), so a member
+    leaving at that moment deadlocked with the deletion. D2: the plan used to
+    be read before the new owner was locked, so if that person's own
+    deletion won, the fallback found nobody and raised -- a 500 on the one
+    irreversible action. Now a candidate who is gone is simply not in the
+    plan; a team left with nobody is planned exactly as any empty team is
+    (deleted, or kept and refused while a report is open), and a team whose
+    remaining members have no live account is planned as it always was.
+
+    Someone who joined between step 1 and step 2 is newer than every member
+    already locked, so the fallback reaches them only if all of those are
+    gone. Then they are locked here (the one late lock), and the plan is
+    read again; a few rounds at most, bounded.
+    """
+    owned = db.session.execute(
+        db.select(Team.id).where(Team.created_by_user_id == user_id)
+        .order_by(Team.id)).scalars().all()
+    left_behind = [tid for tid in owned
+                   if user_id not in _team_member_ids_in_order(tid)]
+    candidates = set()
+    for tid in left_behind:
+        candidates.update(_team_member_ids_in_order(tid))
+    candidates.discard(user_id)
+    alive = _lock_moderation_subjects(*candidates) if candidates else set()
+    for tid in owned:
+        _lock_team_for_deletion(tid)
+    for _round in range(_OWNED_TEAM_LOCK_ROUNDS):
+        plan = _owned_team_plan(user_id)
+        late = sorted({e["new_owner_user_id"] for e in plan
+                       if e["action"] == TEAM_OWNER_TRANSFER
+                       and e["new_owner_user_id"] not in alive})
+        if not late:
+            return plan
+        for uid in late:
+            # Gone by the time the lock is held: the next read of the plan
+            # no longer finds them (their user row and membership are gone).
+            if _lock_moderation_subject(uid):
+                alive.add(uid)
+    # Unreachable in practice (each round locks or loses a person for good).
+    # Plan with no transfer at all rather than guess: such a team blocks.
+    plan = _owned_team_plan(user_id)
+    for e in plan:
+        if e["action"] == TEAM_OWNER_TRANSFER and e["new_owner_user_id"] not in alive:
+            e["action"], e["new_owner_user_id"] = TEAM_OWNER_PICK, None
+    return plan
+
+
 def _stage_team_owner_change(team, new_owner_user_id, reason):
     """Hand `team` to another member. Stages only; the caller commits.
 
@@ -13780,17 +13917,12 @@ def _stage_owned_teams_for_account_deletion(user_id, team_plan):
             _stage_team_deletion(team)
             deleted += 1
         elif entry["action"] == TEAM_OWNER_TRANSFER:
-            new_owner = entry["new_owner_user_id"]
-            tried = []
-            # Key-share on the new owner, so a deletion of THEM in flight
-            # finishes first; if it won, the next-longest-standing member.
-            while new_owner is not None and not _lock_moderation_subject(new_owner):
-                tried.append(new_owner)
-                new_owner = _fallback_team_owner(
-                    _team_member_ids_in_order(team.id), exclude=tried + [user_id])
-            if new_owner is None:
-                raise RuntimeError("team owner fallback found nobody")
-            _stage_team_owner_change(team, new_owner, "owner_deleted_fallback")
+            # _lock_and_plan_owned_teams already holds the new owner's row
+            # and re-planned under every lock, so the person named here
+            # exists and is still a member: nothing to re-check, no fallback
+            # to a fallback, and no 500 if a candidate vanished (PR #23 D2).
+            _stage_team_owner_change(team, entry["new_owner_user_id"],
+                                     "owner_deleted_fallback")
             transferred += 1
     db.session.flush()
     return deleted, transferred
