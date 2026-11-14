@@ -186,3 +186,92 @@ def test_the_team_photo_kind_fits_the_column_and_is_its_own_promise():
     assert len(RETENTION_TEAM_PHOTO) <= RetentionRun.kind.property.columns[0].type.length
     assert RETENTION_TEAM_PHOTO in A.RETENTION_KINDS
     assert len(set(A.RETENTION_KINDS)) == len(A.RETENTION_KINDS)
+
+
+# ── R2-DEF-A (PR #23 round-2 review): the sweep's statement order ─────────────
+
+class _Statements:
+    """Every statement one block of code sends, in order, with its parameters
+    (an executemany's parameter list is kept whole)."""
+
+    def __init__(self):
+        self.seen = []
+
+    def __call__(self, _conn, _cursor, statement, parameters, _context, executemany):
+        self.seen.append((' '.join(statement.split()), parameters, executemany))
+
+    def __enter__(self):
+        from sqlalchemy import event
+        event.listen(db.engine, 'before_cursor_execute', self)
+        return self
+
+    def __exit__(self, *exc):
+        from sqlalchemy import event
+        event.remove(db.engine, 'before_cursor_execute', self)
+
+
+def _photo_ids_updated(seen):
+    """Photo ids written by each UPDATE of team_photo, one entry per row write."""
+    import re
+    writes = []
+    for sql, params, many in seen:
+        if not sql.upper().startswith('UPDATE TEAM_PHOTO'):
+            continue
+        assert re.search(r'WHERE team_photo\.id = \?$', sql), sql   # ORM per-row UPDATEs only
+        for p in (params if many else [params]):
+            writes.append(p[-1])
+    return writes
+
+
+def test_the_sweep_writes_each_photo_row_once_and_takes_the_team_rows_first(client, fam):
+    """R2-DEF-A, F1 and F2. PostgreSQL re-checks a row's foreign keys (KEY
+    SHARE on its team and its sender) when one transaction updates it a second
+    time; that late lock closed a deadlock cycle with team and account
+    deletion. Each swept photo row must be written exactly once, and the team
+    rows must be read (FOR KEY SHARE on PostgreSQL) before any content is
+    written. Several captioned and captionless photos in two teams, with an
+    old caption-carrying moment, so every branch of the scrub runs."""
+    other = register_and_login(client, 'exp_other')
+    t2 = client.post('/api/teams', json={'name': 'Exp Two'},
+                     headers=auth_headers(other)).get_json()['team']
+    fam2 = {'tok': other, 'tid': t2['id']}
+    ids = [_shared(client, fam, caption='beach day'),
+           _shared(client, fam, caption=None),
+           _shared(client, fam2, caption='park'),
+           _shared(client, fam, caption='hike'),
+           _shared(client, fam2, caption=None)]
+    db.session.add(A.TeamMoment(team_id=fam['tid'], moment_type='photo_shared',
+                                subject_user_id=fam['uid'],
+                                moment_metadata='{"caption": "hike"}'))
+    db.session.commit()
+    db.session.expire_all()
+
+    with _Statements() as rec:
+        result = A._sweep_expired_team_photos()
+    db.session.commit()
+    assert result['erased'] == 5
+
+    writes = _photo_ids_updated(rec.seen)
+    assert sorted(writes) == sorted(ids), ('each swept photo written exactly once', writes)
+    first_write = next(i for i, (sql, _p, _m) in enumerate(rec.seen)
+                       if sql.upper().startswith(('UPDATE', 'DELETE', 'INSERT')))
+    team_lock = [i for i, (sql, _p, _m) in enumerate(rec.seen)
+                 if sql.upper().startswith('SELECT TEAM.ID FROM TEAM')]
+    assert team_lock and team_lock[0] < first_write, rec.seen
+
+    db.session.expire_all()
+    for pid in ids:
+        p = db.session.get(A.TeamPhoto, pid)
+        assert (p.image_data, p.byte_size, p.caption) == (None, 0, None)
+        assert A.TeamMessage.query.filter_by(photo_id=pid).one().body == ''
+    assert A.TeamMoment.query.filter(A.TeamMoment.moment_metadata.isnot(None),
+                                     A.TeamMoment.moment_type == 'photo_shared').count() == 0
+
+
+def test_the_team_lock_is_part_of_the_sweep_on_postgresql():
+    """The team lock statement, compiled for PostgreSQL, is FOR KEY SHARE ...
+    SKIP LOCKED (the PostgreSQL scenarios in tests/team_photo_sweep_race.py
+    prove what it does)."""
+    import inspect
+    src = inspect.getsource(A._sweep_expired_team_photos)
+    assert '_for_key_share_skip_locked(' in src

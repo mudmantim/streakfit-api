@@ -46,8 +46,22 @@ def test_user_and_team_locks_cannot_share_a_cache_entry_with_for_update():
 def test_key_share_only_via_the_helper_and_plain_locks_never_use_of():
     src = inspect.getsource(A)
     calls = re.findall(r'with_for_update\(([^)]*)\)', src)
-    assert calls.count('key_share=True, of=model') == 1, calls
+    helpers = ('key_share=True, of=model',                                  # _for_no_key_update
+               'read=True, key_share=True, skip_locked=True, of=model')     # _for_key_share_skip_locked
+    for h in helpers:
+        assert calls.count(h) == 1, calls
     for args in calls:
-        if args == 'key_share=True, of=model':
+        if args in helpers:
             continue
         assert 'key_share' not in args and 'of=' not in args, args
+
+
+def test_the_photo_sweeps_team_lock_is_key_share_skip_locked_and_its_own_cache_entry():
+    """R2-DEF-A: the sweep takes FOR KEY SHARE on its teams -- the weakest
+    lock, waited for only by a FOR UPDATE or DELETE of the team -- never
+    anything stronger borrowed from a cached entry."""
+    ks = A._for_key_share_skip_locked(A.db.select(A.Team.id).where(A.Team.id == 1), A.Team)
+    assert re.search(r'FOR KEY SHARE OF "?team"? SKIP LOCKED$', _sql(ks)), _sql(ks)
+    for other in (A.db.select(A.Team.id).where(A.Team.id == 1).with_for_update(),
+                  A._for_no_key_update(A.db.select(A.Team.id).where(A.Team.id == 1), A.Team)):
+        assert other._generate_cache_key() != ks._generate_cache_key()

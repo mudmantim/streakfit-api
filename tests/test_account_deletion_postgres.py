@@ -164,3 +164,25 @@ def test_account_deletion_takes_its_user_locks_in_one_ascending_pass(migrated_pg
                     f'\nSTDERR:\n{result.stderr[-3000:]}')
     failed = {k: v['detail'] for k, v in out.items() if not v['ok']}
     assert not failed and result.returncode == 0, failed
+
+
+@pytest.mark.parametrize('scenario', ['SW1', 'SW1L', 'SW2', 'SW3', 'SW4', 'SW5',
+                                      'SK1', 'SK2', 'LH1', 'ORD'])
+def test_the_photo_sweep_never_deadlocks_with_team_or_account_deletion(migrated_pg, scenario):
+    """PR #23 round-2 review R2-DEF-A: the expired-photo sweep vs a sole owner's
+    team deletion (leave or account), a photo sender's account deletion, a team
+    deleted mid-batch -- each paused at the statement that deadlocked or failed
+    on 3b143a1 -- plus SKIP LOCKED never dropping a due photo, legal holds, and
+    the sweep's statement order. See tests/team_photo_sweep_race.py."""
+    _engine, env = migrated_pg
+    result = subprocess.run(
+        [sys.executable, os.path.join('tests', 'team_photo_sweep_race.py'), scenario],
+        cwd=REPO, env={**env, 'PYTHONPATH': REPO}, capture_output=True, text=True,
+        timeout=300)
+    try:
+        out = json.loads(result.stdout[result.stdout.index('{'):])
+    except ValueError:
+        pytest.fail(f'no result from the race script\nSTDOUT:\n{result.stdout[-2000:]}'
+                    f'\nSTDERR:\n{result.stderr[-3000:]}')
+    failed = {k: v['detail'] for k, v in out.items() if not v['ok']}
+    assert not failed and result.returncode == 0, failed

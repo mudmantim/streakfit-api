@@ -3247,6 +3247,13 @@ def _for_no_key_update(stmt, model):
     return stmt.with_for_update(key_share=True, of=model)
 
 
+def _for_key_share_skip_locked(stmt, model):
+    """FOR KEY SHARE OF <model> SKIP LOCKED: the weakest row lock, which only
+    a FOR UPDATE or a DELETE of that row waits for (and, skipped, never
+    waits itself). Named table for the same cache-key reason as above."""
+    return stmt.with_for_update(read=True, key_share=True, skip_locked=True, of=model)
+
+
 def _lock_user(user_id):
     """Lock the acting person's row for the rest of this request's transaction.
 
@@ -8604,17 +8611,24 @@ def _scrub_photo_captions(photos):
     for photo in photos:
         caption = photo.caption
         photo.caption = None
-        TeamMessage.query.filter(TeamMessage.photo_id == photo.id).update(
-            {TeamMessage.body: ''}, synchronize_session=False)
-        if caption and photo.sender_user_id is not None:
-            # Rows written before the moment stopped carrying a caption. The
-            # moment has no photo id, so match the exact metadata upload wrote.
-            TeamMoment.query.filter(
-                TeamMoment.team_id == photo.team_id,
-                TeamMoment.moment_type == 'photo_shared',
-                TeamMoment.subject_user_id == photo.sender_user_id,
-                TeamMoment.moment_metadata == json.dumps({"caption": caption[:60]}),
-            ).update({TeamMoment.moment_metadata: None}, synchronize_session=False)
+        _scrub_photo_caption_copies(photo, caption)
+
+
+def _scrub_photo_caption_copies(photo, caption):
+    """The copies of `caption` that upload made outside the photo row: the
+    body of the photo's chat message, and an old photo_shared moment. Stages
+    only; the photo row itself is the caller's."""
+    TeamMessage.query.filter(TeamMessage.photo_id == photo.id).update(
+        {TeamMessage.body: ''}, synchronize_session=False)
+    if caption and photo.sender_user_id is not None:
+        # Rows written before the moment stopped carrying a caption. The
+        # moment has no photo id, so match the exact metadata upload wrote.
+        TeamMoment.query.filter(
+            TeamMoment.team_id == photo.team_id,
+            TeamMoment.moment_type == 'photo_shared',
+            TeamMoment.subject_user_id == photo.sender_user_id,
+            TeamMoment.moment_metadata == json.dumps({"caption": caption[:60]}),
+        ).update({TeamMoment.moment_metadata: None}, synchronize_session=False)
 
 
 def _removed_photo_caption_residue(execute=False):
@@ -12042,14 +12056,47 @@ def _sweep_expired_team_photos(now=None):
         db.or_(TeamPhoto.image_data.isnot(None), TeamPhoto.caption.isnot(None),
                TeamPhoto.byte_size != 0))
     held_count = TeamPhoto.query.filter(expired, under_hold).count()
-    photos = TeamPhoto.query.filter(
+    # R2-DEF-A (PR #23 round-2 review): the sweep and a team deletion used to
+    # lock the same rows in opposite orders and deadlock (40P01) -- the sweep
+    # wrote a team's photos and messages first, the deletion takes the team
+    # row FOR UPDATE first. So, like every team deletion, take the TEAM rows
+    # first: FOR KEY SHARE on every team in this batch, ascending, before any
+    # photo is read or written.
+    #   * KEY SHARE conflicts only with FOR UPDATE and DELETE (team deletion,
+    #     _lock_team_for_deletion). Joins, leaves, messages and handovers
+    #     (FOR NO KEY UPDATE, foreign-key checks) never wait on the sweep.
+    #   * SKIP LOCKED: a team being deleted at this moment is left out of
+    #     this pass. Its photos stay "expired AND still has data", which is
+    #     what the next pass selects, so a skipped team is retried every
+    #     pass and never dropped (it is erased next time, or deleted whole).
+    #   * A locked team cannot be deleted under the batch, so the UPDATEs
+    #     below always find their rows (no StaleDataError mid-batch).
+    candidate_teams = db.select(TeamPhoto.team_id).where(
         expired, db.not_(under_hold)
-    ).order_by(TeamPhoto.id).limit(_TEAM_PHOTO_SWEEP_BATCH).all()
-    _scrub_photo_captions(photos)
+    ).order_by(TeamPhoto.id).limit(_TEAM_PHOTO_SWEEP_BATCH).subquery()
+    locked_teams = db.session.execute(
+        _for_key_share_skip_locked(
+            db.select(Team.id).where(Team.id.in_(db.select(candidate_teams.c.team_id)))
+            .order_by(Team.id), Team)).scalars().all()
+    photos = TeamPhoto.query.filter(
+        expired, db.not_(under_hold), TeamPhoto.team_id.in_(locked_teams)
+    ).order_by(TeamPhoto.id).limit(_TEAM_PHOTO_SWEEP_BATCH).all() if locked_teams else []
+    # Each photo row is written ONCE (R2-DEF-A): caption, pixels and size in
+    # one UPDATE per row, flushed before any message or moment is touched.
+    # PostgreSQL re-checks a row's foreign keys (KEY SHARE on its team and on
+    # its sender's user row) when the same transaction updates it a second
+    # time; that late lock on the sender closed a cycle with the sender's own
+    # account deletion. _scrub_photo_captions would write the caption first
+    # (its next query autoflushes it) and the pixels later, so the caption is
+    # read here and the copies are scrubbed from it afterwards.
+    captions = [(photo, photo.caption) for photo in photos]
     for photo in photos:
+        photo.caption = None
         photo.image_data = None
         photo.byte_size = 0
     db.session.flush()
+    for photo, caption in captions:
+        _scrub_photo_caption_copies(photo, caption)
     return {"erased": len(photos), "held_by_legal_hold": held_count}
 
 
