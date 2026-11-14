@@ -525,8 +525,50 @@ def test_decision_pending_a_child_is_never_made_owner(client):
     tid, code = _team(client, otok)
     _join(client, ktok, tid, code)
     u = db.session.get(A.User, kid)
-    u.age_band = 'under_13'
+    u.age_band = A.AGE_CHILD
     db.session.commit()
     r = client.post(f'/api/teams/{tid}/owner', json={'new_owner_user_id': kid},
                     headers=auth_headers(otok))
     assert r.status_code != 200
+
+
+# ── D5 (suspended members) stays Tim's: decision #1 ──────────────────────────
+# A reviewer condition relayed by the coordinator asked for this to be blocked
+# in code. It was NOT changed: the brief names D5 as Tim's policy, and the
+# change was refused at the permission layer. Pinned here instead, so the
+# moment it is decided the tests say exactly what changes.
+
+def _suspend(uid):
+    db.session.add(A.UserRestriction(user_id=uid, kind='social_suspended'))
+    db.session.commit()
+
+
+@pytest.mark.xfail(strict=True, reason=(
+    "OWNER DECISION #1 pending (review D5): whether a socially SUSPENDED member "
+    "may be picked as the next owner. Today the pick succeeds (200)."))
+@pytest.mark.parametrize('route', ['owner', 'leave'])
+def test_decision_pending_a_suspended_member_is_never_picked_as_owner(client, route):
+    o, otok = _person(client, f'sus_o_{route}')
+    s, stok = _person(client, f'sus_s_{route}')
+    tid, code = _team(client, otok)
+    _join(client, stok, tid, code)
+    _suspend(s)
+    r = client.post(f'/api/teams/{tid}/{route}', json={'new_owner_user_id': s},
+                    headers=auth_headers(otok))
+    assert r.status_code != 200
+
+
+@pytest.mark.xfail(strict=True, reason=(
+    "OWNER DECISION #1 pending (review D5, fallback eligibility rule): whether "
+    "the automatic fallback skips a socially SUSPENDED member. Today it picks "
+    "the longest-standing member whatever their suspension."))
+def test_decision_pending_the_fallback_skips_a_suspended_member(app):
+    owner = _u('fb_owner')
+    sus = _u('fb_suspended')
+    ok = _u('fb_ok')
+    tid = _qa_team(owner, [sus, ok], owner_in=False, name='fallback')
+    db.session.query(A.TeamMembership).filter_by(team_id=tid, user_id=sus).update(
+        {A.TeamMembership.joined_at: datetime.datetime.utcnow() - datetime.timedelta(days=9)})
+    db.session.commit()
+    _suspend(sus)
+    assert A._owned_team_plan(owner)[0]['new_owner_user_id'] == ok
