@@ -13424,27 +13424,25 @@ def _delete_user_account_once(user_id, allow_team_owner=False, dry_run=True,
     """
     if dry_run:
         user = db.session.get(User, user_id)
+        team_plan = _owned_team_plan(user_id) if user is not None else []
     else:
         # FOR UPDATE on the person's row before anything is counted. Every
-        # moderation write that names this person takes FOR KEY SHARE on the
+        # moderation write that names this person takes a row lock on the
         # same row first (_lock_moderation_subject), so the two serialise: a
         # report or operator action that got there first is committed and
         # then seen by the plan below (a pending report now blocks); one that
         # arrives second waits, then finds the person gone and answers
-        # cleanly instead of failing on a foreign key.
-        user = db.session.execute(
-            db.select(User).where(User.id == user_id).with_for_update()
-            .execution_options(populate_existing=True)).scalar_one_or_none()
+        # cleanly instead of failing on a foreign key. The person is locked
+        # in ONE ascending-id pass with everybody the team plan could hand a
+        # team to, then the teams, then the plan is read
+        # (_lock_and_plan_owned_teams).
+        user, team_plan = _lock_and_plan_owned_teams(user_id)
     if user is None:
         if not dry_run:
             db.session.rollback()
         return {"user_id": user_id, "found": False, "blocked": False,
                 "blockers": [], "dry_run": dry_run, "executed": False, "counts": {}}
 
-    if dry_run:
-        team_plan = _owned_team_plan(user_id)
-    else:
-        team_plan = _lock_and_plan_owned_teams(user_id)
     counts = _account_dependent_counts(user_id, team_plan)
     blocker_codes = _account_deletion_blockers(counts, allow_team_owner)
     if qa_teams_only:
@@ -13829,67 +13827,109 @@ def _lock_team_for_deletion(team_id):
 _OWNED_TEAM_LOCK_ROUNDS = 5
 
 
+def _lock_people_for_deletion(user_id, others):
+    """Lock the person being deleted (FOR UPDATE) and `others` (as moderation
+    subjects) in ONE pass, ascending id -- the global order: users ascending,
+    then teams ascending. (person or None, the set of `others` still alive)
+
+    PR #23 follow-up review DEF-3: the person used to be locked first and the
+    others after, so a lower-id member doing something that names the person
+    (a report: _lock_moderation_subjects(member, person)) waited on the person
+    while the deletion waited on the member -- a deadlock.
+    """
+    person, alive = None, set()
+    for uid in sorted(set(others) | {user_id}):
+        if uid == user_id:
+            person = db.session.execute(
+                db.select(User).where(User.id == user_id).with_for_update()
+                .execution_options(populate_existing=True)).scalar_one_or_none()
+            if person is None:
+                return None, set()
+        elif _lock_moderation_subject(uid):
+            alive.add(uid)
+    return person, alive
+
+
+def _owned_team_candidates(user_id):
+    """Everybody the fallback could hand one of this person's teams to: every
+    member of every team they created but are no longer in. Read unlocked;
+    _lock_and_plan_owned_teams checks it again under its locks."""
+    owned = db.session.execute(
+        db.select(Team.id).where(Team.created_by_user_id == user_id)
+        .order_by(Team.id)).scalars().all()
+    candidates = set()
+    for tid in owned:
+        members = _team_member_ids_in_order(tid)
+        if user_id not in members:
+            candidates.update(members)
+    candidates.discard(user_id)
+    return candidates
+
+
 def _lock_and_plan_owned_teams(user_id):
-    """_owned_team_plan for account deletion, decided under every lock it needs.
+    """Account deletion's locks, and _owned_team_plan read under them.
+    Returns (the person's row or None, plan).
 
-    The caller already holds the person's row FOR UPDATE. Then, in the global
-    order (users ascending, then teams ascending):
+    Every lock is taken in the global order (users ascending, then teams
+    ascending), the order every route uses (the leave, join and report routes
+    lock people first, then the team):
 
-      1. every member of each team the person created but is no longer in --
-         the only teams the fallback can hand on -- is locked like a
-         moderation subject. A deletion or a leave of one of THEM in flight
-         finishes first; afterwards none of them can leave or be deleted
-         until this transaction ends;
+      1. ONE ascending-id pass over the person (FOR UPDATE) and every member
+         of each team they created but are no longer in -- the only people
+         the fallback can hand a team to -- locked like moderation subjects.
+         A deletion or a leave of one of THEM in flight finishes first;
+         afterwards none of them can leave or be deleted until this
+         transaction ends;
       2. every team they created, FOR UPDATE (a join, a message or a report
          about a team that is about to go waits and then sees the outcome);
       3. the plan is read under those locks.
 
-    PR #23 review D4: the teams used to be locked first and the new owner
-    after, the reverse of every route (person, then team), so a member
-    leaving at that moment deadlocked with the deletion. D2: the plan used to
-    be read before the new owner was locked, so if that person's own
-    deletion won, the fallback found nobody and raised -- a 500 on the one
-    irreversible action. Now a candidate who is gone is simply not in the
-    plan; a team left with nobody is planned exactly as any empty team is
-    (deleted, or kept and refused while a report is open), and a team whose
-    remaining members have no live account is planned as it always was.
+    The candidate set in step 1 is read before any lock is held, so it can be
+    out of date by step 3: someone joined in between (the fallback prefers an
+    adult, so a newcomer recorded as adult is chosen over every older member,
+    PR #23 follow-up review DEF-2), every older member left or was deleted,
+    or the person's own membership changed. Such a person is NEVER locked
+    late, after the teams: that is the reverse of their own leave (person,
+    then team) and deadlocked with it. Instead every lock is released (a
+    rollback; nothing has been written) and steps 1-3 run again with the new
+    people added to the pass. A few rounds at most, bounded.
 
-    Someone who joined between step 1 and step 2 is newer than every member
-    already locked, so the fallback reaches them only if all of those are
-    gone. Then they are locked here (the one late lock), and the plan is
-    read again; a few rounds at most, bounded.
+    PR #23 review D4: the teams used to be locked first and the new owner
+    after. D2: the plan used to be read before the new owner was locked, so if
+    that person's own deletion won, the fallback found nobody and raised -- a
+    500. Now a candidate who is gone is simply not in the plan; a team left
+    with nobody is planned exactly as any empty team is (deleted, or kept and
+    refused while a report is open), and a team whose remaining members have
+    no live account is planned as it always was.
     """
-    owned = db.session.execute(
-        db.select(Team.id).where(Team.created_by_user_id == user_id)
-        .order_by(Team.id)).scalars().all()
-    left_behind = [tid for tid in owned
-                   if user_id not in _team_member_ids_in_order(tid)]
-    candidates = set()
-    for tid in left_behind:
-        candidates.update(_team_member_ids_in_order(tid))
-    candidates.discard(user_id)
-    alive = _lock_moderation_subjects(*candidates) if candidates else set()
-    for tid in owned:
-        _lock_team_for_deletion(tid)
-    for _round in range(_OWNED_TEAM_LOCK_ROUNDS):
+    extra = set()
+    for round_no in range(_OWNED_TEAM_LOCK_ROUNDS):
+        candidates = _owned_team_candidates(user_id) | extra
+        person, alive = _lock_people_for_deletion(user_id, candidates)
+        if person is None:
+            return None, []
+        owned = db.session.execute(
+            db.select(Team.id).where(Team.created_by_user_id == user_id)
+            .order_by(Team.id)).scalars().all()
+        for tid in owned:
+            _lock_team_for_deletion(tid)
         plan = _owned_team_plan(user_id)
-        late = sorted({e["new_owner_user_id"] for e in plan
-                       if e["action"] == TEAM_OWNER_TRANSFER
-                       and e["new_owner_user_id"] not in alive})
-        if not late:
-            return plan
-        for uid in late:
-            # Gone by the time the lock is held: the next read of the plan
-            # no longer finds them (their user row and membership are gone).
-            if _lock_moderation_subject(uid):
-                alive.add(uid)
-    # Unreachable in practice (each round locks or loses a person for good).
-    # Plan with no transfer at all rather than guess: such a team blocks.
-    plan = _owned_team_plan(user_id)
+        unlocked = {e["new_owner_user_id"] for e in plan
+                    if e["action"] == TEAM_OWNER_TRANSFER
+                    and e["new_owner_user_id"] not in alive}
+        if not unlocked:
+            return person, plan
+        if round_no == _OWNED_TEAM_LOCK_ROUNDS - 1:
+            break
+        # Not locked in this pass: start again with them in it.
+        extra |= candidates | unlocked
+        db.session.rollback()
+    # Unreachable in practice. Plan with no transfer to anybody this pass did
+    # not lock, rather than guess or lock out of order: such a team blocks.
     for e in plan:
         if e["action"] == TEAM_OWNER_TRANSFER and e["new_owner_user_id"] not in alive:
             e["action"], e["new_owner_user_id"] = TEAM_OWNER_PICK, None
-    return plan
+    return person, plan
 
 
 def _stage_team_owner_change(team, new_owner_user_id, reason):

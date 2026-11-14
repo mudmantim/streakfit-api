@@ -17,6 +17,22 @@ SECOND proven to be waiting on them, then both released and checked.
                                                           -> 200 / 404, team gone
   R2   two hand-overs by the same owner at once           -> 200 / 403, one owner
 
+Run with the argument `lock-order <name>` instead, it plays ONE of the paused
+interleavings from the PR #23 follow-up review (2026-11-14), each of which
+deadlocked on b365d16 (10/10 in the review):
+
+  S5   DEF-2: A (legacy owner) deletes, paused after locking its candidate B
+       and again after locking the team; meanwhile E, recorded as adult, joins
+       and then leaves. The fallback prefers E, whom A had not locked.
+                                     -> 200 / 200, the team goes to B, no deadlock
+  S5c  DEF-2 with no age band: A pauses before locking B; E joins; B deletes;
+       A locks the team and pauses; E leaves. Nobody A locked is left.
+                                     -> 200 / 200, the empty team is deleted
+  S6   DEF-3: B (LOWER id than A, a member) reports A's old message while A's
+       deletion is paused at its first user lock.
+                                     -> report 201, deletion 409 (that report
+                                        is pending), no deadlock
+
 "No deadlock" is checked from the app's own log lines (deadlock retry in the
 deletion service, or the 40P01 handler on a route), not just from the final
 answers: PostgreSQL may break a deadlock by retrying the deletion, which ends
@@ -38,6 +54,28 @@ _pause = threading.local()
 
 def _install_hooks(A):
     orig_counts, orig_lock_team = A._account_dependent_counts, A._lock_team
+    orig_lock_deletion_team = A._lock_team_for_deletion
+    orig_lock_subject = A._lock_moderation_subject
+
+    def hold_at(point):
+        """Named pauses (lock-order scenarios); each one is used once."""
+        gate = (getattr(_pause, 'points', None) or {}).pop(point, None)
+        if gate is not None:
+            gate['holding'].set()
+            gate['go'].wait(30)
+
+    def lock_deletion_team(team_id):
+        hold_at('before_team')
+        out = orig_lock_deletion_team(team_id)
+        hold_at('after_team')
+        return out
+
+    def lock_subject(user_id):
+        hold_at('before_subject')
+        return orig_lock_subject(user_id)
+
+    A._lock_team_for_deletion = lock_deletion_team
+    A._lock_moderation_subject = lock_subject
 
     def hold_here():
         gate = getattr(_pause, 'gate', None)
@@ -76,11 +114,12 @@ class _Grab(logging.Handler):
             pass
 
 
-def _run(A, fn, gate=None, pause_on_team=False):
+def _run(A, fn, gate=None, pause_on_team=False, points=None):
     box = {}
 
     def target():
         _pause.gate, _pause.counts_calls = gate, 0
+        _pause.points = dict(points or {})
         _pause.pause_on_team = pause_on_team
         try:
             with A.app.app_context():
@@ -118,7 +157,11 @@ def _body(box):
     return box['resp'].get_json(silent=True) if 'resp' in box else None
 
 
-def main():
+def _gate():
+    return {'holding': threading.Event(), 'go': threading.Event()}
+
+
+def main(argv):
     import app as A
     A.limiter.enabled = False
     A.app.config['TESTING'] = True
@@ -173,6 +216,13 @@ def main():
             t = db.session.get(A.Team, tid)
             members = A._team_member_ids_in_order(tid) if t else []
             return (t.created_by_user_id if t else None), members, t is not None
+
+    if argv[:1] == ['lock-order']:
+        _lock_order(A, argv[1], check, person, team, delete_me, deadlocks_since,
+                    team_state, grab)
+        A.app.logger.removeHandler(grab)
+        print(json.dumps(results, indent=1))
+        return 0 if results and all(v['ok'] for v in results.values()) else 1
 
     # D2a. B (the only member) deletes first; the legacy owner A deletes meanwhile.
     a, ah = person('own')
@@ -266,5 +316,113 @@ def main():
     return 0 if all(v['ok'] for v in results.values()) else 1
 
 
+def _lock_order(A, name, check, person, team, delete_me, deadlocks_since,
+                team_state, grab):
+    """One paused interleaving from the PR #23 follow-up review (DEF-2/DEF-3).
+    No step may end in a deadlock, a 5xx or an exception."""
+    db = A.db
+
+    def call(fn):
+        with A.app.app_context():
+            return fn(A.app.test_client())
+
+    def leave(tid, h):
+        return lambda c: c.post(f'/api/teams/{tid}/leave', json={}, headers=h)
+
+    def wait(gate, what):
+        ok = gate['holding'].wait(20)
+        check(f'{name} {what}', ok)
+        return ok
+
+    mark = len(grab.lines)
+    if name in ('S5', 'S5c'):
+        a, ah = person('own')
+        b, bh = person('mem')
+        e, eh = person('late')
+        if name == 'S5':
+            with A.app.app_context():
+                db.session.get(A.User, e).age_band = A.AGE_ADULT
+                db.session.commit()
+        tid, code = team(a, [b], owner_in_team=False)
+        first, second = _gate(), _gate()
+        first_point = 'before_team' if name == 'S5' else 'before_subject'
+        t1, b1 = _run(A, delete_me(ah), points={first_point: first, 'after_team': second})
+        if not wait(first, 'the deletion paused at its first lock point'):
+            first['go'].set()
+            second['go'].set()
+            t1.join(40)
+            return
+        join = call(lambda c: c.post(f'/api/teams/{tid}/join', json={'code': code},
+                                     headers=eh))
+        check(f'{name} E joined while the deletion was paused', join.status_code == 200,
+              join.status_code)
+        if name == 'S5c':
+            gone = call(delete_me(bh))
+            check('S5c B (the only older member) deleted meanwhile',
+                  gone.status_code == 200, gone.status_code)
+        first['go'].set()
+        if wait(second, 'the deletion holds the team'):
+            t2, b2 = _run(A, leave(tid, eh))
+            time.sleep(1.5)                 # > deadlock_timeout (1s)
+            check(f'{name} E\'s leave waited for the team', t2.is_alive())
+        else:
+            t2, b2 = None, {'exc': 'deletion never locked the team'}
+        second['go'].set()
+        t1.join(40)
+        if t2 is not None:
+            t2.join(40)
+        owner, members, exists = team_state(tid)
+        check(f'{name} deletion 200, E\'s leave 200 (no 503, no 500)',
+              (_status(b1), _status(b2)) == (200, 200),
+              (_status(b1), _status(b2), _body(b1), _body(b2)))
+        check(f'{name} no deadlock', not deadlocks_since(mark), deadlocks_since(mark))
+        if name == 'S5':
+            check('S5 the team went to B, the one member left', exists and owner == b
+                  and members == [b], (owner, members, exists))
+        else:
+            check('S5c the team, left with nobody, is gone', not exists,
+                  (owner, members))
+        with A.app.app_context():
+            check(f'{name} A is gone', db.session.get(A.User, a) is None)
+        return
+
+    if name == 'S6':
+        b, bh = person('mem')                # created first: the LOWER id
+        a, ah = person('own')
+        check('S6 B has the lower id', b < a, (b, a))
+        tid, _code = team(a, [b], owner_in_team=False)
+        with A.app.app_context():
+            msg = A.TeamMessage(team_id=tid, sender_type='user', sender_user_id=a,
+                                body='an old message')
+            db.session.add(msg)
+            db.session.commit()
+            ref = msg.public_id
+        gate = _gate()
+        t1, b1 = _run(A, delete_me(ah), points={'before_subject': gate})
+        if not wait(gate, 'the deletion paused at its first user lock'):
+            gate['go'].set()
+            t1.join(40)
+            return
+        t2, b2 = _run(A, lambda c: c.post('/api/reports', headers=bh, json={
+            'category': 'harassment', 'subject_type': 'message', 'subject_ref': ref}))
+        time.sleep(1.5)                     # > deadlock_timeout (1s)
+        gate['go'].set()
+        t1.join(40)
+        t2.join(40)
+        check('S6 report 201, deletion 409 (the report is pending)',
+              (_status(b2), _status(b1)) == (201, 409),
+              (_status(b2), _status(b1), _body(b2), _body(b1)))
+        check('S6 no deadlock', not deadlocks_since(mark), deadlocks_since(mark))
+        with A.app.app_context():
+            alive = db.session.get(A.User, a) is not None
+            rep = A.Report.query.filter_by(subject_ref=ref).one_or_none()
+            check('S6 the report names A, who is still there',
+                  alive and rep is not None and rep.reported_user_id == a,
+                  (alive, rep and rep.reported_user_id))
+        return
+
+    check(f'unknown scenario {name}', False)
+
+
 if __name__ == '__main__':
-    sys.exit(main())
+    sys.exit(main(sys.argv[1:]))

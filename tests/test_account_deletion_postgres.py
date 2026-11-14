@@ -143,3 +143,24 @@ def test_team_ownership_races_answer_cleanly_on_postgres(migrated_pg):
                     f'\nSTDERR:\n{result.stderr[-3000:]}')
     failed = {k: v['detail'] for k, v in out.items() if not v['ok']}
     assert not failed and result.returncode == 0, failed
+
+
+@pytest.mark.parametrize('scenario', ['S5', 'S5c', 'S6'])
+def test_account_deletion_takes_its_user_locks_in_one_ascending_pass(migrated_pg, scenario):
+    """PR #23 follow-up review DEF-2 and DEF-3, the paused interleavings that
+    deadlocked on b365d16: a late joiner the fallback prefers (S5: recorded as
+    adult; S5c: every older member deleted meanwhile) leaving while the
+    legacy owner's deletion holds the team, and a lower-id member reporting
+    the deleting person (S6). See tests/team_owner_race.py."""
+    _engine, env = migrated_pg
+    result = subprocess.run(
+        [sys.executable, os.path.join('tests', 'team_owner_race.py'), 'lock-order', scenario],
+        cwd=REPO, env={**env, 'PYTHONPATH': REPO}, capture_output=True, text=True,
+        timeout=300)
+    try:
+        out = json.loads(result.stdout[result.stdout.index('{'):])
+    except ValueError:
+        pytest.fail(f'no result from the race script\nSTDOUT:\n{result.stdout[-2000:]}'
+                    f'\nSTDERR:\n{result.stderr[-3000:]}')
+    failed = {k: v['detail'] for k, v in out.items() if not v['ok']}
+    assert not failed and result.returncode == 0, failed
