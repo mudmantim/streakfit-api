@@ -1,7 +1,7 @@
 """index team_message.photo_id  -- PROPOSAL, NOT APPLIED
 
 Revision ID: e5a7c3d91f20
-Revises: d4f1b6e2a9c3
+Revises: a1c4e0f2b7d9 (rebased in round 6; was d4f1b6e2a9c3)
 Create Date: 2026-11-14 (proposed; lives in migrations/proposals/, which
 Alembic does not load, until the owner approves moving it to versions/)
 
@@ -32,7 +32,7 @@ it; only query plans change.
 from alembic import op
 
 revision = 'e5a7c3d91f20'
-down_revision = 'd4f1b6e2a9c3'
+down_revision = 'a1c4e0f2b7d9'
 branch_labels = None
 depends_on = None
 
