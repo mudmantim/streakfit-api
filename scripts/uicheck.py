@@ -1040,6 +1040,14 @@ def check_team_creator_can_hand_over_leave_and_delete(b: Browser, base: str, app
                    " [...e.querySelectorAll('option')].map(o=>o.textContent).join(',');})()") or ""
     check("Hand over the team" in section and "Robin" in section,
           "the creator sees 'Hand over the team' with the member to pick", section[:120])
+    # PR #23 round 8: before any tap, the section must not promise a handover
+    # that every member is refused today (nobody's age can be confirmed).
+    help_text = b.js("(()=>{const e=document.querySelector('.team-handover-status');"
+                     " return e ? e.textContent : '';})()") or ""
+    check(help_text.startswith("A team can only be handed to a member confirmed as an adult")
+          and "so for now a handover is refused" in help_text
+          and not help_text.startswith("They get"),
+          "and it says up front that a handover is refused for now", help_text[:160])
 
     # --- leaving as creator asks who looks after it ------------------------
     b.js("document.querySelector('.team-panel-leave-row .retention-btn').click()")

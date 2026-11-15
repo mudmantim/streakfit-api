@@ -1972,6 +1972,11 @@ function _buildTeamMemberPicker(data, idSuffix, labelText, withNobody) {
 // "Hand over the team": the creator gives the team (and its Remove / Rotate
 // Code powers) to another member and stays in it. Two taps, like every other
 // action here that cannot be taken back by the person doing it.
+var HANDOVER_HELP_TEXT = 'A team can only be handed to a member confirmed as an adult ' +
+    'whose account has no restrictions. StreakFit can\'t confirm anyone\'s age yet, ' +
+    'so for now a handover is refused. If one goes through, they get Remove and ' +
+    'Rotate Code and you stay in the team.';
+
 function _buildHandOverSection(data) {
     var wrap = document.createElement('div');
     wrap.className = 'team-panel-info-section team-panel-handover';
@@ -1993,7 +1998,9 @@ function _buildHandOverSection(data) {
     var status = document.createElement('p');
     status.className = 'team-handover-status';
     status.setAttribute('role', 'status');
-    status.textContent = 'They get Remove and Rotate Code. You stay in the team.';
+    // PR #23 round 8: every handover is refused today (owner decision #1,
+    // P1 -- no age can be confirmed yet), so say that before the first tap.
+    status.textContent = HANDOVER_HELP_TEXT;
     wrap.appendChild(status);
 
     var pending = false;

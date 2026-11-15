@@ -221,3 +221,89 @@ def test_the_service_worker_never_serves_a_cached_policy():
     sw = (ROOT / 'static' / 'sw.js').read_text(encoding='utf-8')
     assert "url.pathname === '/privacy'" in sw
     assert "const CACHE = 'streakfit-v1018';" in sw
+
+
+# ── PR #23 round 8: no promise of a handover nobody can receive today ──────
+# Owner decision #1 (P1): a team can only be handed to a member confirmed as
+# an adult and not suspended; nobody's age can be confirmed yet, so every
+# handover is refused, and a team with members is left ownerless and
+# read-only (P3, P4-safety (b)); P9 keeps a reported solo team ownerless.
+
+_TEAMS_YOU_CREATED = (
+    "a team only you are in is deleted with your account or when you leave it; "
+    "if any of it has to be kept for a safety review or a legal hold, it is kept "
+    "only until that ends and then deleted. A team with other people in it can "
+    "only be handed to a member confirmed as an adult whose account has no "
+    "restrictions. StreakFit can't confirm anyone's age yet, so for now such a "
+    "team is left without an owner when you leave it, which you need to do before "
+    "you can delete your account; a team you created and have already left is "
+    "left without an owner in the same way when you delete your account. A team "
+    "with no owner is read-only: its members can still read it, report a problem, "
+    "delete photos they shared, leave it and delete their accounts, and it may "
+    "stay like that with no end date")
+
+_STALE_PROMISES = ('handed to the member you choose', 'Hand over the team, or Leave Team',
+                   'choose who looks after it (', 'They get Remove and Rotate Code. You stay')
+
+
+def test_round8_the_export_does_not_promise_a_handover(client):
+    text = _export(client, 'r8_export')['teams_you_created']
+    assert text == _TEAMS_YOU_CREATED
+    for stale in _STALE_PROMISES:
+        assert stale not in text
+    # Neutral: names no report about anyone (same words as the delete sheet).
+    for word in ('reported', 'investigat', 'suspend', 'moderat'):
+        assert word not in text
+
+
+def test_round8_the_export_handover_rule_matches_the_server_refusal():
+    """The export and the refusal shown on a handover say the same rule."""
+    rule = ("can only be handed to a member confirmed as an adult whose account "
+            "has no restrictions")
+    assert rule in A._NEW_OWNER_NOT_ELIGIBLE_MESSAGE
+    assert rule in A.TEAMS_YOU_CREATED_EXPORT_TEXT
+
+
+def test_round8_the_privacy_draft_describes_ownerless_teams(client, published):
+    html = client.get('/privacy').get_data(as_text=True)
+    assert (
+        "<p><strong>Teams you created.</strong> A team that only you are in is deleted "
+        "with your account, along with its chat, photos and history. If any of it has "
+        "to be kept for a safety review or a legal hold, it is kept only until that "
+        "ends and then deleted. If other people are still in it, open the team and "
+        "use Leave Team before you delete your account. A team can only be handed to "
+        "a member confirmed as an adult whose account has no restrictions. StreakFit "
+        "can't confirm anyone's age yet, so for now Leave Team leaves it without an "
+        "owner. A team you created and have already left is left without an owner in "
+        "the same way when you delete your account. A team with no owner is "
+        "read-only: nobody can post in it or join it, and its members can still read "
+        "it, report a problem, delete photos they shared, leave it and delete their "
+        "accounts. StreakFit can't give it a new owner yet, so it may stay like that "
+        "with no end date.</p>") in html
+    assert (
+        "<p>Deletion has to wait while a safety report that you made, or that is "
+        "about you or something you posted, is still being reviewed or is under a "
+        "legal hold. A report about a team you created does not make your deletion "
+        "wait; what happens to that team is described above.</p>") in html
+    assert 'a safety report that involves you is still being reviewed' not in html
+    for stale in _STALE_PROMISES:
+        assert stale not in html
+
+
+def test_round8_the_privacy_draft_is_still_unpublished(client):
+    assert A.app.config['PRIVACY_PAGE_PUBLISHED'] is False
+    r = client.get('/privacy')
+    assert r.status_code == 404 and r.get_json() == {"error": "Not found"}
+
+
+def test_round8_the_hand_over_help_text_says_it_is_refused_for_now():
+    js = (ROOT / 'static' / 'app.js').read_text(encoding='utf-8')
+    assert ("var HANDOVER_HELP_TEXT = 'A team can only be handed to a member confirmed "
+            "as an adult ' +\n    'whose account has no restrictions. StreakFit can\\'t "
+            "confirm anyone\\'s age yet, ' +\n    'so for now a handover is refused. If "
+            "one goes through, they get Remove and ' +\n    'Rotate Code and you stay in "
+            "the team.';") in js
+    body = js[js.index('function _buildHandOverSection(data)'):]
+    body = body[:body.index('\nfunction ')]
+    assert 'status.textContent = HANDOVER_HELP_TEXT;' in body
+    assert 'They get Remove and Rotate Code. You stay in the team.' not in js

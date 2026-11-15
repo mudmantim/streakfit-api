@@ -5872,9 +5872,11 @@ def export_my_data():
                              "no time limit: it is not deleted after any set "
                              "time. If you delete your account it stays, without "
                              "your name"),
-            "teams_you_created": ("a team only you are in is deleted with your "
-                                  "account or when you leave it; one with other "
-                                  "people in it is handed to the member you choose"),
+            # Owner decision #1 (P1/P3/P4-safety (b)/P9). PR #23 round 8: this
+            # used to promise that a team with members "is handed to the member
+            # you choose" -- but every handover is refused today (nobody's age
+            # is known), so such a team ends up ownerless and read-only.
+            "teams_you_created": TEAMS_YOU_CREATED_EXPORT_TEXT,
             "everything_else": "kept while the account exists, and deleted with it",
             "clear_conversations": "Settings → Forget our conversations",
             "delete_everything": "Settings → Delete my account",
@@ -8283,6 +8285,25 @@ def _generate_team_invite_code():
 # There is no way back to having an owner yet: nobody's age can be confirmed
 # (P2 deferred) and the claim process (M2) is not built. So an ownerless team
 # may stay read-only indefinitely; the notice below says so.
+
+# The export's `retention.teams_you_created` (PR #23 round 8). Says what
+# happens today, with no promise of a handover nobody can currently receive:
+# a handover needs a member confirmed as an adult (P1), and no age can be
+# confirmed yet (P2 deferred), so a team with members is left ownerless and
+# read-only (P3, P4-safety (b)). The "kept for a safety review or a legal hold"
+# clause is the delete-sheet's wording (P9), shown whether or not one exists.
+TEAMS_YOU_CREATED_EXPORT_TEXT = (
+    "a team only you are in is deleted with your account or when you leave it; "
+    "if any of it has to be kept for a safety review or a legal hold, it is kept "
+    "only until that ends and then deleted. A team with other people in it can "
+    "only be handed to a member confirmed as an adult whose account has no "
+    "restrictions. StreakFit can't confirm anyone's age yet, so for now such a "
+    "team is left without an owner when you leave it, which you need to do before "
+    "you can delete your account; a team you created and have already left is "
+    "left without an owner in the same way when you delete your account. A team "
+    "with no owner is read-only: its members can still read it, report a problem, "
+    "delete photos they shared, leave it and delete their accounts, and it may "
+    "stay like that with no end date")
 
 TEAM_READ_ONLY_MESSAGE = ("This team has no owner right now, so nothing new can be "
                           "posted in it. You can still read it, report something, "
