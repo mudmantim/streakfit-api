@@ -23,7 +23,9 @@ def check_team_ownership(api, results, scenario, team_id, code):
     """Owner decision 2026-11-13: the creator picks the next owner before
     leaving a team other people are in; alone in it, leaving deletes it and
     needs an explicit confirmation. Runs after "b" has left, so the smoke
-    team holds only "a"; "c" joins to be handed the team. Ends with the smoke
+    team holds only "a"; "c" joins. Since owner decision #1 the handover to
+    "c" (age not confirmed) is refused, "a" leaves with no owner, and the
+    read-only ownerless state is checked live. Ends with the smoke
     team deleted (or, if a report about it is still open, kept closed), so a
     production run no longer leaves a QA team behind."""
     users = scenario.users
@@ -46,17 +48,32 @@ def check_team_ownership(api, results, scenario, team_id, code):
     status, _ = api.request("POST", f"/api/teams/{team_id}/owner", token=users["c"]["token"],
                             body={"new_owner_user_id": users["a"]["id"]})
     results.check("security.non_owner_cannot_hand_over", status == 403, f"status={status}")
-    status, _ = api.request("POST", f"/api/teams/{team_id}/owner", token=users["a"]["token"],
-                            body={"new_owner_user_id": users["c"]["id"]})
-    results.check("security.owner_hands_over", status == 200, f"status={status}")
+    # Owner decision #1 (2026-11-14/15): only a verified adult can be handed a
+    # team, and nothing records an age yet -- so the handover is refused.
+    status, body = api.request("POST", f"/api/teams/{team_id}/owner", token=users["a"]["token"],
+                               body={"new_owner_user_id": users["c"]["id"]})
+    results.check("security.handover_to_unconfirmed_age_refused",
+                  status == 400 and body.get("error") == "new_owner_not_eligible",
+                  f"status={status} error={body.get('error')!r}")
+    # ...so the owner leaves with nobody as owner: the team is read-only.
+    status, _ = api.request("POST", f"/api/teams/{team_id}/leave", token=users["a"]["token"],
+                            body={"no_owner": True})
+    results.check("security.owner_leaves_with_no_owner", status == 200, f"status={status}")
     status, team = api.request("GET", f"/api/teams/{team_id}", token=users["c"]["token"])
-    results.check("security.new_owner_is_creator",
-                  status == 200 and team.get("is_creator") is True, f"status={status}")
-    status, _ = api.request("POST", f"/api/teams/{team_id}/leave", token=users["a"]["token"])
-    results.check("security.former_owner_leaves_plainly", status == 200, f"status={status}")
+    results.check("security.ownerless_team_hides_its_code",
+                  status == 200 and team.get("ownerless") is True
+                  and team.get("invite_code") is None, f"status={status}")
+    status, body = api.request("POST", f"/api/teams/{team_id}/messages", token=users["c"]["token"],
+                               body={"body": "still here?"})
+    results.check("security.ownerless_team_is_read_only",
+                  status == 403 and body.get("error") == "team_read_only", f"status={status}")
+    status, _ = api.request("POST", f"/api/teams/{team_id}/join", token=users["outsider"]["token"],
+                            body={"code": code})
+    results.check("security.ownerless_team_takes_nobody_new", status in (403, 404),
+                  f"status={status}")
     status, _ = api.request("POST", f"/api/teams/{team_id}/leave", token=users["c"]["token"],
                             body={"delete_team": True})
-    results.check("security.sole_owner_leaves_and_deletes", status == 200, f"status={status}")
+    results.check("security.last_member_leaves_and_deletes", status == 200, f"status={status}")
     status, _ = api.request("GET", f"/api/teams/{team_id}", token=users["c"]["token"])
     results.check("security.deleted_team_unreachable", status in (403, 404), f"status={status}")
 

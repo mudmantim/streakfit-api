@@ -139,13 +139,18 @@ def test_a_team_with_one_member_left_still_works(client):
 
 def test_the_creator_leaving_does_not_close_a_team_others_are_in(client):
     """Since 2026-11-13 the creator hands the team on as they leave (owner
-    decision); the team stays open for the people still in it."""
+    decision); the team stays open for the people still in it. Since owner
+    decision #1 (round 6) only a verified adult can take it, so the heir here
+    is recorded as one (a child is refused: tests/test_round6_ownerless.py)."""
     mum = _t(client, "creator_mum")
-    kid = _t(client, "creator_kid")
+    kid = _t(client, "creator_dad")
     tid, code = _team(client, mum)
     client.post(f"/api/teams/{tid}/join", json={"code": code},
                 headers=auth_headers(kid))
     kid_id = client.get("/api/me", headers=auth_headers(kid)).get_json()["id"]
+    import app as _A
+    _A.db.session.get(_A.User, kid_id).age_band = _A.AGE_ADULT
+    _A.db.session.commit()
     r = client.post(f"/api/teams/{tid}/leave", json={"new_owner_user_id": kid_id},
                     headers=auth_headers(mum))
     assert r.status_code == 200, r.get_json()

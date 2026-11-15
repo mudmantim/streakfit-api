@@ -14,6 +14,12 @@ can pick the new owner if the owner decides to leave."
   * the owner already left and cannot pick: the FALLBACK hands it to the
     longest-standing adult member, else the longest-standing member.
 
+Owner decision #1 (Tim, 2026-11-14/15; round 6) changed three of those: only a
+VERIFIED ADULT who is not suspended can receive a team (a pick, a leave or the
+fallback; unknown age is not adult); with nobody eligible the team becomes
+ownerless (and read-only); and a report about a sole owner's team no longer
+blocks their deletion -- the team is kept, ownerless, for the review (P9).
+
 SQLite enforces foreign keys here, so a row left pointing at a deleted team or
 person fails the test the way it would fail on PostgreSQL.
 """
@@ -88,6 +94,12 @@ def _team_rows(tid):
             for label, model, attr in A._TEAM_ROW_DELETES}
 
 
+def _adult(uid):
+    db.session.get(A.User, uid).age_band = A.AGE_ADULT
+    db.session.commit()
+    return uid
+
+
 def _report(tid, status='pending', hold=False, about=None, by=None):
     rep = A.Report(public_id=uuid.uuid4().hex, team_id=tid, category='harassment',
                    subject_type='user', status=status, legal_hold=hold,
@@ -103,6 +115,7 @@ def _report(tid, status='pending', hold=False, about=None, by=None):
 def test_the_plan_names_the_right_action_for_each_shape(client):
     me, tok = _person(client, 'plan_me')
     mate, mtok = _person(client, 'plan_mate')
+    _adult(mate)
     sole, _ = _team(client, tok, 'sole')
     shared, code = _team(client, tok, 'shared')
     _join(client, mtok, shared, code)
@@ -173,11 +186,14 @@ def test_an_owner_still_in_a_team_with_others_must_pick_first(fk_client):
     body = r.get_json()
     assert r.status_code == 409
     assert body['blocker_codes'] == ['team_owned']
-    # The refusal points at controls that now exist.
-    assert 'Hand over the team' in body['message'] and 'Leave Team' in body['message']
+    # The refusal points at the control that always works (decision #1:
+    # every handover to an unconfirmed age is refused, so not "Hand over").
+    assert 'Leave Team' in body['message'] and 'without an owner' in body['message']
+    assert 'Hand over the team' not in body['message']
     assert 'remove the team' not in body['message']
     assert db.session.get(A.User, me) is not None
 
+    _adult(mate)
     assert c.post(f'/api/teams/{tid}/owner', json={'new_owner_user_id': mate},
                   headers=auth_headers(tok)).status_code == 200
     assert _delete_me(c, tok).status_code == 200
@@ -188,12 +204,14 @@ def test_an_owner_still_in_a_team_with_others_must_pick_first(fk_client):
 
 
 def test_the_refusal_names_controls_the_app_really_has():
-    """The 409 says "Hand over the team" and "Leave Team": both must be real
-    labels in the client, or the message is the same dead end as before."""
+    """The 409 says "Leave Team" and "without an owner": both must be real in
+    the client, or the message is the same dead end as before."""
     js = (ROOT / 'static' / 'app.js').read_text(encoding='utf-8')
     assert "'Hand over the team'" in js
     assert "'Leave Team'" in js
     assert "'/owner'" in js
+    assert "'Nobody (leave it without an owner)'" in js
+    assert "{ no_owner: true }" in js
 
 
 def test_the_fallback_hands_a_team_the_owner_already_left_to_the_longest_standing_member(fk_client):
@@ -204,6 +222,8 @@ def test_the_fallback_hands_a_team_the_owner_already_left_to_the_longest_standin
     tid, code = _team(c, tok)
     _join(c, ftok, tid, code)
     _join(c, stok, tid, code)
+    _adult(first)
+    _adult(second)
     # Make the join order unambiguous, then the owner leaves the old way
     # (before 2026-11-13 leaving kept them as owner).
     db.session.query(A.TeamMembership).filter_by(team_id=tid, user_id=first).update(
@@ -229,45 +249,58 @@ def test_the_fallback_prefers_a_member_recorded_as_an_adult(app):
         db.session.commit()
         users.append(u.id)
     assert A._fallback_team_owner(users) == users[2]
-    assert A._fallback_team_owner(users[:2]) == users[0]      # nobody adult: longest-standing
+    # Nobody adult: NOBODY (decision #1; it used to be the longest-standing).
+    assert A._fallback_team_owner(users[:2]) is None
     assert A._fallback_team_owner(users, exclude=[users[2]]) == users[3]
     assert A._fallback_team_owner([]) is None
 
 
 @pytest.mark.parametrize('status,hold', [('pending', False), ('closed', True)])
-def test_a_report_about_a_sole_members_team_keeps_it_and_the_account(fk_client, status, hold):
+def test_a_report_about_a_sole_members_team_keeps_the_team_not_the_account(fk_client, status, hold):
+    """Owner decision #1, P9 (replaces the 'team_report_open' block): the
+    account deletion proceeds; the team is KEPT, ownerless, with every row
+    the review may need; the answer is the ordinary 200, naming no report."""
     c = fk_client
     me, tok = _person(c, f'rep_owner_{status}')
     tid, _code = _team(c, tok)
     _fill(c, tok, tid)
     rid = _report(tid, status=status, hold=hold)
     before = _team_rows(tid)
+    plan = A.delete_user_account(me, dry_run=True)
+    assert not plan['blocked'] and plan['owned_teams'][0]['action'] == A.TEAM_OWNER_OWNERLESS
 
     r = _delete_me(c, tok)
     body = r.get_json()
-    assert r.status_code == 409
-    # Generic, like every other safety record: it never names a report.
-    assert body['blocker_codes'] == ['safety_record'] and body['blockers'] == []
-    assert 'report' not in body['message'].lower()
-    assert A.delete_user_account(me, dry_run=True)['blocker_codes'] == ['team_report_open']
-    assert _team_rows(tid) == before and db.session.get(A.Team, tid) is not None
-    # The operator, not the person, is told the report is holding someone up.
+    assert r.status_code == 200, body
+    # Shown to the person exactly as a deleted team (no oracle).
+    assert body['counts']['team_owned_deleted'] == 1
+    assert 'team_owned_kept_for_review' not in body['counts']
     db.session.expire_all()
-    assert db.session.get(A.Report, rid).deletion_requested_at is not None
+    assert db.session.get(A.User, me) is None
+    team = db.session.get(A.Team, tid)
+    assert team is not None and team.created_by_user_id is None
+    after = _team_rows(tid)
+    assert after['team_membership'] == before['team_membership'] - 1
+    assert {k: v for k, v in after.items() if k != 'team_membership'} == \
+        {k: v for k, v in before.items() if k != 'team_membership'}
+    assert db.session.get(A.Report, rid).team_id == tid
+    assert db.session.execute(db.text('PRAGMA foreign_key_check')).all() == []
 
 
-def test_once_the_report_is_decided_the_same_button_works(fk_client):
+def test_once_the_report_is_decided_the_kept_team_is_cleaned_up(fk_client):
     c = fk_client
     me, tok = _person(c, 'rep_then_ok')
     tid, _code = _team(c, tok)
     rid = _report(tid)
-    assert _delete_me(c, tok).status_code == 409
+    assert _delete_me(c, tok).status_code == 200
+    assert A._reap_empty_ownerless_teams() == {'deleted': 0, 'kept_for_review': 1, 'skipped': 0}
+    assert db.session.get(A.Team, tid) is not None
     db.session.get(A.Report, rid).status = 'closed'
     db.session.commit()
-    assert _delete_me(c, tok).status_code == 200
+    assert A._reap_empty_ownerless_teams()['deleted'] == 1
     db.session.expire_all()
     assert db.session.get(A.Team, tid) is None
-    assert db.session.get(A.Report, rid).team_id is None
+    assert db.session.get(A.Report, rid) is not None and db.session.get(A.Report, rid).team_id is None
 
 
 def test_a_multi_member_owner_still_gets_the_team_answer_whatever_else_blocks(fk_client):
@@ -289,6 +322,7 @@ def test_a_multi_member_owner_still_gets_the_team_answer_whatever_else_blocks(fk
 def test_an_owner_with_others_must_choose_before_leaving(client):
     me, tok = _person(client, 'lv_owner')
     mate, mtok = _person(client, 'lv_mate')
+    _adult(mate)     # an eligible new owner (decision #1)
     _out, otok = _person(client, 'lv_out')
     tid, code = _team(client, tok)
     _join(client, mtok, tid, code)
@@ -369,6 +403,7 @@ def test_a_member_who_is_not_the_owner_leaves_exactly_as_before(client):
 def test_only_the_owner_can_hand_over_and_only_to_a_member(client):
     me, tok = _person(client, 'tr_owner')
     mate, mtok = _person(client, 'tr_mate')
+    _adult(mate)     # an eligible new owner (decision #1)
     out, otok = _person(client, 'tr_out')
     tid, code = _team(client, tok)
     _join(client, mtok, tid, code)

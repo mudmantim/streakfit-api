@@ -145,6 +145,27 @@ def test_team_ownership_races_answer_cleanly_on_postgres(migrated_pg):
     assert not failed and result.returncode == 0, failed
 
 
+def test_ownerless_teams_race_cleanly_on_postgres(migrated_pg):
+    """Round 6 (owner decision #1): a post racing the change to ownerless, in
+    both orders (it lands only while the team is owned); a mission completion
+    against it; P9's kept team against its owner's own post; the empty-team
+    cleanup against a legal hold in both orders, the photo sweep, and a
+    failure half-way. See tests/ownerless_race.py."""
+    _engine, env = migrated_pg
+    result = subprocess.run(
+        [sys.executable, os.path.join('tests', 'ownerless_race.py')],
+        cwd=REPO, env={**env, 'PYTHONPATH': REPO}, capture_output=True, text=True,
+        timeout=300)
+    try:
+        out = json.loads(result.stdout[result.stdout.index('{'):])
+    except ValueError:
+        pytest.fail(f'no result from the race script\nSTDOUT:\n{result.stdout[-2000:]}'
+                    f'\nSTDERR:\n{result.stderr[-3000:]}')
+    failed = {k: v['detail'] for k, v in out.items() if not v['ok']}
+    assert not failed and result.returncode == 0, failed
+    assert len(out) >= 30, sorted(out)
+
+
 @pytest.mark.parametrize('scenario', ['S5', 'S5c', 'S6', 'S1'])
 def test_account_deletion_takes_its_user_locks_in_one_ascending_pass(migrated_pg, scenario):
     """PR #23 follow-up review DEF-2 and DEF-3, the paused interleavings that

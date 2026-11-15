@@ -3,8 +3,15 @@
 dependent rows. DRY RUN by default — pass --execute to actually delete.
 
 Classification:
-  * Any username beginning with the EXACT prefix 'qa_smoke_' is a QA account.
-    (Exact Python prefix match — never a SQL LIKE, whose '_' is a wildcard.)
+  * A QA account is one whose username begins with the EXACT prefix 'qa_smoke_'
+    (exact Python prefix match — never a SQL LIKE, whose '_' is a wildcard)
+    AND whose (id, username) the QA tooling recorded creating, in its
+    provenance ledger (round 6, D-R5-3: a username prefix alone never proves
+    an account is disposable). Since round 6 sign-up also reserves the prefix
+    for the tooling. A qa_smoke_ account with NO provenance record -- every
+    account created before the ledger existed, and anything a person could
+    have named that way -- is never deleted: it is listed under
+    "NO QA PROVENANCE" and left alone. No ledger at all = nothing is deleted.
   * SAFE to delete: a QA account the app's deletion service would delete.
   * BLOCKED (requires manual cleanup): whatever that service refuses — a QA account
     still in a team it created WITH other people (tearing that team down would
@@ -47,6 +54,15 @@ Team-owner policy (--team-owner-policy=delete-qa-team), opt-in:
   * A second sanity cap (TEAM_SANITY_CAP) aborts before anything if more teams
     than that would be deleted.
 
+Provenance ledger (no schema change; JSON lines {"user_id", "username", ...}):
+  written by scripts/verification/_client.py each time the tooling registers a
+  qa_smoke_ account (verify_all, post_deploy_check). Path: --qa-ledger, else
+  STREAKFIT_QA_LEDGER, else <repo>/instance/qa_provenance.jsonl. It lives
+  where the tooling ran: an in-process StreakFit Control run on Render writes
+  to that instance's ephemeral disk, so its accounts have NO usable
+  provenance and are kept (fail closed). A server-side marker would need a
+  schema change, which was not made (round 6: reported to Tim instead).
+
 Run where the target DATABASE_URL is set (e.g. production):
   DATABASE_URL=... SECRET_KEY=... JWT_SECRET_KEY=... python scripts/cleanup_qa_smoke.py            # dry run
   DATABASE_URL=... SECRET_KEY=... JWT_SECRET_KEY=... python scripts/cleanup_qa_smoke.py --execute  # delete safe
@@ -56,6 +72,7 @@ Against PRODUCTION from a laptop, also set STREAKFIT_ALLOW_PRODUCTION_DB_FROM_HE
 (db_guard R5); without it the app refuses to connect.
 """
 import argparse
+import json
 import os
 import sys
 
@@ -76,10 +93,57 @@ DOWNGRADE_CAVEAT = (
     "longer be downgraded -- roll forward instead; see "
     "docs/operations/deploy-account-deletion-2026-09.md.")
 
+DEFAULT_LEDGER = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                              "instance", "qa_provenance.jsonl")
+
+
+def ledger_path(cli_value=None):
+    return cli_value or os.environ.get("STREAKFIT_QA_LEDGER") or DEFAULT_LEDGER
+
+
+def load_provenance(path):
+    """{user id: username} from the tooling's ledger, or ({}, why) when there is
+    none. A malformed line is skipped (and counted), never guessed at."""
+    if not os.path.exists(path):
+        return {}, f"no QA provenance ledger at {path}"
+    prov, conflicted, bad = {}, set(), 0
+    with open(path, encoding="utf-8") as fh:
+        for line in fh:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                rec = json.loads(line)
+                uid, name = rec["user_id"], rec["username"]
+            except (ValueError, KeyError, TypeError):
+                bad += 1
+                continue
+            if not (isinstance(uid, int) and not isinstance(uid, bool)
+                    and isinstance(name, str) and name.startswith(PREFIX)):
+                bad += 1
+                continue
+            # One id is only ever one name. Two different names for one id
+            # make it ambiguous, so that id is dropped (fail closed).
+            if uid in prov and prov[uid] != name:
+                conflicted.add(uid)
+            prov[uid] = name
+    prov = {k: v for k, v in prov.items() if k not in conflicted}
+    return prov, (f"{bad} malformed ledger line(s) ignored" if bad else None)
+
+
+def _has_provenance(u):
+    return A._is_verified_qa_account(u.id, u.username)
+
+
 def _matches():
     """Fetch ALL users and filter in Python with an exact prefix — deliberately no
     SQL LIKE, so there is zero chance of a wildcard/substring match."""
     return [u for u in A.User.query.all() if u.username.startswith(PREFIX)]
+
+
+def no_provenance_accounts():
+    """qa_smoke_ accounts the tooling never recorded creating. Never deleted."""
+    return [u for u in _matches() if not _has_provenance(u)]
 
 
 def survey():
@@ -92,8 +156,9 @@ def survey():
         return None
     safe, blocked, counts_by_id = [], [], {}
     for u in users:
-        # Belt-and-suspenders: never operate on anything not exactly prefixed.
-        if not u.username.startswith(PREFIX):
+        # Belt-and-suspenders: never operate on anything not exactly prefixed,
+        # nor on anything the tooling did not record creating (round 6).
+        if not u.username.startswith(PREFIX) or not _has_provenance(u):
             continue
         plan = A.delete_user_account(u.id, dry_run=True, qa_teams_only=True)
         counts_by_id[u.id] = plan["counts"]
@@ -124,7 +189,7 @@ def manual_review_listing(blocked):
     codes and counts only -- no names of non-QA people, no content."""
     lines = []
     for u, _reason in sorted(blocked, key=lambda e: e[0].id):
-        if not u.username.startswith(PREFIX):
+        if not u.username.startswith(PREFIX) or not _has_provenance(u):
             continue
         plan = A.delete_user_account(u.id, dry_run=True, qa_teams_only=True)
         codes = ",".join(plan.get("blocker_codes", [])) or "-"
@@ -136,6 +201,14 @@ def manual_review_listing(blocked):
             lines.append(f"  account id={u.id:<6} team={t['team_id']:<6} "
                          f"plan={t['action']} members={members} reasons={codes}")
     return lines
+
+
+def _print_no_provenance(unproven):
+    """READ-ONLY. Ids only: a name here may be a real person's choice."""
+    print(f"NO QA PROVENANCE (never deleted; read-only listing): {len(unproven)} "
+          f"account(s) named '{PREFIX}*' that the QA tooling has no record of creating")
+    for u in sorted(unproven, key=lambda x: x.id):
+        print(f"  account id={u.id:<6} reasons=no_qa_provenance")
 
 
 def _print_manual_review(blocked):
@@ -152,6 +225,9 @@ def execute(safe, counts_by_id):
     no team that anybody else is still in; a team only it is in goes with it."""
     deleted = 0
     for u in safe:
+        if not _has_provenance(u):      # never reached: survey() filters these
+            print(f"  SKIPPED id={u.id}: no QA provenance")
+            continue
         report = A.delete_user_account(u.id, dry_run=False, qa_teams_only=True)
         if report.get("executed"):
             deleted += 1
@@ -168,7 +244,7 @@ def plan_team_owners(blocked):
     blocker; refused = [(user_id, [reason codes])]. Read-only."""
     candidates, refused = [], []
     for u, _reason in sorted(blocked, key=lambda e: e[0].id):
-        if not u.username.startswith(PREFIX):
+        if not u.username.startswith(PREFIX) or not _has_provenance(u):
             continue
         plan = A.delete_user_account(u.id, dry_run=True, qa_teams_only=True)
         codes = plan.get("blocker_codes", [])
@@ -234,7 +310,19 @@ def main():
                     help="actually delete the SAFE group (default is a dry run that changes nothing)")
     ap.add_argument("--team-owner-policy", choices=[TEAM_OWNER_POLICY], default=None,
                     help="also delete QA-only 'Smoke Test ' teams and then their qa_smoke_ owners")
+    ap.add_argument("--qa-ledger", default=None,
+                    help="the QA tooling's provenance ledger (default: $STREAKFIT_QA_LEDGER, "
+                         "else instance/qa_provenance.jsonl)")
     args = ap.parse_args()
+
+    path = ledger_path(args.qa_ledger)
+    provenance, ledger_note = load_provenance(path)
+    # Read by the app's QA rules (A._qa_provenance): unset or empty means
+    # nobody counts as QA, so with no ledger nothing at all is deleted.
+    A.app.config["QA_PROVENANCE"] = provenance
+    print(f"QA provenance: {len(provenance)} account(s) recorded in {path}")
+    if ledger_note:
+        print(f"  NOTE: {ledger_note}. Accounts without a record are never deleted.")
 
     with A.app.app_context():
         if args.team_owner_policy and not args.execute \
@@ -248,8 +336,13 @@ def main():
                   "That's unexpected — investigate before running any deletion.")
             sys.exit(2)
         safe, blocked, counts_by_id = result
+        unproven = no_provenance_accounts()
 
         if not safe and not blocked:
+            if unproven:
+                _print_no_provenance(unproven)
+                print("\nNothing has QA provenance, so nothing is deleted.")
+                return
             print(f"No '{PREFIX}' accounts found. Nothing to do.")
             return
 
@@ -261,6 +354,9 @@ def main():
                      blocked, counts_by_id, with_reason=True)
         print()
         _print_manual_review(blocked)
+        if unproven:
+            print()
+            _print_no_provenance(unproven)
 
         candidates = []
         if args.team_owner_policy:
@@ -293,7 +389,7 @@ def main():
 
         # Re-query: safe group should be gone; blocked accounts remain by design.
         remaining = _matches()
-        blocked_ids = {u.id for u, _r in blocked} - set(policy_deleted)
+        blocked_ids = ({u.id for u, _r in blocked} - set(policy_deleted)) | {u.id for u in unproven}
         stray = [u for u in remaining if u.id not in blocked_ids]
         if stray:
             print(f"\n✗ {len(stray)} supposedly-deleted account(s) STILL PRESENT: "

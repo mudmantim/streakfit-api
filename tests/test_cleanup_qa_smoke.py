@@ -6,12 +6,15 @@ manually validated.
 """
 import scripts.cleanup_qa_smoke as C
 from app import db, User, CoachTurn, CoachNote, Team, TeamMembership
+from conftest import qa_tooling_created
 
 
 def _mk(name):
     u = User(username=name, password_hash="x")
     db.session.add(u)
     db.session.commit()
+    if name.startswith("qa_smoke_"):
+        qa_tooling_created(u.id, name)   # as the QA tooling records it (round 6)
     return u
 
 
@@ -95,6 +98,8 @@ def test_the_dry_run_blocks_exactly_what_execute_would(app):
     parent = User(username="qa_smoke_parent_z", password_hash="x")
     db.session.add_all([kid, parent])
     db.session.commit()
+    qa_tooling_created(kid.id, kid.username)
+    qa_tooling_created(parent.id, parent.username)
     db.session.add(GuardianLink(child_user_id=kid.id, guardian_user_id=parent.id,
                                 method="test"))
     db.session.commit()

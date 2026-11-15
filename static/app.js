@@ -843,6 +843,27 @@ var TEAM_QUICK_REACTIONS = ['❤️', '🔥', '🎉', '💪', '😂', '🧠'];
 var _teamPanelOverlay  = null;
 var _teamPanelThread   = null;
 var _teamPanelInput    = null;
+// Owner decision #1 (2026-11-14/15): a team with no owner is read-only. The
+// server refuses every new post (403 team_read_only); the panel hides the
+// composer and says why. The same words as the server's TEAM_OWNERLESS_NOTICE
+// (a test keeps them identical); the server's copy wins when it sends one.
+var TEAM_OWNERLESS_NOTICE = "This team has no owner right now, so it's read-only: "
+    + 'nobody can post, share photos, start challenges or join. You can still read '
+    + 'everything, report a problem, leave the team or delete your account. '
+    + "StreakFit can't give a team a new owner yet, so it may stay read-only with "
+    + 'no end date.';
+var _teamPanelInputRow = null;
+var _teamPanelReactionRow = null;
+var _teamPanelReadOnlyNote = null;
+
+function _applyTeamReadOnly(readOnly, noticeText) {
+    if (_teamPanelInputRow) _teamPanelInputRow.style.display = readOnly ? 'none' : '';
+    if (_teamPanelReactionRow) _teamPanelReactionRow.style.display = readOnly ? 'none' : '';
+    if (_teamPanelReadOnlyNote) {
+        _teamPanelReadOnlyNote.style.display = readOnly ? '' : 'none';
+        _teamPanelReadOnlyNote.textContent = noticeText || TEAM_OWNERLESS_NOTICE;
+    }
+}
 var _teamPanelSendBtn  = null;
 // Mirrors data.is_creator for the open panel: the creator may remove any
 // photo, the same narrow safety exception they already have for members and
@@ -967,6 +988,12 @@ function openTeamPanel(team, opts) {
         reactionRow.appendChild(btn);
     });
     chatPane.appendChild(reactionRow);
+    _teamPanelReactionRow = reactionRow;
+
+    _teamPanelReadOnlyNote = document.createElement('p');
+    _teamPanelReadOnlyNote.className = 'team-ownerless-notice';
+    _teamPanelReadOnlyNote.setAttribute('role', 'status');
+    chatPane.appendChild(_teamPanelReadOnlyNote);
 
     var inputRow = document.createElement('div');
     inputRow.className = 'team-panel-input-row';
@@ -1020,6 +1047,8 @@ function openTeamPanel(team, opts) {
     inputRow.appendChild(_teamPanelInput);
     inputRow.appendChild(_teamPanelSendBtn);
     chatPane.appendChild(inputRow);
+    _teamPanelInputRow = inputRow;
+    _applyTeamReadOnly(!!team.ownerless);
 
     _teamPanelOverlay.appendChild(panel);
     _teamPanelOverlay.classList.add('open');
@@ -1095,7 +1124,17 @@ async function _loadTeamInfo(teamId) {
     _teamPanelIsCreator = !!data.is_creator;
     _teamPanelMembers = data.members || [];
     _refreshPhotoDeletePermissions();
+    _applyTeamReadOnly(!!data.ownerless, data.ownerless_notice);
 
+    if (data.ownerless) {
+        // Neutral: says what the team can and can't do, never why it has
+        // no owner (that can be a report, which is never disclosed).
+        var ownerless = document.createElement('p');
+        ownerless.className = 'team-panel-info-section team-ownerless-notice';
+        ownerless.setAttribute('role', 'status');
+        ownerless.textContent = data.ownerless_notice || TEAM_OWNERLESS_NOTICE;
+        _teamPanelInfo.appendChild(ownerless);
+    }
     _teamPanelInfo.appendChild(_buildCampfireSection(data));
     var rosterSection = _buildRosterSection(data);
     _teamPanelInfo.appendChild(rosterSection);
@@ -1105,7 +1144,10 @@ async function _loadTeamInfo(teamId) {
         var fresh = _buildRosterSection(data);
         if (rosterSection.parentNode) rosterSection.replaceWith(fresh);
     });
-    _teamPanelInfo.appendChild(_buildInviteSection(data));
+    // No code for an ownerless team: nobody can join it (owner decision #1).
+    if (!data.ownerless && data.invite_code) {
+        _teamPanelInfo.appendChild(_buildInviteSection(data));
+    }
     if (data.is_creator && _teamOtherMembers(data).length) {
         _teamPanelInfo.appendChild(_buildHandOverSection(data));
     }
@@ -1762,11 +1804,32 @@ function _buildLeaveTeamRow(data) {
     // walk away from it: with other people in it they choose who looks after
     // it (the picker below, sent with the leave), and alone in it, leaving
     // deletes it -- so the confirmation says exactly that.
+    // Owner decision #1: the picker also offers "nobody" (P3), which leaves
+    // the team ownerless and read-only. The last member of an ownerless team
+    // gets the same delete confirmation as a sole creator.
     var others = _teamOtherMembers(data);
     var mustPick = !!data.is_creator && others.length > 0;
-    var deletesTeam = !!data.is_creator && others.length === 0;
-    var picker = mustPick ? _buildTeamMemberPicker(data, 'leave', 'Before you leave, hand the team to') : null;
+    var deletesTeam = (!!data.is_creator || !!data.ownerless) && others.length === 0;
+    var picker = mustPick ? _buildTeamMemberPicker(data, 'leave', 'Before you leave, hand the team to', true) : null;
     if (picker) picker.wrap.hidden = true;
+    var NOBODY_NOTE = 'If you leave it without an owner, nobody can join it, remove '
+        + 'anyone or post anything new in it, including photos and challenges. '
+        + 'Members can still read it, report a problem and leave. StreakFit '
+        + "can't give it a new owner yet, so it may stay like that with no end "
+        + 'date. Your streak, XP and acorns stay exactly as they are.';
+    if (picker) {
+        picker.select.addEventListener('change', function () {
+            if (!pending) return;
+            if (picker.select.value === 'none') {
+                leaveBtn.textContent = 'Tap again to leave without an owner';
+                note.textContent = NOBODY_NOTE;
+            } else {
+                leaveBtn.textContent = 'Tap again to hand over and leave';
+                note.textContent = 'You created this team, so choose who looks after '
+                    + 'it. Your streak, XP and acorns stay exactly as they are.';
+            }
+        });
+    }
 
     var pending = false;
     var leaveBtn = document.createElement('button');
@@ -1790,15 +1853,17 @@ function _buildLeaveTeamRow(data) {
                 note.textContent = 'You created this team, so choose who looks after '
                     + 'it. Your streak, XP and acorns stay exactly as they are.';
             } else if (deletesTeam) {
-                // Owner decision #6 (2026-11-14): the permanent loss is spelled
-                // out, former members' messages and photos included.
-                leaveBtn.textContent = 'Tap again to permanently delete '
+                // Owner decision #6 (2026-11-14), corrected for review D-R5-1:
+                // true even when a review or legal hold keeps the team for a
+                // while, and shown to everybody, so it reveals no report.
+                leaveBtn.textContent = 'Tap again to delete '
                     + (data.name || 'this team') + ' and leave';
                 note.textContent = "You're the only one in this team, so leaving "
-                    + 'permanently deletes it. All of its chat and photos go, including '
-                    + 'messages and photos from people who have already left, and so '
-                    + "does its history. This can't be undone. Your streak, XP and "
-                    + 'acorns stay.';
+                    + 'deletes it. All of its chat and photos go, including messages '
+                    + 'and photos from people who have already left, and so does its '
+                    + 'history. If any of it has to be kept for a safety review or a '
+                    + "legal hold, it's kept only until that ends and then deleted. "
+                    + "This can't be undone. Your streak, XP and acorns stay.";
             } else {
                 leaveBtn.textContent = 'Tap again to leave ' + (data.name || 'this team');
                 note.textContent = 'Your streak, XP and acorns stay exactly as they '
@@ -1809,11 +1874,13 @@ function _buildLeaveTeamRow(data) {
         var body;
         if (mustPick) {
             if (!picker.select.value) {
-                note.textContent = 'Choose who looks after the team first.';
+                note.textContent = 'Choose who looks after the team, or nobody, first.';
                 picker.select.focus();
                 return;
             }
-            body = { new_owner_user_id: Number(picker.select.value) };
+            body = picker.select.value === 'none'
+                ? { no_owner: true }
+                : { new_owner_user_id: Number(picker.select.value) };
         } else if (deletesTeam) {
             body = { delete_team: true };
         }
@@ -1829,7 +1896,8 @@ function _buildLeaveTeamRow(data) {
             // The roster changed under us (someone joined or left): reload
             // the panel so the next attempt asks the right question.
             if (d.error === 'owner_must_choose' || d.error === 'team_will_be_deleted'
-                    || d.error === 'new_owner_not_a_member') {
+                    || d.error === 'new_owner_not_a_member'
+                    || d.error === 'new_owner_not_eligible') {
                 if (_teamPanelTeamId === data.id) _loadTeamInfo(data.id);
             }
             return;
@@ -1858,7 +1926,7 @@ function _teamOtherMembers(data) {
 
 // A labelled <select> of the other members, for handing the team over.
 // Names are the roster's own labels (display name or "Member N"), never logins.
-function _buildTeamMemberPicker(data, idSuffix, labelText) {
+function _buildTeamMemberPicker(data, idSuffix, labelText, withNobody) {
     var wrap = document.createElement('div');
     wrap.className = 'team-handover';
     var id = 'team-handover-' + idSuffix + '-' + data.id;
@@ -1877,6 +1945,12 @@ function _buildTeamMemberPicker(data, idSuffix, labelText) {
         opt.textContent = m.name || 'Member';
         select.appendChild(opt);
     });
+    if (withNobody) {
+        var nobody = document.createElement('option');
+        nobody.value = 'none';
+        nobody.textContent = 'Nobody (leave it without an owner)';
+        select.appendChild(nobody);
+    }
     wrap.appendChild(label);
     wrap.appendChild(select);
     return { wrap: wrap, select: select };
@@ -2562,8 +2636,10 @@ function openDeleteAccount() {
     // BEFORE the button, not only in the refusal after it.
     var teamNote = document.createElement('p');
     teamNote.className = 'danger-note';
-    teamNote.textContent = 'A team only you are in is deleted too. If you created a '
-        + 'team other people are in, hand it over first (open the team → Hand over the team).';
+    teamNote.textContent = 'A team only you are in is deleted too. If any of it has to '
+        + "be kept for a safety review or a legal hold, it's kept only until that ends "
+        + 'and then deleted. If you created a team other people are in, open it and use '
+        + 'Leave Team first: choose who looks after it, or leave it without an owner.';
     sheet.appendChild(teamNote);
 
     var pw = document.createElement('input');

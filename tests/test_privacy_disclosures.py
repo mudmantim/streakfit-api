@@ -90,7 +90,12 @@ def test_the_delete_screen_discloses_what_stays_and_what_happens_to_teams():
     assert 'team history' in body and 'without your name' in body
     assert "'them, with no time limit.'" in body
     assert 'A team only you are in is deleted too' in body
-    assert 'Hand over the team' in body
+    # Round 6 (owner decision #1): every handover is refused until an age can
+    # be confirmed, so the screen points at Leave Team (which offers "nobody"),
+    # and (D-R5-1) does not promise immediate deletion of a kept team.
+    assert 'Leave Team first' in body and 'leave it without an owner' in body
+    assert "it's kept only until that ends" in body
+    assert 'Hand over the team' not in body
 
 
 # ── The privacy page: a draft, NOT published (owner decision #5) ──────────

@@ -15,6 +15,7 @@ from sqlalchemy import event
 import app as A
 import scripts.cleanup_qa_smoke as C
 from app import db
+from conftest import qa_tooling_created
 
 
 @pytest.fixture()
@@ -37,6 +38,8 @@ def _user(name):
     u = A.User(username=name, password_hash="x")
     db.session.add(u)
     db.session.commit()
+    if name.startswith("qa_smoke_"):
+        qa_tooling_created(u.id, name)   # as the QA tooling records it (round 6)
     return u
 
 

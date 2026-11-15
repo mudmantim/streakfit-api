@@ -24,7 +24,8 @@ deadlocked on b365d16 (10/10 in the review):
   S5   DEF-2: A (legacy owner) deletes, paused after locking its candidate B
        and again after locking the team; meanwhile E, recorded as adult, joins
        and then leaves. The fallback prefers E, whom A had not locked.
-                                     -> 200 / 200, the team goes to B, no deadlock
+                                     -> 200 / 200, no deadlock; since decision #1
+                                        the team is kept for B, ownerless
   S5c  DEF-2 with no age band: A pauses before locking B; E joins; B deletes;
        A locks the team and pauses; E leaves. Nobody A locked is left.
                                      -> 200 / 200, the empty team is deleted
@@ -41,6 +42,12 @@ deadlocked on b365d16 (10/10 in the review):
 deletion service, or the 40P01 handler on a route), not just from the final
 answers: PostgreSQL may break a deadlock by retrying the deletion, which ends
 in a correct state that would otherwise hide it.
+
+Owner decision #1 (round 6): only a VERIFIED ADULT who is not suspended can
+receive a team, so every member these scenarios expect to be handed a team is
+recorded as adult (`person(..., adult=True)`). D2c is new: the same race as
+D2b with nobody eligible -- the team becomes ownerless, then empties, and the
+empty-team cleanup deletes it.
 
 Prints one JSON object; exit 0 only if every check held.
 """
@@ -196,7 +203,7 @@ def main(argv):
     def check(name, ok, detail=''):
         results[name] = {'ok': bool(ok), 'detail': str(detail)}
 
-    def person(prefix):
+    def person(prefix, adult=False):
         n[0] += 1
         name = f'{prefix}{run_tag}{n[0]}'
         with A.app.app_context():
@@ -204,7 +211,11 @@ def main(argv):
             c.post('/api/register', json={'username': name, 'password': PASSWORD})
             tok = c.post('/api/login', json={'username': name, 'password': PASSWORD}
                          ).get_json()['access_token']
-            uid = A.User.query.filter_by(username=name).one().id
+            user = A.User.query.filter_by(username=name).one()
+            uid = user.id
+            if adult:
+                user.age_band = A.AGE_ADULT       # eligible to own (decision #1)
+                db.session.commit()
         return uid, {'Authorization': f'Bearer {tok}'}
 
     def team(owner, members, owner_in_team=True):
@@ -256,7 +267,7 @@ def main(argv):
 
     # D2b. The same pair, A first.
     a, ah = person('own')
-    b, bh = person('mem')
+    b, bh = person('mem', adult=True)
     tid, _ = team(a, [b], owner_in_team=False)
     b1, b2, waited = race(A, delete_me(ah), delete_me(bh))
     owner, members, exists = team_state(tid)
@@ -266,11 +277,30 @@ def main(argv):
     check('D2b the team went with B, its new owner and only member', not exists,
           (owner, members))
 
+    # D2c. D2b with nobody eligible (decision #1): A's deletion makes the team
+    # ownerless; B's deletion empties it; the cleanup deletes it.
+    a, ah = person('own')
+    b, bh = person('mem')
+    tid, _ = team(a, [b], owner_in_team=False)
+    mark = len(grab.lines)
+    b1, b2, waited = race(A, delete_me(ah), delete_me(bh))
+    owner, members, exists = team_state(tid)
+    check('D2c A first: B waited for A', waited)
+    check('D2c A 200, B 200 (no 500)', (_status(b1), _status(b2)) == (200, 200),
+          (_status(b1), _status(b2), _body(b2)))
+    check('D2c the team is ownerless and empty, never handed to B',
+          exists and owner is None and members == [], (owner, members, exists))
+    with A.app.app_context():
+        reaped = A._reap_empty_ownerless_teams()
+    owner, members, exists = team_state(tid)
+    check('D2c the cleanup deletes it', reaped['deleted'] >= 1 and not exists, reaped)
+    check('D2c no deadlock', not deadlocks_since(mark), deadlocks_since(mark))
+
     # D4a. Legacy owner A deletes first (paused holding every lock); B, the
     # longest-standing member and so the fallback's choice, leaves meanwhile.
     a, ah = person('own')
-    b, bh = person('mem')
-    c_, _ch = person('mem')
+    b, bh = person('mem', adult=True)
+    c_, _ch = person('mem', adult=True)
     tid, _ = team(a, [b, c_], owner_in_team=False)
     mark = len(grab.lines)
     b1, b2, waited = race(A, delete_me(ah), lambda c: c.post(
@@ -287,8 +317,8 @@ def main(argv):
 
     # D4b. B leaves first (paused holding B and the team); A deletes meanwhile.
     a, ah = person('own')
-    b, bh = person('mem')
-    c_, _ch = person('mem')
+    b, bh = person('mem', adult=True)
+    c_, _ch = person('mem', adult=True)
     tid, _ = team(a, [b, c_], owner_in_team=False)
     mark = len(grab.lines)
     b1, b2, waited = race(A, lambda c: c.post(f'/api/teams/{tid}/leave', json={}, headers=bh),
@@ -315,8 +345,8 @@ def main(argv):
 
     # R2. Two hand-overs by the same owner at once.
     o, oh = person('ownr')
-    p, _ph = person('memp')
-    q, _qh = person('memq')
+    p, _ph = person('memp', adult=True)
+    q, _qh = person('memq', adult=True)
     tid, _ = team(o, [p, q])
     b1, b2, waited = race(
         A, lambda c: c.post(f'/api/teams/{tid}/owner', json={'new_owner_user_id': p},
@@ -346,7 +376,10 @@ def _lock_order(A, name, check, person, team, delete_me, deadlocks_since,
             return fn(A.app.test_client())
 
     def leave(tid, h):
-        return lambda c: c.post(f'/api/teams/{tid}/leave', json={}, headers=h)
+        # delete_team: E may be the last member of a team that has just become
+        # ownerless (S5c), which needs the confirmation; ignored otherwise.
+        return lambda c: c.post(f'/api/teams/{tid}/leave', json={'delete_team': True},
+                                headers=h)
 
     def wait(gate, what):
         ok = gate['holding'].wait(20)
@@ -356,6 +389,9 @@ def _lock_order(A, name, check, person, team, delete_me, deadlocks_since,
     mark = len(grab.lines)
     if name in ('S5', 'S5c'):
         a, ah = person('own')
+        # B is NOT a verified adult and E is: the fallback prefers E, whom A
+        # has not locked -- the DEF-2 re-plan path. After E leaves, nobody is
+        # eligible, so the team becomes ownerless (decision #1).
         b, bh = person('mem')
         e, eh = person('late')
         if name == 'S5':
@@ -396,8 +432,8 @@ def _lock_order(A, name, check, person, team, delete_me, deadlocks_since,
               (_status(b1), _status(b2), _body(b1), _body(b2)))
         check(f'{name} no deadlock', not deadlocks_since(mark), deadlocks_since(mark))
         if name == 'S5':
-            check('S5 the team went to B, the one member left', exists and owner == b
-                  and members == [b], (owner, members, exists))
+            check('S5 the team is kept for B, ownerless (B is not a verified adult)',
+                  exists and owner is None and members == [b], (owner, members, exists))
         else:
             check('S5c the team, left with nobody, is gone', not exists,
                   (owner, members))

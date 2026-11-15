@@ -47,7 +47,8 @@ def test_key_share_only_via_the_helper_and_plain_locks_never_use_of():
     src = inspect.getsource(A)
     calls = re.findall(r'with_for_update\(([^)]*)\)', src)
     helpers = ('key_share=True, of=model',                                  # _for_no_key_update
-               'read=True, key_share=True, skip_locked=True, of=model')     # _for_key_share_skip_locked
+               'read=True, key_share=True, skip_locked=True, of=model',     # _for_key_share_skip_locked
+               'read=True, of=model')                                       # _for_share (round 6)
     for h in helpers:
         assert calls.count(h) == 1, calls
     for args in calls:
@@ -65,3 +66,16 @@ def test_the_photo_sweeps_team_lock_is_key_share_skip_locked_and_its_own_cache_e
     for other in (A.db.select(A.Team.id).where(A.Team.id == 1).with_for_update(),
                   A._for_no_key_update(A.db.select(A.Team.id).where(A.Team.id == 1), A.Team)):
         assert other._generate_cache_key() != ks._generate_cache_key()
+
+
+def test_the_read_only_gates_share_lock_is_its_own_cache_entry():
+    """Round 6 (owner decision #1): _lock_team_for_content's FOR SHARE must
+    never be emitted as, or turn, another team lock: not the FOR NO KEY UPDATE
+    every join/leave/hand-over takes, not account deletion's FOR UPDATE, and not
+    the photo sweep's FOR KEY SHARE SKIP LOCKED."""
+    stmt = lambda: A.db.select(A.Team).where(A.Team.id == 1)          # noqa: E731
+    share = A._for_share(stmt(), A.Team)
+    assert re.search(r'FOR SHARE OF "?team"?$', _sql(share)), _sql(share)
+    for other in (stmt().with_for_update(), A._for_no_key_update(stmt(), A.Team),
+                  A._for_key_share_skip_locked(stmt(), A.Team)):
+        assert other._generate_cache_key() != share._generate_cache_key(), _sql(other)

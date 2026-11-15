@@ -21,7 +21,7 @@ from sqlalchemy import event
 
 import app as A
 from app import db
-from conftest import auth_headers, register_and_login
+from conftest import auth_headers, qa_tooling_created, register_and_login
 
 import scripts.cleanup_qa_smoke as C
 
@@ -174,7 +174,10 @@ def test_a_sole_owner_who_left_cannot_tell_a_kept_team_from_a_deleted_one(fk_cli
     deleted = _world(c, 'qzgone', None)
     kept = _world(c, 'qzkept', report)
     before = _side_effects(kept)
-    assert before['invite'] == (True, None) and before['owner'] == kept['o']
+    # Kept for the review: since owner decision #1 the empty team is also
+    # ownerless, so nobody holds owner powers over it and the empty-team
+    # cleanup deletes it once the review ends (D-R5-1).
+    assert before['invite'] == (True, None) and before['owner'] is None
 
     reqs_d, hd = _requests(deleted)
     reqs_k, hk = _requests(kept)
@@ -199,7 +202,7 @@ def test_a_sole_owner_who_left_cannot_tell_a_kept_team_from_a_deleted_one(fk_cli
     after = _side_effects(kept)
     assert after == before, (before, after)
     # The kept team still belongs to nobody new and is still closed.
-    assert after['owner'] == kept['o'] and after['members'] == 0
+    assert after['owner'] is None and after['members'] == 0     # ownerless since round 6
 
 
 def test_rotate_on_a_kept_team_never_returns_a_code(fk_client):
@@ -350,7 +353,18 @@ def _u(name):
     u = A.User(username=name, password_hash='x')
     db.session.add(u)
     db.session.commit()
+    if name.startswith('qa_smoke_'):
+        qa_tooling_created(u.id, name)   # as the QA tooling records it (round 6)
     return u.id
+
+
+def _adult(uid):
+    """Record a verified adult (owner decision #1: only they can hold a team).
+    Nothing in the app writes age_band yet; tests that need an eligible owner
+    set it directly."""
+    db.session.get(A.User, uid).age_band = A.AGE_ADULT
+    db.session.commit()
+    return uid
 
 
 def _qa_team(owner, members, owner_in=True, name='Smoke Test run'):
@@ -395,7 +409,7 @@ def test_a_real_former_members_chat_and_photos_are_never_deleted(fk_client):
 def test_a_qa_team_is_never_handed_to_a_real_member(fk_client):
     """QA owner already left; the fallback would pick a real member."""
     qa = _u('qa_smoke_d8_owner2')
-    real = _u('real_d8_member')
+    real = _adult(_u('real_d8_member'))     # eligible, so the fallback WOULD pick them
     tid = _qa_team(qa, [real], owner_in=False)
     assert A._owned_team_plan(qa)[0]['action'] == A.TEAM_OWNER_TRANSFER
     before = _snapshot(tid)
@@ -442,7 +456,7 @@ def test_an_all_qa_team_still_goes_with_its_qa_owner(fk_client):
 def test_the_qa_guard_does_not_change_ordinary_deletion(fk_client):
     """Without qa_teams_only the user-facing rules are exactly as before."""
     qa = _u('qa_smoke_d8_plain')
-    real = _u('real_d8_plain')
+    real = _adult(_u('real_d8_plain'))
     tid = _qa_team(qa, [real], owner_in=False)
     rep = A.delete_user_account(qa, dry_run=True)
     assert 'team_not_qa_only' not in rep['blocker_codes'] and not rep['blocked']
@@ -519,70 +533,126 @@ def test_a_failure_midway_through_team_deletion_on_leave_rolls_back(fk_client, m
     assert _all_rows(tid, o) == before
 
 
-# ── D5 (children): decision #1, decided, blocked on a migration ──────────────────────────────────
-
-@pytest.mark.xfail(strict=True, reason=(
-    "OWNER DECISION #1 DECIDED 2026-11-14 (no child owners; no eligible adult "
-    "-> restricted ownerless team) but NOT IMPLEMENTED: an ownerless team "
-    "needs team.created_by_user_id to be nullable, a migration only Tim can "
-    "approve (round-5 report). Today a child can still be picked."))
-def test_decision_pending_a_child_is_never_made_owner(client):
-    o, otok = _person(client, 'kid_o')
-    kid, ktok = _person(client, 'kid_k')
-    tid, code = _team(client, otok)
-    _join(client, ktok, tid, code)
-    u = db.session.get(A.User, kid)
-    u.age_band = A.AGE_CHILD
-    db.session.commit()
-    r = client.post(f'/api/teams/{tid}/owner', json={'new_owner_user_id': kid},
-                    headers=auth_headers(otok))
-    assert r.status_code != 200
-
-
-# ── D5 (suspended members) stays Tim's: decision #1 ──────────────────────────
-# A reviewer condition relayed by the coordinator asked for this to be blocked
-# in code. It was NOT changed: the brief names D5 as Tim's policy, and the
-# change was refused at the permission layer. Pinned here instead, so the
-# moment it is decided the tests say exactly what changes.
+# ── D5: owner decision #1 (Tim, 2026-11-14/15), IMPLEMENTED in round 6 ──────
+# These were strict xfails while the decision needed a migration. Since
+# a1c4e0f2b7d9 a team can be ownerless, so the decided rule is enforced: only a
+# VERIFIED ADULT who is not suspended can be made owner -- by a pick, a leave or
+# the account-deletion fallback -- and with nobody eligible the team becomes
+# ownerless. Unknown age is NOT adult (review D-R5-2: the fallback test used to
+# expect an unknown-age owner).
 
 def _suspend(uid):
     db.session.add(A.UserRestriction(user_id=uid, kind='social_suspended'))
     db.session.commit()
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "OWNER DECISION #1 DECIDED 2026-11-14 (handover to a suspended member is "
-    "refused, 400) but NOT IMPLEMENTED: on its own it would leave an owner "
-    "whose co-members are all ineligible unable to leave or delete their "
-    "account; it ships with the ownerless state, which needs a migration "
-    "(round-5 report). Today the pick succeeds (200)."))
+def _band(uid, band):
+    db.session.get(A.User, uid).age_band = band
+    db.session.commit()
+
+
+@pytest.mark.parametrize('band', [A.AGE_CHILD, A.AGE_TEEN, None])
+def test_a_child_or_unknown_age_member_is_never_made_owner(client, band):
+    o, otok = _person(client, f'kid_o_{band}')
+    kid, ktok = _person(client, f'kid_k_{band}')
+    tid, code = _team(client, otok)
+    _join(client, ktok, tid, code)
+    _band(kid, band)
+    for route in ('owner', 'leave'):
+        r = client.post(f'/api/teams/{tid}/{route}', json={'new_owner_user_id': kid},
+                        headers=auth_headers(otok))
+        assert r.status_code == 400 and r.get_json()['error'] == 'new_owner_not_eligible', \
+            (route, r.get_json())
+    db.session.expire_all()
+    assert db.session.get(A.Team, tid).created_by_user_id == o
+    assert A.TeamMembership.query.filter_by(team_id=tid, user_id=o).count() == 1
+
+
 @pytest.mark.parametrize('route', ['owner', 'leave'])
-def test_decision_pending_a_suspended_member_is_never_picked_as_owner(client, route):
+def test_a_suspended_member_is_never_picked_as_owner(client, route):
+    """Even a verified adult: the suspension alone refuses (400)."""
     o, otok = _person(client, f'sus_o_{route}')
     s, stok = _person(client, f'sus_s_{route}')
     tid, code = _team(client, otok)
     _join(client, stok, tid, code)
+    _band(s, A.AGE_ADULT)
     _suspend(s)
     r = client.post(f'/api/teams/{tid}/{route}', json={'new_owner_user_id': s},
                     headers=auth_headers(otok))
-    assert r.status_code != 200
+    assert r.status_code == 400 and r.get_json()['error'] == 'new_owner_not_eligible'
+    db.session.expire_all()
+    assert db.session.get(A.Team, tid).created_by_user_id == o
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "OWNER DECISION #1 DECIDED 2026-11-14 (the fallback takes verified adults "
-    "only) but NOT IMPLEMENTED: with no eligible adult the team must become "
-    "ownerless, which needs a migration (round-5 report). Today it picks the "
-    "longest-standing member whatever their suspension."))
-def test_decision_pending_the_fallback_skips_a_suspended_member(app):
+@pytest.mark.parametrize('route', ['owner', 'leave'])
+def test_a_verified_adult_who_is_not_suspended_can_be_picked(client, route):
+    """The positive control: the rule refuses the ineligible, not everybody."""
+    o, otok = _person(client, f'ad_o_{route}')
+    a, atok = _person(client, f'ad_a_{route}')
+    tid, code = _team(client, otok)
+    _join(client, atok, tid, code)
+    _band(a, A.AGE_ADULT)
+    r = client.post(f'/api/teams/{tid}/{route}', json={'new_owner_user_id': a},
+                    headers=auth_headers(otok))
+    assert r.status_code == 200, r.get_json()
+    db.session.expire_all()
+    assert db.session.get(A.Team, tid).created_by_user_id == a
+
+
+def test_the_fallback_makes_the_team_ownerless_when_nobody_is_a_verified_adult(app):
+    """D-R5-2: a suspended member and an UNKNOWN-AGE member -> ownerless, never
+    the unknown-age one (the old xfail body expected `ok` to be chosen)."""
     owner = _u('fb_owner')
     sus = _u('fb_suspended')
-    ok = _u('fb_ok')
+    ok = _u('fb_ok')                         # no age band: NOT adult
     tid = _qa_team(owner, [sus, ok], owner_in=False, name='fallback')
     db.session.query(A.TeamMembership).filter_by(team_id=tid, user_id=sus).update(
         {A.TeamMembership.joined_at: datetime.datetime.utcnow() - datetime.timedelta(days=9)})
     db.session.commit()
+    _band(sus, A.AGE_ADULT)
     _suspend(sus)
-    assert A._owned_team_plan(owner)[0]['new_owner_user_id'] == ok
+    plan = A._owned_team_plan(owner)[0]
+    assert plan['action'] == A.TEAM_OWNER_OWNERLESS and plan['new_owner_user_id'] is None
+    rep = A.delete_user_account(owner, dry_run=False)
+    assert rep['executed'], rep
+    db.session.expire_all()
+    team = db.session.get(A.Team, tid)
+    assert team is not None and team.created_by_user_id is None
+    assert {m.user_id for m in A.TeamMembership.query.filter_by(team_id=tid)} == {sus, ok}
+
+
+@pytest.mark.parametrize('bands', [
+    (None,), (A.AGE_CHILD,), (A.AGE_TEEN,), (None, A.AGE_CHILD), ('ADULT?',), ('',),
+    (A.AGE_CHILD, A.AGE_TEEN, None)])
+def test_the_fallback_never_makes_a_child_or_unknown_age_member_owner(app, bands):
+    """Pinned: whatever mix of children, teens and unknown ages remains, the
+    fallback chooses nobody -- the team becomes ownerless."""
+    owner = _u(f'nb_owner_{len(bands)}')
+    members = [_u(f'nb_m{i}_{len(bands)}') for i in range(len(bands))]
+    for uid, band in zip(members, bands):
+        _band(uid, band)
+    tid = _qa_team(owner, members, owner_in=False, name='never')
+    plan = A._owned_team_plan(owner)[0]
+    assert plan['action'] == A.TEAM_OWNER_OWNERLESS and plan['new_owner_user_id'] is None
+    assert A.delete_user_account(owner, dry_run=False)['executed']
+    db.session.expire_all()
+    assert db.session.get(A.Team, tid).created_by_user_id is None
+
+
+def test_the_fallback_takes_the_longest_standing_verified_adult(app):
+    """Positive control: a verified adult is chosen over an older unknown-age
+    member and an older suspended adult."""
+    owner = _u('fa_owner')
+    old_unknown = _u('fa_unknown')
+    old_sus = _u('fa_sus')
+    adult = _u('fa_adult')
+    tid = _qa_team(owner, [old_unknown, old_sus, adult], owner_in=False, name='fa')
+    _band(old_sus, A.AGE_ADULT)
+    _suspend(old_sus)
+    _band(adult, A.AGE_ADULT)
+    plan = A._owned_team_plan(owner)[0]
+    assert plan['action'] == A.TEAM_OWNER_TRANSFER and plan['new_owner_user_id'] == adult
+    assert tid
 
 
 # ── Follow-up review DEF-4: every cut person link fails the QA guard closed ──
@@ -770,6 +840,7 @@ def _legacy_owner_world(client, tag):
     """A created a team, B joined, A left before the owner rules existed."""
     a, atok = _person(client, f'lg_a{tag}')
     b, btok = _person(client, f'lg_b{tag}')
+    _adult(b)    # an eligible heir, so the fallback hands the team on (decision #1)
     tid, code = _team(client, atok, f'Legacy {tag}')
     _join(client, btok, tid, code)
     A.TeamMembership.query.filter_by(team_id=tid, user_id=a).delete()

@@ -17,18 +17,21 @@ from sqlalchemy import event
 
 import app as A
 from app import db
-from conftest import auth_headers, register_and_login
+from conftest import auth_headers, qa_tooling_created, register_and_login
 
 import scripts.cleanup_qa_smoke as C
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 PW = 'WalkTest123!'
 
+# Round 6 (review D-R5-1): no longer "permanently deletes it" on the spot --
+# a review or legal hold can keep the team for a while. Shown to everybody.
 SOLE_OWNER_WARNING = (
-    "You're the only one in this team, so leaving permanently deletes it. "
-    "All of its chat and photos go, including messages and photos from people "
-    "who have already left, and so does its history. This can't be undone. "
-    "Your own streak, XP and acorns stay.")
+    "You're the only one in this team, so leaving deletes it. All of its chat "
+    "and photos go, including messages and photos from people who have already "
+    "left, and so does its history. If any of it has to be kept for a safety "
+    "review or a legal hold, it's kept only until that ends and then deleted. "
+    "This can't be undone. Your own streak, XP and acorns stay.")
 
 
 @pytest.fixture()
@@ -66,15 +69,17 @@ def test_the_sole_owner_leave_confirmation_in_the_app_says_the_same():
     js = (ROOT / 'static' / 'app.js').read_text(encoding='utf-8')
     body = js[js.index("leaveBtn.textContent = 'Leave Team';"):]
     body = body[:body.index('wrap.appendChild(leaveBtn);')]
-    assert ("leaveBtn.textContent = 'Tap again to permanently delete '\n"
+    assert ("leaveBtn.textContent = 'Tap again to delete '\n"
             "                    + (data.name || 'this team') + ' and leave';") in body
     flat = ' '.join(line.strip() for line in body.splitlines())
     for piece in ('"You\'re the only one in this team, so leaving "',
-                  "'permanently deletes it. All of its chat and photos go, including '",
-                  "'messages and photos from people who have already left, and so '",
-                  "\"does its history. This can't be undone. Your streak, XP and \"",
-                  "'acorns stay.'"):
+                  "'deletes it. All of its chat and photos go, including messages '",
+                  "'and photos from people who have already left, and so does its '",
+                  "'history. If any of it has to be kept for a safety review or a '",
+                  "\"legal hold, it's kept only until that ends and then deleted. \"",
+                  "\"This can't be undone. Your streak, XP and acorns stay.\""):
         assert piece in flat, piece
+    assert 'permanently deletes it' not in flat
 
 
 # ── #7: the QA cleanup deletes only positively verified test data ────────────
@@ -83,6 +88,8 @@ def _u(name):
     u = A.User(username=name, password_hash='x')
     db.session.add(u)
     db.session.commit()
+    if name.startswith('qa_smoke_'):
+        qa_tooling_created(u.id, name)   # as the QA tooling records it (round 6)
     return u.id
 
 
@@ -130,6 +137,8 @@ def _world():
                     sender_user_id=w['real_former'], image_data=b'x', byte_size=1)])
     w['qa_heir'] = _u('qa_smoke_r5_heir')
     w['real_member'] = _u('real_r5_member')
+    # A verified adult, so the fallback WOULD hand them the team (decision #1).
+    db.session.get(A.User, w['real_member']).age_band = A.AGE_ADULT
     w['real_heir'] = _team(w['qa_heir'], [w['real_member']], owner_in=False)
     w['qa_cut'] = _u('qa_smoke_r5_cut')
     w['cut'] = _team(w['qa_cut'], [])

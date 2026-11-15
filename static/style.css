@@ -696,6 +696,8 @@ a.btn-forget-coach {
 }
 .team-handover label { font-size: .85rem; font-weight: 600; width: 100%; }
 .team-handover-status { font-size: .8rem; color: var(--gray-600); margin: .4rem 0 0; }
+/* Owner decision #1: an ownerless team is read-only. Neutral, not an error. */
+.team-ownerless-notice { font-size: .85rem; color: var(--gray-700, #374151); background: var(--gray-100, #f3f4f6); border-radius: 8px; padding: .6rem .75rem; margin: .5rem 0; line-height: 1.4; }
 .team-handover select {
     min-height: 44px;
     flex: 1 1 10rem;
