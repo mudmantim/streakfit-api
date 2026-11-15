@@ -24,6 +24,10 @@ Classification:
 
 Behavior:
   * Dry run lists both groups and changes nothing.
+  * Both modes also print a READ-ONLY "KEPT FOR MANUAL REVIEW" listing: every
+    team a blocked account created (ids, plan, member count, reason codes) --
+    owner decision #7 (2026-11-14): only positively verified test data is
+    deleted, everything ambiguous is kept and listed.
   * --execute deletes ONLY the safe group, ONE TRANSACTION PER ACCOUNT (each
     account is all-or-nothing; the run as a whole is not), then re-queries and
     reports both groups. Blocked accounts are left in place, with the reason.
@@ -109,6 +113,36 @@ def _print_group(title, entries, counts_by_id, with_reason=False):
         line = f"  id={u.id:<6} {u.username:<40} {dep}"
         if with_reason:
             line += f"   ⚠ {item[1]}"
+        print(line)
+
+
+def manual_review_listing(blocked):
+    """READ-ONLY: what this run leaves for a person to look at, one line per
+    team a blocked qa_smoke_ account created, plus one per blocked account that
+    created none. Owner decision #7 (2026-11-14): only positively verified test
+    data is deleted; everything ambiguous is kept and listed here. Ids, reason
+    codes and counts only -- no names of non-QA people, no content."""
+    lines = []
+    for u, _reason in sorted(blocked, key=lambda e: e[0].id):
+        if not u.username.startswith(PREFIX):
+            continue
+        plan = A.delete_user_account(u.id, dry_run=True, qa_teams_only=True)
+        codes = ",".join(plan.get("blocker_codes", [])) or "-"
+        teams = plan.get("owned_teams") or []
+        if not teams:
+            lines.append(f"  account id={u.id:<6} team=-      reasons={codes}")
+        for t in teams:
+            members = A.TeamMembership.query.filter_by(team_id=t["team_id"]).count()
+            lines.append(f"  account id={u.id:<6} team={t['team_id']:<6} "
+                         f"plan={t['action']} members={members} reasons={codes}")
+    return lines
+
+
+def _print_manual_review(blocked):
+    lines = manual_review_listing(blocked)
+    print(f"KEPT FOR MANUAL REVIEW (read-only listing; nothing below is changed): "
+          f"{len(lines)} item(s)")
+    for line in lines:
         print(line)
 
 
@@ -225,6 +259,8 @@ def main():
         print()
         _print_group("REQUIRES MANUAL CLEANUP (team owners or other blockers)",
                      blocked, counts_by_id, with_reason=True)
+        print()
+        _print_manual_review(blocked)
 
         candidates = []
         if args.team_owner_policy:
