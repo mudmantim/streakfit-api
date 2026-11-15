@@ -338,9 +338,22 @@ because storage is still `memory://`. That is Phase C, not a regression.
 - [ ] **C6 · Ownerless teams (owner decision #1; migration `a1c4e0f2b7d9`).**
       See `deploy-ownerless-teams-m1.md` for the migration step, its lock
       risk and rollback. After the deploy, confirm the retention sweeper
-      records `ownerless_reap` runs (`retention_run.kind`), and that the
-      `security.*ownerless*` and `security.handover_to_unconfirmed_age_refused`
-      checks pass in `verify_all`. **State plainly in release notes: a team
+      records `ownerless_reap` runs (`retention_run.kind`) and
+      `retention.ownerless_teams` is PASS in `/api/verification/self` (it
+      FAILs while any empty ownerless team keeps failing to delete), and that
+      `security.handover_to_unconfirmed_age_refused`,
+      `security.leave_handing_to_unconfirmed_age_refused` and
+      `security.smoke_team_left_owned` pass in `verify_all` **suite 19**
+      (never suite 18: it left its smoke team ownerless). **Rollback window:**
+      the M1 downgrade works only while
+      `SELECT count(*) FROM team WHERE created_by_user_id IS NULL` is 0.
+      Suite 19 keeps it 0; it is closed by the first owner leaving with
+      "nobody", a fallback with no verified adult, a sole owner leaving or
+      deleting their account under a report or hold, or
+      `cleanup_qa_smoke.py --execute` on a smoke account whose smoke team its
+      reports keep -- and in practice never reopens. Decide on rollback right
+      after the post-deploy checks, before running the cleanup. **State
+      plainly in release notes: a team
       whose owner leaves with "nobody", or whose owner deletes their account
       with no verified adult to take over, becomes READ-ONLY and may stay
       read-only indefinitely** -- there is no way back to an owner until age

@@ -34,9 +34,10 @@ Say this plainly in the release notes and anywhere users are told about it:
   says exactly that:
 
   > This team has no owner right now, so it's read-only: nobody can post,
-  > share photos, start challenges or join. You can still read everything,
-  > report a problem, leave the team or delete your account. StreakFit can't
-  > give a team a new owner yet, so it may stay read-only with no end date.
+  > share photos, start or complete challenges, or join, and missions no
+  > longer add to its campfire. You can still read everything, report a
+  > problem, leave the team or delete your account. StreakFit can't give a
+  > team a new owner yet, so it may stay read-only with no end date.
 
 - **Today every handover is refused** (P1: verified adults only, and no age is
   recorded). Every owner who leaves a team that other people are in makes it
@@ -45,7 +46,26 @@ Say this plainly in the release notes and anywhere users are told about it:
 An empty ownerless team is deleted by the retention sweeper (one team per
 transaction, after the legal-hold fence and the team lock), once no report
 about it is pending or under legal hold. Its passes are recorded as
-`retention_run.kind = 'ownerless_reap'`.
+`retention_run.kind = 'ownerless_reap'`, with detail
+`deleted=N kept_for_review=N skipped=N failed=N`.
+
+- The cleanup **selects only teams it may delete**: a team a pending report or
+  a legal hold keeps is never selected (it is counted in `kept_for_review`),
+  and each pass walks the candidates page by page, so kept teams cannot fill
+  the batch and hide the deletable ones behind them (review R6-2(a)). Up to 50
+  deletions per pass.
+- **One failing team does not stop the pass** (review R6-2(b)): it is rolled
+  back whole, logged as `event=ownerless_team_reap_failed team_id=<id>
+  error=<type>`, counted in `failed=`, and the pass goes on. A pass stops after
+  10 failures (a systemic fault).
+- **A stuck team is visible:** the self-check `retention.ownerless_teams`
+  (`/api/verification/self`) FAILs while the last unattended pass recorded
+  `failed>0`, when a pass raised, or when no pass ran for 48 h; UNKNOWN before
+  the first unattended pass.
+- The sole-owner leave copy ("...kept only until that ends and then
+  deleted") is true **only while this cleanup runs and keeps up**: it needs the
+  retention sweeper running in production (C3/C4), and a team that keeps
+  failing needs somebody to act on the FAIL above.
 
 ## Lock risk
 
@@ -79,11 +99,21 @@ about it is pending or under legal hold. Its passes are recorded as
    on the new schema: that is safe** -- the old code never writes NULL, and
    reads a NULL owner (there are none yet) as "not the owner".
 4. Check: `/api/build-identity` shows `a1c4e0f2b7d9` and `atHead: true`;
-   `verify_all` passes, including `security.handover_to_unconfirmed_age_refused`,
-   `security.owner_leaves_with_no_owner`, `security.ownerless_team_hides_its_code`,
-   `security.ownerless_team_is_read_only` and
-   `security.ownerless_team_takes_nobody_new`; the sweeper records
-   `ownerless_reap` runs.
+   `verify_all` (**suite 19**, from this build) passes, including
+   `security.handover_to_unconfirmed_age_refused`,
+   `security.leave_handing_to_unconfirmed_age_refused` and
+   `security.smoke_team_left_owned`; the sweeper records `ownerless_reap`
+   runs and `retention.ownerless_teams` is PASS.
+   **This step leaves no team ownerless, so it does not close the rollback**
+   (review R6-1). Suite 19 never makes a team ownerless: it ends with its
+   smoke team still owned by its own `qa_smoke_` account (kept, because its
+   Moderation checks file pending reports about it). The ownerless path
+   (`security.owner_leaves_with_no_owner`, `security.ownerless_team_*`,
+   `security.last_member_leaves_and_deletes`) is verified against a test
+   database instead (`tests/test_round7_review_fixes.py`), never against
+   production. **Do not run suite 18** (the round-6 `verify_all`) against
+   this build: it left its reported smoke team ownerless and so closed the
+   rollback at once.
 
 ## Rollback
 
@@ -111,8 +141,35 @@ team(s) are ownerless ... Roll forward instead`), by design: making the
 column NOT NULL again would need an owner nobody chose. Verified on
 PostgreSQL 17.10 and SQLite: the refusal leaves the version at
 `a1c4e0f2b7d9` and the column nullable. **Then the only rollback is rolling
-forward** (a fixed build on the same schema). Once the first owner leaves
-with "nobody" in production, assume this case.
+forward** (a fixed build on the same schema).
+
+### The rollback window, and what closes it
+
+The downgrade rollback is open **exactly while step 1's count is 0**. It
+opens when the deploy finishes and the post-deploy `verify_all` (suite 19)
+does not close it. It closes the first time any of these happens in
+production:
+
+1. An owner leaves a team choosing "nobody". Today **every** owner who leaves
+   a team that other people are in has to (every handover is refused).
+2. A person deletes their account while a team they created, and already
+   left, still has members and none of them is a verified adult (the
+   fallback). Today that is every such team.
+3. A sole owner leaves their team, or deletes their account, while a pending
+   report or a legal hold keeps the team (P9; the D-R5-1 path). Nobody is
+   told, by design, so this can happen with no visible sign.
+4. `scripts/cleanup_qa_smoke.py --execute` deletes a `qa_smoke_` account
+   that is the only member of a smoke team its pending reports keep. That is
+   case 3 done by the tooling, and after every `verify_all` run the smoke
+   team is in exactly that state. **Do not run the cleanup with `--execute`
+   while the rollback may still be needed**, unless an operator has first
+   closed the smoke team's reports.
+
+It does **not** reopen by itself in practice: the cleanup deletes an
+ownerless team only once it is empty and nothing keeps it, and a team with
+members never gets an owner back (no M2). So **make the rollback decision
+before real users can do 1-3**, i.e. right after the post-deploy checks, and
+re-run step 1 immediately before any downgrade.
 
 ## What else ships with it (code, no schema)
 
