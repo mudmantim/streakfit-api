@@ -293,7 +293,8 @@ def test_once_the_report_is_decided_the_kept_team_is_cleaned_up(fk_client):
     tid, _code = _team(c, tok)
     rid = _report(tid)
     assert _delete_me(c, tok).status_code == 200
-    assert A._reap_empty_ownerless_teams() == {'deleted': 0, 'kept_for_review': 1, 'skipped': 0}
+    assert A._reap_empty_ownerless_teams() == {'deleted': 0, 'kept_for_review': 1, 'skipped': 0,
+                                              'failed': 0}
     assert db.session.get(A.Team, tid) is not None
     db.session.get(A.Report, rid).status = 'closed'
     db.session.commit()
