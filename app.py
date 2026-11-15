@@ -4096,6 +4096,49 @@ def verification_self():
             "UNKNOWN", "UNKNOWN", f"{type(exc).__name__}",
             failure_reason="The team photo retention record could not be read."))
 
+    # Empty ownerless teams are deleted (owner decision #1; the sole-owner
+    # leave copy says a kept team is "then deleted"). Round-6 review R6-2: a
+    # team whose deletion keeps failing must be visible, so a pass that
+    # recorded failed>0 is a FAIL here even though the pass itself ran.
+    try:
+        verdict = _run_verdict(
+            RUN_OWNERLESS_TEAM_REAP, RETENTION_STALE_AFTER_HOURS,
+            lambda last, age_h: (f"last unattended pass {age_h:.1f}h ago via "
+                                 f"{last.source} ({last.detail or 'no counts'})"))
+        if verdict is None:
+            any_run = _last_retention_run(RUN_OWNERLESS_TEAM_REAP)
+            state, evidence = "UNKNOWN", "UNKNOWN"
+            observed = "no unattended ownerless-team cleanup has ever been recorded"
+            if any_run is not None:
+                observed += f" (a {any_run.source} run exists)"
+        else:
+            state, evidence, observed, _failed = verdict
+            last = _last_retention_run(RUN_OWNERLESS_TEAM_REAP, unattended_only=True)
+            m = re.search(r'\bfailed=(\d+)', (last.detail or '') if last else '')
+            if state == "PASS" and m and int(m.group(1)) > 0:
+                state, evidence = "FAIL", "OBSERVED"
+                observed += (f"; {m.group(1)} team(s) could not be deleted "
+                             f"(see event=ownerless_team_reap_failed)")
+        checks.append(_self_check(
+            "retention.ownerless_teams", "Empty ownerless teams are being deleted",
+            "Every empty team with no owner that no pending report or legal "
+            "hold keeps is deleted by the hourly cleanup.",
+            "Read the most recent UNATTENDED retention_run of kind "
+            "'ownerless_reap': its age, its outcome and its failed-team count. "
+            "A manual run never satisfies this.",
+            state, evidence, observed,
+            failure_reason=None if state == "PASS" else
+            "Empty ownerless teams are not all being deleted on schedule.",
+            limitations="Counts teams only; a team a review or hold keeps is "
+                        "waiting, not failing."))
+    except Exception as exc:
+        checks.append(_self_check(
+            "retention.ownerless_teams", "Empty ownerless teams are being deleted",
+            "Empty ownerless teams are being deleted.",
+            "Read the most recent retention_run of kind 'ownerless_reap'.",
+            "UNKNOWN", "UNKNOWN", f"{type(exc).__name__}",
+            failure_reason="The ownerless-team cleanup record could not be read."))
+
     # EVIDENCE SEALED WITH A KEY THIS BUILD NO LONGER HAS.
     #
     # `photo_evidence.key_id` has been written at capture since the table
@@ -8248,9 +8291,10 @@ TEAM_READ_ONLY_MESSAGE = ("This team has no owner right now, so nothing new can 
 # Shown in the team panel of an ownerless team (GET /api/teams/<id>).
 TEAM_OWNERLESS_NOTICE = (
     "This team has no owner right now, so it's read-only: nobody can post, share "
-    "photos, start challenges or join. You can still read everything, report a "
-    "problem, leave the team or delete your account. StreakFit can't give a team "
-    "a new owner yet, so it may stay read-only with no end date.")
+    "photos, start or complete challenges, or join, and missions no longer add to "
+    "its campfire. You can still read everything, report a problem, leave the team "
+    "or delete your account. StreakFit can't give a team a new owner yet, so it may "
+    "stay read-only with no end date.")
 
 
 class TeamReadOnly(Exception):
@@ -14759,44 +14803,96 @@ def _stage_team_owner_change(team, new_owner_user_id, reason):
 # it), then the team FOR UPDATE (a join, message or report referencing it
 # waits), then everything is re-checked under those locks.
 
-_OWNERLESS_REAP_BATCH = 50
+_OWNERLESS_REAP_BATCH = 50          # teams DELETED per pass, at most
+_OWNERLESS_REAP_MAX_FAILURES = 10   # a pass stops after this many failed teams
 RUN_OWNERLESS_TEAM_REAP = 'ownerless_reap'   # run-record kind; not a retention promise
 
 
-def _empty_ownerless_team_ids(limit=_OWNERLESS_REAP_BATCH):
+def _team_kept_for_review_clause():
+    """SQL truth value: a report about this team is pending or under legal
+    hold -- exactly _team_deletion_refusals' rule, as a clause, so the
+    reaper's selection and its re-check under the locks cannot drift apart."""
+    return db.exists().where(
+        Report.team_id == Team.id,
+        db.or_(Report.status == 'pending', Report.legal_hold.is_(True)))
+
+
+def _empty_ownerless_team_ids(limit=_OWNERLESS_REAP_BATCH, after_id=0):
+    """The next `limit` ids (> after_id, ascending) of empty ownerless teams
+    that NOTHING keeps. A team a review or a hold keeps is never selected
+    (round-6 review R6-2(a)): selected, 50 such teams filled every batch and a
+    deletable team behind them was never reached."""
     return list(db.session.execute(
         db.select(Team.id).where(
             Team.created_by_user_id.is_(None),
-            ~db.exists().where(TeamMembership.team_id == Team.id))
+            Team.id > after_id,
+            ~db.exists().where(TeamMembership.team_id == Team.id),
+            ~_team_kept_for_review_clause())
         .order_by(Team.id).limit(limit)).scalars())
 
 
-def _reap_empty_ownerless_teams(limit=_OWNERLESS_REAP_BATCH):
-    """Delete empty ownerless teams that nothing keeps. Returns
-    {"deleted": n, "kept_for_review": n, "skipped": n}. Commits per team."""
-    result = {"deleted": 0, "kept_for_review": 0, "skipped": 0}
-    ids = _empty_ownerless_team_ids(limit)
-    db.session.rollback()     # no snapshot or lock carried into the loop
-    for team_id in ids:
-        try:
-            _legal_hold_fence(exclusive=False)
-            team = _lock_team_for_deletion(team_id)
-            if team is None or team.created_by_user_id is not None \
-                    or _team_has_members(team_id):
-                result["skipped"] += 1      # gone, or no longer empty/ownerless
+def _count_empty_ownerless_teams_kept_for_review():
+    return db.session.execute(
+        db.select(db.func.count(Team.id)).where(
+            Team.created_by_user_id.is_(None),
+            ~db.exists().where(TeamMembership.team_id == Team.id),
+            _team_kept_for_review_clause())).scalar_one()
+
+
+def _reap_empty_ownerless_teams(limit=_OWNERLESS_REAP_BATCH,
+                                max_failures=_OWNERLESS_REAP_MAX_FAILURES):
+    """Delete empty ownerless teams that nothing keeps. Commits per team.
+
+    Returns {"deleted", "kept_for_review", "skipped", "failed"}:
+      deleted          teams deleted in this pass (at most `limit`);
+      kept_for_review  empty ownerless teams a pending or held report keeps,
+                       counted at the end of the pass (they wait for the
+                       review; they are never selected);
+      skipped          selected, but under the locks no longer empty/ownerless,
+                       gone, or kept after all (a report or hold landed);
+      failed           teams whose deletion raised (rolled back whole).
+
+    One team that fails does not stop the pass (round-6 review R6-2(b)): it is
+    rolled back, logged by id (`event=ownerless_team_reap_failed`), counted,
+    and the pass goes on to the teams after it. The pass walks the candidates
+    in id order, page by page, so neither kept nor failing teams can hide the
+    ones behind them. It stops after `limit` deletions or `max_failures`
+    failures (a systemic fault should not grind through every team), and
+    the self-check retention.ownerless_teams FAILs while any team fails, so
+    a team that is stuck stays visible every hour until somebody looks.
+    """
+    result = {"deleted": 0, "kept_for_review": 0, "skipped": 0, "failed": 0}
+    after_id = 0
+    while result["deleted"] < limit and result["failed"] < max_failures:
+        ids = _empty_ownerless_team_ids(limit, after_id=after_id)
+        db.session.rollback()     # no snapshot or lock carried into the loop
+        for team_id in ids:
+            if result["deleted"] >= limit or result["failed"] >= max_failures:
+                break
+            after_id = team_id
+            try:
+                _legal_hold_fence(exclusive=False)
+                team = _lock_team_for_deletion(team_id)
+                if team is None or team.created_by_user_id is not None \
+                        or _team_has_members(team_id) \
+                        or _team_deletion_refusals(team_id):
+                    result["skipped"] += 1  # gone, no longer empty/ownerless, or kept
+                    db.session.rollback()
+                    continue
+                _stage_team_deletion(team)
+                db.session.commit()
+                result["deleted"] += 1
+                app.logger.info("event=ownerless_team_deleted team_id=%s", team_id)
+            except Exception as exc:
                 db.session.rollback()
-                continue
-            if _team_deletion_refusals(team_id):
-                result["kept_for_review"] += 1
-                db.session.rollback()
-                continue
-            _stage_team_deletion(team)
-            db.session.commit()
-            result["deleted"] += 1
-            app.logger.info("event=ownerless_team_deleted team_id=%s", team_id)
-        except Exception:
-            db.session.rollback()
-            raise
+                result["failed"] += 1
+                # Type only, never the text (it can carry row contents).
+                app.logger.warning("event=ownerless_team_reap_failed team_id=%s error=%s",
+                                   team_id, type(exc).__name__)
+        if len(ids) < limit:
+            break
+    result["kept_for_review"] = _count_empty_ownerless_teams_kept_for_review()
+    db.session.rollback()
     return result
 
 
@@ -15942,17 +16038,27 @@ def _sweeper_team_photo_step():
                         result['erased'], result['held_by_legal_hold'])
 
 
+def _ownerless_reap_detail(result):
+    """Counts only, fixed shape, no identifiers. Read by an HTTP endpoint
+    (retention.ownerless_teams parses `failed=`)."""
+    return (f"deleted={result['deleted']} "
+            f"kept_for_review={result['kept_for_review']} "
+            f"skipped={result['skipped']} failed={result['failed']}")
+
+
 def _sweeper_ownerless_team_step():
     result = _reap_empty_ownerless_teams()
+    # Recorded as a pass that RAN, with its failed-team count: the deletions
+    # it counts have committed one team at a time; a team that failed was
+    # rolled back whole and is named only in the log line. The self-check
+    # turns failed>0 into a FAIL, so a stuck team cannot hide behind 'ok'.
     _record_retention_run(RUN_OWNERLESS_TEAM_REAP, SOURCE_THREAD,
                           deleted=result['deleted'],
-                          detail=(f"deleted={result['deleted']} "
-                                  f"kept_for_review={result['kept_for_review']} "
-                                  f"skipped={result['skipped']}"))
+                          detail=_ownerless_reap_detail(result))
     db.session.commit()
-    if result['deleted']:
-        app.logger.info('event=ownerless_team_reap deleted=%d kept=%d',
-                        result['deleted'], result['kept_for_review'])
+    if result['deleted'] or result['failed']:
+        app.logger.info('event=ownerless_team_reap deleted=%d kept=%d failed=%d',
+                        result['deleted'], result['kept_for_review'], result['failed'])
 
 
 def _notice_generation_detail(made):

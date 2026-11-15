@@ -848,7 +848,8 @@ var _teamPanelInput    = null;
 // composer and says why. The same words as the server's TEAM_OWNERLESS_NOTICE
 // (a test keeps them identical); the server's copy wins when it sends one.
 var TEAM_OWNERLESS_NOTICE = "This team has no owner right now, so it's read-only: "
-    + 'nobody can post, share photos, start challenges or join. You can still read '
+    + 'nobody can post, share photos, start or complete challenges, or join, and '
+    + 'missions no longer add to its campfire. You can still read '
     + 'everything, report a problem, leave the team or delete your account. '
     + "StreakFit can't give a team a new owner yet, so it may stay read-only with "
     + 'no end date.';
@@ -1887,17 +1888,29 @@ function _buildLeaveTeamRow(data) {
         leaveBtn.disabled = true;
         var result = await api('/api/teams/' + data.id + '/leave', 'POST', body);
         if (!result || result.status !== 200) {
+            var d = (result && result.data) || {};
+            if (d.error === 'new_owner_not_eligible' && picker) {
+                // The member picked cannot be handed the team (owner decision
+                // #1). Nothing about the team changed, so no reload: a reload
+                // rebuilt this row and wiped the reason at once, so the tap
+                // looked like it did nothing (round-6 review R6-3). Keep the
+                // picker open with the reason under it, so "Nobody" -- or
+                // another member -- can be chosen and tapped next.
+                leaveBtn.disabled = false;
+                picker.wrap.hidden = false;
+                note.hidden = false;
+                note.textContent = d.message || d.error;
+                return;
+            }
             reset();
             if (picker) picker.wrap.hidden = true;
             note.hidden = false;
-            var d = (result && result.data) || {};
             note.textContent = d.message || d.error
                 || 'Could not leave just now — try again in a moment.';
             // The roster changed under us (someone joined or left): reload
             // the panel so the next attempt asks the right question.
             if (d.error === 'owner_must_choose' || d.error === 'team_will_be_deleted'
-                    || d.error === 'new_owner_not_a_member'
-                    || d.error === 'new_owner_not_eligible') {
+                    || d.error === 'new_owner_not_a_member') {
                 if (_teamPanelTeamId === data.id) _loadTeamInfo(data.id);
             }
             return;

@@ -1058,6 +1058,27 @@ def check_team_creator_can_hand_over_leave_and_delete(b: Browser, base: str, app
     # --- a member whose age is not confirmed cannot be handed the team ------
     heir_id = _api(base, "/api/me", token=heir_token).get("id")
 
+    # Round-6 review R6-3: picking that member in the LEAVE picker is refused
+    # too, and the reason has to stay on screen -- the panel reload used to
+    # wipe it at once, so the tap looked like it did nothing.
+    b.js("(()=>{const s=document.querySelector('.team-panel-leave-row select');"
+         f" s.value={json.dumps(str(heir_id))}; s.dispatchEvent(new Event('change')); return 1;}})()")
+    b.js("document.querySelector('.team-panel-leave-row .retention-btn').click()")
+    seen = []
+    for pause in (0.4, 1.0, 2.5):
+        time.sleep(pause)
+        seen.append(b.js("(()=>{const n=document.querySelector('.team-panel-leave-note');"
+                         " return n && !n.hidden ? n.textContent : '';})()") or "")
+    check(all("confirmed as an adult" in t and "without an owner" in t for t in seen),
+          "picking an unconfirmed-age member when leaving is refused, and the reason stays visible",
+          " / ".join(t[:60] for t in seen))
+    still = b.js("(()=>{const w=document.querySelector('.team-panel-leave-row .team-handover');"
+                 " return !!(w && !w.hidden);})()")
+    check(bool(still), "and the picker stays open, so 'Nobody' can be chosen next")
+    stayed = _api(base, f"/api/teams/{team['id']}", token=owner_token)
+    check(stayed.get("is_creator") is True, "and the owner is still in the team, still its owner",
+          str(stayed)[:120])
+
     def hand_over_in_ui():
         b.js("(()=>{const s=document.querySelector('.team-panel-handover select');"
              f" s.value={json.dumps(str(heir_id))}; s.dispatchEvent(new Event('change')); return 1;}})()")

@@ -24,8 +24,9 @@ ownerless team.
   O7  the photo sweep erasing an empty ownerless team's photos (paused
       inside its erase transaction) vs the reaper -> both finish, no deadlock,
       and the team is gone after the next pass at the latest
-  O8  the reaper fails half-way -> nothing deleted (rollback), the next
-      pass deletes it
+  O8  the reaper fails half-way -> nothing deleted (rollback), the pass
+      counts it as failed instead of raising (round 7), the next pass
+      deletes it
 
 Prints one JSON object; exit 0 only if every check held.
 """
@@ -209,7 +210,8 @@ def main():
         other kept teams behind, and the pause must land on THIS one)."""
         def fn(_client):
             orig = A._empty_ownerless_team_ids
-            A._empty_ownerless_team_ids = lambda limit=50: [tid]
+            A._empty_ownerless_team_ids = (lambda limit=50, after_id=0:
+                                            [tid] if after_id < tid else [])
             try:
                 return A._reap_empty_ownerless_teams()
             finally:
@@ -322,7 +324,8 @@ def main():
     check('O5 the reaper waited for the hold', waited)
     check('O5 hold placed; reaper kept the team for it',
           _status(b1) == 'held' and isinstance(b2.get('resp'), dict)
-          and b2['resp'] == {'deleted': 0, 'kept_for_review': 1, 'skipped': 0}, (b1, b2))
+          and b2['resp']['deleted'] == 0 and b2['resp']['failed'] == 0
+          and b2['resp']['skipped'] == 1, (b1, b2))
     check('O5 the held team is still there', after['exists'], after)
     check('O5 no deadlock', not deadlocks_since(mark), deadlocks_since(mark))
 
@@ -335,7 +338,7 @@ def main():
     after = counts(tid)
     check('O6 the hold waited for the reaper', waited, due)
     check('O6 reaper deleted the team (nothing held it when it checked); hold then placed',
-          b1.get('resp') == {'deleted': 1, 'kept_for_review': 0, 'skipped': 0}
+          (b1.get('resp') or {}).get('deleted') == 1 and b1['resp']['failed'] == 0
           and _status(b2) == 'held' and not after['exists'], (b1, b2, after))
     with A.app.app_context():
         r = db.session.get(A.Report, rid)
@@ -368,15 +371,13 @@ def main():
         return real(model, attr, team_id)
     A._qa_team_rows = boom
     with A.app.app_context():
-        try:
-            reap_only(tid)(None)
-            failed = False
-        except RuntimeError:
-            failed = True
+        # Round 7 (review R6-2(b)): the pass does not raise; the team is
+        # rolled back whole and counted as failed.
+        failed = reap_only(tid)(None)['failed'] == 1
     A._qa_team_rows = real
     with A.app.app_context():
         photos = A.TeamPhoto.query.filter_by(team_id=tid).count()
-    check('O8 the failure surfaced and rolled back whole',
+    check('O8 the failure was counted and rolled back whole',
           failed and counts(tid)['exists'] and photos == 1, (failed, photos))
     with A.app.app_context():
         reap_only(tid)(None)

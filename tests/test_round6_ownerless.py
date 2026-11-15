@@ -624,7 +624,7 @@ def test_the_reaper_deletes_empty_ownerless_teams_and_nothing_else(fk_client):
     db.session.commit()
     w = _ownerless_world(c, 'reap')                                    # ownerless, 2 members
     out = A._reap_empty_ownerless_teams()
-    assert out == {'deleted': 1, 'kept_for_review': 3, 'skipped': 0}
+    assert out == {'deleted': 1, 'kept_for_review': 3, 'skipped': 0, 'failed': 0}
     db.session.expire_all()
     assert db.session.get(A.Team, gone) is None
     for tid in (pending, held, photo_held, owned_empty.id, w['tid']):
@@ -640,7 +640,7 @@ def test_the_reaper_runs_in_the_retention_sweeper_and_records_its_pass(app):
     assert ok is not False
     run = A.RetentionRun.query.filter_by(kind=A.RUN_OWNERLESS_TEAM_REAP).one()
     assert run.outcome == 'ok' and run.deleted == 1
-    assert run.detail == 'deleted=1 kept_for_review=0 skipped=0'
+    assert run.detail == 'deleted=1 kept_for_review=0 skipped=0 failed=0'
     assert A.Team.query.count() == 0
     assert A.RUN_OWNERLESS_TEAM_REAP not in A.RETENTION_KINDS
     src = (ROOT / 'app.py').read_text(encoding='utf-8')
@@ -659,8 +659,9 @@ def test_a_failing_reap_rolls_back_whole_and_keeps_the_team(fk_client, monkeypat
             raise RuntimeError('midway')
         return real(model, attr, team_id)
     monkeypatch.setattr(A, '_qa_team_rows', boom)
-    with pytest.raises(RuntimeError):
-        A._reap_empty_ownerless_teams()
+    # Round 7 (review R6-2(b)): the failing team is rolled back whole and
+    # counted; the pass does not end on it.
+    assert A._reap_empty_ownerless_teams()['failed'] == 1
     monkeypatch.undo()
     db.session.expire_all()
     assert db.session.get(A.Team, tid) is not None
