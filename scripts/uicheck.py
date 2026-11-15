@@ -993,8 +993,9 @@ def check_leaving_while_a_report_is_open(b: Browser, base: str, app) -> None:
 def check_team_creator_can_hand_over_leave_and_delete(b: Browser, base: str, app) -> None:
     """Owner decision 2026-11-13: a team creator is never stuck. With others in
     the team they pick who looks after it; alone, leaving deletes the team;
-    the delete screen says so first; and a privacy page is one tap away."""
-    print("\nTeam creators — hand over, leave, delete; privacy page reachable")
+    the delete screen says so first; and the privacy draft is NOT published
+    (owner decision #5, 2026-11-14): no link, and /privacy is a 404."""
+    print("\nTeam creators — hand over, leave, delete; privacy draft unpublished")
     owner, owner_token = make_user(app, "ho_owner")
     heir, heir_token = make_user(app, "ho_heir")
     created = _api(base, "/api/teams", "POST", owner_token, {"name": "UICheck Handover"})
@@ -1071,6 +1072,13 @@ def check_team_creator_can_hand_over_leave_and_delete(b: Browser, base: str, app
                 " return n && !n.hidden ? n.textContent : '';})()") or ""
     check("delete" in first.lower() and "deletes" in note,
           "a sole creator is told leaving deletes the team", f"{first!r} / {note[:80]!r}")
+    # Owner decision #6 (2026-11-14): the permanent loss is spelled out,
+    # former members' messages and photos included.
+    check("permanently delete" in first and "permanently deletes it" in note
+          and "including messages and photos from people who have already left" in note
+          and "This can't be undone" in note,
+          "and that it permanently deletes chat and photos, former members' too",
+          f"{first!r} / {note[:200]!r}")
     b.js("document.querySelector('.team-panel-leave-row .retention-btn').click()")
     time.sleep(2.5)
     after = _api(base, f"/api/teams/{team['id']}", token=heir_token)
@@ -1086,21 +1094,31 @@ def check_team_creator_can_hand_over_leave_and_delete(b: Browser, base: str, app
           "the delete screen says what stays and what happens to your teams", notes[:160])
     b.js("(()=>{const o=document.querySelector('.danger-overlay'); if(o) o.remove(); return 1;})()")
 
-    # --- the privacy page, from Settings and signed out --------------------
-    href = b.js("(()=>{const a=document.getElementById('link-privacy');"
-                " return a ? a.getAttribute('href') : '';})()")
-    check(href == "/privacy", "Settings links to the privacy page", str(href))
+    # --- the privacy page: NOT published (owner decision #5, 2026-11-14) ----
+    # No link in Settings or on sign-up, and /privacy answers 404 like any
+    # unknown path, until the owner turns on STREAKFIT_PRIVACY_PAGE_PUBLISHED.
+    settings_link = b.js("(()=>!!(document.getElementById('link-privacy')"
+                         " || document.getElementById('settings-row-privacy')"
+                         " || document.querySelector('a[href=\"/privacy\"]')))()")
+    check(settings_link is False, "signed in, no page links to the unpublished privacy draft",
+          str(settings_link))
     b.js("localStorage.removeItem('streakfit_token')")
     b.goto(base + "/", wait=2.0)
-    auth_href = b.js("(()=>{const a=document.getElementById('auth-privacy-link');"
-                     " return a && a.offsetParent !== null ? a.getAttribute('href') : '';})()")
-    check(auth_href == "/privacy", "sign-up shows a visible privacy link", str(auth_href))
-    b.goto(base + "/privacy", wait=1.5)
-    text = b.js("document.body.innerText") or ""
-    check("DRAFT" in text and "without your name" in text,
-          "the privacy page opens signed out, marked draft", text[:100])
-    hscroll = b.js("document.documentElement.scrollWidth > innerWidth + 1")
-    check(not hscroll, "and it fits a phone screen without sideways scrolling")
+    auth_link = b.js("(()=>!!(document.getElementById('auth-privacy-link')"
+                     " || document.querySelector('a[href*=\"privacy\"]')))()")
+    check(auth_link is False, "sign-up shows no link to the unpublished privacy draft",
+          str(auth_link))
+    statuses = {}
+    for path in ("/privacy", "/privacy/", "/privacy.html", "/pages/privacy.html",
+                 "/static/privacy.html"):
+        try:
+            with urllib.request.urlopen(base + path, timeout=20) as resp:
+                statuses[path] = (resp.status, resp.read().decode(errors="replace"))
+        except urllib.error.HTTPError as e:
+            statuses[path] = (e.code, e.read().decode(errors="replace"))
+    check(all(code == 404 and "DRAFT" not in body for code, body in statuses.values()),
+          "/privacy and its other spellings answer 404 and never show the draft",
+          str({p: c for p, (c, _b) in statuses.items()}))
 
 
 def check_photo_sharing(b: Browser, base: str, app) -> None:

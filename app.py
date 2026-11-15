@@ -3477,7 +3477,9 @@ def _asset_version(static_path):
 def _render_index_html():
     """index.html with every local executable/style/image asset URL stamped with
     its content hash. Computed once (static bytes do not change at runtime)."""
-    cached = _ASSET_VERSION_CACHE.get('__rendered_index__')
+    published = _privacy_page_published()
+    key = '__rendered_index__:privacy=%d' % published
+    cached = _ASSET_VERSION_CACHE.get(key)
     if cached is not None:
         return cached
     disk = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'static', 'index.html')
@@ -3489,7 +3491,12 @@ def _render_index_html():
         return m.group(0) if not v else f'{m.group(1)}{m.group(2)}?v={v}{m.group(3)}'
 
     html = _VERSIONABLE_ASSET.sub(stamp, html)
-    _ASSET_VERSION_CACHE['__rendered_index__'] = html
+    # The privacy links exist in the page ONLY once the owner has published
+    # the policy. static/index.html holds just a marker, so not even the raw
+    # file under /static/ links to an unpublished draft (owner decision #5).
+    for marker, link in _PRIVACY_LINKS.items():
+        html = html.replace(marker, link if published else '')
+    _ASSET_VERSION_CACHE[key] = html
     return html
 
 
@@ -3505,16 +3512,50 @@ def frontend():
 
 _PRIVACY_PAGE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'pages', 'privacy.html')
 
+# OWNER DECISION #5 (Tim, 2026-11-14): the draft privacy page is NOT published.
+# Until the owner approves its text and turns this on, /privacy answers the
+# same 404 as any unknown path and no page links to it. Off unless the
+# environment says exactly '1'; tests flip app.config directly.
+app.config['PRIVACY_PAGE_PUBLISHED'] = (
+    os.environ.get('STREAKFIT_PRIVACY_PAGE_PUBLISHED') == '1')
+
+# Placeholder in static/index.html -> the link it becomes once published.
+_PRIVACY_LINKS = {
+    '<!--privacy-link:auth-->': (
+        '<a id="auth-privacy-link" href="/privacy" target="_blank" '
+        'rel="noopener">How we handle your data</a>'),
+    '<!--privacy-link:settings-->': (
+        '<div class="settings-row" id="settings-row-privacy">\n'
+        '                        <span class="settings-label">Privacy</span>\n'
+        '                        <a id="link-privacy" class="btn-forget-coach" href="/privacy"\n'
+        '                           target="_blank" rel="noopener"\n'
+        '                           title="What StreakFit keeps, for how long, and who sees it">\n'
+        '                            How we handle data\n'
+        '                        </a>\n'
+        '                    </div>'),
+}
+
+
+def _privacy_page_published():
+    return app.config.get('PRIVACY_PAGE_PUBLISHED') is True
+
 
 @app.route('/privacy')
 def privacy_page():
     """How StreakFit handles data: a DRAFT page for owner review (2026-11-13).
 
-    Signed out, static, linked from sign-up and Settings. The retention numbers
-    are filled from the same constants the code enforces, so the page cannot
-    say 30 while the code does 31. The wording is a draft marked as such on
-    the page; the owner decides when, and in what words, it is published.
+    UNPUBLISHED unless PRIVACY_PAGE_PUBLISHED is on (owner decision #5): until
+    then this is abort(404), the same JSON 404 as any path that does not
+    exist, and _render_index_html leaves the sign-up and Settings links out.
+
+    Once published: signed out, static, linked from sign-up and Settings. The
+    retention numbers are filled from the same constants the code enforces,
+    so the page cannot say 30 while the code does 31. The wording is a draft
+    marked as such on the page; the owner decides when, and in what words, it
+    is published.
     """
+    if not _privacy_page_published():
+        abort(404)
     from string import Template
     with open(_PRIVACY_PAGE, encoding='utf-8') as fh:
         html = Template(fh.read()).substitute(
@@ -5673,17 +5714,30 @@ def export_my_data():
             # "everything else: kept while the account exists" used to cover
             # team messages too, and they outlive the account.
             "team_photo_days": PHOTO_RETENTION_DAYS,
-            "team_photos": ("a photo you share with a team is shown for %d days; "
-                            "then its picture and caption are erased. You can "
-                            "delete it sooner." % PHOTO_RETENTION_DAYS),
-            # OWNER DECISION pending: no retention window for team messages
-            # exists yet, so none is promised.
-            "team_messages": ("kept in the team with no time limit, including "
-                              "after you delete your account, when they stay "
-                              "without your name"),
+            # OWNER DECISION #4 (Tim, 2026-11-14): no unconditional promise of
+            # erasure at N days while the production sweeper is unverified
+            # (docs/operations/deployment-sequence.md, C4). Only a LEGAL HOLD
+            # keeps an expired photo; a report still under review does not.
+            "team_photos": ("a photo you share with a team is shown for %d days. "
+                            "After that, its picture and caption are scheduled "
+                            "for erasure. A legal hold on the photo, its message, "
+                            "the person who sent it or the team keeps it until "
+                            "the hold is lifted. A report that is still being "
+                            "reviewed does not keep it. You can delete it "
+                            "sooner." % PHOTO_RETENTION_DAYS),
+            # OWNER DECISION #2 (Tim, 2026-11-14): no retention window for team
+            # messages; say so plainly rather than invent one.
+            "team_messages": ("kept in the team with no time limit: they are "
+                              "not deleted after any set time. They stay after "
+                              "you delete your account, without your name, and "
+                              "are deleted if the team itself is deleted"),
+            # OWNER DECISION #3 (Tim, 2026-11-14): disclosure only; nothing
+            # deletes history left by a deleted account.
             "team_history": ("team history (who joined or left, challenges, "
-                             "that a photo was shared) stays in the team "
-                             "without your name if you delete your account"),
+                             "that a photo was shared) is kept in the team with "
+                             "no time limit: it is not deleted after any set "
+                             "time. If you delete your account it stays, without "
+                             "your name"),
             "teams_you_created": ("a team only you are in is deleted with your "
                                   "account or when you leave it; one with other "
                                   "people in it is handed to the member you choose"),
@@ -8478,6 +8532,13 @@ def join_team(team_id):
     return jsonify({"message": "Joined team", "team_id": team_id}), 200
 
 
+_SOLE_OWNER_LEAVE_WARNING = (
+    "You're the only one in this team, so leaving permanently deletes it. "
+    "All of its chat and photos go, including messages and photos from people "
+    "who have already left, and so does its history. This can't be undone. "
+    "Your own streak, XP and acorns stay.")
+
+
 def _new_owner_from_body(data):
     """(user_id or None, error response or None) for `new_owner_user_id`."""
     raw = (data or {}).get('new_owner_user_id')
@@ -8543,9 +8604,9 @@ def leave_team(team_id):
             if data.get('delete_team') is not True:
                 return jsonify({
                     "error": "team_will_be_deleted",
-                    "message": ("You're the only one in this team, so leaving "
-                                "deletes it: its chat, photos and history. "
-                                "Your own streak, XP and acorns stay."),
+                    # OWNER DECISION #6 (Tim, 2026-11-14): say exactly what
+                    # goes, former members' posts included. Copy only.
+                    "message": _SOLE_OWNER_LEAVE_WARNING,
                 }), 409
             _lock_team_for_deletion(team_id)
             if not _team_deletion_refusals(team_id):

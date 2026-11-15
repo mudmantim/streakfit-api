@@ -311,6 +311,20 @@ because storage is still `memory://`. That is Phase C, not a regression.
 - [ ] **C3 ·** `STREAKFIT_RETENTION_SWEEPER=1` **inline on the start command**
       (as a global it fires during `flask db upgrade` and deadlocks the
       deploy). Then the hourly notify cron.
+- [ ] **C4 · TODO (owner decision #4, 2026-11-14): verify `retention.team_photos`
+      PASS in production before strengthening the wording.** Until
+      `GET /api/verification/self` reports `retention.team_photos` **PASS**
+      from an unattended run (thread or `--scheduled` cron), the export and
+      the privacy text say only that expired photos are *scheduled for
+      erasure*, and that a legal hold keeps them. Do not change that to
+      "erased after N days" before this box is ticked. A pending report does
+      not pause erasure; only a legal hold does (decided, not an oversight).
+- [ ] **C5 · Privacy page stays unpublished (owner decision #5).** Leave
+      `STREAKFIT_PRIVACY_PAGE_PUBLISHED` unset: `/privacy` must answer 404 and
+      sign-up / Settings must show no privacy link until the owner approves the
+      text. Before release, people still need the legally required privacy
+      information through a mechanism the owner approves; that mechanism is
+      NOT decided here.
 
 ## The transitional window, and what breaks in it
 

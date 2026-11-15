@@ -1790,9 +1790,15 @@ function _buildLeaveTeamRow(data) {
                 note.textContent = 'You created this team, so choose who looks after '
                     + 'it. Your streak, XP and acorns stay exactly as they are.';
             } else if (deletesTeam) {
-                leaveBtn.textContent = 'Tap again to leave and delete ' + (data.name || 'this team');
-                note.textContent = "You're the only one in this team, so leaving deletes "
-                    + 'it: its chat, photos and history. Your streak, XP and acorns stay.';
+                // Owner decision #6 (2026-11-14): the permanent loss is spelled
+                // out, former members' messages and photos included.
+                leaveBtn.textContent = 'Tap again to permanently delete '
+                    + (data.name || 'this team') + ' and leave';
+                note.textContent = "You're the only one in this team, so leaving "
+                    + 'permanently deletes it. All of its chat and photos go, including '
+                    + 'messages and photos from people who have already left, and so '
+                    + "does its history. This can't be undone. Your streak, XP and "
+                    + 'acorns stay.';
             } else {
                 leaveBtn.textContent = 'Tap again to leave ' + (data.name || 'this team');
                 note.textContent = 'Your streak, XP and acorns stay exactly as they '
@@ -2548,7 +2554,8 @@ function openDeleteAccount() {
     var keepNote = document.createElement('p');
     keepNote.className = 'danger-note';
     keepNote.textContent = 'Messages you sent to a team, and team history (joined, '
-        + 'challenges, "a photo was shared"), stay in that team without your name on them.';
+        + 'challenges, "a photo was shared"), stay in that team without your name on '
+        + 'them, with no time limit.';
     sheet.appendChild(keepNote);
 
     // Owner decision 2026-11-13: say what happens to a team you created

@@ -483,9 +483,15 @@ team's 150 MB quota.
   (`detail` = `erased=N held=M`), even when nothing expired.
 - **Monitored:** `GET /api/verification/self` → `retention.team_photos`. As with
   the other promises, only an UNATTENDED run (thread or `--scheduled`) can PASS.
-- **Not erased:** a photo named by a report under **legal hold**. A reported
-  photo otherwise keeps its own sealed copy in `photo_evidence`, purged by the
-  moderation sweep on its own clock.
+- **Not erased:** a photo covered by a report under **legal hold** (a hold on
+  the photo, its message, its sender or its team). A **pending** report does
+  NOT pause erasure: owner decision #4 (Tim, 2026-11-14), legal holds only. A
+  reported photo otherwise keeps its own sealed copy in `photo_evidence`,
+  purged by the moderation sweep on its own clock.
+- **What users are told:** that expired photos are *scheduled for erasure*,
+  and that a legal hold keeps them. Not "erased after 30 days": that wording
+  waits until `retention.team_photos` PASSes in production
+  (deployment-sequence.md, C4).
 - **Kept on purpose:** the row and `deleted_at` (unchanged), so the thread still
   reads "This photo has expired" rather than "Photo removed", and team history
   keeps the fact that a photo was shared.
@@ -495,8 +501,10 @@ team's 150 MB quota.
 # What outlives an account (disclosed 2026-11-13)
 
 Deleting an account keeps, **without the person's name**: team messages (no
-time limit; a retention window is an OWNER DECISION still open), team history
-(moments: joined, left, challenges, "a photo was shared"), challenges they
+time limit, owner decision #2 of 2026-11-14; a retention window would be a
+later decision), team history (moments: joined, left, challenges, "a photo
+was shared"; no time limit and not deleted after any set time, owner decision
+#3: disclosure only; it goes only if the team itself is deleted), challenges they
 created, "Photo removed" stubs, and moderation records. The export
 (`retention.team_messages`, `retention.team_history`), the delete screen and the
 draft `/privacy` page say so.

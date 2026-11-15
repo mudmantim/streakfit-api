@@ -326,16 +326,22 @@ def test_a_photo_whose_sender_was_deleted_is_still_swept(client):
     assert _erased(x['photo_id'])
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "OWNER DECISION #4 pending: whether a merely PENDING (not held) report "
-    "about a photo stops the 30-day erasure. Today it does not; only a legal "
-    "hold does (PR #23 review D3)."))
-def test_decision_pending_a_pending_report_keeps_an_expired_photo(client):
-    x = _expired_photo(client, 'pend')
-    _report(status='pending', subject_type='photo', subject_ref=x['photo'], tid=x['tid'])
-    A._sweep_expired_team_photos()
+# OWNER DECISION #4 (Tim, 2026-11-14): legal holds only. A report that is
+# still pending -- about the photo, its message, its sender or its team --
+# does NOT pause erasure. This was an xfail while the decision was open.
+@pytest.mark.parametrize('about', ['photo', 'message', 'sender', 'team'])
+def test_a_pending_report_does_not_pause_erasure(client, about):
+    x = _expired_photo(client, f'pend_{about}')
+    other, _ = _person(client, f'pend_x_{about}')
+    kw = {'photo': dict(subject_type='photo', subject_ref=x['photo'], tid=x['tid']),
+          'message': dict(subject_type='message', subject_ref=x['message'], tid=x['tid']),
+          'sender': dict(subject_type='user', about=x['o']),
+          'team': dict(subject_type='user', about=other, tid=x['tid'])}[about]
+    _report(status='pending', **kw)
+    out = A._sweep_expired_team_photos()
     db.session.commit()
-    assert not _erased(x['photo_id'])
+    assert _erased(x['photo_id'])
+    assert out == {'erased': 1, 'held_by_legal_hold': 0}
 
 
 # ── D8: the QA cleanup never touches a team a real person is in ─────────────
@@ -513,12 +519,13 @@ def test_a_failure_midway_through_team_deletion_on_leave_rolls_back(fk_client, m
     assert _all_rows(tid, o) == before
 
 
-# ── D5 (children) stays Tim's: decision #1 ──────────────────────────────────
+# ── D5 (children): decision #1, decided, blocked on a migration ──────────────────────────────────
 
 @pytest.mark.xfail(strict=True, reason=(
-    "OWNER DECISION #1 pending: whether a child may become a team's owner "
-    "(by the owner's pick or by the fallback). Today a child can: the PR "
-    "flags it, and the review's D5 found the manual pick allows it too."))
+    "OWNER DECISION #1 DECIDED 2026-11-14 (no child owners; no eligible adult "
+    "-> restricted ownerless team) but NOT IMPLEMENTED: an ownerless team "
+    "needs team.created_by_user_id to be nullable, a migration only Tim can "
+    "approve (round-5 report). Today a child can still be picked."))
 def test_decision_pending_a_child_is_never_made_owner(client):
     o, otok = _person(client, 'kid_o')
     kid, ktok = _person(client, 'kid_k')
@@ -544,8 +551,11 @@ def _suspend(uid):
 
 
 @pytest.mark.xfail(strict=True, reason=(
-    "OWNER DECISION #1 pending (review D5): whether a socially SUSPENDED member "
-    "may be picked as the next owner. Today the pick succeeds (200)."))
+    "OWNER DECISION #1 DECIDED 2026-11-14 (handover to a suspended member is "
+    "refused, 400) but NOT IMPLEMENTED: on its own it would leave an owner "
+    "whose co-members are all ineligible unable to leave or delete their "
+    "account; it ships with the ownerless state, which needs a migration "
+    "(round-5 report). Today the pick succeeds (200)."))
 @pytest.mark.parametrize('route', ['owner', 'leave'])
 def test_decision_pending_a_suspended_member_is_never_picked_as_owner(client, route):
     o, otok = _person(client, f'sus_o_{route}')
@@ -559,9 +569,10 @@ def test_decision_pending_a_suspended_member_is_never_picked_as_owner(client, ro
 
 
 @pytest.mark.xfail(strict=True, reason=(
-    "OWNER DECISION #1 pending (review D5, fallback eligibility rule): whether "
-    "the automatic fallback skips a socially SUSPENDED member. Today it picks "
-    "the longest-standing member whatever their suspension."))
+    "OWNER DECISION #1 DECIDED 2026-11-14 (the fallback takes verified adults "
+    "only) but NOT IMPLEMENTED: with no eligible adult the team must become "
+    "ownerless, which needs a migration (round-5 report). Today it picks the "
+    "longest-standing member whatever their suspension."))
 def test_decision_pending_the_fallback_skips_a_suspended_member(app):
     owner = _u('fb_owner')
     sus = _u('fb_suspended')
