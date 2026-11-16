@@ -311,6 +311,64 @@ because storage is still `memory://`. That is Phase C, not a regression.
 - [ ] **C3 ·** `STREAKFIT_RETENTION_SWEEPER=1` **inline on the start command**
       (as a global it fires during `flask db upgrade` and deadlocks the
       deploy). Then the hourly notify cron.
+- [ ] **C4 · TODO (owner decision #4, 2026-11-14): verify `retention.team_photos`
+      PASS in production before strengthening the wording.** Until
+      `GET /api/verification/self` reports `retention.team_photos` **PASS**
+      from an unattended run (thread or `--scheduled` cron), the export and
+      the privacy text say only that expired photos are *scheduled for
+      erasure*, and that a legal hold keeps them. Do not change that to
+      "erased after N days" before this box is ticked. A pending report does
+      not pause erasure; only a legal hold does (decided, not an oversight).
+      **When the wording IS strengthened, update `verify_all` in the same
+      change:** `scripts/verification/auth.py`'s
+      `auth.export_photo_wording_is_conditional` deliberately FAILS on any
+      export that promises erasure at N days (review D-R5-6, round 6). Change
+      or retire that check with the wording, or the next verification run is
+      red.
+- [ ] **C5 · Privacy page stays unpublished (owner decision #5).** Leave
+      `STREAKFIT_PRIVACY_PAGE_PUBLISHED` unset: `/privacy` must answer 404 and
+      sign-up / Settings must show no privacy link until the owner approves the
+      text. Before release, people still need the legally required privacy
+      information through a mechanism the owner approves; that mechanism is
+      NOT decided here. **On the day the owner turns the flag on, update
+      `verify_all` in the same change:** `auth.privacy_draft_not_published`
+      (`scripts/verification/auth.py`) deliberately FAILS once `/privacy`
+      answers 200 (review D-R5-6, round 6). Replace it with a check that the
+      published page is served and linked, or the next verification run is red.
+- [ ] **C6 · Ownerless teams (owner decision #1; migration `a1c4e0f2b7d9`).**
+      See `deploy-ownerless-teams-m1.md` for the migration step, its lock
+      risk and rollback. After the deploy, confirm the retention sweeper
+      records `ownerless_reap` runs (`retention_run.kind`) and
+      `retention.ownerless_teams` is PASS in `/api/verification/self` (it
+      FAILs while any empty ownerless team keeps failing to delete), and that
+      `security.handover_to_unconfirmed_age_refused`,
+      `security.leave_handing_to_unconfirmed_age_refused` and
+      `security.smoke_team_left_owned` pass in `verify_all` **suite 19**
+      (never suite 18: it left its smoke team ownerless). **Rollback window:**
+      the M1 downgrade works only while
+      `SELECT count(*) FROM team WHERE created_by_user_id IS NULL` is 0.
+      Suite 19 keeps it 0; it is closed by the first owner leaving with
+      "nobody", a fallback with no verified adult, a sole owner leaving or
+      deleting their account under a report or hold, or
+      `cleanup_qa_smoke.py --execute` on a smoke account whose smoke team its
+      reports keep -- and in practice never reopens. Decide on rollback right
+      after the post-deploy checks, before running the cleanup. **State
+      plainly in release notes: a team
+      whose owner leaves with "nobody", or whose owner deletes their account
+      with no verified adult to take over, becomes READ-ONLY and may stay
+      read-only indefinitely** -- there is no way back to an owner until age
+      eligibility (P2) and a recovery process (M2/P5) exist. Today nobody's
+      age is recorded, so EVERY handover is refused and every owner who
+      leaves a team with other people in it makes it ownerless.
+- [ ] **C7 · QA provisioning secret (review D-R5-3).** Sign-up now reserves
+      the `qa_smoke_` prefix. Set `STREAKFIT_QA_PROVISIONING_SECRET` on Render
+      AND in the shell that runs `verify_all.py` / `post_deploy_check.py`
+      over HTTP, or their registrations are refused (the in-process
+      StreakFit Control run needs nothing). `cleanup_qa_smoke.py` deletes
+      only accounts recorded in the QA provenance ledger
+      (`instance/qa_provenance.jsonl` where the tooling ran, or
+      `STREAKFIT_QA_LEDGER`); every existing `qa_smoke_` account has none and
+      is listed, never deleted.
 
 ## The transitional window, and what breaks in it
 

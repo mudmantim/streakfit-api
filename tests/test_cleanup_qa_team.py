@@ -15,6 +15,7 @@ from sqlalchemy import event
 import app as A
 import scripts.cleanup_qa_smoke as C
 from app import db
+from conftest import qa_tooling_created
 
 
 @pytest.fixture()
@@ -37,6 +38,8 @@ def _user(name):
     u = A.User(username=name, password_hash="x")
     db.session.add(u)
     db.session.commit()
+    if name.startswith("qa_smoke_"):
+        qa_tooling_created(u.id, name)   # as the QA tooling records it (round 6)
     return u
 
 
@@ -274,8 +277,11 @@ def test_policy_execute_deletes_qa_teams_and_owners_only(fk_app, monkeypatch, ca
 def test_policy_respects_the_team_sanity_cap(fk_app, monkeypatch, capsys):
     monkeypatch.setattr(C, "TEAM_SANITY_CAP", 1)
     o = _user("qa_smoke_owner_11")
-    _qa_team(o, name="Smoke Test a")
-    _qa_team(o, name="Smoke Test b")
+    # With a member each: a team only its owner is in no longer blocks the
+    # owner (owner decision 2026-11-13), so it would never reach this policy.
+    m = _user("qa_smoke_member_11")
+    _qa_team(o, m, name="Smoke Test a")
+    _qa_team(o, m, name="Smoke Test b")
     before = _row_counts()
     with pytest.raises(SystemExit) as e:
         _run(monkeypatch, "--team-owner-policy=delete-qa-team", "--execute")

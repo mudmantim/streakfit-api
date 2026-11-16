@@ -4,11 +4,53 @@ Standard library only -- no pip install needed to run any module in this
 package or scripts/verify_all.py.
 """
 import argparse
+import datetime
 import json
 import os
 import sys
 import urllib.error
 import urllib.request
+
+# ── QA account provenance (PR #23 round 6, review D-R5-3) ─────────────────────
+# Sign-up reserves the qa_smoke_ prefix. The tooling registers such accounts
+# by sending QA_PROVISIONING_HEADER: STREAKFIT_QA_PROVISIONING_SECRET (which
+# the server must also have) for a run over HTTP, or the server process's own
+# token for an in-process run (WsgiClient). Every account it creates is then
+# recorded, (id, username), in the provenance LEDGER -- the only thing
+# scripts/cleanup_qa_smoke.py accepts as proof that an account is disposable.
+QA_PREFIX = "qa_smoke_"
+QA_PROVISIONING_HEADER = "X-StreakFit-QA-Provisioning"
+_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+DEFAULT_QA_LEDGER = os.path.join(_REPO_ROOT, "instance", "qa_provenance.jsonl")
+
+
+def qa_ledger_path():
+    return os.environ.get("STREAKFIT_QA_LEDGER") or DEFAULT_QA_LEDGER
+
+
+def _is_qa_register(method, path, body):
+    return (method.upper() == "POST" and path.split("?")[0] == "/api/register"
+            and isinstance(body, dict)
+            and str(body.get("username") or "").startswith(QA_PREFIX))
+
+
+def record_qa_account(target, username, user_id):
+    """Append one provenance record. Never raises: a run must not fail
+    because the ledger could not be written (the account then simply has no
+    provenance and the cleanup keeps it -- the safe direction)."""
+    if not isinstance(user_id, int) or not str(username).startswith(QA_PREFIX):
+        return False
+    try:
+        path = qa_ledger_path()
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps({
+                "user_id": user_id, "username": username, "target": target,
+                "recorded_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            }) + "\n")
+        return True
+    except OSError:
+        return False
 
 # There is deliberately no default target. Every module WRITES (throwaway
 # qa_smoke_* accounts, a disposable team), and until 2026-10-15 a forgotten
@@ -47,6 +89,9 @@ class ApiClient:
         headers = {"Content-Type": content_type or "application/json"}
         if token:
             headers["Authorization"] = "Bearer " + token
+        qa_register = _is_qa_register(method, path, body)
+        if qa_register and os.environ.get("STREAKFIT_QA_PROVISIONING_SECRET"):
+            headers[QA_PROVISIONING_HEADER] = os.environ["STREAKFIT_QA_PROVISIONING_SECRET"]
         if raw_body is not None:
             data = raw_body
             if chunked:
@@ -69,7 +114,10 @@ class ApiClient:
         if not raw:
             return status, {}
         try:
-            return status, json.loads(raw)
+            parsed = json.loads(raw)
+            if qa_register and status == 201 and isinstance(parsed, dict):
+                record_qa_account(self.base_url, body["username"], parsed.get("user_id"))
+            return status, parsed
         except (json.JSONDecodeError, UnicodeDecodeError):
             # Not every response is JSON -- a photo comes back as JPEG bytes,
             # whose first byte (0xFF) is not valid UTF-8 and raises
@@ -90,6 +138,7 @@ class WsgiClient:
     def __init__(self, flask_app):
         self._test_client = flask_app.test_client()
         self.base_url = "wsgi://in-process"
+        self._qa_token = flask_app.config.get("QA_IN_PROCESS_TOKEN") or ""
 
     def request(self, method, path, token=None, body=None, raw_body=None,
                 content_type=None, text=False, chunked=False):
@@ -116,8 +165,14 @@ class WsgiClient:
                 content_type=content_type or "application/octet-stream")
             data = response.get_json(silent=True)
             return response.status_code, (data if data is not None else {})
+        qa_register = _is_qa_register(method, path, body)
+        if qa_register:
+            # The server process's own token: only code inside it can read it.
+            headers[QA_PROVISIONING_HEADER] = self._qa_token
         response = self._test_client.open(path, method=method, json=body, headers=headers)
         data = response.get_json(silent=True)
+        if qa_register and response.status_code == 201 and isinstance(data, dict):
+            record_qa_account(self.base_url, body["username"], data.get("user_id"))
         return response.status_code, (data if data is not None else {})
 
 

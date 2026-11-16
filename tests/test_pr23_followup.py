@@ -1,0 +1,887 @@
+"""PR #23 follow-up: the independent review's defects D1, D3 and D8, the
+reviewer's ad-hoc checks made permanent, and the owner decisions that stay
+pending pinned as such.
+
+D2 and D4 (and the join-during-deletion / two-hand-overs races) need two real
+connections and run on PostgreSQL: tests/team_owner_race.py, driven by
+tests/test_account_deletion_postgres.py.
+
+Decision-pending tests are `xfail(strict=True)` with the decision named in the
+reason: they describe what WOULD be true under one answer to a decision that
+is Tim's, and they fail today because the code deliberately does not choose.
+Strict, so the day somebody changes the behaviour the test turns red and the
+decision has to be looked at, not slipped in.
+"""
+import datetime
+import re
+import uuid
+
+import pytest
+from sqlalchemy import event
+
+import app as A
+from app import db
+from conftest import auth_headers, qa_tooling_created, register_and_login
+
+import scripts.cleanup_qa_smoke as C
+
+PW = 'WalkTest123!'
+
+
+@pytest.fixture()
+def fk_client(app):
+    def _on(dbapi_conn, _record):
+        dbapi_conn.execute('PRAGMA foreign_keys=ON')
+    event.listen(db.engine, 'connect', _on)
+    db.session.remove()
+    db.engine.dispose()
+    try:
+        yield app.test_client()
+    finally:
+        db.session.remove()
+        event.remove(db.engine, 'connect', _on)
+        db.engine.dispose()
+
+
+def _person(client, name):
+    tok = register_and_login(client, name, PW)
+    uid = client.get('/api/me', headers=auth_headers(tok)).get_json()['id']
+    return uid, tok
+
+
+def _team(client, tok, name='Hill Family'):
+    t = client.post('/api/teams', json={'name': name}, headers=auth_headers(tok)).get_json()['team']
+    return t['id'], t['invite_code']
+
+
+def _join(client, tok, tid, code):
+    r = client.post(f'/api/teams/{tid}/join', json={'code': code}, headers=auth_headers(tok))
+    assert r.status_code == 200, r.get_json()
+
+
+def _report(tid=None, status='pending', hold=False, subject_type='user', subject_ref=None,
+            about=None, by=None):
+    rep = A.Report(public_id=uuid.uuid4().hex, team_id=tid, category='harassment',
+                   subject_type=subject_type, subject_ref=subject_ref, status=status,
+                   legal_hold=hold, legal_hold_reason='test' if hold else None,
+                   reported_user_id=about, reporter_user_id=by)
+    db.session.add(rep)
+    db.session.commit()
+    return rep.id
+
+
+# ── D1: after a sole owner leaves, nothing tells "kept for a report" from "deleted" ──
+
+def _world(client, tag, report):
+    """Owner O and member M share a team with a message, a photo and a
+    challenge. M leaves (having reported, in the report world); then O, alone,
+    leaves with delete_team. Returns what O can still name."""
+    o, otok = _person(client, f'd1o_{tag}')
+    m, mtok = _person(client, f'd1m_{tag}')
+    tid, code = _team(client, otok, f'Fam {tag}')
+    _join(client, mtok, tid, code)
+    client.post(f'/api/teams/{tid}/messages', json={'body': 'hello'}, headers=auth_headers(otok))
+    photo = A.TeamPhoto(public_id=uuid.uuid4().hex, team_id=tid, sender_user_id=o,
+                        caption='park', image_data=b'px', byte_size=2,
+                        expires_at=datetime.datetime.utcnow() + datetime.timedelta(days=5))
+    db.session.add(photo)
+    db.session.commit()
+    photo_ref = photo.public_id
+    ch = client.post(f'/api/teams/{tid}/challenges',
+                     json={'preset_key': A.CHALLENGE_PRESETS[0]['key']},
+                     headers=auth_headers(otok)).get_json() or {}
+    ch_id = (ch.get('challenge') or ch).get('public_id', 'none')
+    if report == 'pending':
+        _report(tid, status='pending', about=o, by=m)
+    elif report == 'hold':
+        _report(tid, status='closed', hold=True, about=o, by=m)
+    assert client.post(f'/api/teams/{tid}/leave', json={},
+                       headers=auth_headers(mtok)).status_code == 200
+    r = client.post(f'/api/teams/{tid}/leave', json={'delete_team': True},
+                    headers=auth_headers(otok))
+    assert r.status_code == 200, r.get_json()
+    db.session.expire_all()
+    kept = db.session.get(A.Team, tid) is not None
+    assert kept == (report is not None)
+    return {'o': o, 'otok': otok, 'm': m, 'tid': tid, 'code': code,
+            'photo': photo_ref, 'challenge': ch_id, 'tag': tag}
+
+
+def _requests(w):
+    t, h = w['tid'], auth_headers(w['otok'])
+    return [
+        ('GET teams', 'get', '/api/teams', None),
+        ('GET team', 'get', f'/api/teams/{t}', None),
+        ('lookup old code', 'get', f"/api/teams/lookup/{w['code']}", None),
+        ('join old code', 'post', f'/api/teams/{t}/join', {'code': w['code']}),
+        ('join wrong code', 'post', f'/api/teams/{t}/join', {'code': 'ZZZZZZ'}),
+        ('leave', 'post', f'/api/teams/{t}/leave', {}),
+        ('leave delete_team', 'post', f'/api/teams/{t}/leave', {'delete_team': True}),
+        ('leave hand over', 'post', f'/api/teams/{t}/leave', {'new_owner_user_id': w['m']}),
+        ('remove member', 'delete', f"/api/teams/{t}/members/{w['m']}", None),
+        ('hand over', 'post', f'/api/teams/{t}/owner', {'new_owner_user_id': w['m']}),
+        ('hand over self', 'post', f'/api/teams/{t}/owner', {'new_owner_user_id': w['o']}),
+        ('rotate invite', 'post', f'/api/teams/{t}/rotate-invite', None),
+        ('campfire', 'get', f'/api/teams/{t}/campfire', None),
+        ('moments', 'get', f'/api/teams/{t}/moments', None),
+        ('messages', 'get', f'/api/teams/{t}/messages', None),
+        ('post message', 'post', f'/api/teams/{t}/messages', {'body': 'still here?'}),
+        ('post challenge', 'post', f'/api/teams/{t}/challenges',
+         {'preset_key': A.CHALLENGE_PRESETS[0]['key']}),
+        ('complete challenge', 'post', f"/api/teams/{t}/challenges/{w['challenge']}/complete", {}),
+        ('upload photo', 'post', f'/api/teams/{t}/photos', None),
+        ('get photo', 'get', f"/api/teams/{t}/photos/{w['photo']}", None),
+        ('delete photo', 'delete', f"/api/teams/{t}/photos/{w['photo']}", None),
+        ('report about the team', 'post', '/api/reports',
+         {'category': 'other', 'subject_type': 'user', 'reported_user_id': w['m'], 'team_id': t}),
+    ], h
+
+
+def _normalise(text, w):
+    """Take out what differs only because the two worlds are different rows."""
+    text = re.sub(r'\d{4}-\d\d-\d\dT[\d:.]+(\+00:00|Z)?', '<time>', text)
+    for key, label in (('code', '<code>'), ('photo', '<photo>'), ('challenge', '<ch>'),
+                       ('tag', '<tag>')):
+        text = text.replace(str(w[key]), label)
+    for key, label in (('tid', '<team>'), ('o', '<me>'), ('m', '<mate>')):
+        text = re.sub(rf'\b{w[key]}\b', label, text)
+    return text
+
+
+def _side_effects(w):
+    db.session.expire_all()
+    t = w['tid']
+    inv = A.TeamInviteCode.query.filter_by(team_id=t).one_or_none()
+    team = db.session.get(A.Team, t)
+    return {
+        'invite': None if inv is None else (inv.code == w['code'], inv.rotated_at),
+        'owner': None if team is None else team.created_by_user_id,
+        'members': A.TeamMembership.query.filter_by(team_id=t).count(),
+        'messages_by_me': A.TeamMessage.query.filter_by(sender_user_id=w['o']).count(),
+        'challenges_by_me': A.TeamChallenge.query.filter_by(created_by_user_id=w['o']).count(),
+        'photos_live': A.TeamPhoto.query.filter_by(team_id=t, deleted_at=None).count(),
+        'reports_by_me': A.Report.query.filter_by(reporter_user_id=w['o']).count(),
+    }
+
+
+@pytest.mark.parametrize('report', ['pending', 'hold'])
+def test_a_sole_owner_who_left_cannot_tell_a_kept_team_from_a_deleted_one(fk_client, report):
+    """PR #23 review D1. Every team endpoint the former owner can call answers
+    the same status, the same body and the same headers whether a report kept
+    the team or there was none and it was deleted; and none of them changes
+    anything in the kept team (no new invite code, no new owner, no row)."""
+    c = fk_client
+    deleted = _world(c, 'qzgone', None)
+    kept = _world(c, 'qzkept', report)
+    before = _side_effects(kept)
+    # Kept for the review: since owner decision #1 the empty team is also
+    # ownerless, so nobody holds owner powers over it and the empty-team
+    # cleanup deletes it once the review ends (D-R5-1).
+    assert before['invite'] == (True, None) and before['owner'] is None
+
+    reqs_d, hd = _requests(deleted)
+    reqs_k, hk = _requests(kept)
+    diffs = []
+    for (name, verb, path_d, body_d), (_n, _v, path_k, body_k) in zip(reqs_d, reqs_k):
+        rd = getattr(c, verb)(path_d, json=body_d, headers=hd)
+        rk = getattr(c, verb)(path_k, json=body_k, headers=hk)
+        # Content-Length is left out of the header comparison only because the
+        # bodies themselves are compared exactly (after the same normalising).
+        a = (rd.status_code, _normalise(rd.get_data(as_text=True), deleted),
+             sorted((k, _normalise(v, deleted)) for k, v in rd.headers.items()
+                    if k != 'Content-Length'))
+        b = (rk.status_code, _normalise(rk.get_data(as_text=True), kept),
+             sorted((k, _normalise(v, kept)) for k, v in rk.headers.items()
+                    if k != 'Content-Length'))
+        if a != b:
+            diffs.append((name, a[0], b[0], a[1] == b[1],
+                          sorted(set(a[2]) ^ set(b[2]))))
+        assert rk.status_code != 200 or name == 'GET teams', (name, rk.get_json())
+    assert not diffs, diffs
+
+    after = _side_effects(kept)
+    assert after == before, (before, after)
+    # The kept team still belongs to nobody new and is still closed.
+    assert after['owner'] is None and after['members'] == 0     # ownerless since round 6
+
+
+def test_rotate_on_a_kept_team_never_returns_a_code(fk_client):
+    """The reviewer's sharpest probe, on its own: 200 + a fresh invite code."""
+    c = fk_client
+    w = _world(c, 'r', 'pending')
+    r = c.post(f"/api/teams/{w['tid']}/rotate-invite", headers=auth_headers(w['otok']))
+    assert r.status_code == 404 and 'invite_code' not in (r.get_json() or {})
+    assert A.TeamInviteCode.query.filter_by(team_id=w['tid']).one().code == w['code']
+
+
+def test_a_team_with_people_in_it_keeps_its_creator_powers(client):
+    """Control for D1: only an EMPTY team reads as gone."""
+    o, otok = _person(client, 'ctl_o')
+    m, mtok = _person(client, 'ctl_m')
+    tid, code = _team(client, otok)
+    _join(client, mtok, tid, code)
+    r = client.post(f'/api/teams/{tid}/rotate-invite', headers=auth_headers(otok))
+    assert r.status_code == 200 and r.get_json()['invite_code'] != code
+
+
+@pytest.mark.parametrize('report', ['pending', 'hold'])
+def test_decision_pending_the_export_still_lists_a_photo_kept_for_review(fk_client, report):
+    """DOCUMENTED CURRENT BEHAVIOUR -- a residual of D1 left for the owner
+    (decisions #5 export/privacy wording and #6 sole-owner leave).
+
+    GET /api/me/data lists the person's own photos. A photo in a team kept
+    for a review still exists, so it is listed; deleted with the team, it is
+    not. That difference tells the former owner a report kept the team.
+    Leaving it out would make the export omit data that is still held about
+    the person, which is a transparency / legal choice, not a bug fix. Only
+    `photos_shared` differs; everything else in the export is the same."""
+    c = fk_client
+    deleted = _world(c, 'qzexpg', None)
+    kept = _world(c, 'qzexpk', report)
+    a = c.get('/api/me/data', headers=auth_headers(deleted['otok'])).get_json()
+    b = c.get('/api/me/data', headers=auth_headers(kept['otok'])).get_json()
+    differs = sorted(k for k in set(a) | set(b)
+                     if _normalise(repr(a.get(k)), deleted) != _normalise(repr(b.get(k)), kept))
+    assert differs == ['photos_shared'], differs
+    assert a['photos_shared'] == [] and len(b['photos_shared']) == 1
+
+
+@pytest.mark.parametrize('report', ['pending', 'hold'])
+def test_decision_pending_account_deletion_still_answers_differently(fk_client, report):
+    """DOCUMENTED CURRENT BEHAVIOUR (owner decision #6, sole-owner leave).
+
+    DELETE /api/me is not a team endpoint and is out of D1's reach: with the
+    kept team still owned, the deletion is refused with the generic
+    `safety_record` (as for ANY pending report that involves the person),
+    while without a report it succeeds. Making these the same means either
+    deleting a team under review or never letting the owner go -- a policy
+    choice, so it is pinned here, not changed."""
+    c = fk_client
+    deleted = _world(c, 'xn', None)
+    kept = _world(c, 'xk', report)
+    rd = c.delete('/api/me', json={'password': PW}, headers=auth_headers(deleted['otok']))
+    rk = c.delete('/api/me', json={'password': PW}, headers=auth_headers(kept['otok']))
+    assert rd.status_code == 200
+    assert rk.status_code == 409 and rk.get_json()['blocker_codes'] == ['safety_record']
+
+
+# ── D3: a legal hold keeps a photo whatever the held report is about ──────────
+
+def _expired_photo(client, tag):
+    o, otok = _person(client, f'd3o_{tag}')
+    tid, _code = _team(client, otok, f'D3 {tag}')
+    when = datetime.datetime.utcnow() - datetime.timedelta(days=A.PHOTO_RETENTION_DAYS + 2)
+    photo = A.TeamPhoto(public_id=uuid.uuid4().hex, team_id=tid, sender_user_id=o,
+                        caption='kept for court', image_data=b'pixels', byte_size=6,
+                        created_at=when,
+                        expires_at=when + datetime.timedelta(days=A.PHOTO_RETENTION_DAYS))
+    db.session.add(photo)
+    db.session.flush()
+    msg = A.TeamMessage(public_id=uuid.uuid4().hex, team_id=tid, sender_type='user',
+                        sender_user_id=o, body='kept for court', photo_id=photo.id)
+    db.session.add(msg)
+    db.session.commit()
+    return {'o': o, 'tid': tid, 'photo_id': photo.id, 'photo': photo.public_id,
+            'message': msg.public_id}
+
+
+def _erased(photo_id):
+    db.session.expire_all()
+    p = db.session.get(A.TeamPhoto, photo_id)
+    return p.image_data is None and p.byte_size == 0 and p.caption is None
+
+
+@pytest.mark.parametrize('about', ['photo', 'message', 'sender', 'team'])
+def test_a_legal_hold_on_anything_the_photo_belongs_to_keeps_it(client, about):
+    x = _expired_photo(client, about)
+    other, _ = _person(client, f'd3x_{about}')
+    kw = {'photo': dict(subject_type='photo', subject_ref=x['photo']),
+          'message': dict(subject_type='message', subject_ref=x['message']),
+          'sender': dict(subject_type='user', about=x['o']),
+          'team': dict(subject_type='user', about=other, tid=x['tid'])}[about]
+    _report(status='closed', hold=True, **kw)
+    out = A._sweep_expired_team_photos()
+    db.session.commit()
+    assert not _erased(x['photo_id'])
+    assert out == {'erased': 0, 'held_by_legal_hold': 1}
+
+
+def test_a_hold_on_something_unrelated_does_not_keep_it(client):
+    x = _expired_photo(client, 'unrel')
+    y = _expired_photo(client, 'other')
+    _report(tid=y['tid'], status='closed', hold=True, about=y['o'])
+    out = A._sweep_expired_team_photos()
+    db.session.commit()
+    assert _erased(x['photo_id']) and not _erased(y['photo_id'])
+    assert out == {'erased': 1, 'held_by_legal_hold': 1}
+
+
+def test_a_photo_whose_sender_was_deleted_is_still_swept(client):
+    """NULL-safety of the hold predicate: NOT(... IN ...) must not be NULL."""
+    x = _expired_photo(client, 'nulls')
+    _report(status='closed', hold=True, subject_type='user',
+            about=_person(client, 'd3_unrelated')[0])
+    p = db.session.get(A.TeamPhoto, x['photo_id'])
+    p.sender_user_id = None
+    db.session.commit()
+    A._sweep_expired_team_photos()
+    db.session.commit()
+    assert _erased(x['photo_id'])
+
+
+# OWNER DECISION #4 (Tim, 2026-11-14): legal holds only. A report that is
+# still pending -- about the photo, its message, its sender or its team --
+# does NOT pause erasure. This was an xfail while the decision was open.
+@pytest.mark.parametrize('about', ['photo', 'message', 'sender', 'team'])
+def test_a_pending_report_does_not_pause_erasure(client, about):
+    x = _expired_photo(client, f'pend_{about}')
+    other, _ = _person(client, f'pend_x_{about}')
+    kw = {'photo': dict(subject_type='photo', subject_ref=x['photo'], tid=x['tid']),
+          'message': dict(subject_type='message', subject_ref=x['message'], tid=x['tid']),
+          'sender': dict(subject_type='user', about=x['o']),
+          'team': dict(subject_type='user', about=other, tid=x['tid'])}[about]
+    _report(status='pending', **kw)
+    out = A._sweep_expired_team_photos()
+    db.session.commit()
+    assert _erased(x['photo_id'])
+    assert out == {'erased': 1, 'held_by_legal_hold': 0}
+
+
+# ── D8: the QA cleanup never touches a team a real person is in ─────────────
+
+def _u(name):
+    u = A.User(username=name, password_hash='x')
+    db.session.add(u)
+    db.session.commit()
+    if name.startswith('qa_smoke_'):
+        qa_tooling_created(u.id, name)   # as the QA tooling records it (round 6)
+    return u.id
+
+
+def _adult(uid):
+    """Record a verified adult (owner decision #1: only they can hold a team).
+    Nothing in the app writes age_band yet; tests that need an eligible owner
+    set it directly."""
+    db.session.get(A.User, uid).age_band = A.AGE_ADULT
+    db.session.commit()
+    return uid
+
+
+def _qa_team(owner, members, owner_in=True, name='Smoke Test run'):
+    t = A.Team(name=name, created_by_user_id=owner)
+    db.session.add(t)
+    db.session.flush()
+    for uid in ([owner] if owner_in else []) + list(members):
+        db.session.add(A.TeamMembership(team_id=t.id, user_id=uid))
+    db.session.commit()
+    return t.id
+
+
+def _snapshot(tid):
+    db.session.expire_all()
+    t = db.session.get(A.Team, tid)
+    return (t is not None, t.created_by_user_id if t else None,
+            A.TeamMembership.query.filter_by(team_id=tid).count(),
+            A.TeamMessage.query.filter_by(team_id=tid).count(),
+            A.TeamPhoto.query.filter_by(team_id=tid).count())
+
+
+def test_a_real_former_members_chat_and_photos_are_never_deleted(fk_client):
+    """QA owner alone in its team, but a real person posted there and left."""
+    qa = _u('qa_smoke_d8_owner1')
+    real = _u('real_d8_former')
+    tid = _qa_team(qa, [])
+    db.session.add_all([
+        A.TeamMessage(team_id=tid, sender_type='user', sender_user_id=real, body='mine'),
+        A.TeamPhoto(public_id=uuid.uuid4().hex, team_id=tid, sender_user_id=real,
+                    image_data=b'x', byte_size=1)])
+    db.session.commit()
+    before = _snapshot(tid)
+    safe, blocked, _counts = C.survey()
+    assert qa not in {u.id for u in safe}
+    assert any(u.id == qa and 'non-qa_smoke_' in r for u, r in blocked)
+    C.execute(safe, {})
+    rep = A.delete_user_account(qa, dry_run=False, qa_teams_only=True)
+    assert rep['blocked'] and 'team_not_qa_only' in rep['blocker_codes']
+    assert _snapshot(tid) == before and db.session.get(A.User, qa) is not None
+
+
+def test_a_qa_team_is_never_handed_to_a_real_member(fk_client):
+    """QA owner already left; the fallback would pick a real member."""
+    qa = _u('qa_smoke_d8_owner2')
+    real = _adult(_u('real_d8_member'))     # eligible, so the fallback WOULD pick them
+    tid = _qa_team(qa, [real], owner_in=False)
+    assert A._owned_team_plan(qa)[0]['action'] == A.TEAM_OWNER_TRANSFER
+    before = _snapshot(tid)
+    safe, blocked, _counts = C.survey()
+    assert qa in {u.id for u, _r in blocked} and qa not in {u.id for u in safe}
+    C.execute(safe, {})
+    assert _snapshot(tid) == before
+    assert db.session.get(A.Team, tid).created_by_user_id == qa
+
+
+def test_user_content_with_its_author_link_cut_counts_as_not_qa(fk_client):
+    """Fail closed: a message whose sender was deleted may have been real."""
+    qa = _u('qa_smoke_d8_owner3')
+    tid = _qa_team(qa, [])
+    db.session.add(A.TeamMessage(team_id=tid, sender_type='user', sender_user_id=None,
+                                 body='who wrote this?'))
+    db.session.commit()
+    rep = A.delete_user_account(qa, dry_run=True, qa_teams_only=True)
+    assert rep['blocker_codes'] == ['team_not_qa_only']
+
+
+def test_an_all_qa_team_still_goes_with_its_qa_owner(fk_client):
+    """Positive control, mixed fixtures in ONE run: only the all-QA team goes."""
+    qa_ok = _u('qa_smoke_d8_ok')
+    qa_mate = _u('qa_smoke_d8_mate')
+    clean = _qa_team(qa_ok, [])
+    db.session.add_all([
+        A.TeamMessage(team_id=clean, sender_type='user', sender_user_id=qa_mate, body='qa'),
+        A.TeamMessage(team_id=clean, sender_type='rickie', sender_user_id=None, body='hi')])
+    qa_bad = _u('qa_smoke_d8_bad')
+    real = _u('real_d8_in_mixed')
+    mixed = _qa_team(qa_bad, [real], owner_in=False)
+    db.session.commit()
+    before_mixed = _snapshot(mixed)
+    safe, blocked, counts = C.survey()
+    assert {qa_ok, qa_mate} <= {u.id for u in safe}
+    assert qa_bad in {u.id for u, _r in blocked}
+    C.execute(safe, counts)
+    db.session.expire_all()
+    assert db.session.get(A.Team, clean) is None and db.session.get(A.User, qa_ok) is None
+    assert _snapshot(mixed) == before_mixed and db.session.get(A.User, qa_bad) is not None
+
+
+def test_the_qa_guard_does_not_change_ordinary_deletion(fk_client):
+    """Without qa_teams_only the user-facing rules are exactly as before."""
+    qa = _u('qa_smoke_d8_plain')
+    real = _adult(_u('real_d8_plain'))
+    tid = _qa_team(qa, [real], owner_in=False)
+    rep = A.delete_user_account(qa, dry_run=True)
+    assert 'team_not_qa_only' not in rep['blocker_codes'] and not rep['blocked']
+    assert rep['owned_teams'][0]['new_owner_user_id'] == real and tid
+
+
+# ── The reviewer's ad-hoc checks, made permanent ─────────────────────────────
+
+def _all_rows(tid, *uids):
+    db.session.expire_all()
+    rows = {label: A._qa_team_rows(model, attr, tid).count()
+            for label, model, attr in A._TEAM_ROW_DELETES}
+    rows['team'] = int(db.session.get(A.Team, tid) is not None)
+    rows['users'] = sum(db.session.get(A.User, u) is not None for u in uids)
+    return rows
+
+
+def _filled_sole_team(client, tag):
+    o, otok = _person(client, f'rb_{tag}')
+    tid, _code = _team(client, otok, f'RB {tag}')
+    client.post(f'/api/teams/{tid}/messages', json={'body': 'hi'}, headers=auth_headers(otok))
+    db.session.add(A.TeamPhoto(public_id=uuid.uuid4().hex, team_id=tid, sender_user_id=o,
+                               caption='c', image_data=b'p', byte_size=1))
+    db.session.commit()
+    client.post(f'/api/teams/{tid}/challenges',
+                json={'preset_key': A.CHALLENGE_PRESETS[0]['key']}, headers=auth_headers(otok))
+    return o, otok, tid
+
+
+def _boom_after(monkeypatch, name, calls):
+    orig = getattr(A, name)
+    n = [0]
+
+    def wrapped(*a, **k):
+        n[0] += 1
+        out = orig(*a, **k)
+        if n[0] >= calls:
+            raise RuntimeError('injected failure')
+        return out
+    monkeypatch.setattr(A, name, wrapped)
+
+
+def test_a_failure_midway_through_account_deletion_rolls_everything_back(fk_client, monkeypatch):
+    """Team staged for deletion, then a failure before the person goes."""
+    c = fk_client
+    o, otok, tid = _filled_sole_team(c, 'acct')
+    before = _all_rows(tid, o)
+    assert before['team'] == 1 and before['team_message'] >= 1
+    _boom_after(monkeypatch, '_stage_owned_teams_for_account_deletion', 1)
+    try:
+        r = c.delete('/api/me', json={'password': PW}, headers=auth_headers(otok))
+        assert r.status_code == 500
+    except RuntimeError:
+        pass                                  # TESTING propagates it
+    monkeypatch.undo()
+    db.session.remove()
+    assert _all_rows(tid, o) == before
+
+
+def test_a_failure_midway_through_team_deletion_on_leave_rolls_back(fk_client, monkeypatch):
+    """Half of _TEAM_ROW_DELETES done, then a failure: nothing is gone."""
+    c = fk_client
+    o, otok, tid = _filled_sole_team(c, 'leave')
+    before = _all_rows(tid, o)
+    _boom_after(monkeypatch, '_qa_team_rows', 4)
+    try:
+        r = c.post(f'/api/teams/{tid}/leave', json={'delete_team': True},
+                   headers=auth_headers(otok))
+        assert r.status_code == 500
+    except RuntimeError:
+        pass
+    monkeypatch.undo()
+    db.session.remove()
+    assert _all_rows(tid, o) == before
+
+
+# ── D5: owner decision #1 (Tim, 2026-11-14/15), IMPLEMENTED in round 6 ──────
+# These were strict xfails while the decision needed a migration. Since
+# a1c4e0f2b7d9 a team can be ownerless, so the decided rule is enforced: only a
+# VERIFIED ADULT who is not suspended can be made owner -- by a pick, a leave or
+# the account-deletion fallback -- and with nobody eligible the team becomes
+# ownerless. Unknown age is NOT adult (review D-R5-2: the fallback test used to
+# expect an unknown-age owner).
+
+def _suspend(uid):
+    db.session.add(A.UserRestriction(user_id=uid, kind='social_suspended'))
+    db.session.commit()
+
+
+def _band(uid, band):
+    db.session.get(A.User, uid).age_band = band
+    db.session.commit()
+
+
+@pytest.mark.parametrize('band', [A.AGE_CHILD, A.AGE_TEEN, None])
+def test_a_child_or_unknown_age_member_is_never_made_owner(client, band):
+    o, otok = _person(client, f'kid_o_{band}')
+    kid, ktok = _person(client, f'kid_k_{band}')
+    tid, code = _team(client, otok)
+    _join(client, ktok, tid, code)
+    _band(kid, band)
+    for route in ('owner', 'leave'):
+        r = client.post(f'/api/teams/{tid}/{route}', json={'new_owner_user_id': kid},
+                        headers=auth_headers(otok))
+        assert r.status_code == 400 and r.get_json()['error'] == 'new_owner_not_eligible', \
+            (route, r.get_json())
+    db.session.expire_all()
+    assert db.session.get(A.Team, tid).created_by_user_id == o
+    assert A.TeamMembership.query.filter_by(team_id=tid, user_id=o).count() == 1
+
+
+@pytest.mark.parametrize('route', ['owner', 'leave'])
+def test_a_suspended_member_is_never_picked_as_owner(client, route):
+    """Even a verified adult: the suspension alone refuses (400)."""
+    o, otok = _person(client, f'sus_o_{route}')
+    s, stok = _person(client, f'sus_s_{route}')
+    tid, code = _team(client, otok)
+    _join(client, stok, tid, code)
+    _band(s, A.AGE_ADULT)
+    _suspend(s)
+    r = client.post(f'/api/teams/{tid}/{route}', json={'new_owner_user_id': s},
+                    headers=auth_headers(otok))
+    assert r.status_code == 400 and r.get_json()['error'] == 'new_owner_not_eligible'
+    db.session.expire_all()
+    assert db.session.get(A.Team, tid).created_by_user_id == o
+
+
+@pytest.mark.parametrize('route', ['owner', 'leave'])
+def test_a_verified_adult_who_is_not_suspended_can_be_picked(client, route):
+    """The positive control: the rule refuses the ineligible, not everybody."""
+    o, otok = _person(client, f'ad_o_{route}')
+    a, atok = _person(client, f'ad_a_{route}')
+    tid, code = _team(client, otok)
+    _join(client, atok, tid, code)
+    _band(a, A.AGE_ADULT)
+    r = client.post(f'/api/teams/{tid}/{route}', json={'new_owner_user_id': a},
+                    headers=auth_headers(otok))
+    assert r.status_code == 200, r.get_json()
+    db.session.expire_all()
+    assert db.session.get(A.Team, tid).created_by_user_id == a
+
+
+def test_the_fallback_makes_the_team_ownerless_when_nobody_is_a_verified_adult(app):
+    """D-R5-2: a suspended member and an UNKNOWN-AGE member -> ownerless, never
+    the unknown-age one (the old xfail body expected `ok` to be chosen)."""
+    owner = _u('fb_owner')
+    sus = _u('fb_suspended')
+    ok = _u('fb_ok')                         # no age band: NOT adult
+    tid = _qa_team(owner, [sus, ok], owner_in=False, name='fallback')
+    db.session.query(A.TeamMembership).filter_by(team_id=tid, user_id=sus).update(
+        {A.TeamMembership.joined_at: datetime.datetime.utcnow() - datetime.timedelta(days=9)})
+    db.session.commit()
+    _band(sus, A.AGE_ADULT)
+    _suspend(sus)
+    plan = A._owned_team_plan(owner)[0]
+    assert plan['action'] == A.TEAM_OWNER_OWNERLESS and plan['new_owner_user_id'] is None
+    rep = A.delete_user_account(owner, dry_run=False)
+    assert rep['executed'], rep
+    db.session.expire_all()
+    team = db.session.get(A.Team, tid)
+    assert team is not None and team.created_by_user_id is None
+    assert {m.user_id for m in A.TeamMembership.query.filter_by(team_id=tid)} == {sus, ok}
+
+
+@pytest.mark.parametrize('bands', [
+    (None,), (A.AGE_CHILD,), (A.AGE_TEEN,), (None, A.AGE_CHILD), ('ADULT?',), ('',),
+    (A.AGE_CHILD, A.AGE_TEEN, None)])
+def test_the_fallback_never_makes_a_child_or_unknown_age_member_owner(app, bands):
+    """Pinned: whatever mix of children, teens and unknown ages remains, the
+    fallback chooses nobody -- the team becomes ownerless."""
+    owner = _u(f'nb_owner_{len(bands)}')
+    members = [_u(f'nb_m{i}_{len(bands)}') for i in range(len(bands))]
+    for uid, band in zip(members, bands):
+        _band(uid, band)
+    tid = _qa_team(owner, members, owner_in=False, name='never')
+    plan = A._owned_team_plan(owner)[0]
+    assert plan['action'] == A.TEAM_OWNER_OWNERLESS and plan['new_owner_user_id'] is None
+    assert A.delete_user_account(owner, dry_run=False)['executed']
+    db.session.expire_all()
+    assert db.session.get(A.Team, tid).created_by_user_id is None
+
+
+def test_the_fallback_takes_the_longest_standing_verified_adult(app):
+    """Positive control: a verified adult is chosen over an older unknown-age
+    member and an older suspended adult."""
+    owner = _u('fa_owner')
+    old_unknown = _u('fa_unknown')
+    old_sus = _u('fa_sus')
+    adult = _u('fa_adult')
+    tid = _qa_team(owner, [old_unknown, old_sus, adult], owner_in=False, name='fa')
+    _band(old_sus, A.AGE_ADULT)
+    _suspend(old_sus)
+    _band(adult, A.AGE_ADULT)
+    plan = A._owned_team_plan(owner)[0]
+    assert plan['action'] == A.TEAM_OWNER_TRANSFER and plan['new_owner_user_id'] == adult
+    assert tid
+
+
+# ── Follow-up review DEF-4: every cut person link fails the QA guard closed ──
+
+def _cut_challenge_creator(tid, qa):
+    db.session.add(A.TeamChallenge(public_id=uuid.uuid4().hex, team_id=tid,
+                                   created_by_user_id=None, target_user_id=qa,
+                                   preset_key='squats_10'))
+
+
+def _cut_challenge_target(tid, qa):
+    # What _expire_challenges_addressed_to leaves when the named person deletes.
+    db.session.add(A.TeamChallenge(public_id=uuid.uuid4().hex, team_id=tid,
+                                   created_by_user_id=qa, target_user_id=None,
+                                   target_left_at=datetime.datetime.utcnow(),
+                                   preset_key='squats_10'))
+
+
+def _cut_moment_subject(tid, qa):
+    db.session.add_all([
+        A.TeamMoment(team_id=tid, moment_type='member_joined', subject_user_id=None),
+        A.TeamMoment(team_id=tid, moment_type='member_left', subject_user_id=None)])
+
+
+def _cut_reporter(tid, qa):
+    _report(tid=tid, status='closed', about=qa, by=None)
+
+
+def _cut_appellant(tid, qa):
+    rid = _report(tid=tid, status='closed', about=qa, by=qa)
+    act = A.ModerationAction(report_id=rid, action='dismiss', target_user_id=qa, team_id=tid)
+    db.session.add(act)
+    db.session.flush()
+    db.session.add(A.Appeal(public_id=uuid.uuid4().hex, user_id=None, action_id=act.id,
+                            status='withdrawn'))
+
+
+@pytest.mark.parametrize('cut', [_cut_challenge_creator, _cut_challenge_target,
+                                 _cut_moment_subject, _cut_reporter, _cut_appellant],
+                         ids=['challenge_creator', 'challenge_target', 'moment_subject',
+                              'reporter', 'appellant'])
+def test_any_row_whose_person_link_was_cut_keeps_a_qa_team(fk_client, cut):
+    """The review's four uncounted link types (and appeals): each one alone,
+    in a team where every live link is a qa_smoke_ account, must stop
+    `--execute` deleting the team, because the cut link may have been a real
+    person's."""
+    qa = _u(f'qa_smoke_r2_{cut.__name__}')
+    tid = _qa_team(qa, [])
+    cut(tid, qa)
+    db.session.commit()
+    before = _snapshot(tid)
+    safe, blocked, counts = C.survey()
+    assert qa not in {u.id for u in safe}
+    assert qa in {u.id for u, _r in blocked}
+    C.execute(safe, counts)
+    rep = A.delete_user_account(qa, dry_run=False, qa_teams_only=True)
+    assert rep['blocker_codes'] == ['team_not_qa_only']
+    assert _snapshot(tid) == before and db.session.get(A.User, qa) is not None
+
+
+def test_rows_with_no_person_by_design_do_not_keep_a_qa_team(fk_client):
+    """Control: NULLs that are not cut links -- Rickie's message, a challenge
+    to the whole team, a campfire stage moment -- leave an all-QA team
+    deletable, as before."""
+    qa = _u('qa_smoke_r2_by_design')
+    tid = _qa_team(qa, [])
+    db.session.add_all([
+        A.TeamMessage(team_id=tid, sender_type='rickie', sender_user_id=None, body='hi'),
+        A.TeamChallenge(public_id=uuid.uuid4().hex, team_id=tid, created_by_user_id=qa,
+                        target_user_id=None, preset_key='squats_10'),
+        A.TeamMoment(team_id=tid, moment_type='campfire_stage_reached', subject_user_id=None),
+        A.TeamMoment(team_id=tid, moment_type='team_created', subject_user_id=qa)])
+    db.session.commit()
+    safe, _blocked, counts = C.survey()
+    assert qa in {u.id for u in safe}
+    C.execute(safe, counts)
+    db.session.expire_all()
+    assert db.session.get(A.Team, tid) is None and db.session.get(A.User, qa) is None
+
+
+def test_a_real_person_who_joined_left_and_deleted_keeps_the_qa_team(fk_client):
+    """The review's app-reachable path, end to end through the API: a QA
+    account creates a smoke-test team, a real person joins with the code,
+    leaves and deletes their account. Only author-less moments are left of
+    them, and `--execute` must leave the team (and its owner) alone."""
+    qa, qa_tok = _person(fk_client, 'qa_smoke_r2api')
+    tid, code = _team(fk_client, qa_tok, name='Smoke Test run api')
+    real, real_tok = _person(fk_client, 'realr2api')
+    _join(fk_client, real_tok, tid, code)
+    left = fk_client.post(f'/api/teams/{tid}/leave', json={}, headers=auth_headers(real_tok))
+    assert left.status_code == 200, left.get_json()
+    gone = fk_client.delete('/api/me', json={'password': PW}, headers=auth_headers(real_tok))
+    assert gone.status_code == 200, gone.get_json()
+    db.session.expire_all()
+    assert db.session.get(A.User, real) is None
+    moments = sorted((m.moment_type, m.subject_user_id)
+                     for m in A.TeamMoment.query.filter_by(team_id=tid))
+    assert ('member_joined', None) in moments and ('member_left', None) in moments
+    before = _snapshot(tid)
+    safe, blocked, counts = C.survey()
+    assert qa not in {u.id for u in safe} and qa in {u.id for u, _r in blocked}
+    C.execute(safe, counts)
+    assert _snapshot(tid) == before and db.session.get(A.User, qa) is not None
+
+
+# ── DEF-1 timing (round-2 review): the same SQL, kept or deleted ─────────────
+
+class _SQL:
+    """The SQL text of every statement sent inside the block (parameters
+    dropped, whitespace collapsed)."""
+
+    def __init__(self):
+        self.seen = []
+
+    def _on(self, _conn, _cursor, statement, _params, _context, _many):
+        self.seen.append(' '.join(statement.split()))
+
+    def __enter__(self):
+        event.listen(db.engine, 'before_cursor_execute', self._on)
+        return self
+
+    def __exit__(self, *exc):
+        event.remove(db.engine, 'before_cursor_execute', self._on)
+
+
+def _parity_requests(w):
+    t = w['tid']
+    return [
+        ('lookup', 'get', f"/api/teams/lookup/{w['code']}", None),
+        ('rotate', 'post', f'/api/teams/{t}/rotate-invite', None),
+        ('join', 'post', f'/api/teams/{t}/join', {'code': w['code']}),
+        ('owner', 'post', f'/api/teams/{t}/owner', {'new_owner_user_id': w['m']}),
+        ('remove', 'delete', f"/api/teams/{t}/members/{w['m']}", None),
+    ]
+
+
+def _traced(c, verb, path, body, tok):
+    with _SQL() as sql:
+        r = getattr(c, verb)(path, json=body, headers=auth_headers(tok))
+    return r.status_code, r.get_json(silent=True), sql.seen
+
+
+@pytest.mark.parametrize('report', ['pending', 'hold'])
+def test_d1_query_parity_a_kept_team_runs_the_same_sql_as_a_deleted_one(fk_client, report):
+    """DEF-1 timing (PR #23 round-2 review), the CI gate. A former sole owner
+    must not be able to tell "kept for a report" from "deleted" by TIMING
+    either: each of these endpoints sends exactly the same sequence of SQL
+    statements in both worlds (and lookup the same as for a code that never
+    existed), so no extra round trip separates them. Deterministic, cannot
+    flake, and catches any later query added to one branch only. The timing
+    itself is measured by the opt-in tests/d1_timing_benchmark.py."""
+    c = fk_client
+    deleted = _world(c, 'qpgone', None)
+    kept = _world(c, 'qpkept', report)
+    for (name, verb, path_d, body_d), (_n, _v, path_k, body_k) in zip(
+            _parity_requests(deleted), _parity_requests(kept)):
+        sd, bd, qd = _traced(c, verb, path_d, body_d, deleted['otok'])
+        sk, bk, qk = _traced(c, verb, path_k, body_k, kept['otok'])
+        assert (sd, bd) == (sk, bk) and sd == 404, (name, sd, bd, sk, bk)
+        assert qd == qk, (name, len(qd), len(qk), qd, qk)
+    never = _traced(c, 'get', '/api/teams/lookup/QQ' + uuid.uuid4().hex[:4].upper(), None,
+                    deleted['otok'])
+    gone = _traced(c, 'get', f"/api/teams/lookup/{deleted['code']}", None, deleted['otok'])
+    assert never == gone, (never, gone)
+
+
+def test_d1_parity_leaves_an_open_team_working(client):
+    """Control: the reordered checks still let a real team be looked up,
+    joined and administered."""
+    o, otok = _person(client, 'qpo')
+    m, mtok = _person(client, 'qpm')
+    tid, code = _team(client, otok)
+    look = client.get(f'/api/teams/lookup/{code}', headers=auth_headers(mtok))
+    assert look.status_code == 200 and look.get_json()['member_count'] == 1
+    _join(client, mtok, tid, code)
+    assert client.post(f'/api/teams/{tid}/rotate-invite',
+                       headers=auth_headers(otok)).status_code == 200
+    assert client.delete(f'/api/teams/{tid}/members/{m}',
+                         headers=auth_headers(otok)).status_code == 200
+
+
+# ── R2-DEF-C: the 409 for a legacy owner who already left ───────────────────
+
+def _legacy_owner_world(client, tag):
+    """A created a team, B joined, A left before the owner rules existed."""
+    a, atok = _person(client, f'lg_a{tag}')
+    b, btok = _person(client, f'lg_b{tag}')
+    _adult(b)    # an eligible heir, so the fallback hands the team on (decision #1)
+    tid, code = _team(client, atok, f'Legacy {tag}')
+    _join(client, btok, tid, code)
+    A.TeamMembership.query.filter_by(team_id=tid, user_id=a).delete()
+    db.session.commit()
+    return a, atok, b, tid
+
+
+def test_a_legacy_owner_who_already_left_is_not_told_to_open_the_team(client, monkeypatch):
+    """R2-DEF-C. When a team the person created and has ALREADY LEFT blocks
+    for a moment (the re-plan ran out -- forced here, as in the review -- or
+    the S1 race), the 409 must not send them to "Open that team and use Hand
+    over the team": they are not in it and cannot. Wording only: still 409
+    team_owned, nothing changed."""
+    a, atok, b, tid = _legacy_owner_world(client, 'c')
+    real = A._lock_people_for_deletion
+    monkeypatch.setattr(A, '_lock_people_for_deletion',
+                        lambda uid, others: (real(uid, set())[0], set()))
+    r = client.delete('/api/me', json={'password': PW}, headers=auth_headers(atok))
+    body = r.get_json()
+    assert r.status_code == 409 and body['blocker_codes'] == ['team_owned'], body
+    assert 'Open that team' not in body['message'] and 'Hand over' not in body['message']
+    assert 'already left' in body['message'] and 'try again' in body['message'].lower()
+    assert not any('hand each one' in t for t in body['blockers']), body
+    db.session.expire_all()
+    assert db.session.get(A.User, a) is not None
+    assert db.session.get(A.Team, tid).created_by_user_id == a
+    monkeypatch.undo()
+    assert client.delete('/api/me', json={'password': PW},
+                         headers=auth_headers(atok)).status_code == 200
+    db.session.expire_all()
+    assert db.session.get(A.Team, tid).created_by_user_id == b
+
+
+def test_an_owner_still_in_the_team_keeps_the_hand_over_message(client):
+    """Control for R2-DEF-C: the owner who IS in the team with others is still
+    pointed at "Hand over the team"."""
+    o, otok = _person(client, 'lg_in_o')
+    m, mtok = _person(client, 'lg_in_m')
+    tid, code = _team(client, otok)
+    _join(client, mtok, tid, code)
+    r = client.delete('/api/me', json={'password': PW}, headers=auth_headers(otok))
+    assert r.status_code == 409 and r.get_json()['blocker_codes'] == ['team_owned']
+    assert 'Open that team' in r.get_json()['message']
+    assert 'hand each one' in r.get_json()['blockers'][0]

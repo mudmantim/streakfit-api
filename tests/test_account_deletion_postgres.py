@@ -124,3 +124,95 @@ def test_deletion_races_answer_cleanly_on_postgres(migrated_pg):
                     f'\nSTDERR:\n{result.stderr[-3000:]}')
     failed = {k: v['detail'] for k, v in out.items() if not v['ok']}
     assert not failed and result.returncode == 0, failed
+
+
+def test_team_ownership_races_answer_cleanly_on_postgres(migrated_pg):
+    """PR #23 follow-up: the owner fallback when its candidate deletes at the
+    same moment (D2, never a 500), a member leaving while the legacy owner
+    deletes in both orders (D4, no deadlock), a join during a sole owner's
+    deletion (404) and two hand-overs at once (they serialize)."""
+    _engine, env = migrated_pg
+    result = subprocess.run(
+        [sys.executable, os.path.join('tests', 'team_owner_race.py')],
+        cwd=REPO, env={**env, 'PYTHONPATH': REPO}, capture_output=True, text=True,
+        timeout=300)
+    try:
+        out = json.loads(result.stdout[result.stdout.index('{'):])
+    except ValueError:
+        pytest.fail(f'no result from the race script\nSTDOUT:\n{result.stdout[-2000:]}'
+                    f'\nSTDERR:\n{result.stderr[-3000:]}')
+    failed = {k: v['detail'] for k, v in out.items() if not v['ok']}
+    assert not failed and result.returncode == 0, failed
+
+
+def test_ownerless_teams_race_cleanly_on_postgres(migrated_pg):
+    """Round 6 (owner decision #1): a post racing the change to ownerless, in
+    both orders (it lands only while the team is owned); a mission completion
+    against it; P9's kept team against its owner's own post; the empty-team
+    cleanup against a legal hold in both orders, the photo sweep, and a
+    failure half-way. See tests/ownerless_race.py."""
+    _engine, env = migrated_pg
+    result = subprocess.run(
+        [sys.executable, os.path.join('tests', 'ownerless_race.py')],
+        cwd=REPO, env={**env, 'PYTHONPATH': REPO}, capture_output=True, text=True,
+        timeout=300)
+    try:
+        out = json.loads(result.stdout[result.stdout.index('{'):])
+    except ValueError:
+        pytest.fail(f'no result from the race script\nSTDOUT:\n{result.stdout[-2000:]}'
+                    f'\nSTDERR:\n{result.stderr[-3000:]}')
+    failed = {k: v['detail'] for k, v in out.items() if not v['ok']}
+    assert not failed and result.returncode == 0, failed
+    assert len(out) >= 30, sorted(out)
+
+
+@pytest.mark.parametrize('scenario', ['S5', 'S5c', 'S6', 'S1'])
+def test_account_deletion_takes_its_user_locks_in_one_ascending_pass(migrated_pg, scenario):
+    """PR #23 follow-up review DEF-2 and DEF-3, the paused interleavings that
+    deadlocked on b365d16: a late joiner the fallback prefers (S5: recorded as
+    adult; S5c: every older member deleted meanwhile) leaving while the
+    legacy owner's deletion holds the team, and a lower-id member reporting
+    the deleting person (S6). Also the round-2 review's S1: the unlocked dry
+    run must read a team's members and their accounts as one snapshot, or a
+    member deleting at that instant gives a spurious 409 (409 on 3b143a1).
+    See tests/team_owner_race.py."""
+    _engine, env = migrated_pg
+    result = subprocess.run(
+        [sys.executable, os.path.join('tests', 'team_owner_race.py'), 'lock-order', scenario],
+        cwd=REPO, env={**env, 'PYTHONPATH': REPO}, capture_output=True, text=True,
+        timeout=300)
+    try:
+        out = json.loads(result.stdout[result.stdout.index('{'):])
+    except ValueError:
+        pytest.fail(f'no result from the race script\nSTDOUT:\n{result.stdout[-2000:]}'
+                    f'\nSTDERR:\n{result.stderr[-3000:]}')
+    failed = {k: v['detail'] for k, v in out.items() if not v['ok']}
+    assert not failed and result.returncode == 0, failed
+
+
+@pytest.mark.parametrize('scenario', ['SW1', 'SW1L', 'SW2', 'SW3', 'SW4', 'SW5',
+                                      'SK1', 'SK2', 'LH1', 'ORD',
+                                      'HEAP', 'NB', 'CRM', 'CRR', 'CRT',
+                                      'LHM1', 'LHM2', 'LHM3', 'LHM4', 'LHM5'])
+def test_the_photo_sweep_never_deadlocks_with_team_or_account_deletion(migrated_pg, scenario):
+    """PR #23 round-2 review R2-DEF-A: the expired-photo sweep vs a sole owner's
+    team deletion (leave or account), a photo sender's account deletion, a team
+    deleted mid-batch -- each paused at the statement that deadlocked or failed
+    on 3b143a1 -- plus SKIP LOCKED never dropping a due photo, legal holds, and
+    the sweep's statement order. Round 3 review: the sender's photos stored out
+    of id order (HEAP, NEW-1), a deletion never waiting for the whole pass (NB,
+    NEW-2), failures mid-team and mid-run (CRM, CRR, CRT), and a legal hold
+    placed at every point of an erase transaction (LHM1-5). See
+    tests/team_photo_sweep_race.py."""
+    _engine, env = migrated_pg
+    result = subprocess.run(
+        [sys.executable, os.path.join('tests', 'team_photo_sweep_race.py'), scenario],
+        cwd=REPO, env={**env, 'PYTHONPATH': REPO}, capture_output=True, text=True,
+        timeout=300)
+    try:
+        out = json.loads(result.stdout[result.stdout.index('{'):])
+    except ValueError:
+        pytest.fail(f'no result from the race script\nSTDOUT:\n{result.stdout[-2000:]}'
+                    f'\nSTDERR:\n{result.stderr[-3000:]}')
+    failed = {k: v['detail'] for k, v in out.items() if not v['ok']}
+    assert not failed and result.returncode == 0, failed

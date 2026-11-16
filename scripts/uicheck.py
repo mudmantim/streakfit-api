@@ -990,6 +990,250 @@ def check_leaving_while_a_report_is_open(b: Browser, base: str, app) -> None:
     b.js("localStorage.removeItem('streakfit_token')")
 
 
+def check_team_creator_can_hand_over_leave_and_delete(b: Browser, base: str, app) -> None:
+    """Owner decision 2026-11-13: a team creator is never stuck. With others in
+    the team they pick who looks after it; alone, leaving deletes the team;
+    the delete screen says so first; and the privacy draft is NOT published
+    (owner decision #5, 2026-11-14): no link, and /privacy is a 404."""
+    print("\nTeam creators — hand over, leave, delete; privacy draft unpublished")
+    owner, owner_token = make_user(app, "ho_owner")
+    heir, heir_token = make_user(app, "ho_heir")
+    created = _api(base, "/api/teams", "POST", owner_token, {"name": "UICheck Handover"})
+    team = created.get("team")
+    if not team:
+        bad(f"could not create a team to check ({created})")
+        return
+    _api(base, f"/api/teams/{team['id']}/join", "POST", heir_token, {"code": team["invite_code"]})
+    _api(base, "/api/me", "PATCH", heir_token, {"display_name": "Robin"})
+
+    def open_team(token):
+        b.goto(base + "/", wait=1.0)
+        b.js(f"localStorage.setItem('streakfit_token', {json.dumps(token)})")
+        b.goto(base + "/", wait=3.0)
+        go_to_pane(b, "team")
+        b.js("(()=>{const x=[...document.querySelectorAll('button')]"
+             ".find(e=>['Open','Take it on'].includes(e.textContent.trim()));"
+             " if(x) x.click(); return 1;})()")
+        time.sleep(2.5)
+
+    # --- the refusal names the real control, and the control is there -------
+    req = urllib.request.Request(base + "/api/me", method="DELETE",
+                                 data=json.dumps({"password": "x"}).encode())
+    req.add_header("Content-Type", "application/json")
+    req.add_header("Authorization", "Bearer " + owner_token)
+    try:
+        urllib.request.urlopen(req, timeout=20)
+        refused = {"__status__": 200}
+    except urllib.error.HTTPError as e:
+        refused = json.loads(e.read().decode() or "{}")
+        refused["__status__"] = e.code
+    # Owner decision #1: handing over is refused until an age can be
+    # confirmed, so the refusal points at Leave Team (which offers "nobody").
+    check(refused.get("__status__") == 409
+          and "Leave Team" in str(refused.get("message"))
+          and "without an owner" in str(refused.get("message")),
+          "deleting while others are in your team points at Leave Team (or no owner)",
+          str(refused)[:160])
+    open_team(owner_token)
+    section = b.js("(()=>{const e=document.querySelector('.team-panel-handover');"
+                   " if(!e) return ''; return e.textContent + ' | ' +"
+                   " [...e.querySelectorAll('option')].map(o=>o.textContent).join(',');})()") or ""
+    check("Hand over the team" in section and "Robin" in section,
+          "the creator sees 'Hand over the team' with the member to pick", section[:120])
+    # PR #23 round 8: before any tap, the section must not promise a handover
+    # that every member is refused today (nobody's age can be confirmed).
+    help_text = b.js("(()=>{const e=document.querySelector('.team-handover-status');"
+                     " return e ? e.textContent : '';})()") or ""
+    check(help_text.startswith("A team can only be handed to a member confirmed as an adult")
+          and "so for now a handover is refused" in help_text
+          and not help_text.startswith("They get"),
+          "and it says up front that a handover is refused for now", help_text[:160])
+
+    # --- leaving as creator asks who looks after it ------------------------
+    b.js("document.querySelector('.team-panel-leave-row .retention-btn').click()")
+    time.sleep(0.8)
+    leave_picker = b.js("(()=>{const w=document.querySelector('.team-panel-leave-row .team-handover');"
+                        " return !!(w && !w.hidden && w.querySelector('select'));})()")
+    check(bool(leave_picker), "Leave Team asks the creator who looks after the team")
+    nobody = b.js("(()=>{const o=[...document.querySelectorAll("
+                  "'.team-panel-leave-row .team-handover option')].find(x=>x.value==='none');"
+                  " return o ? o.textContent : '';})()") or ""
+    check(nobody == "Nobody (leave it without an owner)",
+          "and offers to leave it with nobody as owner", nobody)
+    page = b.js("document.body.innerText") or ""
+    check(heir not in page, "and the picker shows chosen names, never logins")
+
+    # --- a member whose age is not confirmed cannot be handed the team ------
+    heir_id = _api(base, "/api/me", token=heir_token).get("id")
+
+    # Round-6 review R6-3: picking that member in the LEAVE picker is refused
+    # too, and the reason has to stay on screen -- the panel reload used to
+    # wipe it at once, so the tap looked like it did nothing.
+    b.js("(()=>{const s=document.querySelector('.team-panel-leave-row select');"
+         f" s.value={json.dumps(str(heir_id))}; s.dispatchEvent(new Event('change')); return 1;}})()")
+    b.js("document.querySelector('.team-panel-leave-row .retention-btn').click()")
+    seen = []
+    for pause in (0.4, 1.0, 2.5):
+        time.sleep(pause)
+        seen.append(b.js("(()=>{const n=document.querySelector('.team-panel-leave-note');"
+                         " return n && !n.hidden ? n.textContent : '';})()") or "")
+    check(all("confirmed as an adult" in t and "without an owner" in t for t in seen),
+          "picking an unconfirmed-age member when leaving is refused, and the reason stays visible",
+          " / ".join(t[:60] for t in seen))
+    still = b.js("(()=>{const w=document.querySelector('.team-panel-leave-row .team-handover');"
+                 " return !!(w && !w.hidden);})()")
+    check(bool(still), "and the picker stays open, so 'Nobody' can be chosen next")
+    stayed = _api(base, f"/api/teams/{team['id']}", token=owner_token)
+    check(stayed.get("is_creator") is True, "and the owner is still in the team, still its owner",
+          str(stayed)[:120])
+
+    def hand_over_in_ui():
+        b.js("(()=>{const s=document.querySelector('.team-panel-handover select');"
+             f" s.value={json.dumps(str(heir_id))}; s.dispatchEvent(new Event('change')); return 1;}})()")
+        b.js("document.querySelector('.team-panel-handover button').click()")
+        time.sleep(0.5)
+        b.js("document.querySelector('.team-panel-handover button').click()")
+        time.sleep(2.5)
+
+    hand_over_in_ui()
+    status = b.js("(()=>{const e=document.querySelector('.team-handover-status');"
+                  " return e ? e.textContent : '';})()") or ""
+    check("confirmed as an adult" in status and "without an owner" in status,
+          "handing over to a member of unknown age is refused, and says why", status[:160])
+
+    # --- hand over to a verified adult, then the old owner is a plain member
+    from app import User, db
+    with app.app_context():
+        db.session.get(User, heir_id).age_band = "adult"
+        db.session.commit()
+    hand_over_in_ui()
+    detail = _api(base, f"/api/teams/{team['id']}", token=heir_token)
+    check(detail.get("is_creator") is True, "two taps on Hand over make the member the creator",
+          str(detail)[:120])
+    gone = b.js("!document.querySelector('.team-panel-handover')")
+    check(bool(gone), "and the former creator no longer sees the hand-over control")
+    left = _api(base, f"/api/teams/{team['id']}/leave", "POST", owner_token)
+    check(left.get("message") == "Left team", "the former creator can then simply leave", str(left))
+
+    # --- alone in it: leaving says it deletes the team, then does ----------
+    open_team(heir_token)
+    first = b.js("(()=>{const x=document.querySelector('.team-panel-leave-row .retention-btn');"
+                 " x.click(); return x.textContent.trim();})()") or ""
+    time.sleep(0.8)
+    note = b.js("(()=>{const n=document.querySelector('.team-panel-leave-note');"
+                " return n && !n.hidden ? n.textContent : '';})()") or ""
+    check("delete" in first.lower() and "deletes" in note,
+          "a sole creator is told leaving deletes the team", f"{first!r} / {note[:80]!r}")
+    # Owner decision #6 (2026-11-14), corrected for review D-R5-1 (round 6):
+    # former members' content is named, and the copy stays true when a review
+    # or legal hold keeps the team for a while -- without naming a report.
+    check(first.startswith("Tap again to delete") and "leaving deletes it" in note
+          and "including messages and photos from people who have already left" in note
+          and "kept only until that ends and then deleted" in note
+          and "This can't be undone" in note and "permanently deletes it" not in note,
+          "and that it deletes chat and photos (former members' too), kept only while a review needs it",
+          f"{first!r} / {note[:260]!r}")
+    b.js("document.querySelector('.team-panel-leave-row .retention-btn').click()")
+    time.sleep(2.5)
+    after = _api(base, f"/api/teams/{team['id']}", token=heir_token)
+    check(after.get("__status__") in (403, 404), "and the second tap leaves and deletes it",
+          str(after)[:100])
+
+    # --- the delete screen discloses what stays, before the button ---------
+    b.js("openDeleteAccount()")
+    time.sleep(0.8)
+    notes = b.js("JSON.stringify([...document.querySelectorAll('.danger-note')]"
+                 ".map(e=>e.textContent))") or ""
+    check("team history" in notes and "A team only you are in is deleted" in notes
+          and "kept only until that ends" in notes and "without an owner" in notes,
+          "the delete screen says what stays and what happens to your teams", notes[:220])
+    b.js("(()=>{const o=document.querySelector('.danger-overlay'); if(o) o.remove(); return 1;})()")
+
+    # --- the privacy page: NOT published (owner decision #5, 2026-11-14) ----
+    # No link in Settings or on sign-up, and /privacy answers 404 like any
+    # unknown path, until the owner turns on STREAKFIT_PRIVACY_PAGE_PUBLISHED.
+    settings_link = b.js("(()=>!!(document.getElementById('link-privacy')"
+                         " || document.getElementById('settings-row-privacy')"
+                         " || document.querySelector('a[href=\"/privacy\"]')))()")
+    check(settings_link is False, "signed in, no page links to the unpublished privacy draft",
+          str(settings_link))
+    b.js("localStorage.removeItem('streakfit_token')")
+    b.goto(base + "/", wait=2.0)
+    auth_link = b.js("(()=>!!(document.getElementById('auth-privacy-link')"
+                     " || document.querySelector('a[href*=\"privacy\"]')))()")
+    check(auth_link is False, "sign-up shows no link to the unpublished privacy draft",
+          str(auth_link))
+    statuses = {}
+    for path in ("/privacy", "/privacy/", "/privacy.html", "/pages/privacy.html",
+                 "/static/privacy.html"):
+        try:
+            with urllib.request.urlopen(base + path, timeout=20) as resp:
+                statuses[path] = (resp.status, resp.read().decode(errors="replace"))
+        except urllib.error.HTTPError as e:
+            statuses[path] = (e.code, e.read().decode(errors="replace"))
+    check(all(code == 404 and "DRAFT" not in body for code, body in statuses.values()),
+          "/privacy and its other spellings answer 404 and never show the draft",
+          str({p: c for p, (c, _b) in statuses.items()}))
+
+
+def check_ownerless_team_is_read_only(b: Browser, base: str, app) -> None:
+    """Owner decision #1 (2026-11-14/15): an owner can leave a team with nobody
+    as owner; the team is then read-only, takes nobody new and says so."""
+    print("\nOwnerless teams — leave with nobody as owner; read-only, plainly said")
+    owner, owner_token = make_user(app, "ol_owner")
+    mate, mate_token = make_user(app, "ol_mate")
+    created = _api(base, "/api/teams", "POST", owner_token, {"name": "UICheck Ownerless"})
+    team = created.get("team")
+    if not team:
+        bad(f"could not create a team to check ({created})")
+        return
+    _api(base, f"/api/teams/{team['id']}/join", "POST", mate_token, {"code": team["invite_code"]})
+
+    def open_team(token):
+        b.goto(base + "/", wait=1.0)
+        b.js(f"localStorage.setItem('streakfit_token', {json.dumps(token)})")
+        b.goto(base + "/", wait=3.0)
+        go_to_pane(b, "team")
+        b.js("(()=>{const x=[...document.querySelectorAll('button')]"
+             ".find(e=>['Open','Take it on'].includes(e.textContent.trim()));"
+             " if(x) x.click(); return 1;})()")
+        time.sleep(2.5)
+
+    open_team(owner_token)
+    b.js("document.querySelector('.team-panel-leave-row .retention-btn').click()")
+    time.sleep(0.8)
+    b.js("(()=>{const s=document.querySelector('.team-panel-leave-row select');"
+         " s.value='none'; s.dispatchEvent(new Event('change')); return 1;})()")
+    time.sleep(0.4)
+    btn = b.js("document.querySelector('.team-panel-leave-row .retention-btn').textContent") or ""
+    note = b.js("(()=>{const n=document.querySelector('.team-panel-leave-note');"
+                " return n && !n.hidden ? n.textContent : '';})()") or ""
+    check(btn.strip() == "Tap again to leave without an owner"
+          and "nobody can join it" in note and "no end date" in note,
+          "choosing nobody asks for confirmation and says what it means", f"{btn!r} / {note[:160]!r}")
+    b.js("document.querySelector('.team-panel-leave-row .retention-btn').click()")
+    time.sleep(2.5)
+    detail = _api(base, f"/api/teams/{team['id']}", token=mate_token)
+    check(detail.get("ownerless") is True and detail.get("invite_code") is None,
+          "the second tap leaves the team with no owner and no invite code", str(detail)[:140])
+
+    open_team(mate_token)
+    notice = b.js("(()=>[...document.querySelectorAll('.team-ownerless-notice')]"
+                  ".filter(e=>e.offsetParent!==null||e.closest('.team-panel-info'))"
+                  ".map(e=>e.textContent).join(' | '))()") or ""
+    check("read-only" in notice and "may stay read-only with no end date" in notice
+          and "report a problem" in notice,
+          "a member sees a plain notice that the team is read-only, maybe for good", notice[:200])
+    composer_hidden = b.js("(()=>{const r=document.querySelector('.team-panel-input-row');"
+                           " return !!r && r.style.display==='none';})()")
+    check(bool(composer_hidden), "and there is no message box to type into")
+    code_shown = b.js(f"document.body.innerText.includes({json.dumps(team['invite_code'])})")
+    check(code_shown is False, "and no invite code anywhere on the page")
+    posted = _api(base, f"/api/teams/{team['id']}/messages", "POST", mate_token, {"body": "hi"})
+    check(posted.get("__status__") == 403 or posted.get("error") == "team_read_only",
+          "the server refuses a post sent anyway", str(posted)[:120])
+
+
 def check_photo_sharing(b: Browser, base: str, app) -> None:
     """The Olivia test: take a photo, filter it, send it, family sees it."""
     print("\nTeam photos — can Olivia send her family a goofy picture?")
@@ -3327,6 +3571,8 @@ def main() -> int:
         check_a_challenge_that_wrapped_up_while_open_says_so(browser, base, flask_app)
         check_photo_sharing(browser, base, flask_app)
         check_leaving_while_a_report_is_open(browser, base, flask_app)
+        check_team_creator_can_hand_over_leave_and_delete(browser, base, flask_app)
+        check_ownerless_team_is_read_only(browser, base, flask_app)
         check_side_quests_still_work(browser, base, flask_app)
         check_moderation_operator_can_close_a_report(browser, base, flask_app)
         check_step_up_is_offered_not_imposed(browser, base, flask_app)

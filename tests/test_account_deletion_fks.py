@@ -154,8 +154,7 @@ def test_a_team_owner_cannot_use_deletion_to_learn_about_a_report(fk_app):
     h = {'Authorization': f'Bearer {tok}'}
     owner = appmod.User.query.filter_by(username='owner_o').one().id
     mate = appmod.User.query.filter_by(username='mate_o').one().id
-    db.session.add(appmod.Team(name='mine', created_by_user_id=owner))
-    db.session.commit()
+    _owned_team_with(owner, mate)
     before = client.delete('/api/me', json={'password': 'WalkTest123!'}, headers=h)
     db.session.add(appmod.Report(public_id=uuid.uuid4().hex, reporter_user_id=mate,
                                  reported_user_id=owner, category='harassment',
@@ -167,6 +166,20 @@ def test_a_team_owner_cannot_use_deletion_to_learn_about_a_report(fk_app):
     assert after.get_json()['blocker_codes'] == ['team_owned']
     assert appmod.delete_user_account(owner, dry_run=True)['blocker_codes'] == [
         'team_owned', 'report_open_about']      # the plan still knows
+
+
+def _owned_team_with(owner, mate):
+    """A team `owner` created and is still in WITH `mate`: the case that blocks
+    deletion until the owner picks who looks after it (owner decision
+    2026-11-13). An empty or sole-member team no longer blocks -- it is deleted
+    with the account."""
+    team = appmod.Team(name='mine', created_by_user_id=owner)
+    db.session.add(team)
+    db.session.flush()
+    db.session.add_all([appmod.TeamMembership(team_id=team.id, user_id=owner),
+                        appmod.TeamMembership(team_id=team.id, user_id=mate)])
+    db.session.commit()
+    return team.id
 
 
 def _person(client, name):
@@ -232,7 +245,7 @@ def test_a_team_owner_refusal_marks_nothing(fk_app):
     client = fk_app.test_client()
     owner, oh = _person(client, 'ind_owner')
     mate, _ = _person(client, 'ind_mate')
-    db.session.add(appmod.Team(name='t', created_by_user_id=owner))
+    _owned_team_with(owner, mate)
     rep = appmod.Report(public_id=uuid.uuid4().hex, reporter_user_id=mate,
                         reported_user_id=owner, category='harassment', subject_type='user')
     db.session.add(rep)

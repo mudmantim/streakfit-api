@@ -46,8 +46,33 @@ def run(api, results, scenario):
     )
     results.check("auth.malformed_login_is_400", status == 400, f"status={status}")
 
+    check_privacy_disclosures(api, results, scenario)
     check_account_deletion(api, results, scenario)
     return scenario
+
+
+def check_privacy_disclosures(api, results, scenario):
+    """The draft privacy page is not published, and the export says what
+    outlives an account (privacy remediation 2026-11-13; owner decisions #2,
+    #4 and #5 of 2026-11-14). Read-only; production-safe."""
+    status, page = api.request("GET", "/privacy", text=True)
+    results.check("auth.privacy_draft_not_published",
+                  status == 404 and "privacy-draft-banner" not in (page or ""),
+                  f"status={status}: /privacy must 404 until the owner publishes it "
+                  "(STREAKFIT_PRIVACY_PAGE_PUBLISHED)")
+    status, data = api.request("GET", "/api/me/data", token=scenario.users["a"]["token"])
+    retention = (data or {}).get("retention", {}) if status == 200 else {}
+    results.check("auth.export_discloses_message_retention",
+                  "no time limit" in (retention.get("team_messages") or ""),
+                  f"status={status} keys={sorted(retention)}")
+    results.check("auth.export_discloses_team_history",
+                  "without your name" in (retention.get("team_history") or ""),
+                  f"keys={sorted(retention)}")
+    photos = retention.get("team_photos") or ""
+    results.check("auth.export_photo_wording_is_conditional",
+                  "scheduled for erasure" in photos and "legal hold" in photos,
+                  "the export must not promise erasure at N days until "
+                  "retention.team_photos PASSes in production")
 
 
 def check_account_deletion(api, results, scenario):

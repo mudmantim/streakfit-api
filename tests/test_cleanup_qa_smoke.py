@@ -5,14 +5,31 @@ against a seeded database, so the destructive tool is covered rather than only
 manually validated.
 """
 import scripts.cleanup_qa_smoke as C
-from app import db, User, CoachTurn, CoachNote, Team
+from app import db, User, CoachTurn, CoachNote, Team, TeamMembership
+from conftest import qa_tooling_created
 
 
 def _mk(name):
     u = User(username=name, password_hash="x")
     db.session.add(u)
     db.session.commit()
+    if name.startswith("qa_smoke_"):
+        qa_tooling_created(u.id, name)   # as the QA tooling records it (round 6)
     return u
+
+
+def _owned_shared_team(owner, name):
+    """A team the owner is still in with somebody else -- the ownership that
+    blocks deletion since the owner decision of 2026-11-13. (An empty or
+    sole-member team is deleted with its owner instead.)"""
+    mate = _mk(f"real_mate_of_{owner.username}")
+    t = Team(name=name, created_by_user_id=owner.id)
+    db.session.add(t)
+    db.session.flush()
+    db.session.add_all([TeamMembership(team_id=t.id, user_id=owner.id),
+                        TeamMembership(team_id=t.id, user_id=mate.id)])
+    db.session.commit()
+    return mate
 
 
 def test_matches_exact_prefix_only(app):
@@ -28,8 +45,7 @@ def test_matches_exact_prefix_only(app):
 def test_survey_splits_safe_and_blocked(app):
     _mk("qa_smoke_1_a")
     owner = _mk("qa_smoke_owner_x")
-    db.session.add(Team(name="T", created_by_user_id=owner.id))
-    db.session.commit()
+    _owned_shared_team(owner, "T")
     safe, blocked, counts = C.survey()
     assert {u.username for u in safe} == {"qa_smoke_1_a"}
     assert [u.username for u, _r in blocked] == ["qa_smoke_owner_x"]
@@ -53,7 +69,7 @@ def test_execute_deletes_safe_only(app):
     _mk("real_bob")
     safe_u = _mk("qa_smoke_del_a")
     owner = _mk("qa_smoke_owner_y")
-    db.session.add(Team(name="T2", created_by_user_id=owner.id))
+    mate = _owned_shared_team(owner, "T2")
     db.session.add(CoachTurn(user_id=safe_u.id, role="user", content="hi"))
     db.session.commit()
 
@@ -61,7 +77,7 @@ def test_execute_deletes_safe_only(app):
     C.execute(safe, counts)
 
     left = {u.username for u in User.query.all()}
-    assert left == {"real_bob", "qa_smoke_owner_y"}   # safe deleted; real + team-owner remain
+    assert left == {"real_bob", "qa_smoke_owner_y", mate.username}   # safe deleted; real + team-owner remain
     assert CoachTurn.query.count() == 0               # its dependents went too
 
 
@@ -82,6 +98,8 @@ def test_the_dry_run_blocks_exactly_what_execute_would(app):
     parent = User(username="qa_smoke_parent_z", password_hash="x")
     db.session.add_all([kid, parent])
     db.session.commit()
+    qa_tooling_created(kid.id, kid.username)
+    qa_tooling_created(parent.id, parent.username)
     db.session.add(GuardianLink(child_user_id=kid.id, guardian_user_id=parent.id,
                                 method="test"))
     db.session.commit()

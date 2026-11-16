@@ -15,6 +15,7 @@ revoke it.
 These tests pin both halves: an empty team refuses entry, and a team that
 still has somebody in it carries on working normally.
 """
+import app as A
 from conftest import auth_headers, register_and_login
 
 
@@ -29,12 +30,31 @@ def _t(client, name):
     return register_and_login(client, name, "TestPass123!")
 
 
+def _abandon(client, tid, token):
+    """Leave a team as its only member, leaving it EMPTY rather than deleted.
+
+    Since the owner decision of 2026-11-13 a creator who is the only member
+    deletes the team by leaving. An empty team can still exist: one abandoned
+    before that rule, or one kept because a report about it is pending or
+    under legal hold. The second is the live path, so it is the one used
+    here; these tests are about what an empty team refuses.
+    """
+    import uuid
+    from app import db, Report
+    db.session.add(Report(public_id=uuid.uuid4().hex, team_id=tid, category="harassment",
+                          subject_type="user", status="pending"))
+    db.session.commit()
+    r = client.post(f"/api/teams/{tid}/leave", json={"delete_team": True},
+                    headers=auth_headers(token))
+    assert r.status_code == 200, r.get_json()
+
+
 # ── The hole ────────────────────────────────────────────────────────────────
 
 def test_an_abandoned_teams_code_no_longer_resolves(client):
     mum = _t(client, "aban_mum")
     tid, code = _team(client, mum)
-    client.post(f"/api/teams/{tid}/leave", headers=auth_headers(mum))
+    _abandon(client, tid, mum)
 
     stranger = _t(client, "aban_stranger")
     r = client.get(f"/api/teams/lookup/{code}", headers=auth_headers(stranger))
@@ -47,12 +67,15 @@ def test_an_abandoned_teams_code_no_longer_resolves(client):
 def test_a_stranger_cannot_join_an_abandoned_team(client):
     mum = _t(client, "aban_mum2")
     tid, code = _team(client, mum)
-    client.post(f"/api/teams/{tid}/leave", headers=auth_headers(mum))
+    _abandon(client, tid, mum)
 
     stranger = _t(client, "aban_stranger2")
     r = client.post(f"/api/teams/{tid}/join", json={"code": code},
                     headers=auth_headers(stranger))
-    assert r.status_code == 403
+    # 404, as for a deleted team (PR #23 review D1): a 403 here told a sole
+    # owner who left whether a report had kept the team instead of deleting it.
+    assert r.status_code == 404
+    assert not A.TeamMembership.query.filter_by(team_id=tid).count()
 
 
 def test_join_is_guarded_even_when_lookup_is_skipped(client):
@@ -64,13 +87,14 @@ def test_join_is_guarded_even_when_lookup_is_skipped(client):
     """
     mum = _t(client, "aban_mum3")
     tid, code = _team(client, mum)
-    client.post(f"/api/teams/{tid}/leave", headers=auth_headers(mum))
+    _abandon(client, tid, mum)
 
     stranger = _t(client, "aban_stranger3")
     # Never calls /lookup at all.
     r = client.post(f"/api/teams/{tid}/join", json={"code": code},
                     headers=auth_headers(stranger))
-    assert r.status_code == 403
+    assert r.status_code == 404     # as for a deleted team (PR #23 review D1)
+    assert not A.TeamMembership.query.filter_by(team_id=tid).count()
 
 
 def test_a_stranger_who_cannot_join_cannot_read_anything(client):
@@ -78,7 +102,7 @@ def test_a_stranger_who_cannot_join_cannot_read_anything(client):
     tid, code = _team(client, mum)
     client.post(f"/api/teams/{tid}/messages", json={"body": "We did it!"},
                 headers=auth_headers(mum))
-    client.post(f"/api/teams/{tid}/leave", headers=auth_headers(mum))
+    _abandon(client, tid, mum)
 
     stranger = _t(client, "aban_stranger4")
     for path in (f"/api/teams/{tid}",
@@ -114,13 +138,22 @@ def test_a_team_with_one_member_left_still_works(client):
 
 
 def test_the_creator_leaving_does_not_close_a_team_others_are_in(client):
-    """Leaving is not ownership transfer, and the creator is not special here."""
+    """Since 2026-11-13 the creator hands the team on as they leave (owner
+    decision); the team stays open for the people still in it. Since owner
+    decision #1 (round 6) only a verified adult can take it, so the heir here
+    is recorded as one (a child is refused: tests/test_round6_ownerless.py)."""
     mum = _t(client, "creator_mum")
-    kid = _t(client, "creator_kid")
+    kid = _t(client, "creator_dad")
     tid, code = _team(client, mum)
     client.post(f"/api/teams/{tid}/join", json={"code": code},
                 headers=auth_headers(kid))
-    client.post(f"/api/teams/{tid}/leave", headers=auth_headers(mum))
+    kid_id = client.get("/api/me", headers=auth_headers(kid)).get_json()["id"]
+    import app as _A
+    _A.db.session.get(_A.User, kid_id).age_band = _A.AGE_ADULT
+    _A.db.session.commit()
+    r = client.post(f"/api/teams/{tid}/leave", json={"new_owner_user_id": kid_id},
+                    headers=auth_headers(mum))
+    assert r.status_code == 200, r.get_json()
 
     friend = _t(client, "creator_friend")
     assert client.get(f"/api/teams/lookup/{code}",

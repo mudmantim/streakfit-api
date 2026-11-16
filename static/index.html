@@ -85,7 +85,8 @@
 
             <div class="auth-guest-divider"><span>or</span></div>
             <button class="btn-guest" onclick="handleGuestMode()">Peek at today's mission first — no signup</button>
-            <p class="auth-trust-line">No email, no ads, no selling your data. Your streak is yours.</p>
+            <p class="auth-trust-line">No email, no ads, no selling your data. Your streak is yours.
+                <!--privacy-link:auth--></p>
         </div>
     </div>
 
@@ -220,6 +221,9 @@
                             Download my data
                         </button>
                     </div>
+                    <!-- The privacy row is filled in by the server only once the
+                         owner publishes the policy (PRIVACY_PAGE_PUBLISHED). -->
+                    <!--privacy-link:settings-->
                     <!-- Moderation decisions about you, and the appeal route.
                          Hidden entirely when there are none: most people will
                          never have one and a permanent "Appeals" row in the

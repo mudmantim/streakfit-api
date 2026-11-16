@@ -42,8 +42,8 @@ def _install_hooks(A):
             gate['holding'].set()
             gate['go'].wait(30)
 
-    def counts(user_id):
-        out = orig_counts(user_id)
+    def counts(user_id, team_plan=None):
+        out = orig_counts(user_id, team_plan)
         # The route plans once unlocked (dry run), then again under FOR UPDATE.
         _pause.counts_calls = getattr(_pause, 'counts_calls', 0) + 1
         if _pause.counts_calls == 2:
